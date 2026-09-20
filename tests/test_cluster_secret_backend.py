@@ -54,7 +54,7 @@ class Test:
                                 auth=sdk.SSHTargetAuth(
                                     sdk.SSHTargetAuthSshTargetPasswordAuth(
                                         kind="Password",
-                                        password="vault://vault-test/secret/sshtarget#password",
+                                        password="secret://vault-test/secret/sshtarget#password",
                                     )
                                 ),
                             )
@@ -66,7 +66,7 @@ class Test:
             with admin_client(f"https://localhost:{node_b.http_port}") as api:
                 assert [b.name for b in api.get_secret_backends()] == ["vault-test"]
                 assert (
-                    _resolve_status(api, "vault://vault-test/secret/sshtarget#password") == 204
+                    _resolve_status(api, "secret://vault-test/secret/sshtarget#password") == 204
                 )
 
             ssh_client = processes.start_ssh_client(

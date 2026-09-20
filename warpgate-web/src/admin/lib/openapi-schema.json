@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.28.5-25-g7b5548a5-modified"
+    "version": "v0.28.5-25-ge7011112-modified"
   },
   "servers": [
     {
@@ -5254,7 +5254,7 @@
       },
       "BackendType": {
         "type": "string",
-        "description": "The kind of server behind a backend; also the scheme of references to it.",
+        "description": "The product behind a backend. Both speak the same API; the distinction is\ninformational.",
         "enum": [
           "vault",
           "openbao"
@@ -5307,15 +5307,10 @@
       "CheckHealthResponse": {
         "type": "object",
         "title": "CheckHealthResponse",
-        "required": [
-          "health"
-        ],
         "properties": {
-          "health": {
-            "$ref": "#/components/schemas/HealthStatus"
-          },
           "error": {
-            "type": "string"
+            "type": "string",
+            "description": "`null` when the backend is reachable and accepts the stored credentials"
           }
         }
       },
@@ -5733,13 +5728,6 @@
           }
         }
       },
-      "HealthStatus": {
-        "type": "string",
-        "enum": [
-          "ok",
-          "error"
-        ]
-      },
       "ImportLdapUsersRequest": {
         "type": "object",
         "title": "ImportLdapUsersRequest",
@@ -5770,7 +5758,7 @@
           },
           "reference": {
             "type": "string",
-            "description": "A `vault://backend/path#field` or `openbao://backend/path#field` reference;\nthe field must resolve to a private key in OpenSSH or PKCS#8 PEM format.",
+            "description": "A `secret://backend/mount/path#field` reference; the field must resolve to\na private key in OpenSSH or PKCS#8 PEM format.",
             "maxLength": 1024
           },
           "is_default": {
@@ -7242,15 +7230,107 @@
           }
         ]
       },
+      "SecretBackendAuth": {
+        "type": "object",
+        "description": "How a backend logs in to Vault. Stored as one JSON column with the secret\nencrypted at rest; the API carries the same shape with the secret blanked\n(see [`Self::redacted`]).",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/SecretBackendAuth_VaultTokenAuth"
+          },
+          {
+            "$ref": "#/components/schemas/SecretBackendAuth_VaultAppRoleAuth"
+          },
+          {
+            "$ref": "#/components/schemas/SecretBackendAuth_VaultKubernetesAuth"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "method",
+          "mapping": {
+            "Token": "#/components/schemas/SecretBackendAuth_VaultTokenAuth",
+            "AppRole": "#/components/schemas/SecretBackendAuth_VaultAppRoleAuth",
+            "Kubernetes": "#/components/schemas/SecretBackendAuth_VaultKubernetesAuth"
+          }
+        }
+      },
+      "SecretBackendAuth_VaultAppRoleAuth": {
+        "description": "How a backend logs in to Vault. Stored as one JSON column with the secret\nencrypted at rest; the API carries the same shape with the secret blanked\n(see [`Self::redacted`]).",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "method"
+            ],
+            "properties": {
+              "method": {
+                "type": "string",
+                "enum": [
+                  "AppRole"
+                ],
+                "example": "AppRole"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/VaultAppRoleAuth"
+          }
+        ]
+      },
+      "SecretBackendAuth_VaultKubernetesAuth": {
+        "description": "How a backend logs in to Vault. Stored as one JSON column with the secret\nencrypted at rest; the API carries the same shape with the secret blanked\n(see [`Self::redacted`]).",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "method"
+            ],
+            "properties": {
+              "method": {
+                "type": "string",
+                "enum": [
+                  "Kubernetes"
+                ],
+                "example": "Kubernetes"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/VaultKubernetesAuth"
+          }
+        ]
+      },
+      "SecretBackendAuth_VaultTokenAuth": {
+        "description": "How a backend logs in to Vault. Stored as one JSON column with the secret\nencrypted at rest; the API carries the same shape with the secret blanked\n(see [`Self::redacted`]).",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "method"
+            ],
+            "properties": {
+              "method": {
+                "type": "string",
+                "enum": [
+                  "Token"
+                ],
+                "example": "Token"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/VaultTokenAuth"
+          }
+        ]
+      },
       "SecretBackendRequest": {
         "type": "object",
         "title": "SecretBackendRequest",
-        "description": "Shared by create and update. The secret fields are write-only: mandatory\nwhen the row holds none for the chosen method, kept when omitted otherwise.",
+        "description": "Shared by create and update.",
         "required": [
           "name",
           "backend_type",
           "address",
-          "auth_method"
+          "auth"
         ],
         "properties": {
           "name": {
@@ -7269,28 +7349,11 @@
           },
           "namespace": {
             "type": "string",
-            "maxLength": 255
+            "maxLength": 255,
+            "minLength": 1
           },
-          "auth_method": {
-            "$ref": "#/components/schemas/VaultAuthMethod"
-          },
-          "auth_mount": {
-            "type": "string",
-            "maxLength": 255
-          },
-          "token": {
-            "type": "string"
-          },
-          "app_role_id": {
-            "type": "string",
-            "maxLength": 255
-          },
-          "app_role_secret_id": {
-            "type": "string"
-          },
-          "kubernetes_role": {
-            "type": "string",
-            "maxLength": 255
+          "auth": {
+            "$ref": "#/components/schemas/SecretBackendAuth"
           },
           "tls_skip_verify": {
             "type": "boolean",
@@ -7316,8 +7379,7 @@
           "name",
           "backend_type",
           "address",
-          "auth_method",
-          "auth_mount",
+          "auth",
           "tls_skip_verify",
           "allowed_paths"
         ],
@@ -7338,18 +7400,8 @@
           "namespace": {
             "type": "string"
           },
-          "auth_method": {
-            "$ref": "#/components/schemas/VaultAuthMethod"
-          },
-          "auth_mount": {
-            "type": "string",
-            "description": "Empty means the method's default mount"
-          },
-          "app_role_id": {
-            "type": "string"
-          },
-          "kubernetes_role": {
-            "type": "string"
+          "auth": {
+            "$ref": "#/components/schemas/SecretBackendAuth"
           },
           "tls_skip_verify": {
             "type": "boolean"
@@ -7368,7 +7420,6 @@
         "required": [
           "reference",
           "backend",
-          "target_count",
           "targets"
         ],
         "properties": {
@@ -7377,10 +7428,6 @@
           },
           "backend": {
             "type": "string"
-          },
-          "target_count": {
-            "type": "integer",
-            "format": "uint32"
           },
           "targets": {
             "type": "array",
@@ -8779,13 +8826,63 @@
           }
         }
       },
-      "VaultAuthMethod": {
-        "type": "string",
-        "enum": [
-          "token",
-          "app_role",
-          "kubernetes"
-        ]
+      "VaultAppRoleAuth": {
+        "type": "object",
+        "title": "VaultAppRoleAuth",
+        "required": [
+          "role_id",
+          "secret_id"
+        ],
+        "properties": {
+          "role_id": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1
+          },
+          "secret_id": {
+            "type": "string",
+            "description": "Blank in responses; blank in an update, keeps the stored secret ID"
+          },
+          "mount": {
+            "type": "string",
+            "description": "Auth mount; `null` uses `approle`",
+            "maxLength": 255,
+            "minLength": 1
+          }
+        }
+      },
+      "VaultKubernetesAuth": {
+        "type": "object",
+        "title": "VaultKubernetesAuth",
+        "required": [
+          "role"
+        ],
+        "properties": {
+          "role": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1
+          },
+          "mount": {
+            "type": "string",
+            "description": "Auth mount; `null` uses `kubernetes`",
+            "maxLength": 255,
+            "minLength": 1
+          }
+        }
+      },
+      "VaultTokenAuth": {
+        "type": "object",
+        "title": "VaultTokenAuth",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "Blank in responses; blank in an update, keeps the stored token"
+          }
+        }
       },
       "VncTargetAuth": {
         "type": "object",

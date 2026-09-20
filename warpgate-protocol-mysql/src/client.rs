@@ -7,7 +7,7 @@ use sha1::Sha1;
 use tokio::net::TcpStream;
 use tracing::{debug, info};
 use warpgate_common::helpers::rng::get_crypto_rng;
-use warpgate_common::{TargetMySqlOptions, WarpgateError};
+use warpgate_common::{SecretResolver, TargetMySqlOptions, WarpgateError};
 use warpgate_core::AdmittedTarget;
 use warpgate_database_protocols::io::Decode;
 use warpgate_database_protocols::mysql::protocol::Capabilities;
@@ -41,6 +41,7 @@ impl MySqlClient {
     pub async fn connect(
         approved: AdmittedTarget<TargetMySqlOptions>,
         mut options: ConnectionOptions,
+        secrets: &dyn SecretResolver,
     ) -> Result<Self, MySqlError> {
         let target = approved.specific_target().options().clone();
         let stream = TcpStream::connect((target.host.clone(), target.port)).await?;
@@ -95,9 +96,12 @@ impl MySqlClient {
 
         // An IAM role yields a short-lived token in place of a stored password
         let effective_password = match &target.auth {
-            warpgate_common::DatabaseTargetAuth::Password(auth) => {
-                auth.password.reveal()?.expose_secret().clone()
-            }
+            warpgate_common::DatabaseTargetAuth::Password(auth) => auth
+                .password
+                .resolve(secrets)
+                .await?
+                .expose_secret()
+                .clone(),
             warpgate_common::DatabaseTargetAuth::IamRole(_) => {
                 warpgate_aws::generate_rds_auth_token(&target.host, target.port, &target.username)
                     .await

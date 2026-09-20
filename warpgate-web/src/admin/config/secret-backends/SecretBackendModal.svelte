@@ -10,9 +10,9 @@
     } from '@sveltestrap/sveltestrap'
     import type {
         BackendType,
+        SecretBackendAuth,
         SecretBackendRequest,
         SecretBackendResponse,
-        VaultAuthMethod,
     } from 'admin/lib/api'
 
     interface Props {
@@ -29,33 +29,44 @@
     let backendType: BackendType = $state('vault')
     let address = $state('')
     let namespace = $state('')
-    let authMethod: VaultAuthMethod = $state('token')
-    let authMount = $state('')
+    let method: SecretBackendAuth['method'] = $state('Token')
+    let mount = $state('')
     let token = $state('')
-    let appRoleId = $state('')
-    let appRoleSecretId = $state('')
+    let roleId = $state('')
+    let secretId = $state('')
     let kubernetesRole = $state('')
     let tlsSkipVerify = $state(false)
     let allowedPaths = $state('')
 
     // Secrets are write-only: blank on edit keeps the stored value, which only
     // exists for the method the backend was saved with.
-    const secretStored = $derived(instance?.authMethod === authMethod)
+    const secretStored = $derived(instance?.auth.method === method)
     const secretPlaceholder = $derived(secretStored ? 'Unchanged' : '')
 
     function reset() {
+        const auth = instance?.auth
         name = instance?.name ?? ''
         backendType = instance?.backendType ?? 'vault'
         address = instance?.address ?? ''
         namespace = instance?.namespace ?? ''
-        authMethod = instance?.authMethod ?? 'token'
-        authMount = instance?.authMount ?? ''
+        method = auth?.method ?? 'Token'
+        mount = (auth?.method === 'Token' ? undefined : auth?.mount) ?? ''
         token = ''
-        appRoleId = instance?.appRoleId ?? ''
-        appRoleSecretId = ''
-        kubernetesRole = instance?.kubernetesRole ?? ''
+        roleId = auth?.method === 'AppRole' ? auth.roleId : ''
+        secretId = ''
+        kubernetesRole = auth?.method === 'Kubernetes' ? auth.role : ''
         tlsSkipVerify = instance?.tlsSkipVerify ?? false
         allowedPaths = instance?.allowedPaths.join('\n') ?? ''
+    }
+
+    function auth(): SecretBackendAuth {
+        if (method === 'AppRole') {
+            return { method, roleId, secretId, mount: mount || undefined }
+        }
+        if (method === 'Kubernetes') {
+            return { method, role: kubernetesRole, mount: mount || undefined }
+        }
+        return { method: 'Token', token }
     }
 
     // Native validation gates submit, so this only runs with a valid form.
@@ -66,12 +77,7 @@
             backendType,
             address,
             namespace: namespace || undefined,
-            authMethod,
-            authMount: authMount || undefined,
-            token: token || undefined,
-            appRoleId: appRoleId || undefined,
-            appRoleSecretId: appRoleSecretId || undefined,
-            kubernetesRole: kubernetesRole || undefined,
+            auth: auth(),
             tlsSkipVerify,
             allowedPaths: allowedPaths.split('\n').map(p => p.trim()).filter(p => p),
         })
@@ -108,32 +114,32 @@
             </FormGroup>
 
             <FormGroup floating label="Authentication">
-                <Input type="select" bind:value={authMethod}>
-                    <option value="token">Token</option>
-                    <option value="app_role">AppRole</option>
-                    <option value="kubernetes">Kubernetes</option>
+                <Input type="select" bind:value={method}>
+                    <option value="Token">Token</option>
+                    <option value="AppRole">AppRole</option>
+                    <option value="Kubernetes">Kubernetes</option>
                 </Input>
             </FormGroup>
-            {#if authMethod === 'token'}
+            {#if method === 'Token'}
                 <FormGroup floating label="Token">
                     <Input type="password" autocomplete="off" required={!secretStored} placeholder={secretPlaceholder} bind:value={token} />
                 </FormGroup>
-            {:else if authMethod === 'app_role'}
+            {:else if method === 'AppRole'}
                 <FormGroup floating label="Role ID">
-                    <Input type="text" required bind:value={appRoleId} />
+                    <Input type="text" required bind:value={roleId} />
                 </FormGroup>
                 <FormGroup floating label="Secret ID">
-                    <Input type="password" autocomplete="off" required={!secretStored} placeholder={secretPlaceholder} bind:value={appRoleSecretId} />
+                    <Input type="password" autocomplete="off" required={!secretStored} placeholder={secretPlaceholder} bind:value={secretId} />
                 </FormGroup>
                 <FormGroup floating label="Auth mount (default: approle)">
-                    <Input type="text" bind:value={authMount} />
+                    <Input type="text" bind:value={mount} />
                 </FormGroup>
             {:else}
                 <FormGroup floating label="Role">
                     <Input type="text" required bind:value={kubernetesRole} />
                 </FormGroup>
                 <FormGroup floating label="Auth mount (default: kubernetes)">
-                    <Input type="text" bind:value={authMount} />
+                    <Input type="text" bind:value={mount} />
                 </FormGroup>
             {/if}
 

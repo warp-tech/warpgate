@@ -88,8 +88,8 @@ struct GenerateSSHClientKeyRequest {
 struct ImportSSHClientKeyReferenceRequest {
     #[oai(validator(max_length = 255))]
     label: String,
-    /// A `vault://backend/path#field` or `openbao://backend/path#field` reference;
-    /// the field must resolve to a private key in OpenSSH or PKCS#8 PEM format.
+    /// A `secret://backend/mount/path#field` reference; the field must resolve to
+    /// a private key in OpenSSH or PKCS#8 PEM format.
     #[oai(validator(max_length = 1024))]
     reference: String,
     is_default: bool,

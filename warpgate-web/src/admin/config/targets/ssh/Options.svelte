@@ -8,7 +8,7 @@
         type TargetOptionsTargetSSHOptions,
     } from 'admin/lib/api'
     import { adminPermissions } from 'admin/lib/store'
-    import SecretRefInput, { isSecretRef } from 'common/SecretRefInput.svelte'
+    import SecretRefInput from 'common/SecretRefInput.svelte'
     import { TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import { untrack } from 'svelte'
@@ -40,25 +40,6 @@
             t => t.options.kind === TargetKind.Ssh && t.id !== id,
         )
     })
-
-    let authMode = $derived.by(() => {
-        if (options.auth.kind !== 'Password') return options.auth.kind
-        const pw = (options.auth as { kind: 'Password'; password: string })
-            .password
-        return isSecretRef(pw) ? 'VaultRef' : 'Password'
-    })
-
-    function changeAuthKind(kind: string) {
-        if (kind === 'Password') {
-            options.auth = { kind: 'Password', password: '' }
-        } else if (kind === 'VaultRef') {
-            options.auth = { kind: 'Password', password: 'vault://' }
-        } else if (kind === 'PublicKey') {
-            options.auth = { kind: 'PublicKey' }
-        } else if (kind === 'IamRole') {
-            options.auth = { kind: 'IamRole' }
-        }
-    }
 
     // svelte-ignore state_referenced_locally
     let jumpHostSelectValue = $state(options.jumpHost ?? '')
@@ -162,16 +143,11 @@
     >
 </FormGroup>
 
-<div class="d-flex align-items-center">
+<div class="d-flex">
     <FormGroup floating label="Authenticate using" class="w-100">
-        <select
-            value={authMode}
-            onchange={(e) => changeAuthKind((e.target as HTMLSelectElement).value)}
-            class="form-control"
-        >
+        <select bind:value={options.auth.kind} class="form-control">
             <option value="PublicKey">Warpgate's own private keys</option>
             <option value="Password">Password</option>
-            <option value="VaultRef">Password from Vault / OpenBao</option>
             {#if $serverInfo?.runningOnEc2}
                 <option value="IamRole">IAM Role (experimental)</option>
             {/if}
@@ -197,24 +173,14 @@
             <Fa fw icon={faExternalLink} />
         </a>
     {/if}
-    {#if options.auth.kind === 'Password' && authMode === 'Password'}
-        <FormGroup floating label="Password" class="w-100 ms-3">
-            <input
-                class="form-control"
-                type="password"
-                autocomplete="off"
-                bind:value={options.auth.password}
-            >
-        </FormGroup>
-    {/if}
-
-    {#if options.auth.kind === 'Password' && authMode === 'VaultRef'}
-        <FormGroup class="w-100 ms-3">
+    {#if options.auth.kind === 'Password'}
+        <div class="w-100 ms-3">
             <SecretRefInput
                 bind:value={options.auth.password}
+                inlineLabel="Password"
                 disabled={!$adminPermissions.targetsEdit}
             />
-        </FormGroup>
+        </div>
     {/if}
 </div>
 

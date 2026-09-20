@@ -181,15 +181,17 @@ struct ParameterUpdate {
     pub recordings_storage: Option<RecordingsStorageConfig>,
 }
 
-async fn validate_host_key_reference(
+/// Resolved here so a bad reference is refused instead of taking the SSH
+/// listener down on every node's next restart.
+async fn parse_host_key_reference(
     reference: &str,
     secret_backend: &dyn SecretResolver,
-) -> Result<(), String> {
+) -> Result<SecretRef, String> {
     let reference: SecretRef = reference.parse().map_err(|e: SecretError| e.to_string())?;
     warpgate_protocol_ssh::load_host_keys_from_backend(&reference, secret_backend)
         .await
-        .map(|_| ())
-        .map_err(|e| format!("Could not load SSH host keys from {reference}: {e}"))
+        .map_err(|e| format!("Could not load SSH host keys from {reference}: {e}"))?;
+    Ok(reference)
 }
 
 #[derive(Serialize, Object)]
@@ -248,7 +250,10 @@ impl Api {
             ssh_client_auth_password: parameters.ssh_client_auth_password,
             ssh_client_auth_keyboard_interactive: parameters.ssh_client_auth_keyboard_interactive,
             ssh_host_key_verification: parameters.ssh_host_key_verification,
-            ssh_host_key_secret_ref: parameters.ssh_host_key_secret_ref.clone(),
+            ssh_host_key_secret_ref: parameters
+                .ssh_host_key_secret_ref
+                .as_ref()
+                .map(ToString::to_string),
             password_login_mode: parameters.password_login_mode,
             mfa_enforcement: parameters.mfa_enforcement,
             mfa_policy_exempt_sso_users: parameters.mfa_policy_exempt_sso_users,
@@ -348,16 +353,20 @@ impl Api {
             .ssh_client_auth_keyboard_interactive
             .map_or(NotSet, Set);
         parameters.ssh_host_key_verification = body.ssh_host_key_verification.map_or(NotSet, Set);
-        // Resolved here so a bad reference is refused instead of taking the SSH
-        // listener down on every node's next restart.
-        if let Some(Some(reference)) = &body.ssh_host_key_secret_ref
-            && let Err(error) =
-                validate_host_key_reference(reference, &*services.secret_backends).await
-        {
-            return Ok(UpdateParametersResponse::BadRequest(Json(error)));
+        if let Some(update) = &body.ssh_host_key_secret_ref {
+            let reference = match update {
+                Some(reference) => {
+                    match parse_host_key_reference(reference, &*services.secret_backends).await {
+                        Ok(reference) => Some(reference),
+                        Err(error) => {
+                            return Ok(UpdateParametersResponse::BadRequest(Json(error)));
+                        }
+                    }
+                }
+                None => None,
+            };
+            parameters.ssh_host_key_secret_ref = Set(reference);
         }
-        parameters.ssh_host_key_secret_ref =
-            body.ssh_host_key_secret_ref.clone().map_or(NotSet, Set);
         parameters.password_login_mode = body.password_login_mode.map_or(NotSet, Set);
         parameters.mfa_enforcement = body.mfa_enforcement.map_or(NotSet, Set);
         parameters.mfa_policy_exempt_sso_users =

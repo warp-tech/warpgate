@@ -29,6 +29,6 @@ pub use data::*;
 pub use db_auth::*;
 pub use listener_status::*;
 pub use protocols::*;
-pub use secret_backend_registry::{SecretBackendRegistry, resolve_secrets};
+pub use secret_backend_registry::SecretBackendRegistry;
 pub use services::*;
 pub use state::{SharedSessionHandle, State, UserSessionState, UserSessionStateInit};

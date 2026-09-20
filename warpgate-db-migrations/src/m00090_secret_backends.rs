@@ -16,14 +16,8 @@ pub mod secret_backend {
         #[sea_orm(column_type = "Text")]
         pub address: String,
         pub namespace: Option<String>,
-        pub auth_method: String,
-        pub auth_mount: String,
-        #[sea_orm(column_type = "Text", nullable)]
-        pub token: Option<String>,
-        pub app_role_id: Option<String>,
-        #[sea_orm(column_type = "Text", nullable)]
-        pub app_role_secret_id: Option<String>,
-        pub kubernetes_role: Option<String>,
+        #[sea_orm(column_type = "Json")]
+        pub auth: serde_json::Value,
         pub tls_skip_verify: bool,
         #[sea_orm(column_type = "Text")]
         pub allowed_paths: String,

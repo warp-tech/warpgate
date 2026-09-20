@@ -223,10 +223,6 @@ impl<O> TargetAuthorization<O> {
         self.target.options()
     }
 
-    pub const fn options_mut(&mut self) -> &mut O {
-        self.target.options_mut()
-    }
-
     /// The protocol the authorizing authentication ran under.
     pub const fn protocol(&self) -> Protocol {
         self.protocol
@@ -265,10 +261,6 @@ impl<O> ApprovedTarget<O> {
 
     pub fn into_parts(self) -> (AuthStateUserInfo, SpecificTarget<O>) {
         (self.0.user_info, self.0.target)
-    }
-
-    pub(crate) const fn authorization_mut(&mut self) -> &mut TargetAuthorization<O> {
-        &mut self.0
     }
 }
 

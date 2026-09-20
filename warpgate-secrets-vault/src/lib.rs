@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -8,11 +7,11 @@ use tracing::{debug, error, info, warn};
 use vaultrs::client::{Client, VaultClient, VaultClientSettingsBuilder};
 use vaultrs::error::ClientError;
 use warpgate_common::{
-    BackendType, Secret, SecretBackendConfig, SecretError, SecretRef, SecretResolver,
-    VaultAuthConfig,
+    Secret, SecretBackendConfig, SecretError, SecretRef, SecretResolver, StoredSecret,
+    VaultAppRoleAuth, VaultAuthConfig, VaultKubernetesAuth, VaultTokenAuth,
 };
 
-type SecretDataMap = HashMap<String, serde_json::Value>;
+type SecretDataMap = std::collections::HashMap<String, serde_json::Value>;
 
 /// Bounds every Vault round-trip so a stalled server fails a connection
 /// attempt instead of holding it (and everything queued behind it) forever.
@@ -21,12 +20,13 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// are reported as-is, so a misconfigured policy can't burn AppRole secret-id
 /// uses or pile up tokens at connection rate.
 const REAUTH_MIN_INTERVAL: Duration = Duration::from_secs(30);
+/// Where a pod's service account token is mounted.
+const KUBERNETES_JWT_PATH: &str = "/var/run/secrets/kubernetes.io/serviceaccount/token";
 
 pub struct VaultBackend {
     /// Readers share the client; only (re)authentication takes the write lock.
     client: Arc<RwLock<VaultClient>>,
     auth_config: VaultAuthConfig,
-    backend_type: BackendType,
     /// KV path prefixes references may name; empty means any path.
     allowed_paths: Vec<String>,
     last_reauth: Mutex<Option<Instant>>,
@@ -54,7 +54,7 @@ impl VaultBackend {
             builder.set_namespace(ns.clone());
         }
 
-        builder.verify(!config.tls.skip_verify);
+        builder.verify(!config.tls_skip_verify);
 
         let settings = builder
             .build()
@@ -78,14 +78,13 @@ impl VaultBackend {
         };
 
         let renewal = match &config.auth {
-            VaultAuthConfig::Token { .. } => renewable_token_ttl(&client, &config.name).await,
+            VaultAuthConfig::Token(_) => renewable_token_ttl(&client, &config.name).await,
             _ => Some(initial_lease),
         };
 
         let backend = Self {
             client: Arc::new(RwLock::new(client)),
             auth_config: config.auth.clone(),
-            backend_type: config.backend_type,
             allowed_paths: config.allowed_paths.clone(),
             last_reauth: Mutex::new(None),
         };
@@ -126,31 +125,28 @@ impl VaultBackend {
         });
     }
 
-    pub const fn backend_type(&self) -> BackendType {
-        self.backend_type
-    }
-
     fn check_allowed(&self, reference: &SecretRef) -> Result<(), SecretError> {
-        if path_allowed(&self.allowed_paths, &reference.path) {
+        let path = reference.kv_path();
+        if path_allowed(&self.allowed_paths, &path) {
             Ok(())
         } else {
             Err(SecretError::PathNotAllowed {
                 backend: reference.backend.clone(),
-                path: reference.path.clone(),
+                path,
             })
         }
     }
 
-    async fn read_kv(&self, mount: &str, kv_path: &str) -> Result<SecretDataMap, ClientError> {
+    async fn read_kv(&self, reference: &SecretRef) -> Result<SecretDataMap, ClientError> {
         let client = self.client.read().await;
-        vaultrs::kv2::read::<SecretDataMap>(&*client, mount, kv_path).await
+        vaultrs::kv2::read::<SecretDataMap>(&*client, &reference.mount, &reference.path).await
     }
 
     /// Re-logs in after a denied read, at most once per [`REAUTH_MIN_INTERVAL`].
     /// Returns `false` when the window has not elapsed.
     async fn reauthenticate(&self) -> Result<bool, SecretError> {
         // A static token can't be replaced by logging in again.
-        if matches!(self.auth_config, VaultAuthConfig::Token { .. }) {
+        if matches!(self.auth_config, VaultAuthConfig::Token(_)) {
             return Ok(false);
         }
         {
@@ -166,10 +162,15 @@ impl VaultBackend {
         Ok(true)
     }
 
-    fn split_path(path: &str) -> Result<(&str, &str), SecretError> {
-        path.split_once('/').ok_or_else(|| {
-            SecretError::InvalidRef(format!("path must be 'mount/kv_path', got '{path}'"))
-        })
+    /// A token lookup proves the server is reachable and unsealed and that
+    /// the credentials this backend resolves with are still accepted, which
+    /// the unauthenticated `sys/health` cannot.
+    pub async fn health(&self) -> Result<(), SecretError> {
+        let client = self.client.read().await;
+        vaultrs::token::lookup_self(&*client)
+            .await
+            .map(|_| ())
+            .map_err(|e| SecretError::Backend(format!("token check: {e}")))
     }
 }
 
@@ -182,33 +183,21 @@ impl SecretResolver for VaultBackend {
             ))
         })?;
         self.check_allowed(reference)?;
-        let (mount, kv_path) = Self::split_path(&reference.path)?;
 
-        let data = match self.read_kv(mount, kv_path).await {
+        let data = match self.read_kv(reference).await {
             Ok(data) => data,
             Err(ClientError::APIError { code: 403, .. }) if self.reauthenticate().await? => self
-                .read_kv(mount, kv_path)
+                .read_kv(reference)
                 .await
-                .map_err(|e| read_error(mount, kv_path, e))?,
-            Err(e) => return Err(read_error(mount, kv_path, e)),
+                .map_err(|e| read_error(reference, e))?,
+            Err(e) => return Err(read_error(reference, e)),
         };
 
         data.get(field)
             .map(|v| Secret::new(value_to_string(v)))
             .ok_or_else(|| SecretError::NotFound {
-                path: reference.path.clone(),
+                path: reference.kv_path(),
             })
-    }
-
-    async fn health(&self) -> Result<(), SecretError> {
-        // A token lookup proves the server is reachable and unsealed and that
-        // the credentials this backend resolves with are still accepted, which
-        // the unauthenticated `sys/health` cannot.
-        let client = self.client.read().await;
-        vaultrs::token::lookup_self(&*client)
-            .await
-            .map(|_| ())
-            .map_err(|e| SecretError::Backend(format!("token check: {e}")))
     }
 }
 
@@ -225,12 +214,12 @@ fn path_allowed(allowed: &[String], path: &str) -> bool {
         })
 }
 
-fn read_error(mount: &str, kv_path: &str, error: ClientError) -> SecretError {
+fn read_error(reference: &SecretRef, error: ClientError) -> SecretError {
     match error {
         ClientError::APIError { code: 404, .. } => SecretError::NotFound {
-            path: format!("{mount}/{kv_path}"),
+            path: reference.kv_path(),
         },
-        other => SecretError::Backend(format!("KV v2 read {mount}/{kv_path}: {other}")),
+        other => SecretError::Backend(format!("KV v2 read {}: {other}", reference.kv_path())),
     }
 }
 
@@ -278,7 +267,7 @@ async fn renew_or_login(
     };
     match renewed {
         Ok(info) => Ok(Some(Duration::from_secs(info.lease_duration))),
-        Err(e) if matches!(auth, VaultAuthConfig::Token { .. }) => {
+        Err(e) if matches!(auth, VaultAuthConfig::Token(_)) => {
             Err(SecretError::Backend(format!("token renewal: {e}")))
         }
         Err(e) => {
@@ -289,25 +278,31 @@ async fn renew_or_login(
     }
 }
 
+fn reveal(stored: &StoredSecret) -> Result<Secret<String>, SecretError> {
+    stored
+        .reveal()
+        .map_err(|e| SecretError::Backend(format!("decrypt stored credential: {e}")))
+}
+
 async fn authenticate(
     client: &mut VaultClient,
     auth: &VaultAuthConfig,
 ) -> Result<Option<Duration>, SecretError> {
     match auth {
-        VaultAuthConfig::Token { token } => {
-            client.set_token(token.expose_secret());
+        VaultAuthConfig::Token(VaultTokenAuth { token }) => {
+            client.set_token(reveal(token)?.expose_secret());
             Ok(None)
         }
-        VaultAuthConfig::AppRole {
+        VaultAuthConfig::AppRole(VaultAppRoleAuth {
             role_id,
             secret_id,
             mount,
-        } => {
+        }) => {
             let info = vaultrs::auth::approle::login(
                 client,
-                mount,
+                mount.as_deref().unwrap_or("approle"),
                 role_id.trim(),
-                secret_id.expose_secret().trim(),
+                reveal(secret_id)?.expose_secret().trim(),
             )
             .await
             .map_err(|e| SecretError::Backend(format!("AppRole login: {e}")))?;
@@ -315,18 +310,21 @@ async fn authenticate(
             client.set_token(&info.client_token);
             Ok(Some(Duration::from_secs(info.lease_duration)))
         }
-        VaultAuthConfig::Kubernetes {
-            role,
-            jwt_path,
-            mount,
-        } => {
-            let jwt = tokio::fs::read_to_string(jwt_path).await.map_err(|e| {
-                SecretError::Backend(format!("read JWT from {}: {e}", jwt_path.display()))
-            })?;
-
-            let info = vaultrs::auth::kubernetes::login(client, mount, role, jwt.trim())
+        VaultAuthConfig::Kubernetes(VaultKubernetesAuth { role, mount }) => {
+            let jwt = tokio::fs::read_to_string(KUBERNETES_JWT_PATH)
                 .await
-                .map_err(|e| SecretError::Backend(format!("Kubernetes login: {e}")))?;
+                .map_err(|e| {
+                    SecretError::Backend(format!("read JWT from {KUBERNETES_JWT_PATH}: {e}"))
+                })?;
+
+            let info = vaultrs::auth::kubernetes::login(
+                client,
+                mount.as_deref().unwrap_or("kubernetes"),
+                role,
+                jwt.trim(),
+            )
+            .await
+            .map_err(|e| SecretError::Backend(format!("Kubernetes login: {e}")))?;
 
             client.set_token(&info.client_token);
             Ok(Some(Duration::from_secs(info.lease_duration)))
@@ -337,6 +335,10 @@ async fn authenticate(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn reference(kv_path: &str) -> SecretRef {
+        format!("secret://b/{kv_path}").parse().unwrap()
+    }
 
     #[test]
     fn renewal_interval_renews_before_expiry() {
@@ -367,8 +369,7 @@ mod tests {
     #[test]
     fn read_errors_map_404_to_not_found() {
         let not_found = read_error(
-            "secret",
-            "app",
+            &reference("secret/app"),
             ClientError::APIError {
                 code: 404,
                 errors: vec![],
@@ -376,8 +377,7 @@ mod tests {
         );
         assert!(matches!(not_found, SecretError::NotFound { path } if path == "secret/app"));
         let other = read_error(
-            "secret",
-            "app",
+            &reference("secret/app"),
             ClientError::APIError {
                 code: 500,
                 errors: vec![],

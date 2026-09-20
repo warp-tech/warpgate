@@ -144,12 +144,7 @@ impl Services {
             db: db.clone(),
             recordings,
             config: config.clone(),
-            state: State::new(
-                &db,
-                &rate_limiter_registry,
-                cluster.node_id,
-                &secret_backends,
-            ),
+            state: State::new(&db, &rate_limiter_registry, cluster.node_id),
             cluster,
             rate_limiter_registry,
             config_provider,

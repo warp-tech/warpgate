@@ -1,11 +1,11 @@
 use super::target::{
     Target, TargetHTTPOptions, TargetKubernetesOptions, TargetMySqlOptions, TargetOptions,
-    TargetPostgresOptions, TargetRdpOptions, TargetSSHOptions, TargetSecrets, TargetVncOptions,
+    TargetPostgresOptions, TargetRdpOptions, TargetSSHOptions, TargetVncOptions,
 };
 use crate::{Protocol, WarpgateError};
 
 /// Inner value of a [`TargetOptions`] variant
-pub trait TargetOptionsVariant: Clone + TargetSecrets {
+pub trait TargetOptionsVariant: Clone {
     const PROTOCOL: Protocol;
     fn extract(options: &TargetOptions) -> Option<&Self>;
 }
@@ -43,10 +43,6 @@ pub struct SpecificTarget<O = TargetOptions> {
 impl<O> SpecificTarget<O> {
     pub const fn options(&self) -> &O {
         &self.options
-    }
-
-    pub const fn options_mut(&mut self) -> &mut O {
-        &mut self.options
     }
 
     pub fn into_parts(self) -> (Target, O) {

@@ -25,7 +25,7 @@ use warpgate_common::auth::{
     AuthCredential, AuthResult, AuthSelector, AuthState, CredentialKind, RememberApprovalBy,
 };
 use warpgate_common::{
-    Secret, TargetOptionsVariant, TargetSecrets, TargetSessionId, UserSessionId, WarpgateError,
+    Secret, TargetOptionsVariant, TargetSessionId, UserSessionId, WarpgateError,
 };
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::approvals::{GatedConnection, admit_target_session};
@@ -240,7 +240,7 @@ pub async fn finalize_user_auth<O: TargetOptionsVariant>(
 }
 
 /// Start a target session, holding for approval if needed
-pub async fn admit_desktop_session<O: TargetSecrets + Send + Sync>(
+pub async fn admit_desktop_session<O: Send + Sync>(
     services: &Services,
     server_handle: &Arc<Mutex<WarpgateServerHandle>>,
     authorization: TargetAuthorization<O>,

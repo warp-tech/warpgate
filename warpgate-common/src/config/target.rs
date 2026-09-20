@@ -399,8 +399,7 @@ pub enum TargetOptions {
 impl TargetOptions {
     /// Every external secret reference among the credentials
     pub fn secret_references(&self) -> Vec<SecretRef> {
-        let mut copy = self.clone();
-        copy.secrets_mut()
+        self.secrets()
             .into_iter()
             .filter_map(|s| s.as_reference().cloned())
             .collect()
@@ -438,79 +437,79 @@ impl TargetOptions {
 
 /// The credential slots of a target, the one place that knows where they are.
 pub trait TargetSecrets {
-    fn secrets_mut(&mut self) -> Vec<&mut MaybeSecretRef>;
+    fn secrets(&self) -> Vec<&MaybeSecretRef>;
 }
 
 impl TargetSecrets for TargetSSHOptions {
-    fn secrets_mut(&mut self) -> Vec<&mut MaybeSecretRef> {
-        match &mut self.auth {
-            SSHTargetAuth::Password(auth) => vec![&mut auth.password],
+    fn secrets(&self) -> Vec<&MaybeSecretRef> {
+        match &self.auth {
+            SSHTargetAuth::Password(auth) => vec![&auth.password],
             SSHTargetAuth::PublicKey(_) | SSHTargetAuth::IamRole(_) => vec![],
         }
     }
 }
 
 impl TargetSecrets for TargetHTTPOptions {
-    fn secrets_mut(&mut self) -> Vec<&mut MaybeSecretRef> {
+    fn secrets(&self) -> Vec<&MaybeSecretRef> {
         vec![]
     }
 }
 
 impl TargetSecrets for TargetKubernetesOptions {
-    fn secrets_mut(&mut self) -> Vec<&mut MaybeSecretRef> {
-        match &mut self.auth {
-            KubernetesTargetAuth::Token(auth) => vec![&mut auth.token],
-            KubernetesTargetAuth::Certificate(auth) => vec![&mut auth.private_key],
+    fn secrets(&self) -> Vec<&MaybeSecretRef> {
+        match &self.auth {
+            KubernetesTargetAuth::Token(auth) => vec![&auth.token],
+            KubernetesTargetAuth::Certificate(auth) => vec![&auth.private_key],
             KubernetesTargetAuth::IamRole(_) => vec![],
         }
     }
 }
 
-fn database_secrets(auth: &mut DatabaseTargetAuth) -> Vec<&mut MaybeSecretRef> {
+fn database_secrets(auth: &DatabaseTargetAuth) -> Vec<&MaybeSecretRef> {
     match auth {
-        DatabaseTargetAuth::Password(auth) => vec![&mut auth.password],
+        DatabaseTargetAuth::Password(auth) => vec![&auth.password],
         DatabaseTargetAuth::IamRole(_) => vec![],
     }
 }
 
 impl TargetSecrets for TargetMySqlOptions {
-    fn secrets_mut(&mut self) -> Vec<&mut MaybeSecretRef> {
-        database_secrets(&mut self.auth)
+    fn secrets(&self) -> Vec<&MaybeSecretRef> {
+        database_secrets(&self.auth)
     }
 }
 
 impl TargetSecrets for TargetPostgresOptions {
-    fn secrets_mut(&mut self) -> Vec<&mut MaybeSecretRef> {
-        database_secrets(&mut self.auth)
+    fn secrets(&self) -> Vec<&MaybeSecretRef> {
+        database_secrets(&self.auth)
     }
 }
 
 impl TargetSecrets for TargetVncOptions {
-    fn secrets_mut(&mut self) -> Vec<&mut MaybeSecretRef> {
-        match &mut self.auth {
-            VncTargetAuth::Password(auth) => vec![&mut auth.password],
+    fn secrets(&self) -> Vec<&MaybeSecretRef> {
+        match &self.auth {
+            VncTargetAuth::Password(auth) => vec![&auth.password],
             VncTargetAuth::None(_) => vec![],
         }
     }
 }
 
 impl TargetSecrets for TargetRdpOptions {
-    fn secrets_mut(&mut self) -> Vec<&mut MaybeSecretRef> {
-        let RdpTargetAuth::Password(auth) = &mut self.auth;
-        vec![&mut auth.password]
+    fn secrets(&self) -> Vec<&MaybeSecretRef> {
+        let RdpTargetAuth::Password(auth) = &self.auth;
+        vec![&auth.password]
     }
 }
 
 impl TargetSecrets for TargetOptions {
-    fn secrets_mut(&mut self) -> Vec<&mut MaybeSecretRef> {
+    fn secrets(&self) -> Vec<&MaybeSecretRef> {
         match self {
-            TargetOptions::Ssh(o) => o.secrets_mut(),
-            TargetOptions::Http(o) => o.secrets_mut(),
-            TargetOptions::Kubernetes(o) => o.secrets_mut(),
-            TargetOptions::MySql(o) => o.secrets_mut(),
-            TargetOptions::Postgres(o) => o.secrets_mut(),
-            TargetOptions::Vnc(o) => o.secrets_mut(),
-            TargetOptions::Rdp(o) => o.secrets_mut(),
+            TargetOptions::Ssh(o) => o.secrets(),
+            TargetOptions::Http(o) => o.secrets(),
+            TargetOptions::Kubernetes(o) => o.secrets(),
+            TargetOptions::MySql(o) => o.secrets(),
+            TargetOptions::Postgres(o) => o.secrets(),
+            TargetOptions::Vnc(o) => o.secrets(),
+            TargetOptions::Rdp(o) => o.secrets(),
         }
     }
 }
@@ -576,7 +575,7 @@ mod tests {
         TargetRdpOptions, TargetSSHOptions, Tls,
     };
 
-    const REFERENCE: &str = "vault://vault-prod/secret/db#password";
+    const REFERENCE: &str = "secret://vault-prod/secret/db#password";
 
     fn ssh_options(auth: SSHTargetAuth) -> TargetOptions {
         let mut options: TargetSSHOptions = serde_json::from_str(r#"{"host":"h"}"#).unwrap();
@@ -701,7 +700,7 @@ mod tests {
     }
 
     /// Fails when a credential slot is reachable through one of the two walkers
-    /// but not the other: `secrets_mut` (typed, used for resolution) and
+    /// but not the other: `secrets` (typed, used for the usage report) and
     /// `SECRET_PATHS` (JSON, used for encryption at rest).
     #[test]
     fn secret_paths_match_the_typed_walker() {
@@ -735,7 +734,7 @@ mod tests {
             private_key: secret(),
         });
 
-        for mut options in [
+        for options in [
             TargetOptions::Ssh(ssh),
             TargetOptions::MySql(mysql),
             TargetOptions::Postgres(postgres),
@@ -745,7 +744,7 @@ mod tests {
             TargetOptions::Kubernetes(k8s_cert),
             TargetOptions::Http(serde_json::from_str(r#"{"url":"http://t"}"#).unwrap()),
         ] {
-            let typed = options.secrets_mut().len();
+            let typed = options.secrets().len();
             let mut json = serde_json::to_value(&options).unwrap();
             let rendered = json.to_string();
             let mut walked = 0;

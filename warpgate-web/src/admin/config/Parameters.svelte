@@ -352,14 +352,12 @@
                                             class="mb-0 me-2"
                                             type="switch"
                                             checked={parameters.sshHostKeySecretRef != null}
-                                            on:change={e => parameters.sshHostKeySecretRef = (e.currentTarget as HTMLInputElement).checked ? 'vault://' : undefined}
+                                            on:change={e => parameters.sshHostKeySecretRef = (e.currentTarget as HTMLInputElement).checked ? '' : undefined}
                                         />
                                         <div>Load host keys from a secret backend</div>
                                     </label>
                                     {#if parameters.sshHostKeySecretRef != null}
-                                        <div class="mb-3">
-                                            <SecretRefInput bind:value={parameters.sshHostKeySecretRef} withKey={false} />
-                                        </div>
+                                        <SecretRefInput bind:value={parameters.sshHostKeySecretRef} withKey={false} />
                                     {/if}
                                     <HelpText>
                                         The entry's <code>ed25519</code> and <code>rsa</code> fields hold the private keys in PEM format.

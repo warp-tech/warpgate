@@ -31,7 +31,7 @@ use warpgate_aws::AwsError;
 use warpgate_common::{
     SSHTargetAuth, TargetOptionsVariant, TargetSSHOptions, UserSessionId, WarpgateError,
 };
-use warpgate_core::{AdmittedTarget, ConfigProvider, Services, resolve_secrets};
+use warpgate_core::{AdmittedTarget, ConfigProvider, Services};
 
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
@@ -125,13 +125,10 @@ fn resolve_chain_ids(
 /// Resolve the full ordered SSH jump chain for a target
 /// `logged_in_username` is used to substitute empty dynamic usernames
 /// in targets' configs
-/// `admitted_options` are the credentials already materialised for the target
-/// itself; the jump hosts are separate targets and get resolved here.
 async fn resolve_ssh_chain(
     services: &Services,
     target_id: Uuid,
     logged_in_username: Option<&String>,
-    mut admitted_options: Option<TargetSSHOptions>,
 ) -> Result<Vec<ResolvedSshChainHost>, WarpgateError> {
     let targets = services.config_provider.list_targets().await?;
 
@@ -147,17 +144,10 @@ async fn resolve_ssh_chain(
         let Some(t) = targets.iter().find(|t| t.id == id) else {
             return Err(unresolvable_jump_host(id));
         };
-        let mut opts = match admitted_options.take_if(|_| id == target_id) {
-            Some(opts) => opts,
-            None => {
-                let Some(opts) = TargetSSHOptions::extract(&t.options) else {
-                    return Err(unresolvable_jump_host(id));
-                };
-                let mut opts = opts.clone();
-                resolve_secrets(&mut opts, &*services.secret_backends).await?;
-                opts
-            }
+        let Some(opts) = TargetSSHOptions::extract(&t.options) else {
+            return Err(unresolvable_jump_host(id));
         };
+        let mut opts = opts.clone();
 
         // Forward username from the authenticated user to the target, if target has no username
         if let Some(logged_in_username) = logged_in_username
@@ -182,7 +172,7 @@ pub async fn resolve_ssh_chain_for_admin(
     target_id: Uuid,
     admin_username: Option<&String>,
 ) -> Result<Vec<ResolvedSshChainHost>, WarpgateError> {
-    resolve_ssh_chain(services, target_id, admin_username, None).await
+    resolve_ssh_chain(services, target_id, admin_username).await
 }
 
 /// Resolve the target-side connection plan while consuming the capability
@@ -191,13 +181,10 @@ pub async fn resolve_approved_ssh_chain(
     services: &Services,
     admitted: AdmittedTarget<TargetSSHOptions>,
 ) -> Result<Vec<ResolvedSshChainHost>, WarpgateError> {
-    let (user_info, target) = admitted.into_approved().into_parts();
-    let (target, options) = target.into_parts();
     resolve_ssh_chain(
         services,
-        target.id,
-        Some(&user_info.username),
-        Some(options),
+        admitted.target().id,
+        Some(&admitted.user_info().username),
     )
     .await
 }
@@ -860,7 +847,10 @@ impl RemoteClient {
         let mut auth_error_msg: Option<String> = None;
         match auth {
             SSHTargetAuth::Password(auth) => {
-                let password = auth.password.reveal()?;
+                let password = auth
+                    .password
+                    .resolve(&*self.services.secret_backends)
+                    .await?;
                 let response = session
                     .authenticate_password(username.to_string(), password.expose_secret())
                     .await?;

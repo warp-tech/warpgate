@@ -18,8 +18,8 @@ pub use config::*;
 pub use error::WarpgateError;
 pub use helpers::password_policy::{PasswordPolicy, PasswordPolicyViolation, validate_password};
 pub use secrets::{
-    BackendType, DEFAULT_KUBERNETES_JWT_PATH, MaybeSecretRef, SecretBackendConfig, SecretError,
-    SecretRef, SecretResolver, VaultAuthConfig, VaultAuthMethod, VaultTlsConfig,
+    BackendType, MaybeSecretRef, SecretBackendConfig, SecretError, SecretRef, SecretResolver,
+    VaultAppRoleAuth, VaultAuthConfig, VaultKubernetesAuth, VaultTokenAuth,
 };
 pub use state::GlobalParams;
 pub use types::*;

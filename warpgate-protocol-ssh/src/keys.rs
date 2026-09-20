@@ -69,7 +69,7 @@ pub async fn load_host_keys(
 ) -> Result<Vec<PrivateKey>, WarpgateError> {
     let row = Parameters::Entity::get(db).await?;
     if let Some(reference) = &row.ssh_host_key_secret_ref {
-        return load_host_keys_from_backend(&reference.parse()?, secret_backend).await;
+        return load_host_keys_from_backend(reference, secret_backend).await;
     }
     [row.ssh_host_key_ed25519, row.ssh_host_key_rsa]
         .into_iter()
@@ -132,7 +132,7 @@ fn public_key_line(key: &PrivateKey) -> Result<String, WarpgateError> {
 /// Inserts a row for `public_key`/`stored_secret_key` unless a key with the
 /// same public key already exists. `stored_secret_key` is whatever belongs in
 /// the `secret_key` column verbatim — already-encrypted PEM for an inline key,
-/// or a `vault://`/`openbao://` reference URI.
+/// or a `secret://` reference.
 async fn insert_client_key(
     db: &DatabaseConnection,
     label: &str,
@@ -285,22 +285,24 @@ pub async fn load_client_keys(
     };
     let mut keys = Vec::with_capacity(models.len());
     for m in &models {
-        if let MaybeSecretRef::Reference(reference) = &m.secret_key {
-            match load_referenced_client_key(db, m, reference, secret_backend).await {
-                Ok(key) => keys.push(key),
-                // A key the admin picked for this target must work or the attempt
-                // fails; an unusable key in the default set just isn't offered, so
-                // one backend outage doesn't take every stored key with it.
-                Err(error) if key_id != Some(m.id) => {
-                    warn!(label = %m.label, %error, "Skipping SSH client key that could not be read from its secret backend");
-                }
-                Err(error) => return Err(error),
+        let key = match &m.secret_key {
+            MaybeSecretRef::Reference(reference) => {
+                load_referenced_client_key(db, m, reference, secret_backend).await
             }
-        } else {
-            keys.push(decode_secret_key(
-                m.secret_key.reveal()?.expose_secret(),
-                None,
-            )?);
+            stored => stored
+                .resolve(secret_backend)
+                .await
+                .and_then(|pem| Ok(decode_secret_key(pem.expose_secret(), None)?)),
+        };
+        match key {
+            Ok(key) => keys.push(key),
+            // A key the admin picked for this target must work or the attempt
+            // fails; an unusable key in the default set just isn't offered, so
+            // one backend outage doesn't take every stored key with it.
+            Err(error) if key_id != Some(m.id) => {
+                warn!(label = %m.label, %error, "Skipping SSH client key that could not be loaded");
+            }
+            Err(error) => return Err(error),
         }
     }
     Ok(keys)

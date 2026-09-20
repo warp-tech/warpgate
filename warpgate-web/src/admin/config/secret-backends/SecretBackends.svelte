@@ -28,7 +28,7 @@
         try {
             health[backend.id] = await api.checkSecretBackendHealth({ id: backend.id })
         } catch (e) {
-            health[backend.id] = { health: 'error', error: await stringifyError(e) }
+            health[backend.id] = { error: await stringifyError(e) }
         }
     }
 
@@ -85,7 +85,7 @@
 {/if}
 
 <InfoBox>
-    Target passwords and SSH keys can be a <code>vault://backend/path#field</code> reference,
+    Target passwords and SSH keys can be a <code>secret://backend/mount/path#field</code> reference,
     resolved from HashiCorp Vault or OpenBao when a connection is made. The path is the KV v2
     path without the <code>data/</code> segment.
 </InfoBox>
@@ -101,10 +101,10 @@
                 <div class="d-flex align-items-center gap-2">
                     <strong>{backend.name}</strong>
                     <Badge color="secondary">{backend.backendType}</Badge>
-                    {#if status?.health === 'ok'}
-                        <Badge color="success">Healthy</Badge>
+                    {#if status?.error}
+                        <Badge color="danger" title={status.error}>Unhealthy</Badge>
                     {:else if status}
-                        <Badge color="danger" title={status.error ?? ''}>Unhealthy</Badge>
+                        <Badge color="success">Healthy</Badge>
                     {/if}
                     <Button
                         class="ms-auto"
@@ -144,9 +144,9 @@
                     {#if backend.namespace}
                         · namespace {backend.namespace}
                     {/if}
-                    · {backend.authMethod}
+                    · {backend.auth.method}
                 </div>
-                {#if status?.health === 'error' && status.error}
+                {#if status?.error}
                     <div class="text-danger small">{status.error}</div>
                 {/if}
             </div>

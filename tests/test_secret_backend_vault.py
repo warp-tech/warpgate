@@ -1,6 +1,6 @@
 """
 Integration tests for the Vault/OpenBao secret-backend feature: targets (and Warpgate's
-own SSH host/client keys) can hold a `vault://backend/path#field` reference instead of an
+own SSH host/client keys) can hold a `secret://backend/mount/path#field` reference instead of an
 inline value, resolved at connect-time against a real Vault server.
 """
 import asyncio
@@ -30,20 +30,28 @@ from .vnc_client import VncClient, VncError
 FRAME_TIMEOUT = 40
 
 
+def _token_auth(token: str = "") -> sdk.SecretBackendAuth:
+    return sdk.SecretBackendAuth(sdk.SecretBackendAuthVaultTokenAuth(method="Token", token=token))
+
+
+def _approle_auth(role_id: str, secret_id: str = "") -> sdk.SecretBackendAuth:
+    return sdk.SecretBackendAuth(
+        sdk.SecretBackendAuthVaultAppRoleAuth(method="AppRole", role_id=role_id, secret_id=secret_id)
+    )
+
+
 def _vault_backend(
     name: str,
     address: str,
-    token: str = None,
+    token: str = "",
     backend_type: str = "vault",
-    **auth,
+    auth: sdk.SecretBackendAuth = None,
 ) -> sdk.SecretBackendRequest:
     return sdk.SecretBackendRequest(
         name=name,
         backend_type=backend_type,
         address=address,
-        auth_method=auth.pop("auth_method", "token"),
-        token=token,
-        **auth,
+        auth=auth or _token_auth(token),
     )
 
 
@@ -120,19 +128,18 @@ class TestSecretBackendVault:
         )
         stop_at_end(lambda: _stop_wg(wg))
         url = f"https://localhost:{wg.http_port}"
-        scheme = vault.backend_type
 
         with admin_client(url) as api:
-            assert _resolve_status(api, f"{scheme}://vault-test/secret/myapp#password") == 204
+            assert _resolve_status(api, f"secret://vault-test/secret/myapp#password") == 204
 
             # wrong field within an existing secret -> NotFound
-            assert _resolve_status(api, f"{scheme}://vault-test/secret/myapp#nope") == 404
+            assert _resolve_status(api, f"secret://vault-test/secret/myapp#nope") == 404
 
             # wrong KV path -> NotFound
-            assert _resolve_status(api, f"{scheme}://vault-test/secret/nope#password") == 404
+            assert _resolve_status(api, f"secret://vault-test/secret/nope#password") == 404
 
             # reference to a backend name that isn't configured
-            assert _resolve_status(api, f"{scheme}://not-configured/secret/myapp#password") == 404
+            assert _resolve_status(api, f"secret://not-configured/secret/myapp#password") == 404
 
             # malformed URI -> 400 Bad Request
             with pytest.raises(sdk.ApiException) as exc:
@@ -156,7 +163,7 @@ class TestSecretBackendVault:
             assert backends[0].address == vault.addr
 
             health = api.check_secret_backend_health(backends[0].id)
-            assert health.health == "ok", health.error
+            assert health.error is None, health.error
             assert health.error is None
 
             with pytest.raises(sdk.ApiException) as exc:
@@ -180,22 +187,21 @@ class TestSecretBackendVault:
         )
         stop_at_end(lambda: _stop_wg(wg))
         url = f"https://localhost:{wg.http_port}"
-        scheme = vault_a.backend_type
 
         with admin_client(url) as api:
             backends = api.get_secret_backends()
             assert {b.name for b in backends} == {"vault-a", "vault-b"}
             assert {b.address for b in backends} == {vault_a.addr, vault_b.addr}
-            assert all(api.check_secret_backend_health(b.id).health == "ok" for b in backends)
+            assert all(api.check_secret_backend_health(b.id).error is None for b in backends)
 
             # each backend name routes to its own Vault instance, not to the other one's data
-            assert _resolve_status(api, f"{scheme}://vault-a/secret/myapp#password") == 204
+            assert _resolve_status(api, f"secret://vault-a/secret/myapp#password") == 204
 
-            assert _resolve_status(api, f"{scheme}://vault-b/secret/myapp#password") == 204
+            assert _resolve_status(api, f"secret://vault-b/secret/myapp#password") == 204
 
             # a path that only exists in vault_a is not visible through the vault-b backend
             vault_a.kv_put("secret", "only-in-a", password="secret")
-            assert _resolve_status(api, f"{scheme}://vault-b/secret/only-in-a#password") == 404
+            assert _resolve_status(api, f"secret://vault-b/secret/only-in-a#password") == 404
 
     def test_multiple_backends_independent_health(self, processes: ProcessManager, backend_engine, timeout, stop_at_end):
         vault: VaultInstance = processes.start_vault(engine=backend_engine)
@@ -220,15 +226,15 @@ class TestSecretBackendVault:
         with admin_client(url) as api:
             ids = _backend_ids(api)
             healthy = api.check_secret_backend_health(ids["vault-healthy"])
-            assert healthy.health == "ok"
+            assert healthy.error is None
             assert healthy.error is None
             unreachable = api.check_secret_backend_health(ids["vault-unreachable"])
-            assert unreachable.health == "error"
+            assert unreachable.error is not None
             assert unreachable.error is not None
 
             # the broken backend must not prevent resolving secrets from the healthy one
             vault.kv_put("secret", "myapp", password="hunter2")
-            assert _resolve_status(api, f"{vault.backend_type}://vault-healthy/secret/myapp#password") == 204
+            assert _resolve_status(api, f"secret://vault-healthy/secret/myapp#password") == 204
 
     def test_duplicate_or_invalid_backend_name_is_rejected(self, processes: ProcessManager, shared_wg, timeout):
         url = f"https://localhost:{shared_wg.http_port}"
@@ -255,7 +261,7 @@ class TestSecretBackendVault:
             [_vault_backend("vault-test", vault.addr, token=vault.root_token, backend_type=vault.backend_type)],
         )
         stop_at_end(lambda: _stop_wg(wg))
-        reference = f"{vault.backend_type}://vault-test/secret/myapp#password"
+        reference = f"secret://vault-test/secret/myapp#password"
 
         with admin_client(f"https://localhost:{wg.http_port}") as api:
             backend_id = _backend_ids(api)["vault-test"]
@@ -282,8 +288,7 @@ class TestSecretBackendVault:
                         "vault-test",
                         vault.addr,
                         backend_type=vault.backend_type,
-                        auth_method="app_role",
-                        app_role_id="role",
+                        auth=_approle_auth("role"),
                     ),
                 )
             assert exc.value.status == 400
@@ -319,7 +324,7 @@ class TestSecretBackendVault:
         # secret_references() only inspects stored target config, so this doesn't need a
         # live/reachable backend at all -- the shared wg instance (no backend configured) is fine.
         url = f"https://localhost:{shared_wg.http_port}"
-        reference = "vault://vault-test/secret/shared#password"
+        reference = "secret://vault-test/secret/shared#password"
 
         with admin_client(url) as api:
             target = api.create_target(
@@ -349,20 +354,20 @@ class TestSecretBackendVault:
             usage = api.get_secret_reference_usage()
             entry = next(u for u in usage if u.reference == reference)
             assert entry.backend == "vault-test"
-            assert entry.target_count == 1
+            assert len(entry.targets) == 1
             assert entry.targets[0].id == target.id
             assert entry.targets[0].name == target.name
 
     def test_secret_reference_usage_multiple_targets_share_secret(
         self, processes: ProcessManager, backend_engine, timeout, stop_at_end
     ):
-        # two targets of different kinds pointing at the exact same vault:// reference must both
+        # two targets of different kinds pointing at the exact same secret:// reference must both
         # show up under a single usage entry, and deleting one must leave the other -- and the
         # underlying secret -- untouched.
         vault: VaultInstance = processes.start_vault(engine=backend_engine)
         stop_at_end(lambda: _stop_vault(vault))
         vault.kv_put("secret", "shared", password="hunter2")
-        reference = f"{vault.backend_type}://vault-test/secret/shared#password"
+        reference = f"secret://vault-test/secret/shared#password"
 
         wg = _start_wg_with_backends(
             processes,
@@ -423,7 +428,7 @@ class TestSecretBackendVault:
             usage = api.get_secret_reference_usage()
             entry = next(u for u in usage if u.reference == reference)
             assert entry.backend == "vault-test"
-            assert entry.target_count == 2
+            assert len(entry.targets) == 2
             assert {t.id for t in entry.targets} == {ssh_target.id, postgres_target.id}
 
             # deleting one of the two sharing targets must not touch the upstream secret, and the
@@ -432,7 +437,7 @@ class TestSecretBackendVault:
 
             usage = api.get_secret_reference_usage()
             entry = next(u for u in usage if u.reference == reference)
-            assert entry.target_count == 1
+            assert len(entry.targets) == 1
             assert entry.targets[0].id == postgres_target.id
 
             assert _resolve_status(api, reference) == 204
@@ -471,7 +476,7 @@ class TestSecretBackendVault:
                             auth=sdk.DatabaseTargetAuth(
                                 sdk.DatabaseTargetAuthDatabaseTargetPasswordAuth(
                                     kind="Password",
-                                    password=f"{vault.backend_type}://vault-test/secret/db#password",
+                                    password=f"secret://vault-test/secret/db#password",
                                 )
                             ),
                             tls=sdk.Tls(mode=sdk.TlsMode.PREFERRED, verify=False),
@@ -540,7 +545,7 @@ class TestSecretBackendVault:
     #                         auth=sdk.DatabaseTargetAuth(
     #                             sdk.DatabaseTargetAuthDatabaseTargetPasswordAuth(
     #                                 kind="Password",
-    #                                 password="vault://vault-test/secret/db#password",
+    #                                 password="secret://vault-test/secret/db#password",
     #                             )
     #                         ),
     #                         tls=sdk.Tls(mode=sdk.TlsMode.PREFERRED, verify=False),
@@ -610,7 +615,7 @@ class TestSecretBackendVault:
                             auth=sdk.SSHTargetAuth(
                                 sdk.SSHTargetAuthSshTargetPasswordAuth(
                                     kind="Password",
-                                    password=f"{vault.backend_type}://vault-test/secret/sshtarget#password",
+                                    password=f"secret://vault-test/secret/sshtarget#password",
                                 )
                             ),
                         )
@@ -670,7 +675,7 @@ class TestSecretBackendVault:
                             auth=sdk.VncTargetAuth(
                                 sdk.VncTargetAuthVncTargetPasswordAuth(
                                     kind="Password",
-                                    password=f"{vault.backend_type}://vault-test/secret/vnctarget#password",
+                                    password=f"secret://vault-test/secret/vnctarget#password",
                                 )
                             ),
                         )
@@ -757,7 +762,7 @@ class TestSecretBackendVault:
                             auth=sdk.RdpTargetAuth(
                                 sdk.RdpTargetAuthRdpTargetPasswordAuth(
                                     kind="Password",
-                                    password=f"{vault.backend_type}://vault-test/secret/rdptarget#password",
+                                    password=f"secret://vault-test/secret/rdptarget#password",
                                 )
                             ),
                             verify_tls=False,
@@ -849,9 +854,7 @@ class TestSecretBackendVault:
                 _vault_backend(
                     "unreachable",
                     f"http://127.0.0.1:{bogus_port}",
-                    auth_method="app_role",
-                    app_role_id="bogus-role-id",
-                    app_role_secret_id="bogus-secret-id",
+                    auth=_approle_auth("bogus-role-id", "bogus-secret-id"),
                 )
             ],
         )
@@ -863,7 +866,7 @@ class TestSecretBackendVault:
 
         with admin_client(url) as api:
             backend_id = _backend_ids(api)["unreachable"]
-            assert api.check_secret_backend_health(backend_id).health == "error"
+            assert api.check_secret_backend_health(backend_id).error is not None
 
             role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
             user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
@@ -937,7 +940,7 @@ class TestSecretBackendVault:
         with admin_client(f"https://localhost:{wg.http_port}") as api:
             api.update_parameters(
                 sdk.ParameterUpdate(
-                    ssh_host_key_secret_ref=f"{vault.backend_type}://vault-test/secret/warpgate-host-keys"
+                    ssh_host_key_secret_ref=f"secret://vault-test/secret/warpgate-host-keys"
                 )
             )
         _stop_wg(wg)
@@ -993,7 +996,7 @@ class TestSecretBackendVault:
             key = api.import_ssh_own_key_reference(
                 sdk.ImportSSHClientKeyReferenceRequest(
                     label="vault-key",
-                    reference=f"{vault.backend_type}://vault-test/secret/warpgate-client-key#private_key",
+                    reference=f"secret://vault-test/secret/warpgate-client-key#private_key",
                     is_default=False,
                 )
             )
@@ -1063,9 +1066,7 @@ class TestSecretBackendVault:
                 _vault_backend(
                     "vault-test",
                     vault.addr,
-                    auth_method="app_role",
-                    app_role_id=role_id,
-                    app_role_secret_id=secret_id,
+                    auth=_approle_auth(role_id, secret_id),
                     backend_type=vault.backend_type,
                 )
             ],
@@ -1074,4 +1075,4 @@ class TestSecretBackendVault:
         url = f"https://localhost:{wg.http_port}"
 
         with admin_client(url) as api:
-            assert _resolve_status(api, f"{vault.backend_type}://vault-test/secret/myapp#password") == 204
+            assert _resolve_status(api, f"secret://vault-test/secret/myapp#password") == 204

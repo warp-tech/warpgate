@@ -6,6 +6,7 @@
         type TargetOptionsTargetRdpOptions,
     } from 'admin/lib/api'
     import HelpText from 'admin/lib/HelpText.svelte'
+    import SecretRefInput from 'common/SecretRefInput.svelte'
 
     interface Props {
         options: TargetOptionsTargetRdpOptions
@@ -47,13 +48,7 @@
 </FormGroup>
 
 {#if options.auth.kind === 'Password'}
-    <FormGroup floating label="Password">
-        <input
-            class="form-control"
-            type="password"
-            bind:value={options.auth.password}
-        >
-    </FormGroup>
+    <SecretRefInput bind:value={options.auth.password} inlineLabel="Password" />
 {/if}
 
 <Input

@@ -1,29 +1,22 @@
 use std::collections::HashMap;
+use std::mem;
 use std::str::FromStr;
 
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
-use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
-use sea_orm::ActiveValue::NotSet;
+use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryOrder, Set};
 use uuid::Uuid;
 use warpgate_common::encryption::idempotent_maybe_encrypt_secret;
 use warpgate_common::secrets::validate_backend_name;
 use warpgate_common::{
-    AdminPermission, BackendType, Secret, SecretError, SecretRef, SecretResolver as _,
-    TargetOptions, VaultAuthMethod, WarpgateError,
+    AdminPermission, BackendType, SecretError, SecretRef, SecretResolver as _, StoredSecret,
+    TargetOptions, VaultAuthConfig, WarpgateError,
 };
 use warpgate_db_entities::{Parameters, SecretBackend, SshClientKey, Target};
 
 use super::AdminContext;
 use crate::api::common::is_unique_violation;
-
-#[derive(Debug, Enum)]
-#[oai(rename_all = "lowercase")]
-pub enum HealthStatus {
-    Ok,
-    Error,
-}
 
 #[derive(Object)]
 pub struct SecretBackendResponse {
@@ -32,37 +25,27 @@ pub struct SecretBackendResponse {
     pub backend_type: BackendType,
     pub address: String,
     pub namespace: Option<String>,
-    pub auth_method: VaultAuthMethod,
-    /// Empty means the method's default mount
-    pub auth_mount: String,
-    pub app_role_id: Option<String>,
-    pub kubernetes_role: Option<String>,
+    pub auth: VaultAuthConfig,
     pub tls_skip_verify: bool,
     pub allowed_paths: Vec<String>,
 }
 
-impl TryFrom<SecretBackend::Model> for SecretBackendResponse {
-    type Error = WarpgateError;
-
-    fn try_from(model: SecretBackend::Model) -> Result<Self, WarpgateError> {
-        Ok(Self {
-            backend_type: model.backend_type()?,
-            auth_method: model.auth_method()?,
+impl From<SecretBackend::Model> for SecretBackendResponse {
+    fn from(model: SecretBackend::Model) -> Self {
+        Self {
             allowed_paths: model.allowed_paths(),
+            auth: model.auth.redacted(),
             id: model.id,
             name: model.name,
+            backend_type: model.backend_type,
             address: model.address,
             namespace: model.namespace,
-            auth_mount: model.auth_mount,
-            app_role_id: model.app_role_id,
-            kubernetes_role: model.kubernetes_role,
             tls_skip_verify: model.tls_skip_verify,
-        })
+        }
     }
 }
 
-/// Shared by create and update. The secret fields are write-only: mandatory
-/// when the row holds none for the chosen method, kept when omitted otherwise.
+/// Shared by create and update.
 #[derive(Object)]
 pub struct SecretBackendRequest {
     #[oai(validator(min_length = 1, max_length = 64, pattern = r"^[A-Za-z0-9._-]+$"))]
@@ -70,17 +53,9 @@ pub struct SecretBackendRequest {
     pub backend_type: BackendType,
     #[oai(validator(min_length = 1, max_length = 2048))]
     pub address: String,
-    #[oai(validator(max_length = 255))]
+    #[oai(validator(min_length = 1, max_length = 255))]
     pub namespace: Option<String>,
-    pub auth_method: VaultAuthMethod,
-    #[oai(validator(max_length = 255))]
-    pub auth_mount: Option<String>,
-    pub token: Option<Secret<String>>,
-    #[oai(validator(max_length = 255))]
-    pub app_role_id: Option<String>,
-    pub app_role_secret_id: Option<Secret<String>>,
-    #[oai(validator(max_length = 255))]
-    pub kubernetes_role: Option<String>,
+    pub auth: VaultAuthConfig,
     #[oai(default)]
     pub tls_skip_verify: bool,
     /// KV path prefixes (`mount/path`), matched on whole segments
@@ -90,7 +65,7 @@ pub struct SecretBackendRequest {
 
 #[derive(Object)]
 pub struct CheckHealthResponse {
-    pub health: HealthStatus,
+    /// `null` when the backend is reachable and accepts the stored credentials
     pub error: Option<String>,
 }
 
@@ -110,7 +85,6 @@ pub struct SecretReferenceUsageTarget {
 pub struct SecretReferenceUsage {
     pub reference: String,
     pub backend: String,
-    pub target_count: u32,
     pub targets: Vec<SecretReferenceUsageTarget>,
 }
 
@@ -197,7 +171,7 @@ impl From<SecretError> for TestResolveApiResponse {
             SecretError::BackendNotConfigured { .. } | SecretError::NotFound { .. } => {
                 Self::NotFound(message)
             }
-            SecretError::Unresolved(_) | SecretError::Backend(_) => Self::BadGateway(message),
+            SecretError::Backend(_) => Self::BadGateway(message),
         }
     }
 }
@@ -210,8 +184,8 @@ enum GetSecretReferenceUsageResponse {
 
 const NAME_TAKEN: &str = "A secret backend with this name already exists";
 
-/// Copies a request onto a row. A secret is mandatory when the row has none
-/// stored for the chosen method; omitting it otherwise keeps the stored value.
+/// Copies a request onto a row. A secret omitted from the request keeps the
+/// one stored for the same method; there is nothing to keep for another method.
 fn apply_request(
     model: &mut SecretBackend::ActiveModel,
     body: &SecretBackendRequest,
@@ -222,59 +196,29 @@ fn apply_request(
         return Err("An allowed path cannot contain a line break".into());
     }
 
-    let stored = |column: fn(&SecretBackend::Model) -> &Option<String>| {
-        existing.is_some_and(|m| m.auth_method == body.auth_method.as_str() && column(m).is_some())
-    };
-    let secret = |what: &str, value: &Option<Secret<String>>, keep: bool| -> Result<_, String> {
-        match value {
-            Some(s) => Ok(Set(Some(
-                idempotent_maybe_encrypt_secret(s.expose_secret()).map_err(|e| e.to_string())?,
-            ))),
-            None if keep => Ok(NotSet),
-            None => Err(format!("{what} is required for this authentication method")),
-        }
-    };
-    let required = |what: &str, present: bool| -> Result<(), String> {
-        if present {
-            Ok(())
+    // A blank secret is the redacted value responses carry, so it keeps the
+    // one stored for the same method.
+    let stored = existing
+        .map(|m| &m.auth)
+        .filter(|auth| mem::discriminant(*auth) == mem::discriminant(&body.auth))
+        .and_then(VaultAuthConfig::secret);
+    let mut auth = body.auth.clone();
+    if let Some(secret) = auth.secret_mut() {
+        let given = secret.stored_value();
+        *secret = if given.is_empty() {
+            stored.cloned().ok_or_else(|| {
+                "The login secret is required for this authentication method".to_owned()
+            })?
         } else {
-            Err(format!("{what} is required for this authentication method"))
-        }
-    };
-
-    let mut token = Set(None);
-    let mut app_role_id = Set(None);
-    let mut app_role_secret_id = Set(None);
-    let mut kubernetes_role = Set(None);
-    match body.auth_method {
-        VaultAuthMethod::Token => {
-            token = secret("A token", &body.token, stored(|m| &m.token))?;
-        }
-        VaultAuthMethod::AppRole => {
-            required("The AppRole role ID", body.app_role_id.is_some())?;
-            app_role_id = Set(body.app_role_id.clone());
-            app_role_secret_id = secret(
-                "The AppRole secret ID",
-                &body.app_role_secret_id,
-                stored(|m| &m.app_role_secret_id),
-            )?;
-        }
-        VaultAuthMethod::Kubernetes => {
-            required("The Kubernetes role", body.kubernetes_role.is_some())?;
-            kubernetes_role = Set(body.kubernetes_role.clone());
-        }
+            StoredSecret::from(idempotent_maybe_encrypt_secret(given).map_err(|e| e.to_string())?)
+        };
     }
 
     model.name = Set(body.name.clone());
-    model.backend_type = Set(body.backend_type.as_str().to_owned());
+    model.backend_type = Set(body.backend_type);
     model.address = Set(body.address.clone());
-    model.namespace = Set(body.namespace.clone().filter(|ns| !ns.is_empty()));
-    model.auth_method = Set(body.auth_method.as_str().to_owned());
-    model.auth_mount = Set(body.auth_mount.clone().unwrap_or_default());
-    model.token = token;
-    model.app_role_id = app_role_id;
-    model.app_role_secret_id = app_role_secret_id;
-    model.kubernetes_role = kubernetes_role;
+    model.namespace = Set(body.namespace.clone());
+    model.auth = Set(auth);
     model.tls_skip_verify = Set(body.tls_skip_verify);
     model.allowed_paths = Set(body.allowed_paths.join("\n"));
     Ok(())
@@ -304,9 +248,7 @@ async fn references_to(db: &DatabaseConnection, name: &str) -> Result<Vec<String
         }
     }
     if let Some(reference) = Parameters::Entity::get(db).await?.ssh_host_key_secret_ref
-        && reference
-            .parse::<SecretRef>()
-            .is_ok_and(|r| r.backend == name)
+        && reference.backend == name
     {
         found.push("the SSH host key setting".into());
     }
@@ -335,8 +277,8 @@ impl Api {
             .all(&admin.services().db)
             .await?
             .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(Into::into)
+            .collect();
         Ok(GetSecretBackendsResponse::Ok(Json(backends)))
     }
 
@@ -361,9 +303,7 @@ impl Api {
             return Ok(CreateSecretBackendResponse::BadRequest(Json(error)));
         }
         match model.insert(db).await {
-            Ok(model) => Ok(CreateSecretBackendResponse::Created(Json(
-                model.try_into()?,
-            ))),
+            Ok(model) => Ok(CreateSecretBackendResponse::Created(Json(model.into()))),
             Err(e) if is_unique_violation(&e) => Ok(CreateSecretBackendResponse::Conflict(Json(
                 NAME_TAKEN.into(),
             ))),
@@ -385,7 +325,7 @@ impl Api {
             .one(&admin.services().db)
             .await?
         {
-            Some(model) => Ok(GetSecretBackendResponse::Ok(Json(model.try_into()?))),
+            Some(model) => Ok(GetSecretBackendResponse::Ok(Json(model.into()))),
             None => Ok(GetSecretBackendResponse::NotFound),
         }
     }
@@ -419,7 +359,7 @@ impl Api {
             return Ok(UpdateSecretBackendResponse::BadRequest(Json(error)));
         }
         match model.update(db).await {
-            Ok(model) => Ok(UpdateSecretBackendResponse::Ok(Json(model.try_into()?))),
+            Ok(model) => Ok(UpdateSecretBackendResponse::Ok(Json(model.into()))),
             Err(e) if is_unique_violation(&e) => Ok(UpdateSecretBackendResponse::Conflict(Json(
                 NAME_TAKEN.into(),
             ))),
@@ -471,12 +411,13 @@ impl Api {
             return Ok(CheckHealthApiResponse::NotFound);
         };
 
-        let (health, error) = match services.secret_backends.health_of(&model.name).await {
-            Ok(()) => (HealthStatus::Ok, None),
-            Err(e) => (HealthStatus::Error, Some(e.to_string())),
-        };
+        let error = services
+            .secret_backends
+            .health_of(&model.name)
+            .await
+            .err()
+            .map(|e| e.to_string());
         Ok(CheckHealthApiResponse::Ok(Json(CheckHealthResponse {
-            health,
             error,
         })))
     }
@@ -530,16 +471,14 @@ impl Api {
                     .or_insert_with(|| SecretReferenceUsage {
                         reference: key,
                         backend: reference.backend.clone(),
-                        target_count: 0,
                         targets: Vec::new(),
                     });
-                // A target may reference the same secret from more than one field; count it once.
+                // A target may reference the same secret from more than one field; list it once.
                 if !entry.targets.iter().any(|t| t.id == target.id) {
                     entry.targets.push(SecretReferenceUsageTarget {
                         id: target.id,
                         name: target.name.clone(),
                     });
-                    entry.target_count += 1;
                 }
             }
         }

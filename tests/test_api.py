@@ -287,7 +287,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         call=lambda api, r: api.import_ssh_own_key_reference_with_http_info(
             sdk.ImportSSHClientKeyReferenceRequest(
                 label=f"key-{uuid4()}",
-                reference="vault://not-configured/secret/key#private_key",
+                reference="secret://not-configured/secret/key#private_key",
                 is_default=False,
             )
         ),
@@ -313,8 +313,9 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
                 name=f"vault-{uuid4().hex[:8]}",
                 backend_type="vault",
                 address="https://vault.invalid:8200",
-                auth_method="token",
-                token="test",
+                auth=sdk.SecretBackendAuth(
+                    sdk.SecretBackendAuthVaultTokenAuth(method="Token", token="test")
+                ),
             )
         ),
         expected_statuses={201},
@@ -334,7 +335,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
                 name="vault-missing",
                 backend_type="vault",
                 address="https://vault.invalid:8200",
-                auth_method="token",
+                auth=sdk.SecretBackendAuth(sdk.SecretBackendAuthVaultTokenAuth(method="Token", token="")),
             ),
         ),
         expected_statuses={404},
@@ -356,7 +357,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         permission="targets_edit",
         call=lambda api, r: api.test_secret_resolve_with_http_info(
             sdk.TestResolveRequest(
-                reference="vault://not-configured/secret/x#password"
+                reference="secret://not-configured/secret/x#password"
             )
         ),
         expected_statuses={404},

@@ -10,7 +10,7 @@ use warpgate_aws::S3StorageConfig;
 use warpgate_common::auth::CredentialKind;
 use warpgate_common::encryption::idempotent_maybe_encrypt_secret;
 use warpgate_common::{
-    GlobalParams, PasswordPolicy, Protocol, SshHostKeyKind, UserAuthCredential,
+    GlobalParams, PasswordPolicy, Protocol, SecretRef, SshHostKeyKind, UserAuthCredential,
     UserRequireCredentialsPolicy, WarpgateError,
 };
 
@@ -303,10 +303,10 @@ pub struct Model {
     pub ssh_host_key_ed25519: String,
     #[sea_orm(column_type = "Text")]
     pub ssh_host_key_rsa: String,
-    /// `scheme://backend/path` of a secret-backend entry whose fields, named after
-    /// [`SshHostKeyKind::name`], hold the host key PEMs; null uses the keys above.
+    /// A secret-backend entry whose fields, named after [`SshHostKeyKind::name`],
+    /// hold the host key PEMs; null uses the keys above.
     #[sea_orm(column_type = "Text", nullable)]
-    pub ssh_host_key_secret_ref: Option<String>,
+    pub ssh_host_key_secret_ref: Option<SecretRef>,
 }
 
 impl Model {

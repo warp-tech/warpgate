@@ -38,7 +38,7 @@
     import TargetRdpOptions from './rdp/Options.svelte'
     import TargetSshOptions from './ssh/Options.svelte'
     import TargetVncOptions from './vnc/Options.svelte'
-    import SecretRefInput, { isSecretRef } from 'common/SecretRefInput.svelte'
+    import SecretRefInput from 'common/SecretRefInput.svelte'
 
     interface Props {
         params: { id: string }
@@ -52,26 +52,6 @@
     let roleIsAllowed: Record<string, boolean> = $state({})
     let connectionsInstructionsModalOpen = $state(false)
     let groups: TargetGroup[] = $state([])
-
-    let dbAuthMode = $derived.by(() => {
-        const options = target?.options
-        if (options?.kind !== 'MySql' && options?.kind !== 'Postgres') return undefined
-        const auth = options.auth
-        if (auth?.kind !== 'Password') return auth?.kind
-        return isSecretRef(auth.password) ? 'VaultRef' : 'Password'
-    })
-
-    function changeDbAuthKind (kind: string) {
-        const options = target?.options
-        if (options?.kind !== 'MySql' && options?.kind !== 'Postgres') return
-        if (kind === 'Password') {
-            options.auth = { kind: 'Password', password: '' }
-        } else if (kind === 'VaultRef') {
-            options.auth = { kind: 'Password', password: 'vault://' }
-        } else if (kind === 'IamRole') {
-            options.auth = { kind: 'IamRole' }
-        }
-    }
 
     async function init() {
         ;[target, groups] = await Promise.all([
@@ -344,14 +324,10 @@
                                         >
                                             <select
                                                 class="form-control"
-                                                value={dbAuthMode}
-                                                onchange={(e) => changeDbAuthKind((e.target as HTMLSelectElement).value)}
+                                                bind:value={target.options.auth.kind}
                                             >
                                                 <option value="Password">
                                                     Password
-                                                </option>
-                                                <option value="VaultRef">
-                                                    Password from Vault / OpenBao
                                                 </option>
                                                 {#if $serverInfo?.runningOnEc2}
                                                     <option value="IamRole">
@@ -364,24 +340,12 @@
                                 </div>
                             </div>
 
-                            {#if target.options.auth?.kind === 'Password' && dbAuthMode === 'Password'}
-                                <FormGroup floating label="Password">
-                                    <input
-                                        class="form-control"
-                                        type="password"
-                                        autocomplete="off"
-                                        bind:value={target.options.auth.password}
-                                    >
-                                </FormGroup>
-                            {/if}
-
-                            {#if target.options.auth?.kind === 'Password' && dbAuthMode === 'VaultRef'}
-                                <div class="mb-3">
-                                    <SecretRefInput
-                                        bind:value={target.options.auth.password}
-                                        disabled={!$adminPermissions.targetsEdit}
-                                    />
-                                </div>
+                            {#if target.options.auth?.kind === 'Password'}
+                                <SecretRefInput
+                                    bind:value={target.options.auth.password}
+                                    inlineLabel="Password"
+                                    disabled={!$adminPermissions.targetsEdit}
+                                />
                             {/if}
 
                             <TlsConfiguration bind:value={target.options.tls} />
@@ -434,14 +398,11 @@
                             {/if}
 
                             {#if target.options.auth.kind === 'Token'}
-                                <FormGroup floating label="Bearer Token">
-                                    <input
-                                        class="form-control"
-                                        type="password"
-                                        autocomplete="off"
-                                        bind:value={target.options.auth.token}
-                                    >
-                                </FormGroup>
+                                <SecretRefInput
+                                    bind:value={target.options.auth.token}
+                                    inlineLabel="Bearer Token"
+                                    disabled={!$adminPermissions.targetsEdit}
+                                />
                             {/if}
 
                             <TlsConfiguration bind:value={target.options.tls} />

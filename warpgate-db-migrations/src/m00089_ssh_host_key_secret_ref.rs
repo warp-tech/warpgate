@@ -2,8 +2,8 @@ use sea_orm_migration::prelude::*;
 
 use crate::m00010_parameters::parameters;
 
-/// A `scheme://backend/path` reference to a secret-backend KV entry holding the
-/// SSH host keys. Null means the keys stored in the parameters row are used.
+/// A `secret://backend/mount/path` reference to a secret-backend KV entry holding
+/// the SSH host keys. Null means the keys stored in the parameters row are used.
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 

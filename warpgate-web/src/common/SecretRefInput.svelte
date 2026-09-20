@@ -44,37 +44,34 @@
         return usagePromise
     }
 
-    const REFERENCE_PREFIXES = ['vault://', 'openbao://']
+    const REFERENCE_SCHEME = 'secret://'
 
     export function isSecretRef(v: string | undefined): boolean {
-        return REFERENCE_PREFIXES.some(p => (v ?? '').startsWith(p))
+        return (v ?? '').startsWith(REFERENCE_SCHEME)
     }
 
-    export interface ParsedRef {
-        scheme: string
+    interface ParsedRef {
         backend: string
         path: string
         key: string
     }
 
-    export function parseSecretRef(v: string): ParsedRef {
-        const prefix = REFERENCE_PREFIXES.find(p => v.startsWith(p))
-        if (!prefix) {
-            return { scheme: 'vault', backend: '', path: '', key: '' }
+    function parseSecretRef(v: string): ParsedRef {
+        if (!isSecretRef(v)) {
+            return { backend: '', path: '', key: '' }
         }
-        const scheme = prefix.slice(0, -3)
-        const rest = v.slice(prefix.length)
+        const rest = v.slice(REFERENCE_SCHEME.length)
         const slash = rest.indexOf('/')
         const backend = slash === -1 ? rest : rest.slice(0, slash)
         const afterBackend = slash === -1 ? '' : rest.slice(slash + 1)
         const hash = afterBackend.indexOf('#')
         const path = hash === -1 ? afterBackend : afterBackend.slice(0, hash)
         const key = hash === -1 ? '' : afterBackend.slice(hash + 1)
-        return { scheme, backend, path, key }
+        return { backend, path, key }
     }
 
-    export function composeSecretRef(p: ParsedRef): string {
-        const base = `${p.scheme}://${p.backend}/${p.path}`
+    function composeSecretRef(p: ParsedRef): string {
+        const base = `${REFERENCE_SCHEME}${p.backend}/${p.path}`
         return p.key ? `${base}#${p.key}` : base
     }
 </script>
@@ -97,13 +94,31 @@
         disabled?: boolean
         // Whether the reference names one field of the secret (`#key`)
         withKey?: boolean
+        // When set, the value may also be entered directly, under this label
+        inlineLabel?: string
     }
 
     let {
         value = $bindable(''),
         disabled = false,
         withKey = true,
+        inlineLabel,
     }: Props = $props()
+
+    // svelte-ignore state_referenced_locally
+    let refMode = $state(!inlineLabel || isSecretRef(value))
+    // A reference set from outside (e.g. the loaded target) switches to
+    // reference mode; clearing the value on a mode switch does not switch back.
+    $effect(() => {
+        if (isSecretRef(value)) {
+            refMode = true
+        }
+    })
+
+    function switchMode(toRef: boolean) {
+        refMode = toRef
+        value = ''
+    }
 
     let current = $derived(parseSecretRef(value))
     let chosen = $derived(
@@ -125,13 +140,8 @@
     let draftPath = $state('')
     let draftKey = $state('')
 
-    let draftScheme = $derived(
-        backends.find(b => b.name === draftBackend)?.backendType ??
-            current.scheme,
-    )
     let draft = $derived(
         composeSecretRef({
-            scheme: draftScheme,
             backend: draftBackend,
             path: draftPath,
             key: draftKey,
@@ -201,15 +211,39 @@
     }
 </script>
 
-<Button
-    color="secondary"
-    class="secret-ref-button d-flex align-items-center gap-2"
-    {disabled}
-    onclick={open}
->
-    <Fa icon={faKey} />
-    {label}
-</Button>
+{#if refMode}
+    <div class="d-flex align-items-center gap-3 mb-3">
+        <Button
+            color="secondary"
+            class="secret-ref-button d-flex align-items-center gap-2"
+            {disabled}
+            onclick={open}
+        >
+            <Fa icon={faKey} />
+            {label}
+        </Button>
+        {#if inlineLabel}
+            <Button color="link" class="px-0 text-nowrap" {disabled} onclick={() => switchMode(false)}>
+                Enter directly
+            </Button>
+        {/if}
+    </div>
+{:else}
+    <div class="d-flex align-items-center gap-3">
+        <FormGroup floating label={inlineLabel ?? ''} class="flex-grow-1">
+            <input
+                class="form-control"
+                type="password"
+                autocomplete="off"
+                {disabled}
+                bind:value
+            >
+        </FormGroup>
+        <Button color="link" class="px-0 mb-3 text-nowrap" {disabled} onclick={() => switchMode(true)}>
+            Use secret backend
+        </Button>
+    </div>
+{/if}
 
 <Modal isOpen={modalOpen} toggle={() => (modalOpen = false)}>
     <ModalHeader>Secret</ModalHeader>
@@ -229,7 +263,7 @@
                 </div>
             {/if}
         </FormGroup>
-        <FormGroup floating label="Path (KV v2, without the data/ segment)">
+        <FormGroup floating label="Path (mount/path, KV v2, without the data/ segment)">
             <input
                 class="form-control font-monospace"
                 placeholder="secret/myapp"

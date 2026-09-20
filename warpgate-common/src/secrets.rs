@@ -1,19 +1,20 @@
 use std::borrow::Cow;
 use std::fmt;
-use std::path::PathBuf;
 use std::str::FromStr;
 
 use async_trait::async_trait;
-use poem_openapi::Enum;
 use poem_openapi::registry::{MetaSchemaRef, Registry};
 use poem_openapi::types::{ParseError, ParseFromJSON, ToJSON};
+use poem_openapi::{Enum, Object, Union};
+use sea_orm::prelude::StringLen;
+use sea_orm::{DeriveActiveEnum, EnumIter, FromJsonQueryResult};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{Secret, StoredSecret, WarpgateError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SecretError {
-    #[error("invalid secret reference '{0}': expected format scheme://backend/path#field")]
+    #[error("invalid secret reference '{0}': expected format secret://backend/mount/path#field")]
     InvalidRef(String),
     #[error("secret backend '{backend}' is not configured")]
     BackendNotConfigured { backend: String },
@@ -23,140 +24,134 @@ pub enum SecretError {
     InvalidBackendName(String),
     #[error("path '{path}' is outside the paths allowed for secret backend '{backend}'")]
     PathNotAllowed { backend: String, path: String },
-    #[error("secret reference '{0}' was used before being resolved")]
-    Unresolved(String),
     #[error("secret backend error: {0}")]
     Backend(String),
 }
 
-/// The kind of server behind a backend; also the scheme of references to it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Enum)]
+/// The product behind a backend. Both speak the same API; the distinction is
+/// informational.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Enum, EnumIter, DeriveActiveEnum,
+)]
 #[serde(rename_all = "lowercase")]
 #[oai(rename_all = "lowercase")]
+#[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
 pub enum BackendType {
+    #[sea_orm(string_value = "vault")]
     Vault,
+    #[sea_orm(string_value = "openbao")]
     OpenBao,
 }
 
-impl BackendType {
-    pub const ALL: [Self; 2] = [Self::Vault, Self::OpenBao];
-
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Vault => "vault",
-            Self::OpenBao => "openbao",
-        }
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Object)]
+pub struct VaultTokenAuth {
+    /// Blank in responses; blank in an update, keeps the stored token
+    pub token: StoredSecret,
 }
 
-impl FromStr for BackendType {
-    type Err = SecretError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::ALL
-            .into_iter()
-            .find(|t| t.as_str() == s)
-            .ok_or_else(|| SecretError::Backend(format!("unknown backend type '{s}'")))
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Object)]
+pub struct VaultAppRoleAuth {
+    #[oai(validator(min_length = 1, max_length = 255))]
+    pub role_id: String,
+    /// Blank in responses; blank in an update, keeps the stored secret ID
+    pub secret_id: StoredSecret,
+    /// Auth mount; `null` uses `approle`
+    #[oai(validator(min_length = 1, max_length = 255))]
+    pub mount: Option<String>,
 }
 
-impl fmt::Display for BackendType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Object)]
+pub struct VaultKubernetesAuth {
+    #[oai(validator(min_length = 1, max_length = 255))]
+    pub role: String,
+    /// Auth mount; `null` uses `kubernetes`
+    #[oai(validator(min_length = 1, max_length = 255))]
+    pub mount: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Enum)]
-#[serde(rename_all = "snake_case")]
-#[oai(rename_all = "snake_case")]
-pub enum VaultAuthMethod {
-    Token,
-    AppRole,
-    Kubernetes,
-}
-
-impl VaultAuthMethod {
-    pub const ALL: [Self; 3] = [Self::Token, Self::AppRole, Self::Kubernetes];
-
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Token => "token",
-            Self::AppRole => "app_role",
-            Self::Kubernetes => "kubernetes",
-        }
-    }
-
-    /// The Vault auth mount the method logs in at unless overridden.
-    pub const fn default_mount(self) -> &'static str {
-        match self {
-            Self::Token => "",
-            Self::AppRole => "approle",
-            Self::Kubernetes => "kubernetes",
-        }
-    }
-}
-
-impl FromStr for VaultAuthMethod {
-    type Err = SecretError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::ALL
-            .into_iter()
-            .find(|m| m.as_str() == s)
-            .ok_or_else(|| SecretError::Backend(format!("unknown auth method '{s}'")))
-    }
-}
-
-pub const DEFAULT_KUBERNETES_JWT_PATH: &str = "/var/run/secrets/kubernetes.io/serviceaccount/token";
-
-#[derive(Debug, Clone)]
+/// How a backend logs in to Vault. Stored as one JSON column with the secret
+/// encrypted at rest; the API carries the same shape with the secret blanked
+/// (see [`Self::redacted`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Union, FromJsonQueryResult)]
+#[serde(tag = "method")]
+#[oai(rename = "SecretBackendAuth", discriminator_name = "method", one_of)]
 pub enum VaultAuthConfig {
-    Token {
-        token: Secret<String>,
-    },
-    AppRole {
-        role_id: String,
-        secret_id: Secret<String>,
-        mount: String,
-    },
-    Kubernetes {
-        role: String,
-        jwt_path: PathBuf,
-        mount: String,
-    },
+    Token(VaultTokenAuth),
+    AppRole(VaultAppRoleAuth),
+    Kubernetes(VaultKubernetesAuth),
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct VaultTlsConfig {
-    pub skip_verify: bool,
+impl VaultAuthConfig {
+    /// The login secret; a Kubernetes login presents the pod's service
+    /// account token instead and has none.
+    pub const fn secret(&self) -> Option<&StoredSecret> {
+        match self {
+            Self::Token(auth) => Some(&auth.token),
+            Self::AppRole(auth) => Some(&auth.secret_id),
+            Self::Kubernetes(_) => None,
+        }
+    }
+
+    pub const fn secret_mut(&mut self) -> Option<&mut StoredSecret> {
+        match self {
+            Self::Token(auth) => Some(&mut auth.token),
+            Self::AppRole(auth) => Some(&mut auth.secret_id),
+            Self::Kubernetes(_) => None,
+        }
+    }
+
+    /// The login with its secret blanked, for API responses
+    pub fn redacted(&self) -> Self {
+        let mut redacted = self.clone();
+        if let Some(secret) = redacted.secret_mut() {
+            *secret = StoredSecret::default();
+        }
+        redacted
+    }
 }
 
 /// Everything needed to talk to one backend; assembled from its stored row.
 #[derive(Debug, Clone)]
 pub struct SecretBackendConfig {
     pub name: String,
-    pub backend_type: BackendType,
     pub address: String,
     pub namespace: Option<String>,
     pub auth: VaultAuthConfig,
-    pub tls: VaultTlsConfig,
+    pub tls_skip_verify: bool,
     /// KV path prefixes (`mount/path`) references may name; empty allows every
     /// path the backend's credentials can read.
     pub allowed_paths: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub const REFERENCE_SCHEME: &str = "secret://";
+
+/// `secret://backend/mount/path[#field]`: an entry in a KV v2 engine of one
+/// of the configured backends.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SecretRef {
-    pub scheme: BackendType,
     pub backend: String,
+    /// The KV v2 engine's mount point
+    pub mount: String,
+    /// The entry within the mount, without the `data/` segment
     pub path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// The entry field holding the value; a reference to the whole entry has none
     pub field: Option<String>,
+}
+
+impl SecretRef {
+    /// `mount/path`, the form allowed-path prefixes are written in
+    pub fn kv_path(&self) -> String {
+        format!("{}/{}", self.mount, self.path)
+    }
 }
 
 impl fmt::Display for SecretRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}://{}/{}", self.scheme, self.backend, self.path)?;
+        write!(
+            f,
+            "{REFERENCE_SCHEME}{}/{}/{}",
+            self.backend, self.mount, self.path
+        )?;
         if let Some(field) = &self.field {
             write!(f, "#{field}")?;
         }
@@ -169,24 +164,23 @@ impl FromStr for SecretRef {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let invalid = || SecretError::InvalidRef(s.to_string());
-        let (scheme, after_scheme) = s.split_once("://").ok_or_else(invalid)?;
-        let scheme = BackendType::from_str(scheme).map_err(|_| invalid())?;
-
-        let (backend, path_and_field) = after_scheme.split_once('/').ok_or_else(invalid)?;
+        let rest = s.strip_prefix(REFERENCE_SCHEME).ok_or_else(invalid)?;
+        let (backend, rest) = rest.split_once('/').ok_or_else(invalid)?;
         validate_backend_name(backend)?;
 
-        let (path, field) = match path_and_field.split_once('#') {
+        let (kv_path, field) = match rest.split_once('#') {
             Some((p, f)) if !f.is_empty() => (p, Some(f.to_string())),
             Some((p, _)) => (p, None),
-            None => (path_and_field, None),
+            None => (rest, None),
         };
-        if path.is_empty() {
+        let (mount, path) = kv_path.split_once('/').ok_or_else(invalid)?;
+        if mount.is_empty() || path.is_empty() {
             return Err(invalid());
         }
 
         Ok(SecretRef {
-            scheme,
             backend: backend.to_string(),
+            mount: mount.to_string(),
             path: path.to_string(),
             field,
         })
@@ -198,21 +192,10 @@ impl FromStr for SecretRef {
 #[async_trait]
 pub trait SecretResolver: Send + Sync {
     async fn resolve(&self, reference: &SecretRef) -> Result<Secret<String>, SecretError>;
-
-    async fn health(&self) -> Result<(), SecretError>;
-}
-
-/// Whether a stored credential string names a secret in a backend rather than
-/// holding the (possibly encrypted) value itself.
-fn is_secret_reference(s: &str) -> bool {
-    BackendType::ALL.iter().any(|scheme| {
-        s.strip_prefix(scheme.as_str())
-            .is_some_and(|rest| rest.starts_with("://"))
-    })
 }
 
 /// A backend name is a path segment of a reference, so it must be unambiguous
-/// against the `/`, `#` and `://` separators.
+/// against the `/` and `#` separators.
 pub fn validate_backend_name(name: &str) -> Result<(), SecretError> {
     if !name.is_empty()
         && name
@@ -229,27 +212,25 @@ pub fn validate_backend_name(name: &str) -> Result<(), SecretError> {
 /// reference to a secret backend. Serialized as one string in both JSON and
 /// database columns, so a column or field of this type is the single place
 /// that decides which of the two a string is.
+///
+/// The only way to the credential is [`Self::resolve`], which needs a
+/// resolver for the reference case, so no code path can use a reference as
+/// if it were the value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MaybeSecretRef {
     Inline(StoredSecret),
     Reference(SecretRef),
+    /// A stored string that starts with the reference scheme but does not
+    /// parse. Kept verbatim, never treated as a credential and never
+    /// encrypted, so it stays visible and correctable; resolving it fails.
+    Malformed(String),
 }
 
 impl MaybeSecretRef {
     pub const fn as_reference(&self) -> Option<&SecretRef> {
         match self {
-            Self::Inline(_) => None,
             Self::Reference(r) => Some(r),
-        }
-    }
-
-    /// The decrypted inline value. A reference has to be resolved first (see
-    /// [`Self::resolve`]); using one here is a programming error, not a
-    /// configuration one, and fails loudly.
-    pub fn reveal(&self) -> Result<Secret<String>, WarpgateError> {
-        match self {
-            Self::Inline(v) => Ok(v.reveal()?),
-            Self::Reference(r) => Err(SecretError::Unresolved(r.to_string()).into()),
+            Self::Inline(_) | Self::Malformed(_) => None,
         }
     }
 
@@ -261,20 +242,22 @@ impl MaybeSecretRef {
         match self {
             Self::Inline(v) => Ok(v.reveal()?),
             Self::Reference(r) => Ok(backend.resolve(r).await?),
+            Self::Malformed(raw) => Err(SecretError::InvalidRef(raw.clone()).into()),
         }
     }
 
-    /// A column value. A string that starts like a reference but does not parse as
-    /// one is kept as an inline value: it can't name a secret, and failing the
-    /// whole query would take every other row down with it.
+    /// An already stored value. Unlike [`Self::from_str`], a malformed
+    /// reference is kept rather than rejected: the row exists, and failing
+    /// its whole read would take every other row down with it.
     fn from_stored(s: String) -> Self {
-        Self::from_str(&s).unwrap_or_else(|_| Self::Inline(StoredSecret::from(s)))
+        Self::from_str(&s).unwrap_or_else(|_| Self::Malformed(s))
     }
 
     fn as_string(&self) -> String {
         match self {
             Self::Inline(v) => v.stored_value().to_owned(),
             Self::Reference(r) => r.to_string(),
+            Self::Malformed(raw) => raw.clone(),
         }
     }
 }
@@ -289,7 +272,7 @@ impl FromStr for MaybeSecretRef {
     type Err = SecretError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if is_secret_reference(s) {
+        if s.starts_with(REFERENCE_SCHEME) {
             SecretRef::from_str(s).map(Self::Reference)
         } else {
             Ok(Self::Inline(StoredSecret::from(s.to_string())))
@@ -303,62 +286,74 @@ impl From<SecretRef> for MaybeSecretRef {
     }
 }
 
+/// Reads stored rows and config files, so it is lenient like `from_stored`;
+/// API input goes through the strict [`ParseFromJSON`] instead.
 impl<'de> Deserialize<'de> for MaybeSecretRef {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(d)?;
-        MaybeSecretRef::from_str(&s).map_err(serde::de::Error::custom)
+        Ok(Self::from_stored(String::deserialize(d)?))
     }
 }
 
 impl Serialize for MaybeSecretRef {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        match self {
-            Self::Inline(v) => v.serialize(s),
-            Self::Reference(r) => r.to_string().serialize(s),
+        self.as_string().serialize(s)
+    }
+}
+
+/// Stores a type in a text column, converting with `$to` on the way in and
+/// `$from` on the way out.
+macro_rules! text_column {
+    ($t:ty, $to:expr, $from:expr) => {
+        impl From<$t> for sea_orm::Value {
+            fn from(v: $t) -> Self {
+                ($to)(&v).into()
+            }
         }
-    }
+
+        impl sea_orm::TryGetable for $t {
+            fn try_get_by<I: sea_orm::ColIdx>(
+                res: &sea_orm::QueryResult,
+                index: I,
+            ) -> Result<Self, sea_orm::TryGetError> {
+                let s = String::try_get_by(res, index)?;
+                ($from)(s).map_err(|e: SecretError| {
+                    sea_orm::TryGetError::DbErr(sea_orm::DbErr::Type(e.to_string()))
+                })
+            }
+        }
+
+        impl sea_orm::sea_query::ValueType for $t {
+            fn try_from(v: sea_orm::Value) -> Result<Self, sea_orm::sea_query::ValueTypeErr> {
+                let s = <String as sea_orm::sea_query::ValueType>::try_from(v)?;
+                ($from)(s).map_err(|_: SecretError| sea_orm::sea_query::ValueTypeErr)
+            }
+
+            fn type_name() -> String {
+                stringify!($t).to_owned()
+            }
+
+            fn array_type() -> sea_orm::sea_query::ArrayType {
+                sea_orm::sea_query::ArrayType::String
+            }
+
+            fn column_type() -> sea_orm::sea_query::ColumnType {
+                sea_orm::sea_query::ColumnType::Text
+            }
+        }
+
+        impl sea_orm::sea_query::Nullable for $t {
+            fn null() -> sea_orm::Value {
+                <String as sea_orm::sea_query::Nullable>::null()
+            }
+        }
+    };
 }
 
-impl From<MaybeSecretRef> for sea_orm::Value {
-    fn from(v: MaybeSecretRef) -> Self {
-        v.as_string().into()
-    }
-}
-
-impl sea_orm::TryGetable for MaybeSecretRef {
-    fn try_get_by<I: sea_orm::ColIdx>(
-        res: &sea_orm::QueryResult,
-        index: I,
-    ) -> Result<Self, sea_orm::TryGetError> {
-        let s = String::try_get_by(res, index)?;
-        Ok(Self::from_stored(s))
-    }
-}
-
-impl sea_orm::sea_query::ValueType for MaybeSecretRef {
-    fn try_from(v: sea_orm::Value) -> Result<Self, sea_orm::sea_query::ValueTypeErr> {
-        let s = <String as sea_orm::sea_query::ValueType>::try_from(v)?;
-        Ok(Self::from_stored(s))
-    }
-
-    fn type_name() -> String {
-        "MaybeSecretRef".to_owned()
-    }
-
-    fn array_type() -> sea_orm::sea_query::ArrayType {
-        sea_orm::sea_query::ArrayType::String
-    }
-
-    fn column_type() -> sea_orm::sea_query::ColumnType {
-        sea_orm::sea_query::ColumnType::Text
-    }
-}
-
-impl sea_orm::sea_query::Nullable for MaybeSecretRef {
-    fn null() -> sea_orm::Value {
-        <String as sea_orm::sea_query::Nullable>::null()
-    }
-}
+text_column!(MaybeSecretRef, MaybeSecretRef::as_string, |s: String| Ok(
+    MaybeSecretRef::from_stored(s)
+));
+text_column!(SecretRef, SecretRef::to_string, |s: String| s
+    .parse::<SecretRef>());
 
 impl poem_openapi::types::Type for MaybeSecretRef {
     const IS_REQUIRED: bool = true;
@@ -380,7 +375,7 @@ impl poem_openapi::types::Type for MaybeSecretRef {
     fn as_raw_value(&self) -> Option<&Self::RawValueType> {
         match self {
             Self::Inline(v) => v.as_raw_value(),
-            Self::Reference(_) => None,
+            Self::Reference(_) | Self::Malformed(_) => None,
         }
     }
 
@@ -393,7 +388,7 @@ impl poem_openapi::types::Type for MaybeSecretRef {
     fn is_empty(&self) -> bool {
         match self {
             Self::Inline(v) => poem_openapi::types::Type::is_empty(v),
-            Self::Reference(_) => false,
+            Self::Reference(_) | Self::Malformed(_) => false,
         }
     }
 
@@ -419,31 +414,33 @@ impl ToJSON for MaybeSecretRef {
 mod tests {
     use super::*;
 
-    const REFERENCE: &str = "vault://vault-prod/secret/db#password";
+    const REFERENCE: &str = "secret://vault-prod/secret/db#password";
 
     #[test]
     fn parses_reference_without_field() {
-        let r: SecretRef = "vault://vault-prod/secret/myapp".parse().unwrap();
+        let r: SecretRef = "secret://vault-prod/secret/myapp".parse().unwrap();
         assert_eq!(r.field, None);
-        assert_eq!(r.scheme, BackendType::Vault);
+        assert_eq!(r.mount, "secret");
+        assert_eq!(r.path, "myapp");
     }
 
     #[test]
-    fn parses_scheme_backend_path_and_field() {
-        let r: SecretRef = "openbao://vault-prod/secret/prod/myapp#password"
+    fn parses_backend_mount_path_and_field() {
+        let r: SecretRef = "secret://vault-prod/kv/prod/myapp#password"
             .parse()
             .unwrap();
-        assert_eq!(r.scheme, BackendType::OpenBao);
         assert_eq!(r.backend, "vault-prod");
-        assert_eq!(r.path, "secret/prod/myapp");
+        assert_eq!(r.mount, "kv");
+        assert_eq!(r.path, "prod/myapp");
+        assert_eq!(r.kv_path(), "kv/prod/myapp");
         assert_eq!(r.field, Some("password".to_string()));
     }
 
     #[test]
     fn trailing_hash_produces_no_field() {
-        let r: SecretRef = "vault://vault-prod/secret/myapp#".parse().unwrap();
+        let r: SecretRef = "secret://vault-prod/secret/myapp#".parse().unwrap();
         assert_eq!(r.field, None);
-        assert_eq!(r.path, "secret/myapp");
+        assert_eq!(r.kv_path(), "secret/myapp");
     }
 
     #[test]
@@ -451,17 +448,18 @@ mod tests {
         for raw in [
             "vault-prod/secret/myapp",
             "://vault-prod/secret/myapp",
-            "vault://vault-prod",
-            "vault://vault-prod/",
-            "http://vault-prod/secret/myapp",
-            "valut://vault-prod/secret/myapp",
+            "secret://vault-prod",
+            "secret://vault-prod/",
+            "secret://vault-prod/secret",
+            "secret://vault-prod/secret/",
+            "secret://vault-prod//myapp",
+            "vault://vault-prod/secret/myapp",
         ] {
             assert!(
                 matches!(SecretRef::from_str(raw), Err(SecretError::InvalidRef(_))),
                 "{raw}"
             );
         }
-        assert!(!is_secret_reference("http://vault-prod/secret/myapp"));
     }
 
     #[test]
@@ -474,18 +472,18 @@ mod tests {
         }
         assert!(validate_backend_name("vault-prod.eu_1").is_ok());
         assert!(matches!(
-            SecretRef::from_str("vault://a:b/secret/x"),
+            SecretRef::from_str("secret://a:b/secret/x"),
             Err(SecretError::InvalidBackendName(_))
         ));
         assert!(matches!(
-            SecretRef::from_str("vault:///secret/myapp"),
+            SecretRef::from_str("secret:///secret/myapp"),
             Err(SecretError::InvalidBackendName(_))
         ));
     }
 
     #[test]
     fn display_round_trips() {
-        for raw in ["vault://vault-prod/secret/myapp", REFERENCE] {
+        for raw in ["secret://vault-prod/secret/myapp", REFERENCE] {
             assert_eq!(SecretRef::from_str(raw).unwrap().to_string(), raw);
         }
     }
@@ -494,29 +492,39 @@ mod tests {
     fn plain_string_is_inline() {
         let v = MaybeSecretRef::from_str("hunter2").unwrap();
         assert_eq!(v.as_reference(), None);
-        assert_eq!(v.reveal().unwrap().expose_secret(), "hunter2");
+        assert!(matches!(v, MaybeSecretRef::Inline(_)));
     }
 
     #[test]
-    fn reference_schemes_are_references() {
-        for raw in [REFERENCE, "openbao://b/p"] {
-            let v = MaybeSecretRef::from_str(raw).unwrap();
-            assert_eq!(v.as_reference().unwrap().to_string(), raw);
-            assert!(matches!(
-                v.reveal(),
-                Err(WarpgateError::SecretBackend(SecretError::Unresolved(_)))
-            ));
-        }
+    fn reference_scheme_is_a_reference() {
+        let v = MaybeSecretRef::from_str(REFERENCE).unwrap();
+        assert_eq!(v.as_reference().unwrap().to_string(), REFERENCE);
         assert!(matches!(
-            MaybeSecretRef::from_str("vault://"),
+            MaybeSecretRef::from_str("secret://"),
             Err(SecretError::InvalidRef(_))
         ));
     }
 
-    #[test]
-    fn default_is_empty_inline() {
+    #[tokio::test]
+    async fn stored_malformed_reference_is_kept_and_does_not_resolve() {
+        let raw = "secret://broken";
+        let v = MaybeSecretRef::from_stored(raw.to_owned());
+        assert_eq!(v, MaybeSecretRef::Malformed(raw.to_owned()));
+        assert_eq!(v.as_string(), raw);
+        assert_eq!(
+            serde_json::from_str::<MaybeSecretRef>(&format!("\"{raw}\"")).unwrap(),
+            v
+        );
+        assert!(matches!(
+            v.resolve(&StubBackend).await,
+            Err(WarpgateError::SecretBackend(SecretError::InvalidRef(_)))
+        ));
+    }
+
+    #[tokio::test]
+    async fn default_is_empty_inline() {
         let v = MaybeSecretRef::default();
-        assert_eq!(v.reveal().unwrap().expose_secret(), "");
+        assert_eq!(v.resolve(&NoBackend).await.unwrap().expose_secret(), "");
     }
 
     #[test]
@@ -538,10 +546,6 @@ mod tests {
         async fn resolve(&self, reference: &SecretRef) -> Result<Secret<String>, SecretError> {
             Ok(Secret::new(format!("resolved:{reference}")))
         }
-
-        async fn health(&self) -> Result<(), SecretError> {
-            Ok(())
-        }
     }
 
     struct NoBackend;
@@ -552,10 +556,6 @@ mod tests {
             Err(SecretError::BackendNotConfigured {
                 backend: reference.backend.clone(),
             })
-        }
-
-        async fn health(&self) -> Result<(), SecretError> {
-            Ok(())
         }
     }
 

@@ -7,14 +7,13 @@ use tracing::{Instrument, info_span};
 use uuid::Uuid;
 use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{
-    NodeId, Protocol, Target, TargetOptionsVariant, TargetSecrets, TargetSessionId, UserSessionId,
-    WarpgateError,
+    NodeId, Protocol, Target, TargetOptionsVariant, TargetSessionId, UserSessionId, WarpgateError,
 };
 use warpgate_db_entities::TargetSession::TargetSessionOpenOutcome;
 use warpgate_db_entities::{TargetSession, UserSession};
 
 use crate::rate_limiting::{RateLimiterRegistry, stack_rate_limiters};
-use crate::{ApprovedTarget, SecretBackendRegistry, State, TargetAuthorization, UserSessionState};
+use crate::{ApprovedTarget, State, TargetAuthorization, UserSessionState};
 
 pub trait SessionHandle {
     fn close(&mut self);
@@ -29,7 +28,6 @@ pub struct WarpgateServerHandle {
     state: Arc<Mutex<State>>,
     user_session_state: Arc<Mutex<UserSessionState>>,
     rate_limiters_registry: Arc<Mutex<RateLimiterRegistry>>,
-    secret_backends: Arc<SecretBackendRegistry>,
     protocol: Protocol,
     /// is this session's lifetime bound to this node?
     /// Often no for HTTP (cookie session), otherwise yes
@@ -46,7 +44,6 @@ impl WarpgateServerHandle {
         state: Arc<Mutex<State>>,
         user_session_state: Arc<Mutex<UserSessionState>>,
         rate_limiters_registry: Arc<Mutex<RateLimiterRegistry>>,
-        secret_backends: Arc<SecretBackendRegistry>,
         protocol: Protocol,
         node_owned: bool,
         node_id: NodeId,
@@ -57,7 +54,6 @@ impl WarpgateServerHandle {
             state,
             user_session_state,
             rate_limiters_registry,
-            secret_backends,
             protocol,
             node_owned,
             node_id,
@@ -137,9 +133,9 @@ impl WarpgateServerHandle {
         Ok(())
     }
 
-    pub async fn start_target_session<O: TargetSecrets>(
+    pub async fn start_target_session<O>(
         &mut self,
-        mut authorization: TargetAuthorization<O>,
+        authorization: TargetAuthorization<O>,
     ) -> Result<TargetSessionStart<O>, WarpgateError> {
         self.stamp_target_session_identity(&authorization).await?;
 
@@ -147,7 +143,6 @@ impl WarpgateServerHandle {
             return Ok(TargetSessionStart::NeedsApproval(authorization));
         }
 
-        self.resolve_secrets(&mut authorization).await?;
         let id = self.open_target_session_row(&authorization).await?;
         Ok(TargetSessionStart::Started(AdmittedTarget {
             id,
@@ -156,24 +151,13 @@ impl WarpgateServerHandle {
     }
 
     /// Register the target session in the DB and issue an ID
-    pub async fn register_approved_target_session<O: TargetSecrets>(
+    pub async fn register_approved_target_session<O>(
         &self,
-        mut approved: ApprovedTarget<O>,
+        approved: ApprovedTarget<O>,
     ) -> Result<AdmittedTarget<O>, WarpgateError> {
         self.stamp_target_session_identity(&approved).await?;
-        self.resolve_secrets(approved.authorization_mut()).await?;
         let id = self.open_target_session_row(&approved).await?;
         Ok(AdmittedTarget { id, approved })
-    }
-
-    /// Materialises every credential of the target before it is admitted, so
-    /// protocol clients only ever see values: a reference that cannot be
-    /// resolved fails the admission here, uniformly for every protocol.
-    async fn resolve_secrets<O: TargetSecrets>(
-        &self,
-        authorization: &mut TargetAuthorization<O>,
-    ) -> Result<(), WarpgateError> {
-        crate::resolve_secrets(authorization.options_mut(), &*self.secret_backends).await
     }
 
     async fn stamp_target_session_identity<O>(

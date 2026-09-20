@@ -29,7 +29,7 @@
 
     function changeKeySource (source: string) {
         keySource = source === 'reference' ? 'reference' : 'paste'
-        secretKey = keySource === 'reference' ? 'vault://' : ''
+        secretKey = ''
     }
 
     function _save() {
@@ -101,9 +101,7 @@
                         />
                     </FormGroup>
                 {:else}
-                    <div class="mb-3">
-                        <SecretRefInput bind:value={secretKey} />
-                    </div>
+                    <SecretRefInput bind:value={secretKey} />
                 {/if}
             {/if}
             <Input
