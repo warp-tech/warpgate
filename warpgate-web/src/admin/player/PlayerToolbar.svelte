@@ -88,6 +88,7 @@
         <input
             class="w-100"
             type="range"
+            aria-label="Seek"
             min="0"
             max="100"
             step="0.001"

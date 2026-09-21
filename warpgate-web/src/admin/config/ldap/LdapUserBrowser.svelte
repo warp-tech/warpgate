@@ -100,6 +100,7 @@
                     <input
                         type="text"
                         class="form-control"
+                        aria-label="Search users"
                         placeholder="Search users..."
                         bind:value={searchTerm}
                     >

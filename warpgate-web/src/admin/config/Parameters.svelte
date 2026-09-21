@@ -214,7 +214,7 @@
                                 id="password-policy"
                                 title="Password policy"
                             >
-                                <div class="wg-field-group">
+                                <label class="wg-field-group">
                                     <span class="wg-field-label"
                                         >Minimum length (0 = no
                                         requirement)</span
@@ -230,7 +230,7 @@
                                             parameters.passwordPolicy.minLength = Number.isNaN(v) ? 0 : Math.max(0, v)
                                         }}
                                     >
-                                </div>
+                                </label>
                                 <Checkbox
                                     label="Require uppercase letter"
                                     bind:checked={parameters.passwordPolicy.requireUppercase}
@@ -284,7 +284,7 @@
                                 </Subsection>
 
                                 <Subsection title="Target host keys">
-                                    <div class="wg-field-group">
+                                    <label class="wg-field-group">
                                         <span class="wg-field-label"
                                             >Unknown host key handling</span
                                         >
@@ -308,7 +308,7 @@
                                                 Don't check host keys at all
                                             </option>
                                         </select>
-                                    </div>
+                                    </label>
                                 </Subsection>
 
                                 <Subsection title="Quirks">
@@ -365,7 +365,7 @@
                                     </HelpText>
 
                                     <Subsection title="Limits">
-                                        <div class="wg-field-group">
+                                        <label class="wg-field-group">
                                             <span class="wg-field-label"
                                                 >Default max ticket duration
                                                 (blank = unlimited)</span
@@ -377,14 +377,14 @@
                                                 placeholder="e.g. 8h, 30m, 1d"
                                                 use:humantimeDuration={{ seconds: parameters.ticketMaxDurationSeconds, onChange: v => { parameters.ticketMaxDurationSeconds = v } }}
                                             >
-                                        </div>
+                                        </label>
                                         <HelpText>
                                             Global default. Can be overridden
                                             per target. Examples: 30m, 8h, 1d,
                                             2h30m.
                                         </HelpText>
 
-                                        <div class="wg-field-group">
+                                        <label class="wg-field-group">
                                             <span class="wg-field-label"
                                                 >Max uses per ticket (blank =
                                                 unlimited)</span
@@ -400,13 +400,13 @@
                                                     parameters.ticketMaxUses = Number.isNaN(v) ? undefined : v
                                                 }}
                                             >
-                                        </div>
+                                        </label>
                                     </Subsection>
                                 {/if}
                             </Section>
 
                             <Section id="api-tokens" title="API tokens">
-                                <div class="wg-field-group">
+                                <label class="wg-field-group">
                                     <span class="wg-field-label"
                                         >Maximum API token duration (blank =
                                         unlimited)</span
@@ -418,7 +418,7 @@
                                         placeholder="e.g. 8h, 30m, 1d"
                                         use:humantimeDuration={{ seconds: parameters.maxApiTokenDurationSeconds, onChange: v => { parameters.maxApiTokenDurationSeconds = v } }}
                                     >
-                                </div>
+                                </label>
                             </Section>
 
                             <Section id="ui" title="UI">
@@ -433,7 +433,7 @@
                                     instructions are shown.
                                 </HelpText>
 
-                                <div class="wg-field-group">
+                                <label class="wg-field-group">
                                     <span class="wg-field-label"
                                         >SSH target click action</span
                                     >
@@ -451,9 +451,9 @@
                                             Show connection instructions
                                         </option>
                                     </select>
-                                </div>
+                                </label>
 
-                                <div class="wg-field-group">
+                                <label class="wg-field-group">
                                     <span class="wg-field-label"
                                         >Open targets in</span
                                     >
@@ -477,7 +477,7 @@
                                             Always the same tab
                                         </option>
                                     </select>
-                                </div>
+                                </label>
 
                                 <Checkbox
                                     label="Show HTTP session menu"
@@ -492,7 +492,7 @@
 
                             <Section id="login" title="Login">
                                 {#if hasSsoProviders}
-                                    <div class="wg-field-group">
+                                    <label class="wg-field-group">
                                         <span class="wg-field-label"
                                             >Password login</span
                                         >
@@ -513,7 +513,7 @@
                                                 Disabled (SSO only)
                                             </option>
                                         </select>
-                                    </div>
+                                    </label>
                                     <HelpText>
                                         Minimized hides the username and
                                         password fields behind a link, with the
@@ -524,7 +524,7 @@
                                         first.
                                     </HelpText>
 
-                                    <div class="wg-field-group">
+                                    <label class="wg-field-group">
                                         <span class="wg-field-label"
                                             >Require re-authentication after
                                             (blank = never)</span
@@ -536,7 +536,7 @@
                                             placeholder="e.g. 8h, 30m, 1d"
                                             use:humantimeDuration={{ seconds: parameters.webAuthMaxAgeSeconds, onChange: v => { parameters.webAuthMaxAgeSeconds = v } }}
                                         >
-                                    </div>
+                                    </label>
                                     <HelpText>
                                         Forces users to sign in again once
                                         before accessing Web SSH or creating
@@ -546,7 +546,7 @@
                                     </HelpText>
                                 {/if}
 
-                                <div class="wg-field-group">
+                                <label class="wg-field-group">
                                     <span class="wg-field-label"
                                         >Web approval cache period</span
                                     >
@@ -557,7 +557,7 @@
                                         placeholder="e.g. 5m, 1h"
                                         use:humantimeDuration={{ seconds: parameters.webApprovalGracePeriodSeconds, onChange: v => { parameters.webApprovalGracePeriodSeconds = v } }}
                                     >
-                                </div>
+                                </label>
                                 <HelpText>
                                     After a user approves an in-browser
                                     authentication request, remember the
@@ -599,13 +599,9 @@
                                 </HelpText>
 
                                 <div class="wg-field-group">
-                                    <label class="mb-2" for="banner">
-                                        Login banner
-                                    </label>
                                     <Textarea
                                         id="banner"
                                         label="Login banner"
-                                        labelHidden
                                         rows={4}
                                         mono={false}
                                         spellcheck
@@ -626,7 +622,7 @@
                                 id="session-approvals"
                                 title="Session approvals"
                             >
-                                <div class="wg-field-group">
+                                <label class="wg-field-group">
                                     <span class="wg-field-label"
                                         >Approval timeout</span
                                     >
@@ -637,14 +633,14 @@
                                         placeholder="e.g. 5m, 1h"
                                         use:humantimeDuration={{ seconds: parameters.adminApprovalTimeoutSeconds, onChange: v => { parameters.adminApprovalTimeoutSeconds = v } }}
                                     >
-                                </div>
+                                </label>
                                 <HelpText>
                                     A session held for administrator approval is
                                     rejected if not approved within this time.
                                     Blank = use the default 10 minute timeout.
                                 </HelpText>
 
-                                <div class="wg-field-group">
+                                <label class="wg-field-group">
                                     <span class="wg-field-label"
                                         >Admin approval cache period</span
                                     >
@@ -655,7 +651,7 @@
                                         placeholder="e.g. 5m, 1h"
                                         use:humantimeDuration={{ seconds: parameters.adminApprovalGracePeriodSeconds, onChange: v => { parameters.adminApprovalGracePeriodSeconds = v } }}
                                     >
-                                </div>
+                                </label>
                                 <HelpText>
                                     After an administrator approves a session,
                                     remember the approval for this period and do
@@ -691,7 +687,7 @@
                                     <Subsection title="IP rate-limit">
                                         <div class="row g-2 mb-2">
                                             <div class="col-sm-6">
-                                                <div class="wg-field-group">
+                                                <label class="wg-field-group">
                                                     <span class="wg-field-label"
                                                         >Max failures before IP
                                                         block</span
@@ -707,10 +703,10 @@
                                                         value={parameters.lpIpMaxAttempts}
                                                         onchange={e => { parameters.lpIpMaxAttempts = e.currentTarget.valueAsNumber }}
                                                     >
-                                                </div>
+                                                </label>
                                             </div>
                                             <div class="col-sm-6">
-                                                <div class="wg-field-group">
+                                                <label class="wg-field-group">
                                                     <span class="wg-field-label"
                                                         >Failure window</span
                                                     >
@@ -721,10 +717,10 @@
                                                         placeholder="e.g. 15m"
                                                         use:humantimeDuration={{ seconds: parameters.lpIpTimeWindowSeconds, onChange: v => { if (v != null) { parameters.lpIpTimeWindowSeconds = v } } }}
                                                     >
-                                                </div>
+                                                </label>
                                             </div>
                                             <div class="col-6">
-                                                <div class="wg-field-group">
+                                                <label class="wg-field-group">
                                                     <span class="wg-field-label"
                                                         >Initial block</span
                                                     >
@@ -735,10 +731,10 @@
                                                         placeholder="e.g. 30m"
                                                         use:humantimeDuration={{ seconds: parameters.lpIpBaseBlockDurationSeconds, onChange: v => { if (v != null) { parameters.lpIpBaseBlockDurationSeconds = v } } }}
                                                     >
-                                                </div>
+                                                </label>
                                             </div>
                                             <div class="col-6">
-                                                <div class="wg-field-group">
+                                                <label class="wg-field-group">
                                                     <span class="wg-field-label"
                                                         >Backoff
                                                         multiplier</span
@@ -755,10 +751,10 @@
                                                         value={parameters.lpIpBlockDurationMultiplier}
                                                         onchange={e => { parameters.lpIpBlockDurationMultiplier = e.currentTarget.valueAsNumber }}
                                                     >
-                                                </div>
+                                                </label>
                                             </div>
                                             <div class="col-6">
-                                                <div class="wg-field-group">
+                                                <label class="wg-field-group">
                                                     <span class="wg-field-label"
                                                         >Max block</span
                                                     >
@@ -769,10 +765,10 @@
                                                         placeholder="e.g. 24h"
                                                         use:humantimeDuration={{ seconds: parameters.lpIpMaxBlockDurationSeconds, onChange: v => { if (v != null) { parameters.lpIpMaxBlockDurationSeconds = v } } }}
                                                     >
-                                                </div>
+                                                </label>
                                             </div>
                                             <div class="col-6">
-                                                <div class="wg-field-group">
+                                                <label class="wg-field-group">
                                                     <span class="wg-field-label"
                                                         >Cooldown reset</span
                                                     >
@@ -783,7 +779,7 @@
                                                         placeholder="e.g. 24h"
                                                         use:humantimeDuration={{ seconds: parameters.lpIpCooldownResetSeconds, onChange: v => { if (v != null) { parameters.lpIpCooldownResetSeconds = v } } }}
                                                     >
-                                                </div>
+                                                </label>
                                             </div>
                                         </div>
                                         <HelpText>
@@ -802,7 +798,9 @@
                                         <Subsection title="User lockout">
                                             <div class="row g-2 mb-2">
                                                 <div class="col-sm-6">
-                                                    <div class="wg-field-group">
+                                                    <label
+                                                        class="wg-field-group"
+                                                    >
                                                         <span
                                                             class="wg-field-label"
                                                             >Max failures before
@@ -819,10 +817,12 @@
                                                             value={parameters.lpUserMaxAttempts}
                                                             onchange={e => { parameters.lpUserMaxAttempts = e.currentTarget.valueAsNumber }}
                                                         >
-                                                    </div>
+                                                    </label>
                                                 </div>
                                                 <div class="col-sm-6">
-                                                    <div class="wg-field-group">
+                                                    <label
+                                                        class="wg-field-group"
+                                                    >
                                                         <span
                                                             class="wg-field-label"
                                                             >Failure
@@ -835,7 +835,7 @@
                                                             placeholder="e.g. 60m"
                                                             use:humantimeDuration={{ seconds: parameters.lpUserTimeWindowSeconds, onChange: v => { if (v != null) { parameters.lpUserTimeWindowSeconds = v } } }}
                                                         >
-                                                    </div>
+                                                    </label>
                                                 </div>
                                             </div>
                                             <Checkbox
@@ -843,7 +843,7 @@
                                                 bind:checked={parameters.lpUserAutoUnlock}
                                             />
                                             {#if parameters.lpUserAutoUnlock}
-                                                <div class="wg-field-group">
+                                                <label class="wg-field-group">
                                                     <span class="wg-field-label"
                                                         >Auto-unlock delay</span
                                                     >
@@ -854,7 +854,7 @@
                                                         placeholder="e.g. 60m"
                                                         use:humantimeDuration={{ seconds: parameters.lpUserLockoutDurationSeconds, onChange: v => { if (v != null) { parameters.lpUserLockoutDurationSeconds = v } } }}
                                                     >
-                                                </div>
+                                                </label>
                                             {/if}
                                         </Subsection>
 
@@ -873,7 +873,7 @@
                                         </Subsection>
 
                                         <Subsection title="Data retention">
-                                            <div class="wg-field-group">
+                                            <label class="wg-field-group">
                                                 <span class="wg-field-label"
                                                     >Keep records for</span
                                                 >
@@ -884,7 +884,7 @@
                                                     placeholder="e.g. 30d"
                                                     use:humantimeDuration={{ seconds: parameters.loginProtectionRetentionSeconds, onChange: v => { if (v != null) { parameters.loginProtectionRetentionSeconds = v } } }}
                                                 >
-                                            </div>
+                                            </label>
                                         </Subsection>
 
                                         <InfoBox>
@@ -920,7 +920,7 @@
                                     </HelpText>
                                 {/if}
 
-                                <div class="wg-field-group">
+                                <label class="wg-field-group">
                                     <span class="wg-field-label"
                                         >Storage backend</span
                                     >
@@ -936,7 +936,7 @@
                                             S3 / S3-compatible
                                         </option>
                                     </select>
-                                </div>
+                                </label>
 
                                 <HelpText>
                                     Changing the storage location applies to new
@@ -946,7 +946,7 @@
 
                                 {#if parameters.recordingsStorage.kind === 'Disk'}
                                     {@const disk = parameters.recordingsStorage}
-                                    <div class="wg-field-group">
+                                    <label class="wg-field-group">
                                         <span class="wg-field-label"
                                             >Recordings path</span
                                         >
@@ -956,10 +956,10 @@
                                             class="form-control"
                                             bind:value={disk.path}
                                         >
-                                    </div>
+                                    </label>
                                 {:else if parameters.recordingsStorage.kind === 'S3'}
                                     {@const s3 = parameters.recordingsStorage}
-                                    <div class="wg-field-group">
+                                    <label class="wg-field-group">
                                         <span class="wg-field-label"
                                             >Bucket</span
                                         >
@@ -970,13 +970,13 @@
                                             required
                                             bind:value={s3.bucket}
                                         >
-                                    </div>
+                                    </label>
                                     <HelpText>
                                         The bucket needs a CORS policy allowing
                                         this origin to issue GET requests with a
                                         Range header.
                                     </HelpText>
-                                    <div class="wg-field-group">
+                                    <label class="wg-field-group">
                                         <span class="wg-field-label"
                                             >Region</span
                                         >
@@ -988,8 +988,8 @@
                                             required
                                             bind:value={s3.region}
                                         >
-                                    </div>
-                                    <div class="wg-field-group">
+                                    </label>
+                                    <label class="wg-field-group">
                                         <span class="wg-field-label"
                                             >Endpoint (blank = AWS)</span
                                         >
@@ -1001,8 +1001,8 @@
                                             value={s3.endpoint ?? ''}
                                             oninput={e => s3.endpoint = e.currentTarget.value || undefined}
                                         >
-                                    </div>
-                                    <div class="wg-field-group">
+                                    </label>
+                                    <label class="wg-field-group">
                                         <span class="wg-field-label"
                                             >Key prefix</span
                                         >
@@ -1012,7 +1012,7 @@
                                             class="form-control"
                                             bind:value={s3.prefix}
                                         >
-                                    </div>
+                                    </label>
                                     <Checkbox
                                         label="Path-style addressing"
                                         bind:checked={s3.pathStyle}
@@ -1022,7 +1022,7 @@
                                         RustFS) require path-style addressing.
                                     </HelpText>
 
-                                    <div class="wg-field-group">
+                                    <label class="wg-field-group">
                                         <span class="wg-field-label"
                                             >Credentials</span
                                         >
@@ -1041,11 +1041,11 @@
                                                 Access key
                                             </option>
                                         </select>
-                                    </div>
+                                    </label>
 
                                     {#if s3.credentials.mode === 'Static'}
                                         {@const creds = s3.credentials}
-                                        <div class="wg-field-group">
+                                        <label class="wg-field-group">
                                             <span class="wg-field-label"
                                                 >Access key ID</span
                                             >
@@ -1056,8 +1056,8 @@
                                                 autocomplete="off"
                                                 bind:value={creds.accessKeyId}
                                             >
-                                        </div>
-                                        <div class="wg-field-group">
+                                        </label>
+                                        <label class="wg-field-group">
                                             <span class="wg-field-label"
                                                 >Secret access key</span
                                             >
@@ -1069,7 +1069,7 @@
                                                 placeholder="********"
                                                 bind:value={creds.secretAccessKey}
                                             >
-                                        </div>
+                                        </label>
                                     {/if}
 
                                     <Button

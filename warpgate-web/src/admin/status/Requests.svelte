@@ -21,11 +21,11 @@
     import { formatDurationAsHumantime } from 'common/duration'
     import EmptyState from 'common/EmptyState.svelte'
     import { errorStatus, stringifyError } from 'common/errors'
-    import RelativeDate from 'ui/RelativeDate.svelte'
     import Fa from 'svelte-fa'
     import Button from 'ui/Button.svelte'
     import Callout from 'ui/Callout.svelte'
     import Modal from 'ui/Modal.svelte'
+    import RelativeDate from 'ui/RelativeDate.svelte'
 
     // One inbox entry, whichever kind of request produced it. `at` is the
     // shared sort key so both kinds interleave chronologically, and `key`
@@ -355,7 +355,7 @@
             </strong
             >?
         </p>
-        <div class="wg-field-group">
+        <label class="wg-field-group">
             <span class="wg-field-label">Reason (optional)</span>
 
             <input
@@ -365,7 +365,7 @@
                 placeholder="Why is this being denied?"
                 maxlength="2000"
             >
-        </div>
+        </label>
     {/if}
 
     {#snippet footer()}

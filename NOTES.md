@@ -1450,3 +1450,67 @@ because I was grepping for `--bs-` rather than reading the block.
 orphaned classes  29 -> 21, all 21 classified as hooks or false positives
 bundle            1720.0 KB raw / 705.5 gz
 ```
+
+## 37 form controls with no accessible name
+
+The screens 15-23 sweep unwrapped sveltestrap's `<FormGroup floating>` into a
+`<div class="wg-field-group">` holding a `<span class="wg-field-label">` and a
+raw control. **A `<span>` is not a `<label>`.** It has no `for`, so nothing
+ties the text to the control: a screen reader announced 31 unnamed edit fields
+on the global parameters screen, and the text was not clickable. `svelte-check`
+has nothing to say about this, and neither does Biome — the markup is valid,
+it just does not mean anything.
+
+### The fix is the element, not an id
+
+The obvious repair — give every control an `id` and every label a `for` — means
+inventing 31 unique ids and keeping them unique forever. The HTML spec provides
+exactly this shape instead: **implicit labelling**, `<label>text <input></label>`,
+where containment does what `for` would. So `.wg-field-group` becomes the
+`<label>` and nothing else moves.
+
+Its precondition is one labelable control per group, so that was checked before
+anything was rewritten: 33 groups, 32 with exactly one control, one with none
+(it held a `Textarea` component). Two already had a real `<label for=>` and
+were left alone — one of those was **double-labelled**, an explicit
+`<label for="banner">` beside a `Textarea` already rendering its own hidden
+label, so the field's accessible name was the same words twice. The component
+now owns its label and shows it.
+
+### It was not only Parameters
+
+Running the check across every `.svelte` file found the same defect in the
+deny-request dialog and in three fields of the portal's ticket request form,
+plus two controls that never had a label at all: the LDAP user search box and
+the recording player's seek slider. Those two get `aria-label` rather than
+visible text, which is the idiomatic naming route for a search field and a
+slider and does not change the design.
+
+Two of the ticket-request fields also hold their own validation message inside
+the group. There the `<label>` wraps **only** the text and the control, because
+wrapping the whole group would splice the error text into the field's
+accessible name — the field would announce itself as "Duration" plus whatever
+the last error said.
+
+### What the checker actually asserts
+
+It asserts the **new** thing: every native control has an accessible name by
+one of the four routes the spec allows — wrapped in a `<label>`, an `id`
+matched by some `<label for=>`, `aria-label`, or `aria-labelledby`.
+
+It was wrong twice, in the by-now familiar way. It missed Svelte's `{id}`
+attribute shorthand, which is how every `ui/` primitive passes its id, and
+reported four of them as broken. And it read the docblocks: this repo's
+comments describe markup — "ui/Select is a real `<select>` over strings" — so
+prose about a control was being counted as a control. Comment bodies are now
+blanked with spaces of the same length, which keeps the reported line numbers
+true.
+
+```
+58 native controls checked, all named   (was 37 unnamed)
+```
+
+Behaviour is unchanged, and that is asserted rather than assumed: the set of
+`bind:value`, `bind:checked`, `onchange`, `oninput` and `onclick` expressions
+in all three rewritten files hashes identically to `HEAD`. Only wrapping
+elements moved. Bundle 1720.3 KB raw / 705.5 gz.

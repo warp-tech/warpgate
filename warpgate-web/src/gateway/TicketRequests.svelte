@@ -11,7 +11,6 @@
     import { routeQueryParams } from 'common/helpers'
     import InfoBox from 'common/InfoBox.svelte'
     import Loadable from 'common/Loadable.svelte'
-    import RelativeDate from 'ui/RelativeDate.svelte'
     import { statusColor, statusIcon } from 'common/ticketRequestStatus'
     import {
         type ActivatedTicketTargetInfo,
@@ -26,6 +25,7 @@
     import Button from 'ui/Button.svelte'
     import Callout from 'ui/Callout.svelte'
     import Modal from 'ui/Modal.svelte'
+    import RelativeDate from 'ui/RelativeDate.svelte'
 
     // Matches the server-side limit in warpgate-core/src/ticket_requests.rs
     const DESCRIPTION_MAX_LENGTH = 2000
@@ -251,7 +251,7 @@
             {/if}
 
             <form onsubmit={e => e.preventDefault()}>
-                <div class="wg-field-group">
+                <label class="wg-field-group">
                     <span class="wg-field-label">Target</span>
 
                     <select
@@ -265,18 +265,25 @@
                             </option>
                         {/each}
                     </select>
-                </div>
+                </label>
 
                 <div class="wg-field-group">
-                    <input
-                        type="text"
-                        bind:value={description}
-                        class="form-control"
-                        class:is-invalid={descriptionMissing && descriptionTouched}
-                        placeholder="Why do you need access?"
-                        maxlength="2000"
-                        onblur={() => descriptionTouched = true}
-                    >
+                    <!-- The label wraps only the text and the control. Putting
+                         the validation message inside it would splice the
+                         error into the field's accessible name. -->
+                    <label class="wg-field-group">
+                        <span class="wg-field-label">Reason for access</span>
+
+                        <input
+                            type="text"
+                            bind:value={description}
+                            class="form-control"
+                            class:is-invalid={descriptionMissing && descriptionTouched}
+                            placeholder="Why do you need access?"
+                            maxlength="2000"
+                            onblur={() => descriptionTouched = true}
+                        >
+                    </label>
                     {#if descriptionMissing}
                         <small class="form-text text-muted">
                             A description is required for ticket requests.
@@ -285,15 +292,17 @@
                 </div>
 
                 <div class="wg-field-group">
-                    <span class="wg-field-label">Duration</span>
+                    <label class="wg-field-group">
+                        <span class="wg-field-label">Duration</span>
 
-                    <input
-                        type="text"
-                        bind:value={durationText}
-                        class="form-control"
-                        class:is-invalid={!!durationError}
-                        placeholder="e.g. 8h, 30m, 1d"
-                    >
+                        <input
+                            type="text"
+                            bind:value={durationText}
+                            class="form-control"
+                            class:is-invalid={!!durationError}
+                            placeholder="e.g. 8h, 30m, 1d"
+                        >
+                    </label>
                     {#if durationError}
                         <div class="invalid-feedback">{durationError}</div>
                     {:else if maxDurationSeconds}
