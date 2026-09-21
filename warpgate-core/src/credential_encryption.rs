@@ -9,7 +9,7 @@ use warpgate_common::encryption::{
 };
 use warpgate_common::{
     MaybeSecretRef, SshHostKeyKind, StoredSecret, WarpgateError, emit_runtime_warning,
-    map_target_secrets,
+    map_stored_target_secrets,
 };
 use warpgate_db_entities::{Parameters, SecretBackend, SshClientKey, Target};
 
@@ -175,7 +175,7 @@ async fn probe_undecryptable(db: &DatabaseConnection) -> Result<Vec<String>, War
 
     for target in Target::Entity::find().all(db).await? {
         let mut probe = target.options.clone();
-        if map_target_secrets(&mut probe, &mut |secret| idempotent_maybe_decrypt(secret)).is_err() {
+        if map_stored_target_secrets(&mut probe, &mut |secret| idempotent_maybe_decrypt(secret)).is_err() {
             undecryptable.push(format!("target `{}`", target.name));
         }
     }
@@ -232,7 +232,7 @@ async fn rewrite_all(db: &DatabaseConnection) -> Result<usize, WarpgateError> {
 
     for target in Target::Entity::find().all(db).await? {
         let mut options = target.options.clone();
-        if map_target_secrets(&mut options, &mut |secret| maybe_reencrypt_str(secret)).is_err() {
+        if map_stored_target_secrets(&mut options, &mut |secret| maybe_reencrypt_str(secret)).is_err() {
             continue;
         }
         if options != target.options {

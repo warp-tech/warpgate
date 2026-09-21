@@ -116,11 +116,11 @@ impl UserFacingReason for WarpgateError {
             | Self::RateLimiterInvalidQuota(_)
             | Self::ExternalHostUnknown
             | Self::NoHostInUrl
-            | Self::SecretBackend(_)
             | Self::SessionEnd => self.to_string(),
 
             Self::Sso(e) => e.user_facing_reason(),
             Self::Ldap(e) => e.user_facing_reason(),
+            Self::SecretBackend(e) => e.user_facing_reason(),
 
             // Wraps an error this crate does not control, or names a
             // server-side detail. `ExternalHostNotWhitelisted` and

@@ -293,7 +293,7 @@ pub async fn load_client_keys(
     for m in &models {
         let key = match &m.secret_key {
             MaybeSecretRef::Reference(reference) => {
-                load_referenced_client_key(db, m, reference, secret_backend).await
+                load_and_sync_referenced_client_key(db, m, reference, secret_backend).await
             }
             stored => stored
                 .resolve(secret_backend)
@@ -305,7 +305,7 @@ pub async fn load_client_keys(
             // A key the admin picked for this target must work or the attempt
             // fails; an unusable key in the default set just isn't offered, so
             // one backend outage doesn't take every stored key with it.
-            Err(error) if key_id != Some(m.id) => {
+            Err(error) if key_id.is_none() => {
                 warn!(label = %m.label, %error, "Skipping SSH client key that could not be loaded");
             }
             Err(error) => return Err(error),
@@ -317,7 +317,7 @@ pub async fn load_client_keys(
 /// Resolves a reference row's key, and syncs the stored public key with what the
 /// backend currently holds so the admin UI and `client-keys` show the key targets
 /// actually see after a rotation in the backend.
-async fn load_referenced_client_key(
+async fn load_and_sync_referenced_client_key(
     db: &DatabaseConnection,
     model: &SshClientKey::Model,
     reference: &SecretRef,

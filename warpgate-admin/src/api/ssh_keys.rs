@@ -23,9 +23,7 @@ struct SSHClientKey {
     pub kind: String,
     pub public_key: String,
     pub is_default: bool,
-    /// The secret backend this key's material is read from, e.g. `"vault-prod"` —
-    /// `None` when the key material is stored directly in Warpgate's database.
-    pub backend: Option<String>,
+    pub secret_backend: Option<String>,
 }
 
 impl From<SshClientKey::Model> for SSHClientKey {
@@ -43,7 +41,7 @@ impl From<SshClientKey::Model> for SSHClientKey {
             kind,
             public_key: model.public_key,
             is_default: model.is_default,
-            backend,
+            secret_backend: backend,
         }
     }
 }
@@ -72,7 +70,7 @@ enum GetSSHOwnKeysResponse {
 }
 
 #[derive(Object)]
-struct ImportSSHClientKeyRequest {
+struct ImportSshClientKeyRequest {
     label: String,
     /// Private key in OpenSSH or PKCS#8 PEM format, without a passphrase
     secret_key: String,
@@ -86,7 +84,7 @@ struct GenerateSSHClientKeyRequest {
 }
 
 #[derive(Object)]
-struct ImportSSHClientKeyReferenceRequest {
+struct ImportSshClientKeyReferenceRequest {
     #[oai(validator(max_length = 255))]
     label: String,
     /// A `secret://backend/mount/path#field` reference; the field must resolve to
@@ -158,7 +156,7 @@ impl Api {
     async fn api_import_client_key(
         &self,
         admin: AdminContext,
-        body: Json<ImportSSHClientKeyRequest>,
+        body: Json<ImportSshClientKeyRequest>,
     ) -> Result<CreateSSHClientKeyResponse, WarpgateError> {
         admin.require(AdminPermission::ConfigEdit)?;
 
@@ -201,18 +199,11 @@ impl Api {
     async fn api_import_client_key_reference(
         &self,
         admin: AdminContext,
-        body: Json<ImportSSHClientKeyReferenceRequest>,
+        body: Json<ImportSshClientKeyReferenceRequest>,
     ) -> Result<CreateSSHClientKeyResponse, WarpgateError> {
         admin.require(AdminPermission::ConfigEdit)?;
 
-        let reference = match SecretRef::from_str(&body.reference) {
-            Ok(r) => r,
-            Err(e) => {
-                return Ok(CreateSSHClientKeyResponse::BadRequest(Json(format!(
-                    "Invalid secret reference: {e}"
-                ))));
-            }
-        };
+        let reference = SecretRef::from_str(&body.reference)?;
 
         let model = warpgate_protocol_ssh::import_client_key_reference(
             &admin.services().db,

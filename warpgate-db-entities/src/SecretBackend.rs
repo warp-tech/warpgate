@@ -3,8 +3,6 @@ use uuid::Uuid;
 use warpgate_common::{BackendType, SecretBackendConfig, VaultAuthConfig};
 
 /// A Vault / OpenBao server that `secret://` references resolve against.
-/// Not serializable: API responses use their own DTO so the login secret
-/// never leaves the row.
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "secret_backends")]
 pub struct Model {

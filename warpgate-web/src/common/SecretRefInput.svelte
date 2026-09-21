@@ -15,7 +15,7 @@
     export function loadSecretBackends(): Promise<SecretBackendOption[]> {
         if (!backendsPromise) {
             backendsPromise = api
-                .getSecretBackends()
+                .getSecretBackendsSummary()
                 .then(list =>
                     list.map(b => ({
                         name: b.name,
@@ -223,7 +223,12 @@
             {label}
         </Button>
         {#if inlineLabel}
-            <Button color="link" class="px-0 text-nowrap" {disabled} onclick={() => switchMode(false)}>
+            <Button
+                color="link"
+                class="px-0 text-nowrap"
+                {disabled}
+                onclick={() => switchMode(false)}
+            >
                 Enter directly
             </Button>
         {/if}
@@ -239,7 +244,12 @@
                 bind:value
             >
         </FormGroup>
-        <Button color="link" class="px-0 mb-3 text-nowrap" {disabled} onclick={() => switchMode(true)}>
+        <Button
+            color="link"
+            class="px-0 mb-3 text-nowrap"
+            {disabled}
+            onclick={() => switchMode(true)}
+        >
             Use secret backend
         </Button>
     </div>
@@ -263,7 +273,10 @@
                 </div>
             {/if}
         </FormGroup>
-        <FormGroup floating label="Path (mount/path, KV v2, without the data/ segment)">
+        <FormGroup
+            floating
+            label="Path (mount/path, KV v2, without the data/ segment)"
+        >
             <input
                 class="form-control font-monospace"
                 placeholder="secret/myapp"

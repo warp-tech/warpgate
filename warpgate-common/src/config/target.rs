@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::str::FromStr;
 
 use poem_openapi::{Enum, Object, Union};
 use serde::{Deserialize, Serialize};
@@ -435,7 +434,7 @@ impl TargetOptions {
     }
 }
 
-/// The credential slots of a target, the one place that knows where they are.
+/// List refs to all credential slots of a target
 pub trait TargetSecrets {
     fn secrets(&self) -> Vec<&MaybeSecretRef>;
 }
@@ -465,22 +464,24 @@ impl TargetSecrets for TargetKubernetesOptions {
     }
 }
 
-fn database_secrets(auth: &DatabaseTargetAuth) -> Vec<&MaybeSecretRef> {
-    match auth {
-        DatabaseTargetAuth::Password(auth) => vec![&auth.password],
-        DatabaseTargetAuth::IamRole(_) => vec![],
+impl TargetSecrets for DatabaseTargetAuth {
+    fn secrets(&self) -> Vec<&MaybeSecretRef> {
+        match self {
+            Self::Password(auth) => vec![&auth.password],
+            Self::IamRole(_) => vec![],
+        }
     }
 }
 
 impl TargetSecrets for TargetMySqlOptions {
     fn secrets(&self) -> Vec<&MaybeSecretRef> {
-        database_secrets(&self.auth)
+        self.auth.secrets()
     }
 }
 
 impl TargetSecrets for TargetPostgresOptions {
     fn secrets(&self) -> Vec<&MaybeSecretRef> {
-        database_secrets(&self.auth)
+        self.auth.secrets()
     }
 }
 
@@ -514,11 +515,6 @@ impl TargetSecrets for TargetOptions {
     }
 }
 
-/// JSON path towards every credential within *serialized* TargetOptions. The
-/// encryption sweep walks JSON rather than [`TargetSecrets`] so a row written by
-/// a newer Warpgate survives byte for byte; `secret_paths_match_the_typed_walker`
-/// keeps the two in step.
-
 /// Update for new protocols
 const SECRET_PATHS: &[&[&str]] = &[
     &["ssh", "auth", "password"],
@@ -531,7 +527,7 @@ const SECRET_PATHS: &[&[&str]] = &[
 ];
 
 /// Rewrite every secret in a serialized TargetOptions
-pub fn map_target_secrets(
+pub fn map_stored_target_secrets(
     options: &mut serde_json::Value,
     f: &mut dyn FnMut(&str) -> Result<String, EncryptionError>,
 ) -> Result<(), EncryptionError> {
@@ -548,7 +544,9 @@ pub fn map_target_secrets(
         // backend names where the credential lives rather than being one, and stays
         // readable so it can be classified and edited.
         if let Some(serde_json::Value::String(value)) = resolve(options, path)
-            && MaybeSecretRef::from_str(value).is_ok_and(|v| v.as_reference().is_none())
+            && MaybeSecretRef::from_stored(value.clone())
+                .as_reference()
+                .is_none()
         {
             let replacement = f(value)?;
             *value = replacement;
@@ -560,7 +558,7 @@ pub fn map_target_secrets(
 /// Blanks out every secret in a serialized TargetOptions or Target (same JSON paths as options are serde(flatten))
 pub fn redact_target_secrets(value: &mut serde_json::Value) {
     // The closure is infallible, so the walk is too.
-    let _ = map_target_secrets(value, &mut |_| Ok(String::new()));
+    let _ = map_stored_target_secrets(value, &mut |_| Ok(String::new()));
 }
 
 #[cfg(test)]
@@ -574,6 +572,7 @@ mod tests {
         TargetKubernetesOptions, TargetMySqlOptions, TargetOptions, TargetPostgresOptions,
         TargetRdpOptions, TargetSSHOptions, Tls,
     };
+    use crate::TargetSecrets;
 
     const REFERENCE: &str = "secret://vault-prod/secret/db#password";
 
@@ -604,7 +603,11 @@ mod tests {
             TargetOptions::MySql(mysql),
             TargetOptions::Postgres(postgres),
         ] {
-            let refs = options.secret_references();
+            let refs = options
+                .secrets()
+                .into_iter()
+                .filter_map(|s| s.as_reference().cloned())
+                .collect::<Vec<_>>();
             assert_eq!(refs.len(), 1);
             assert_eq!(refs[0].to_string(), REFERENCE);
         }
@@ -696,7 +699,7 @@ mod tests {
     }
 
     fn wrap(v: &mut serde_json::Value, prefix: &str) {
-        super::map_target_secrets(v, &mut |s| Ok(format!("{prefix}{s}"))).unwrap();
+        super::map_stored_target_secrets(v, &mut |s| Ok(format!("{prefix}{s}"))).unwrap();
     }
 
     /// Fails when a credential slot is reachable through one of the two walkers
@@ -748,7 +751,7 @@ mod tests {
             let mut json = serde_json::to_value(&options).unwrap();
             let rendered = json.to_string();
             let mut walked = 0;
-            super::map_target_secrets(&mut json, &mut |s| {
+            super::map_stored_target_secrets(&mut json, &mut |s| {
                 walked += 1;
                 assert_eq!(s, "s", "walked a non-secret field in {rendered}");
                 Ok(s.to_owned())
@@ -778,7 +781,7 @@ mod tests {
         wrap(&mut mapped, "X");
         assert_eq!(mapped["mysql"]["auth"]["password"], "Xcurrent");
 
-        super::map_target_secrets(&mut mapped, &mut |s| {
+        super::map_stored_target_secrets(&mut mapped, &mut |s| {
             Ok(s.strip_prefix('X').unwrap_or(s).to_owned())
         })
         .unwrap();

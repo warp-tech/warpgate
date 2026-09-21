@@ -181,9 +181,8 @@ struct ParameterUpdate {
     pub recordings_storage: Option<RecordingsStorageConfig>,
 }
 
-/// Resolved here so a bad reference is refused instead of taking the SSH
-/// listener down on every node's next restart.
-async fn parse_host_key_reference(
+/// Validate on save to reduce the change of breaking the SSH listener
+async fn validate_host_key_secret_ref(
     reference: &str,
     secret_backend: &dyn SecretResolver,
 ) -> Result<SecretRef, String> {
@@ -356,7 +355,8 @@ impl Api {
         if let Some(update) = &body.ssh_host_key_secret_ref {
             let reference = match update {
                 Some(reference) => {
-                    match parse_host_key_reference(reference, &*services.secret_backends).await {
+                    match validate_host_key_secret_ref(reference, &*services.secret_backends).await
+                    {
                         Ok(reference) => Some(reference),
                         Err(error) => {
                             return Ok(UpdateParametersResponse::BadRequest(Json(error)));

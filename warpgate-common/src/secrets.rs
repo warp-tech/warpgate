@@ -10,7 +10,7 @@ use sea_orm::prelude::StringLen;
 use sea_orm::{DeriveActiveEnum, EnumIter, FromJsonQueryResult};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::{Secret, StoredSecret, WarpgateError};
+use crate::{Secret, StoredSecret, UserFacingReason, WarpgateError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SecretError {
@@ -28,8 +28,18 @@ pub enum SecretError {
     Backend(String),
 }
 
-/// The product behind a backend. Both speak the same API; the distinction is
-/// informational.
+impl UserFacingReason for SecretError {
+    fn user_facing_reason(&self) -> String {
+        match self {
+            Self::InvalidRef(_) | Self::NotFound { .. } | Self::PathNotAllowed { .. } => {
+                "Invalid secret reference".into()
+            }
+            Self::InvalidBackendName(_) => "Invalid secret backend name".into(),
+            Self::BackendNotConfigured { .. } | Self::Backend(_) => "Secret backend error".into(),
+        }
+    }
+}
+
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Enum, EnumIter, DeriveActiveEnum,
 )]
@@ -69,9 +79,6 @@ pub struct VaultKubernetesAuth {
     pub mount: Option<String>,
 }
 
-/// How a backend logs in to Vault. Stored as one JSON column with the secret
-/// encrypted at rest; the API carries the same shape with the secret blanked
-/// (see [`Self::redacted`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Union, FromJsonQueryResult)]
 #[serde(tag = "method")]
 #[oai(rename = "SecretBackendAuth", discriminator_name = "method", one_of)]
@@ -82,8 +89,7 @@ pub enum VaultAuthConfig {
 }
 
 impl VaultAuthConfig {
-    /// The login secret; a Kubernetes login presents the pod's service
-    /// account token instead and has none.
+    /// Exposes inner secret for redaction/restore
     pub const fn secret(&self) -> Option<&StoredSecret> {
         match self {
             Self::Token(auth) => Some(&auth.token),
@@ -110,7 +116,6 @@ impl VaultAuthConfig {
     }
 }
 
-/// Everything needed to talk to one backend; assembled from its stored row.
 #[derive(Debug, Clone)]
 pub struct SecretBackendConfig {
     pub name: String,
@@ -118,8 +123,7 @@ pub struct SecretBackendConfig {
     pub namespace: Option<String>,
     pub auth: VaultAuthConfig,
     pub tls_skip_verify: bool,
-    /// KV path prefixes (`mount/path`) references may name; empty allows every
-    /// path the backend's credentials can read.
+    /// Allowed KV path prefixes (`mount/path`), empty = any
     pub allowed_paths: Vec<String>,
 }
 
@@ -127,7 +131,7 @@ pub const REFERENCE_SCHEME: &str = "secret://";
 
 /// `secret://backend/mount/path[#field]`: an entry in a KV v2 engine of one
 /// of the configured backends.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SecretRef {
     pub backend: String,
     /// The KV v2 engine's mount point
@@ -139,7 +143,6 @@ pub struct SecretRef {
 }
 
 impl SecretRef {
-    /// `mount/path`, the form allowed-path prefixes are written in
     pub fn kv_path(&self) -> String {
         format!("{}/{}", self.mount, self.path)
     }
@@ -187,8 +190,6 @@ impl FromStr for SecretRef {
     }
 }
 
-/// Something that can turn a [`SecretRef`] into the secret it names: a single
-/// backend, or the registry routing to one.
 #[async_trait]
 pub trait SecretResolver: Send + Sync {
     async fn resolve(&self, reference: &SecretRef) -> Result<Secret<String>, SecretError>;
@@ -208,14 +209,7 @@ pub fn validate_backend_name(name: &str) -> Result<(), SecretError> {
     }
 }
 
-/// A stored credential: either the value itself (encrypted at rest) or a
-/// reference to a secret backend. Serialized as one string in both JSON and
-/// database columns, so a column or field of this type is the single place
-/// that decides which of the two a string is.
-///
-/// The only way to the credential is [`Self::resolve`], which needs a
-/// resolver for the reference case, so no code path can use a reference as
-/// if it were the value.
+/// A stored credential, either a plaintext value (encrypted at rest) or a secret reference (plain)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MaybeSecretRef {
     Inline(StoredSecret),
@@ -234,6 +228,10 @@ impl MaybeSecretRef {
         }
     }
 
+    pub const fn is_inline(&self) -> bool {
+        matches!(self, Self::Inline(_))
+    }
+
     /// The credential itself: the inline value decrypted, or the referenced secret fetched
     pub async fn resolve(
         &self,
@@ -247,9 +245,8 @@ impl MaybeSecretRef {
     }
 
     /// An already stored value. Unlike [`Self::from_str`], a malformed
-    /// reference is kept rather than rejected: the row exists, and failing
-    /// its whole read would take every other row down with it.
-    fn from_stored(s: String) -> Self {
+    /// reference is kept as [MaybeSecretRef::Malformed]
+    pub fn from_stored(s: String) -> Self {
         Self::from_str(&s).unwrap_or_else(|_| Self::Malformed(s))
     }
 
@@ -286,7 +283,7 @@ impl From<SecretRef> for MaybeSecretRef {
     }
 }
 
-/// Reads stored rows and config files, so it is lenient like `from_stored`;
+/// Lenient like [from_stored].
 /// API input goes through the strict [`ParseFromJSON`] instead.
 impl<'de> Deserialize<'de> for MaybeSecretRef {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {

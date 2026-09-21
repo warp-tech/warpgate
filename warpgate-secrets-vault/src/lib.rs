@@ -27,7 +27,7 @@ pub struct VaultBackend {
     /// Readers share the client; only (re)authentication takes the write lock.
     client: Arc<RwLock<VaultClient>>,
     auth_config: VaultAuthConfig,
-    /// KV path prefixes references may name; empty means any path.
+    /// KV path prefixes references may use, from the config, empty = any
     allowed_paths: Vec<String>,
     last_reauth: Mutex<Option<Instant>>,
 }
@@ -125,7 +125,7 @@ impl VaultBackend {
         });
     }
 
-    fn check_allowed(&self, reference: &SecretRef) -> Result<(), SecretError> {
+    fn assert_path_allowed(&self, reference: &SecretRef) -> Result<(), SecretError> {
         let path = reference.kv_path();
         if path_allowed(&self.allowed_paths, &path) {
             Ok(())
@@ -182,7 +182,7 @@ impl SecretResolver for VaultBackend {
                 "a #field is required for Vault references (got '{reference}')"
             ))
         })?;
-        self.check_allowed(reference)?;
+        self.assert_path_allowed(reference)?;
 
         let data = match self.read_kv(reference).await {
             Ok(data) => data,
