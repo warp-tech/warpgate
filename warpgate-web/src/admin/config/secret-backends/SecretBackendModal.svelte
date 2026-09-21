@@ -12,12 +12,12 @@
         BackendType,
         SecretBackendAuth,
         SecretBackendRequest,
-        SecretBackendResponse,
+        SecretBackend,
     } from 'admin/lib/api'
 
     interface Props {
         isOpen: boolean
-        instance?: SecretBackendResponse
+        instance?: SecretBackend
         save: (request: SecretBackendRequest) => void
     }
 

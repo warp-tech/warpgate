@@ -64,12 +64,12 @@
             }
             if (isSecretRef(secretKey)) {
                 await api.importSshOwnKeyReference({
-                    importSSHClientKeyReferenceRequest: { label, reference: secretKey, isDefault },
+                    importSshClientKeyReferenceRequest: { label, reference: secretKey, isDefault },
                 })
                 return
             }
             await api.importSshOwnKey({
-                importSSHClientKeyRequest: { label, secretKey, isDefault },
+                importSshClientKeyRequest: { label, secretKey, isDefault },
             })
         })
     }
@@ -122,9 +122,9 @@
                     {#if key.isDefault}
                         <Badge color="primary">Default</Badge>
                     {/if}
-                    {#if key.backend}
+                    {#if key.secretBackend}
                         <Badge color="info" title="Key material is read from this secret backend, not stored in Warpgate">
-                            {key.backend}
+                            {key.secretBackend}
                         </Badge>
                     {/if}
                     {#if $adminPermissions.configEdit}

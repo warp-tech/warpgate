@@ -4,7 +4,7 @@
         api,
         type CheckHealthResponse,
         type SecretBackendRequest,
-        type SecretBackendResponse,
+        type SecretBackend,
     } from 'admin/lib/api'
     import { adminPermissions } from 'admin/lib/store'
     import { stringifyError } from 'common/errors'
@@ -13,10 +13,10 @@
     import SecretBackendModal from './SecretBackendModal.svelte'
 
     let error: string | undefined = $state()
-    let backends: SecretBackendResponse[] | undefined = $state()
+    let backends: SecretBackend[] | undefined = $state()
     let health: Record<string, CheckHealthResponse> = $state({})
     let modalOpen = $state(false)
-    let editing: SecretBackendResponse | undefined = $state()
+    let editing: SecretBackend | undefined = $state()
 
     async function load() {
         backends = await api.getSecretBackends()
@@ -24,7 +24,7 @@
         backends.forEach(backend => checkHealth(backend))
     }
 
-    async function checkHealth(backend: SecretBackendResponse) {
+    async function checkHealth(backend: SecretBackend) {
         try {
             health[backend.id] = await api.checkSecretBackendHealth({ id: backend.id })
         } catch (e) {
@@ -52,7 +52,7 @@
         modalOpen = true
     }
 
-    function openEdit(backend: SecretBackendResponse) {
+    function openEdit(backend: SecretBackend) {
         editing = backend
         modalOpen = true
     }
@@ -68,7 +68,7 @@
         })
     }
 
-    function remove(backend: SecretBackendResponse) {
+    function remove(backend: SecretBackend) {
         run(() => api.deleteSecretBackend({ id: backend.id }))
     }
 </script>

@@ -1,47 +1,24 @@
 <script module lang="ts">
-    import { api, type SecretReferenceUsage } from 'admin/lib/api'
+    import {
+        api,
+        type SecretBackendSummary,
+        type SecretReferenceUsage,
+    } from 'admin/lib/api'
 
-    export interface SecretBackendOption {
-        name: string
-        backendType: 'vault' | 'openbao'
-    }
-
-    let backendsPromise: Promise<SecretBackendOption[]> | null = null
+    let backendsPromise: Promise<SecretBackendSummary[]> | null = null
 
     export function invalidateSecretBackends(): void {
         backendsPromise = null
     }
 
-    export function loadSecretBackends(): Promise<SecretBackendOption[]> {
+    export function loadSecretBackends(): Promise<SecretBackendSummary[]> {
         if (!backendsPromise) {
-            backendsPromise = api
-                .getSecretBackendsSummary()
-                .then(list =>
-                    list.map(b => ({
-                        name: b.name,
-                        backendType: b.backendType,
-                    })),
-                )
-                .catch(() => {
-                    backendsPromise = null
-                    return []
-                })
-        }
-        return backendsPromise
-    }
-
-    let usagePromise: Promise<SecretReferenceUsage[]> | null = null
-
-    export function loadSecretReferenceUsage(): Promise<
-        SecretReferenceUsage[]
-    > {
-        if (!usagePromise) {
-            usagePromise = api.getSecretReferenceUsage().catch(() => {
-                usagePromise = null
+            backendsPromise = api.getSecretBackendsSummary().catch(() => {
+                backendsPromise = null
                 return []
             })
         }
-        return usagePromise
+        return backendsPromise
     }
 
     const REFERENCE_SCHEME = 'secret://'
@@ -131,7 +108,7 @@
     )
 
     let modalOpen = $state(false)
-    let backends = $state<SecretBackendOption[]>([])
+    let backends = $state<SecretBackendSummary[]>([])
     let backendsLoaded = $state(false)
     let usage = $state<SecretReferenceUsage[]>([])
 
@@ -151,8 +128,28 @@
         Boolean(draftBackend && draftPath && (draftKey || !withKey)),
     )
     let sharedWith = $derived(
-        usage.find(u => u.reference === draft)?.targets ?? [],
+        usage.find(u => u.reference === draft)?.usages ?? [],
     )
+
+    // Usage is per backend; a reply for a backend no longer selected is dropped.
+    $effect(() => {
+        const id = backends.find(b => b.name === draftBackend)?.id
+        usage = []
+        if (!modalOpen || !id) {
+            return
+        }
+        let wanted = true
+        api.getSecretReferenceUsage({ id })
+            .then(list => {
+                if (wanted) {
+                    usage = list
+                }
+            })
+            .catch(() => {})
+        return () => {
+            wanted = false
+        }
+    })
 
     let testing = $state(false)
     let testResult = $state<{ ok: boolean; error?: string } | null>(null)
@@ -199,9 +196,6 @@
             if (!draftBackend && list.length) {
                 draftBackend = list[0]!.name
             }
-        })
-        loadSecretReferenceUsage().then(list => {
-            usage = list
         })
     }
 
@@ -295,9 +289,15 @@
         {#if sharedWith.length}
             <div class="form-text">
                 Also used by
-                {#each sharedWith as t, i (t.id)}
+                {#each sharedWith as usage, i}
                     {i ? ', ' : ''}
-                    <a href="#/config/targets/{t.id}">{t.name}</a>
+                    {#if usage.kind === 'Target'}
+                        <a href="#/config/targets/{usage.id}">{usage.name}</a>
+                    {:else if usage.kind === 'SshClientKey'}
+                        <a href="#/config/ssh">SSH client key {usage.label}</a>
+                    {:else}
+                        <a href="#/config/parameters">the SSH host keys</a>
+                    {/if}
                 {/each}
             </div>
         {/if}
