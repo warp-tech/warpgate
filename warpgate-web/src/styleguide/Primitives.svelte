@@ -620,7 +620,8 @@
         <code>pending</code>. It colours the number only — the caption and note
         keep their normal ink, so a warning card is not a wall of orange and the
         colour is never the only thing carrying the meaning. Rendered as a
-        <code>&lt;figure&gt;</code> with the caption as its
+        <code>&lt;figure&gt;</code>
+        with the caption as its
         <code>&lt;figcaption&gt;</code>, so the number is announced with the
         thing it counts.
     </p>

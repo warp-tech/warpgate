@@ -2,7 +2,6 @@
     import { formatDurationAsHumantime } from 'common/duration'
     import { errorStatus } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
-    import RelativeDate from 'ui/RelativeDate.svelte'
     import {
         ApiAuthState,
         ApprovalScope,
@@ -12,6 +11,7 @@
     import Button from 'ui/Button.svelte'
     import Callout from 'ui/Callout.svelte'
     import Menu from 'ui/Menu.svelte'
+    import RelativeDate from 'ui/RelativeDate.svelte'
 
     interface Props {
         params: { stateId: string }

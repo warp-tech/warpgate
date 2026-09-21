@@ -178,6 +178,10 @@
         text-decoration: none;
     }
 
+    .step-title {
+        font: var(--wg-text-body-md);
+    }
+
     a:hover .step-title {
         text-decoration: underline;
     }
@@ -203,10 +207,6 @@
         gap: 2px;
         min-width: 0;
         margin-right: auto;
-    }
-
-    .step-title {
-        font: var(--wg-text-body-md);
     }
 
     .step-hint {
