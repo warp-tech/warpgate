@@ -305,7 +305,10 @@ async fn negotiate_and_authorize(
 
     info!(target=%admitted.target().name, "Authorized");
 
-    show_banner(&mut viewer_wr, &mut events_rx, &mut render, services).await?;
+    if !show_banner(&mut viewer_wr, &mut events_rx, &mut render, services).await? {
+        debug!("viewer disconnected at the login banner");
+        return Ok(None);
+    }
 
     // Start a recording if enabled; `None` just means we don't tap the decoded stream.
     // Either way the session takes the same decode-and-re-encode path below, so the

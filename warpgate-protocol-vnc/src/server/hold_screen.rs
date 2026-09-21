@@ -45,13 +45,17 @@ where
 const SPINNER_INTERVAL: Duration = Duration::from_millis(30);
 
 /// Show the login banner, if one is configured, and block until the viewer acknowledges it
-/// with any key or pointer button.
+/// with any key or pointer button. `false` means the viewer disconnected instead.
+///
+/// The event arm is unconditional: a disconnect returns here rather than disabling the arm,
+/// because the paint arm is gated on an outstanding frame request and a `select!` whose every
+/// branch is disabled panics.
 pub(super) async fn show_banner<W>(
     viewer_wr: &mut W,
     events_rx: &mut mpsc::UnboundedReceiver<ClientEvent>,
     render: &mut RenderState,
     services: &Services,
-) -> Result<()>
+) -> Result<bool>
 where
     W: AsyncWrite + Unpin,
 {
@@ -60,21 +64,25 @@ where
         .banner_text()
         .map(str::to_owned)
     else {
-        return Ok(());
+        return Ok(true);
     };
 
     loop {
         tokio::select! {
-            event = events_rx.recv(), if !render.reader_done => {
+            event = events_rx.recv() => {
+                let Some(event) = event else {
+                    render.note_event(None);
+                    return Ok(false);
+                };
                 let acknowledged = matches!(
                     event,
-                    Some(ClientEvent::Key { down: true, .. })
+                    ClientEvent::Key { down: true, .. }
                         // Any pressed button; a bare move (empty mask) isn't an acknowledgement.
-                        | Some(ClientEvent::Pointer { buttons: 1.., .. })
+                        | ClientEvent::Pointer { buttons: 1.., .. }
                 );
-                render.note_event(event.as_ref());
+                render.note_event(Some(&event));
                 if acknowledged {
-                    return Ok(());
+                    return Ok(true);
                 }
             }
             () = sleep(SPINNER_INTERVAL), if render.pending_request => {
