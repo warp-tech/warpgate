@@ -50,7 +50,7 @@
         {/snippet}
         {#snippet item(group)}
             <a
-                class="list-group-item list-group-item-action"
+                class="list-group-item d-flex align-items-center list-group-item-action"
                 href="/config/target-groups/{group.id}"
                 use:link
             >
@@ -71,10 +71,3 @@
         {/snippet}
     </ItemList>
 </div>
-
-<style lang="scss">
-    .list-group-item {
-        display: flex;
-        align-items: center;
-    }
-</style>

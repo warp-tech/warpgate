@@ -110,7 +110,7 @@
             {#if tickets.length}
                 <div class="list-group list-group-flush mb-4">
                     {#each tickets as ticket (ticket.id)}
-                        <div class="list-group-item gap-3">
+                        <div class="list-group-item d-flex align-items-center gap-3">
                             <div>
                                 <strong>
                                     Access to {ticket.target} as
@@ -204,7 +204,7 @@
             {#if filteredHistory.length || requestHistoryFilter}
                 <div class="list-group list-group-flush">
                     {#each filteredHistory as request (request.id)}
-                        <div class="list-group-item">
+                        <div class="list-group-item d-flex align-items-center">
                             <span
                                 class={statusColor(request.status)}
                                 title={request.status}
@@ -264,10 +264,3 @@
         {/if}
     </Loadable>
 </div>
-
-<style lang="scss">
-    .list-group-item {
-        display: flex;
-        align-items: center;
-    }
-</style>
