@@ -1230,3 +1230,98 @@ change:
 
 The route SET was diffed against the previous commit to confirm the regroup
 added, removed and renamed nothing.
+
+## Deleting Bootstrap left ~25 screens unstyled
+
+Found while hunting for further runtime defects after the routing fix, by
+asking a question the migration never asked: *which CSS classes does the markup
+still use that nothing defines any more?*
+
+The screens 15-23 sweep replaced sveltestrap **components**. It did not replace
+Bootstrap **utility classes**, because nothing forced it to — `class="d-flex
+mt-3"` compiles fine with no stylesheet behind it and fails silently in the
+browser. Deleting Bootstrap also took `theme/_theme.scss`, which had imported
+it and had itself defined `.container-max-md`, `.page-summary-bar` and
+`.modal-button`.
+
+**299 class usages across 25 files, 122 distinct classes.** The worst affected
+were Parameters, TicketRequests, LdapServer, LdapUserBrowser, AdminRole,
+AccessRole, ConnectionInstructions and SSHKeys — rendering with browser-default
+inputs, no flex rows, no max width and unstyled buttons.
+
+### The checker was wrong twice before it was right
+
+The first version asked "is this class defined anywhere in `src/`?" That is the
+wrong question. **A Svelte `<style>` block is scoped to its component**, so the
+`.btn` rule in `PlayerToolbar.svelte` never reached the `.btn` in
+`LdapServer.svelte`. Only three things are actually global: a plain `.css`
+file, a rule inside `:global(...)`, and a `<style global>` block. Asking the
+scoped question moved `btn` (11 files), `list-group-item` (6), `list-group` (5)
+and `row` (3) from "fine" to "orphaned".
+
+The second version over-reported, because a Svelte class attribute has four
+shapes at once — `class="a b"`, `class={expr}`, `class="a {expr}"` and
+`class:name={expr}` — and a naive regex turned `class={props.class ?? ''}` into
+three "classes" named `{props.class`, `??` and `''}`. Names a template splices
+into (`wg-marker-{shape}`) are not statically checkable at all and are now
+dropped rather than reported.
+
+Both mistakes were in my own tool, and in opposite directions — the same
+failure as the sveltestrap reachability audit earlier. A checker that has not
+been made to report a known-bad case is not evidence.
+
+### The fix: `ui/compat.css`
+
+One global stylesheet, imported from `theme/index.ts` (which both entry points
+already import, so both bundles get it — verified in both built HTML files).
+
+It is written **in terms of the design tokens**, not as a Bootstrap imitation.
+`.btn.btn-primary` is the same object `ui/Button` draws; `.form-control` is the
+same shell `ui/Input` draws. The consequence is that the affected screens look
+like the redesign *now*, and converting their markup to the primitives later is
+a cleanup with no visual change, rather than a second migration. The file is
+meant to shrink to nothing and says so at the top.
+
+Bootstrap's spacing steps land exactly on the token scale — 1=xs (0.25rem),
+2=sm (0.5), 3=lg (1), 4=xl (1.5), 5=3xl (3) — so the rhythm the old markup was
+laid out to is preserved rather than re-guessed.
+
+Two deliberate judgements:
+
+- **The spacing scale is generated in full**, not limited to the steps in use.
+  Everything else in the file is strictly what the markup references. A missing
+  `.mt-2` is invisible until someone opens that screen, and that asymmetry is
+  worth ~1 KB.
+- **`.form-switch` is redrawn as a toggle** rather than left as a checkbox, so
+  the LDAP screen reads the way it did. The control stays a native checkbox
+  underneath, so its keyboard and assistive-tech behaviour is unchanged, and
+  the transition is disabled under `prefers-reduced-motion`.
+
+Specificity is not a risk here: Svelte's scoped selectors compile to `(0,2,0)`
+and these are `(0,1,0)`, so any component rule still wins. The generic names
+(`.row`, `.table`, `.nav`) cannot reach a proxied HTTP target either — that is
+a different document.
+
+```
+122 orphaned classes / 299 usages  ->  29 / 31
+bundle  1707.3 -> 1719.1 raw (+11.8 KB), 703.2 -> 705.3 gz (+2.1 KB)
+        still -14.7% raw / -3.9% gz against the 2014.6 / 733.6 baseline
+```
+
+### What the remaining 29 are
+
+None are Bootstrap. They split three ways:
+
+- **False positives** — string literals inside an expression that feed a
+  dynamic name or are not classes at all: `diamond`, `dot`, `warning`
+  (`wg-marker-{shape}`), `certificate`, `oidc` (a `kubeconfigMode` value),
+  `kind`, `session`, `username`.
+- **Hooks that need no rule** — a wrapper element whose children carry the
+  styling, or a class passed to a child component so callers can target it:
+  `wg-tabs`, `wg-skeleton`, `wg-check-label`, `wg-status-label`,
+  `wg-table-search`, `wg-table-density`.
+- **Genuinely missing rules, in my own new code** — `panel` (3 files),
+  `head-actions`, `head-titles`, `notice`, `tl-field`, `help-text`, `hostkey`,
+  `hostkey-lead`, `probe-label`, `sg-type`, `sg-spacing` and the four
+  `a-callout-*`. Fixed separately; a compatibility stylesheet is the wrong
+  place for them.

@@ -1,5 +1,9 @@
 import './tokens.css'
 import './fonts.css'
+// Imported here, not from a component, because Svelte scopes a <style>
+// block to its component and these classes are used across 25 files.
+// Both entry points import this module, so both bundles get it.
+import '../ui/compat.css'
 
 import { get, writable } from 'svelte/store'
 
