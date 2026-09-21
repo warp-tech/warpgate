@@ -329,31 +329,44 @@
         }
     }
 
+    const SPECIAL_KEYSYMS: Record<string, number> = {
+        Backspace: 0xff08,
+        Tab: 0xff09,
+        Enter: 0xff0d,
+        Escape: 0xff1b,
+        Delete: 0xffff,
+        Home: 0xff50,
+        ArrowLeft: 0xff51,
+        ArrowUp: 0xff52,
+        ArrowRight: 0xff53,
+        ArrowDown: 0xff54,
+        PageUp: 0xff55,
+        PageDown: 0xff56,
+        End: 0xff57,
+        Insert: 0xff63,
+        CapsLock: 0xffe5,
+        ' ': 0x0020,
+    }
+
+    // A modifier reports its side in `location`, not in `key`, and X11 has a distinct keysym
+    // per side. Sending the left keysym for a right-hand press makes the target see the wrong
+    // key, which matters for AltGr and for anything watching a specific modifier.
+    const SIDED_KEYSYMS: Record<string, [left: number, right: number]> = {
+        Shift: [0xffe1, 0xffe2],
+        Control: [0xffe3, 0xffe4],
+        Alt: [0xffe9, 0xffea],
+        Meta: [0xffeb, 0xffec],
+    }
+
     // Map a KeyboardEvent to an X11 keysym.
     function keysym(e: KeyboardEvent): number | null {
-        const special: Record<string, number> = {
-            Backspace: 0xff08,
-            Tab: 0xff09,
-            Enter: 0xff0d,
-            Escape: 0xff1b,
-            Delete: 0xffff,
-            Home: 0xff50,
-            ArrowLeft: 0xff51,
-            ArrowUp: 0xff52,
-            ArrowRight: 0xff53,
-            ArrowDown: 0xff54,
-            PageUp: 0xff55,
-            PageDown: 0xff56,
-            End: 0xff57,
-            Insert: 0xff63,
-            Shift: 0xffe1,
-            Control: 0xffe3,
-            Alt: 0xffe9,
-            Meta: 0xffeb,
-            CapsLock: 0xffe5,
-            ' ': 0x0020,
+        const sided = SIDED_KEYSYMS[e.key]
+        if (sided) {
+            return e.location === KeyboardEvent.DOM_KEY_LOCATION_RIGHT
+                ? sided[1]
+                : sided[0]
         }
-        const specialKey = special[e.key]
+        const specialKey = SPECIAL_KEYSYMS[e.key]
         if (specialKey) {
             return specialKey
         }
