@@ -1184,3 +1184,49 @@ Verified by cloning to a clean directory at the flip commit: no old-UI file is
 present, `package.json` has no Bootstrap or sveltestrap, and with the API
 clients supplied the build produces byte-equivalent output (1705.7 KB against
 1705.5 in the working tree).
+
+### Route shadowing: `/config/targets/create` was parsed as a target id
+
+Reported from a running instance:
+
+```
+ERROR HTTP: Request failed method=GET
+  url=.../@warpgate/admin/api/targets/create
+  error=ParsePathError { name: "param0",
+    reason: "failed to parse \"string_uuid\": invalid character: found r at 1" }
+```
+
+Clicking **Add a target** produced a 500. The `r` at position 1 is the second
+letter of `create`.
+
+**Cause.** svelte-spa-router keeps routes in declaration order and returns the
+FIRST pattern that matches. `AppNew.svelte` declared `/config/targets/:id` in a
+"migrated" block at the top of the routes object while `/config/targets/create`
+stayed in the "not yet migrated" block eleven entries below it. So `create`
+matched `:id`, the target-detail screen mounted with `id = "create"`, and its
+`getTarget({ id })` asked the server for a target whose UUID is the word
+`create`.
+
+This was mine, introduced when AppNew was written: splitting the table by
+migration status separated a route family, and `create`/`:id` only work if they
+stay adjacent and in that order. Every other family (users, access roles, admin
+roles, target groups, LDAP) happened to keep both halves in the lower block and
+was unaffected — which is why nothing else broke.
+
+**Fix.** The migration-status split is gone (everything is migrated). Routes are
+grouped by family, and within a family every literal path precedes any `:param`
+path. The rule is stated in the file, with this failure as the example.
+
+**Checks added to the scratchpad tooling** — worth re-running after any routing
+change:
+
+- *shadowing*: compile each route with `regexparam`, exactly as the router
+  does, and report any literal route an earlier pattern already matches. It
+  reproduced this bug and found no others; both portal tables were clean.
+- *resolution*: assert that eleven representative paths reach the intended
+  component, including every `…/create` in the app.
+- *dangling links*: collect every `push`, `replace` and in-app `href`, and
+  check each against the route tables. 51 distinct links, all resolve.
+
+The route SET was diffed against the previous commit to confirm the regroup
+added, removed and renamed nothing.

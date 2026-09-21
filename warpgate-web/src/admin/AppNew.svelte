@@ -1,16 +1,7 @@
 <script lang="ts">
     import AuthBar from 'common/AuthBar.svelte'
     /**
-     * Admin shell for the redesigned UI, behind VITE_NEW_UI.
-     *
-     * Routes that have been migrated resolve to `admin/screens/*`. Everything
-     * else still resolves to its existing component, so the new UI is complete
-     * and testable from the first screen rather than only at the end — an
-     * un-migrated screen renders inside the new shell looking like the old one,
-     * which is honest about where the migration has got to.
-     *
-     * The old shell in App.svelte is untouched and keeps building until the
-     * flip commit.
+     * Admin shell.
      */
     import Brand from 'common/Brand.svelte'
     import Loadable from 'common/Loadable.svelte'
@@ -62,41 +53,39 @@
     const initPromise = init()
 
     /**
-     * Every route is listed explicitly rather than delegating /config/* to
-     * config/Config.svelte. That component renders SidebarNavContainer — the
-     * old sub-navigation — which inside the new shell would put two navigation
-     * rails on screen at once. Enumerating here also makes each migration a
-     * one-line swap from ./config/... to ./screens/...
+     * Every route is listed explicitly rather than delegating /config/* to a
+     * sub-router.
+     *
+     * ORDER IS SIGNIFICANT. svelte-spa-router keeps these in declaration order
+     * and returns the FIRST pattern that matches, so a `:param` route declared
+     * above a literal sibling swallows it. `/config/targets/:id` sitting above
+     * `/config/targets/create` made "create" an id, and the detail screen then
+     * asked the API for a target whose UUID was the word "create" — which is
+     * what `failed to parse "string_uuid": invalid character: found r at 1`
+     * was. A 500 from the server for a button that should have opened a form.
+     *
+     * So: routes are grouped by family, and within a family every literal path
+     * comes before any `:param` path. Keeping a family together is the point —
+     * the bug arrived when `/config/targets/:id` was moved into a "migrated"
+     * block at the top and its `create` siblings stayed behind.
      */
     const routes: Record<string, WrappedComponent> = {
-        // ---- migrated ----
+        '/': wrap({
+            asyncComponent: () => import('./screens/Overview.svelte'),
+        }),
+
+        // ---- sessions ----
         '/status/sessions': wrap({
             asyncComponent: () => import('./screens/Sessions.svelte'),
         }),
         '/status/sessions/:id': wrap({
             asyncComponent: () => import('./screens/Session.svelte'),
         }),
-        '/config/targets': wrap({
-            asyncComponent: () => import('./screens/Targets.svelte'),
-        }),
-        '/config/users': wrap({
-            asyncComponent: () => import('./screens/Users.svelte'),
-        }),
-        '/config/access-roles': wrap({
-            asyncComponent: () => import('./screens/Roles.svelte'),
-        }),
-        '/config/targets/:id': wrap({
-            asyncComponent: () =>
-                import('./screens/target-detail/Target.svelte'),
-        }),
-
-        // ---- not yet migrated: existing components, new shell ----
-        '/': wrap({
-            asyncComponent: () => import('./screens/Overview.svelte'),
-        }),
         '/status/recordings/:id': wrap({
             asyncComponent: () => import('./status/Recording.svelte'),
         }),
+
+        // ---- status ----
         '/status/requests': wrap({
             asyncComponent: () => import('./status/Requests.svelte'),
         }),
@@ -106,6 +95,8 @@
         '/status/network': wrap({
             asyncComponent: () => import('./status/NetworkStatus.svelte'),
         }),
+
+        // ---- audit log ----
         '/log': wrap({
             asyncComponent: () => import('./screens/Log.svelte'),
         }),
@@ -121,15 +112,29 @@
             asyncComponent: () => import('./screens/Log.svelte'),
             props: { filterKind: 'admin-role' },
         }),
-        '/config/targets/create/:kind': wrap({
-            asyncComponent: () =>
-                import('./config/targets/CreateTarget.svelte'),
+
+        // ---- targets ----
+        '/config/targets': wrap({
+            asyncComponent: () => import('./screens/Targets.svelte'),
         }),
         '/config/targets/create': wrap({
             asyncComponent: () =>
                 import('./config/targets/ChooseTargetKind.svelte'),
         }),
+        '/config/targets/create/:kind': wrap({
+            asyncComponent: () =>
+                import('./config/targets/CreateTarget.svelte'),
+        }),
+        '/config/targets/:id': wrap({
+            asyncComponent: () =>
+                import('./screens/target-detail/Target.svelte'),
+        }),
 
+        // ---- target groups ----
+        '/config/target-groups': wrap({
+            asyncComponent: () =>
+                import('./config/target-groups/TargetGroups.svelte'),
+        }),
         '/config/target-groups/create': wrap({
             asyncComponent: () =>
                 import('./config/target-groups/CreateTargetGroup.svelte'),
@@ -138,9 +143,10 @@
             asyncComponent: () =>
                 import('./config/target-groups/TargetGroup.svelte'),
         }),
-        '/config/target-groups': wrap({
-            asyncComponent: () =>
-                import('./config/target-groups/TargetGroups.svelte'),
+
+        // ---- users ----
+        '/config/users': wrap({
+            asyncComponent: () => import('./screens/Users.svelte'),
         }),
         '/config/users/create': wrap({
             asyncComponent: () => import('./config/CreateUser.svelte'),
@@ -148,11 +154,21 @@
         '/config/users/:id': wrap({
             asyncComponent: () => import('./screens/user-detail/User.svelte'),
         }),
+
+        // ---- access roles ----
+        '/config/access-roles': wrap({
+            asyncComponent: () => import('./screens/Roles.svelte'),
+        }),
         '/config/access-roles/create': wrap({
             asyncComponent: () => import('./config/CreateRole.svelte'),
         }),
         '/config/access-roles/:id': wrap({
             asyncComponent: () => import('./config/AccessRole.svelte'),
+        }),
+
+        // ---- admin roles ----
+        '/config/admin-roles': wrap({
+            asyncComponent: () => import('./config/AdminRoles.svelte'),
         }),
         '/config/admin-roles/create': wrap({
             asyncComponent: () => import('./config/CreateAdminRole.svelte'),
@@ -160,21 +176,19 @@
         '/config/admin-roles/:id': wrap({
             asyncComponent: () => import('./config/AdminRole.svelte'),
         }),
-        '/config/admin-roles': wrap({
-            asyncComponent: () => import('./config/AdminRoles.svelte'),
+
+        // ---- tickets ----
+        '/config/tickets': wrap({
+            asyncComponent: () => import('./screens/tickets/Tickets.svelte'),
         }),
         '/config/tickets/create': wrap({
             asyncComponent: () =>
                 import('./screens/tickets/CreateTicket.svelte'),
         }),
-        '/config/tickets': wrap({
-            asyncComponent: () => import('./screens/tickets/Tickets.svelte'),
-        }),
-        '/config/ssh': wrap({
-            asyncComponent: () => import('./config/SSHKeys.svelte'),
-        }),
-        '/config/policies': wrap({
-            asyncComponent: () => import('./config/Policies.svelte'),
+
+        // ---- LDAP ----
+        '/config/ldap-servers': wrap({
+            asyncComponent: () => import('./config/ldap/LdapServers.svelte'),
         }),
         '/config/ldap-servers/create': wrap({
             asyncComponent: () =>
@@ -187,8 +201,13 @@
         '/config/ldap-servers/:id': wrap({
             asyncComponent: () => import('./config/ldap/LdapServer.svelte'),
         }),
-        '/config/ldap-servers': wrap({
-            asyncComponent: () => import('./config/ldap/LdapServers.svelte'),
+
+        // ---- global config ----
+        '/config/ssh': wrap({
+            asyncComponent: () => import('./config/SSHKeys.svelte'),
+        }),
+        '/config/policies': wrap({
+            asyncComponent: () => import('./config/Policies.svelte'),
         }),
         '/config/parameters': wrap({
             asyncComponent: () => import('./config/Parameters.svelte'),
