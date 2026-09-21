@@ -6,8 +6,8 @@ use rsa::{Oaep, RsaPublicKey};
 use sha1::Sha1;
 use tokio::net::TcpStream;
 use tracing::{debug, info};
+use warpgate_common::TargetMySqlOptions;
 use warpgate_common::helpers::rng::get_crypto_rng;
-use warpgate_common::{TargetMySqlOptions, WarpgateError};
 use warpgate_core::AdmittedTarget;
 use warpgate_database_protocols::io::Decode;
 use warpgate_database_protocols::mysql::protocol::Capabilities;
@@ -93,20 +93,10 @@ impl MySqlClient {
             info!("Target connection upgraded to TLS");
         }
 
-        // An IAM role yields a short-lived token in place of a stored password
-        let effective_password = match &target.auth {
-            warpgate_common::DatabaseTargetAuth::Password(auth) => auth
-                .password
-                .reveal()
-                .map_err(WarpgateError::from)?
-                .expose_secret()
-                .clone(),
-            warpgate_common::DatabaseTargetAuth::IamRole(_) => {
-                warpgate_aws::generate_rds_auth_token(&target.host, target.port, &target.username)
-                    .await
-                    .map_err(WarpgateError::Aws)?
-            }
-        };
+        let effective_password = target
+            .auth
+            .resolve_password(&target.host, target.port, &target.username)
+            .await?;
 
         // Servers without PLUGIN_AUTH are pre-plugin and expect mysql_native_password
         let mut auth_plugin = handshake

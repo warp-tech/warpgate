@@ -140,6 +140,28 @@ impl Default for DatabaseTargetAuth {
     }
 }
 
+impl DatabaseTargetAuth {
+    /// The password to present to the target.
+    ///
+    /// An IAM role yields a short-lived token in place of a stored password, so this is minted
+    /// per connection and must not be cached alongside the target. Both database proxies
+    /// authenticate through here, which is what makes a new variant of this enum impossible to
+    /// implement for one of them and forget for the other.
+    pub async fn resolve_password(
+        &self,
+        host: &str,
+        port: u16,
+        username: &str,
+    ) -> Result<String, crate::WarpgateError> {
+        match self {
+            Self::Password(auth) => Ok(auth.password.reveal()?.expose_secret().clone()),
+            Self::IamRole(_) => warpgate_aws::generate_rds_auth_token(host, port, username)
+                .await
+                .map_err(crate::WarpgateError::Aws),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct TargetMySqlOptions {
     #[serde(default = "_default_empty_string")]
