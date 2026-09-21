@@ -97,7 +97,6 @@
         fontSize = Math.max(FONT_SIZE_MIN, fontSize - FONT_SIZE_STEP)
     }
 
-    let menuOpen = $state(false)
     let showInstructions = $state(false)
 
     let ws = $state<ReconnectingWebSocket | undefined>()

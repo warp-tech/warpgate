@@ -303,3 +303,37 @@ before removing the row.
 
 **Changed in this fork** as part of the screen 14 migration, since the shadowed
 render was in the markup being replaced.
+
+## 7. "Auto-link SSO users" cannot be set when an LDAP server is created
+
+`warpgate-web/src/admin/config/ldap/CreateLdapServer.svelte`
+
+```svelte
+let autoLinkSsoUsers = $state(false)
+...
+await api.createLdapServer({
+    ...
+    autoLinkSsoUsers,
+})
+```
+
+The value is declared, sent to the API, and **never assigned by anything**. The
+create form has no control for it, so every LDAP server is created with
+`autoLinkSsoUsers: false` regardless of what the operator wants.
+
+The edit screen (`LdapServer.svelte`) does have the checkbox, so the setting is
+reachable — but only by creating the server first and then editing it. Anyone
+who fills in the create form expecting it to be complete gets a directory that
+silently does not auto-link, which for an SSO-backed deployment means users
+arriving through SSO are not matched to their directory accounts until someone
+notices.
+
+Present since `4f16a7b1` (LDAP user sync, #1603), which introduced the variable
+and the payload field together without the control.
+
+**Fix:** add the checkbox to the create form, next to the other directory
+options, defaulting to whatever the edit screen defaults to.
+
+**Not changed in this fork.** Adding the control changes what the screen sends
+to the API, which is behaviour rather than presentation, and this redesign is
+scoped to presentation. Reported rather than fixed.
