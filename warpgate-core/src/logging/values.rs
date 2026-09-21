@@ -54,3 +54,33 @@ impl Visit for RecordVisitor<'_> {
         self.values.insert(field.name(), format!("{value:?}"));
     }
 }
+
+/// Fold an event's own fields onto the fields of every span enclosing it, root first.
+///
+/// Both log layers need the whole scope, not just the immediate parent, so that a field recorded
+/// on an outer span (the session id, say) still reaches an event emitted deeper in. Sharing it
+/// keeps the two sinks from disagreeing about which fields an event carries.
+pub(crate) fn collect_event_values<S>(
+    event: &tracing::Event<'_>,
+    ctx: &tracing_subscriber::layer::Context<'_, S>,
+) -> SerializedRecordValues
+where
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+{
+    let mut values = SerializedRecordValues::new();
+
+    // Bound so the borrow of the temporary `SpanRef` outlives the `id()` taken from it.
+    let current = ctx.current_span();
+    if let Some(parent_id) = event.parent().or_else(|| current.id())
+        && let Some(span) = ctx.span(parent_id)
+    {
+        for span in span.scope().from_root() {
+            if let Some(outer) = span.extensions().get::<SerializedRecordValues>() {
+                values.extend((*outer).clone());
+            }
+        }
+    }
+
+    event.record(&mut RecordVisitor::new(&mut values));
+    values
+}

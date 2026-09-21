@@ -9,7 +9,7 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 
-use super::values::{RecordVisitor, SerializedRecordValues};
+use super::values::{RecordVisitor, SerializedRecordValues, collect_event_values};
 
 #[derive(Serialize)]
 struct JsonLogEntry {
@@ -37,23 +37,7 @@ where
             return;
         }
 
-        // Collect span fields (same pattern as ValuesLogLayer)
-        let mut values = SerializedRecordValues::new();
-
-        let current = ctx.current_span();
-        let parent_id = event.parent().or_else(|| current.id());
-        if let Some(parent_id) = parent_id
-            && let Some(span) = ctx.span(parent_id)
-        {
-            for span in span.scope().from_root() {
-                if let Some(other_values) = span.extensions().get::<SerializedRecordValues>() {
-                    values.extend((*other_values).clone());
-                }
-            }
-        }
-
-        // Record event fields
-        event.record(&mut RecordVisitor::new(&mut values));
+        let mut values = collect_event_values(event, &ctx);
 
         // `_type` is a rich-JSON marker normally hidden from console output,
         // but for audit events it is the event-type discriminator (e.g.
