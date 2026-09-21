@@ -116,6 +116,7 @@ impl UserFacingReason for WarpgateError {
             | Self::RateLimiterInvalidQuota(_)
             | Self::ExternalHostUnknown
             | Self::NoHostInUrl
+            | Self::SecretBackend(_)
             | Self::SessionEnd => self.to_string(),
 
             Self::Sso(e) => e.user_facing_reason(),
