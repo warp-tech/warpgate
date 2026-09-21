@@ -241,7 +241,11 @@
     async function disconnect() {
         ws?.close()
         if (sessionId) {
-            await api.deleteWebSshSession({ sessionId })
+            try {
+                await api.deleteWebSshSession({ sessionId })
+            } catch {
+                // A session that is already gone must not stop us closing the window
+            }
         }
         window.close()
     }
