@@ -1,7 +1,7 @@
 /**
  * Admin shell — sidebar, top bar, breadcrumbs and the command palette.
  *
- * Not mounted by the app yet; Phase 4 wires it in behind VITE_NEW_UI.
+ * Mounted by admin/AppNew.svelte.
  */
 
 export { default as AppShell } from './AppShell.svelte'

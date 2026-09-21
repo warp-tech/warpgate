@@ -5,6 +5,10 @@
 # rebuild — the one you will run dozens of times — is a single short word.
 #
 # Usage:  docker compose -f docker/docker-compose.dev.yml run --rm dev <task>
+#
+# For simply running Warpgate, `docker compose up` from the repository root is
+# the whole story. This environment exists for the case that one is bad at:
+# rebuilding the frontend over and over without rebuilding an image.
 
 set -euo pipefail
 
@@ -31,24 +35,25 @@ need_api_clients() {
 }
 
 build_ui() {
-    local flag="$1"
     need_deps
     need_api_clients
-    echo "--- building frontend with VITE_NEW_UI=${flag} ---"
-    ( cd warpgate-web && VITE_NEW_UI="${flag}" npm run build )
+    echo "--- building frontend ---"
+    ( cd warpgate-web && npm run build )
     echo "--- done. Refresh the browser; no restart needed. ---"
 }
 
 case "${1:-serve}" in
-    # --- the two you will use constantly ---------------------------------
-    ui-new)   build_ui true ;;
-    ui-old)   build_ui false ;;
+    # --- the one you will use constantly ---------------------------------
+    # `ui-new` and `ui-old` used to select between two frontends. There is one
+    # now, and `ui` is it; the old names are kept as aliases so any muscle
+    # memory or note still works.
+    ui|ui-new|ui-old)   build_ui ;;
 
     # --- one-time -------------------------------------------------------
     bootstrap)
         need_deps
         need_api_clients
-        build_ui "${VITE_NEW_UI:-true}"
+        build_ui
         echo "--- building warpgate (debug, first run is slow) ---"
         cargo build --features "$FEATURES"
         if [ ! -f /data/warpgate.yaml ]; then

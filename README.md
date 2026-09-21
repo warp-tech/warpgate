@@ -45,6 +45,34 @@ Warpgate is a smart & fully transparent SSH, HTTPS, Kubernetes, MySQL, PostgreSQ
 </p>
 
 
+## Running this fork
+
+```bash
+docker compose up
+```
+
+That is the whole thing. It builds the image from this working tree, runs
+first-time setup if `./data` has no config yet, and starts the gateway — no
+host toolchain, no build arguments, no separate setup step.
+
+| | |
+|---|---|
+| Admin UI | <https://localhost:8888/@warpgate/admin> |
+| Portal | <https://localhost:8888/@warpgate> |
+| SSH | `localhost:2222` |
+| MySQL | `localhost:33306` |
+
+The TLS certificate is self-signed on first run, so the browser warns once.
+
+On first run an admin password is generated and **printed to the log** — copy
+it, it is stored only as a hash. To pick your own, or to deploy somewhere that
+is not your laptop, see [`.env.example`](.env.example): `WARPGATE_EXTERNAL_HOST`
+has to match the address users actually reach, because it is baked into the
+URLs Warpgate generates.
+
+For reviewing UI changes, [`docker/docker-compose.dev.yml`](docker/docker-compose.dev.yml)
+rebuilds the frontend in seconds instead of rebuilding the image.
+
 ## Getting started & downloads
 
 * See the [Getting started](https://warpgate.null.page/getting-started/) docs page (or [Getting started on Docker](https://warpgate.null.page/getting-started-on-docker/)).

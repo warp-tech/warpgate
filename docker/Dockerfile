@@ -21,26 +21,7 @@ ENV SOURCE_DATE_EPOCH=0
 
 WORKDIR /opt/warpgate
 
-# Which frontend to build.
-#
-# The app tests `import.meta.env.VITE_NEW_UI === 'true'` in admin/index.ts and
-# gateway/index.ts, so ONLY the exact string "true" selects the redesigned UI.
-# A value of `1` would silently build the old one, which is a bad way to lose
-# twenty minutes, so the common truthy spellings are normalised here and the
-# resolved value is echoed into the build log.
-#
-# Vite substitutes this at build time and Rollup drops the unused shell, so the
-# image contains one UI, not both.
-ARG VITE_NEW_UI=false
-
-RUN case "${VITE_NEW_UI,,}" in \
-      1|true|yes|on)  VITE_NEW_UI=true ;; \
-      0|false|no|off|"") VITE_NEW_UI=false ;; \
-      *) echo "VITE_NEW_UI: unrecognised value '${VITE_NEW_UI}'" >&2; exit 1 ;; \
-    esac \
-    && export VITE_NEW_UI \
-    && echo "=== building frontend with VITE_NEW_UI=${VITE_NEW_UI} ===" \
-    && just npm ci \
+RUN just npm ci \
     && just openapi \
     && just npm run build \
     && cargo build --features mysql,postgres,rdp-openssl-tls --release
@@ -48,12 +29,6 @@ RUN case "${VITE_NEW_UI,,}" in \
 FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
 LABEL maintainer=heywoodlh
 ARG USER_ID=1000
-
-# Re-declared: an ARG from an earlier stage is not in scope here. Recorded as a
-# label so `docker inspect` answers "which UI is in this image?" — the two
-# images are otherwise indistinguishable from the outside.
-ARG VITE_NEW_UI=false
-LABEL org.warpgate.new-ui="${VITE_NEW_UI}"
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN <<EOF

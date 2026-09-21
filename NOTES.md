@@ -1549,3 +1549,72 @@ either configuration nobody needs or a feature whose wire was cut, and the two
 are indistinguishable from the current tree. `git log -S` on the dead symbol
 is what tells them apart, and it costs one command. I nearly deleted a feature
 to make an audit come out clean.
+
+## `docker compose up`, and the last of the two-UI scaffolding
+
+Two requests, one underlying cause: the Docker setup still described a world
+with two frontends behind a flag, and none of its entry points was a bare
+`docker compose up`.
+
+### What was actually still "old UI"
+
+`docker/docker-compose.yml` pulled `ghcr.io/warp-tech/warpgate` — **the
+published upstream image, which contains the old UI**. So the most obvious
+command in the repo, `docker compose -f docker/docker-compose.yml up`, ran
+exactly the thing this fork replaced. That is the old UI component worth
+removing; deleted, superseded by the root `compose.yaml`.
+
+`VITE_NEW_UI` was worse than inert. `admin/index.ts` and `gateway/index.ts`
+read no flag any more, so the ARG selected nothing — but its default was
+`false`, which meant every image built without an explicit build arg was
+stamped `org.warpgate.new-ui="false"` while containing the new UI. A label that
+answers the question **wrongly** is worse than no label. Removed from the
+Dockerfile along with the value-normalisation block, and from
+`dev-entrypoint.sh`, where `ui-new` / `ui-old` collapse into one `ui` task
+(both old names kept as aliases so existing notes still work).
+
+`docker-compose.build.yml` existed only to layer a build onto the published
+image and pick a UI. Both reasons are gone; deleted.
+
+Four source docblocks still said "behind VITE_NEW_UI", and two of them were not
+merely dated but false: `shell/AppShell.svelte` and `shell/index.ts` both
+claimed the shell was "not wired into the app yet" while
+`admin/AppNew.svelte:222` renders it around every admin route.
+
+### One command
+
+`compose.yaml` at the repository root, because that is where `docker compose`
+looks with no `-f`. It builds from the working tree with `context: .`, which is
+what `docker/Dockerfile` needs (`COPY . /opt/warpgate` plus `COPY .git/`) and
+what `.github/workflows/docker.yml` already uses.
+
+The interesting part is first-run setup. The image's ENTRYPOINT is `warpgate`
+itself, so a compose `command:` can only pass it arguments — it cannot express
+"set up first, but only once". Rather than add a wrapper script to the
+production image, which upstream does not have and which would make this fork's
+image differ from the published one, the entrypoint is overridden with a shell
+that runs `unattended-setup` when `/data/warpgate.yaml` is absent and then
+`exec warpgate run`.
+
+**The admin password is generated, not defaulted.** A known password in a
+compose file is fine right up until someone runs it on a reachable host, and
+this is a gateway to other machines — so if `WARPGATE_ADMIN_PASSWORD` is unset,
+24 random characters are drawn from `/dev/urandom` and printed once. Setting it
+in `.env` still works; `.env` is already gitignored.
+
+`WARPGATE_EXTERNAL_HOST` is exposed for the same reason the deployment at
+10.13.14.56 would otherwise be subtly wrong: it is baked into the URLs Warpgate
+generates for HTTP targets and tickets, so a gateway set up as `localhost` and
+reached at an IP hands out links pointing back at the visitor's own machine.
+
+### The `$$` that had to be checked rather than assumed
+
+Compose interpolates `$VAR` before the container sees it, so the entrypoint
+script escapes every shell variable as `$$VAR`. `docker compose config` prints
+those back as `$$` too, which proves nothing either way — its output is meant
+to be re-consumable, so a literal `$` must be re-escaped on the way out.
+
+Settled with a two-line throwaway compose file: `$HOME` rendered as
+`C:\Users\AA3777371` (substituted by Compose), `$$HOME` rendered as `$$HOME`
+(preserved as an escape). So the container receives a literal `$`, which is
+what the script needs.

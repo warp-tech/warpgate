@@ -1,7 +1,11 @@
 # Review environment: run Warpgate from source with no host toolchain.
 #
-# Stands alone — do NOT combine it with docker-compose.yml, which describes the
-# published image and a different service.
+# For just RUNNING Warpgate, use `docker compose up` from the repository root;
+# compose.yaml there builds a release image and needs no arguments. This file
+# is for the thing that is bad at: rebuilding the frontend over and over
+# without rebuilding an image.
+#
+# Stands alone — do not combine it with the root compose.yaml.
 #
 #   docker compose -f docker/docker-compose.dev.yml build       # once
 #   docker compose -f docker/docker-compose.dev.yml run --rm dev bootstrap
@@ -10,7 +14,7 @@
 # After that, rebuilding the frontend is a seconds-long operation that needs no
 # image rebuild and no container restart:
 #
-#   docker compose -f docker/docker-compose.dev.yml run --rm dev ui-new
+#   docker compose -f docker/docker-compose.dev.yml run --rm dev ui
 #
 # ...then refresh the browser. See the note in Dockerfile.dev for why that
 # works (debug rust-embed reads dist from disk per request).

@@ -1,0 +1,121 @@
+# Warpgate — one command, from a clean checkout:
+#
+#     docker compose up
+#
+# That builds the image from this working tree, runs first-time setup if there
+# is no config yet, and starts the gateway. Nothing else is required: no host
+# toolchain, no -f flags, no build args, no separate `setup` step.
+#
+#   admin UI   https://localhost:8888/@warpgate/admin
+#   portal     https://localhost:8888/@warpgate
+#   SSH        localhost:2222
+#   MySQL      localhost:33306
+#
+# The certificate is self-signed on first run, so the browser will warn once.
+#
+# ── First run ────────────────────────────────────────────────────────────────
+# If WARPGATE_ADMIN_PASSWORD is not set, a random one is generated and printed
+# to the log. It is not stored in plaintext anywhere, so copy it when you see
+# it. To choose your own instead, put it in a .env file beside this one — see
+# .env.example.
+#
+# Config and state live in ./data. Delete that directory to start over; keep it
+# and `docker compose up` will skip setup and just run.
+#
+# ── Deploying somewhere other than your laptop ───────────────────────────────
+# Set WARPGATE_EXTERNAL_HOST to the address users will reach, because it is
+# baked into the URLs Warpgate hands out for HTTP targets and tickets. A
+# gateway set up as `localhost` and then reached at 10.13.14.56 will show links
+# that point back at the visitor's own machine.
+#
+#     WARPGATE_EXTERNAL_HOST=10.13.14.56 docker compose up -d
+#
+# It is read only during first-time setup; afterwards it lives in
+# data/warpgate.yaml and this variable is ignored.
+#
+# ── Reviewing UI changes ─────────────────────────────────────────────────────
+# This file does a release build, so a Svelte edit means rebuilding the image.
+# For screen-by-screen review use docker/docker-compose.dev.yml instead, where
+# a frontend rebuild takes seconds and needs no restart.
+
+name: warpgate
+
+services:
+    warpgate:
+        build:
+            context: .
+            dockerfile: docker/Dockerfile
+        image: warpgate:local
+        ports:
+            - '8888:8888'
+            - '2222:2222'
+            - '33306:33306'
+        volumes:
+            - ./data:/data
+        environment:
+            # Baked into generated URLs at setup time. See the note above.
+            WARPGATE_EXTERNAL_HOST: ${WARPGATE_EXTERNAL_HOST:-localhost}
+            # Empty means "generate one and print it".
+            WARPGATE_ADMIN_PASSWORD: ${WARPGATE_ADMIN_PASSWORD:-}
+        stdin_open: true
+        tty: true
+        restart: unless-stopped
+
+        # The image's entrypoint is `warpgate` itself, so `command:` can only
+        # pass it arguments — it cannot express "set up first, but only once".
+        # Overriding the entrypoint with a shell keeps that logic here instead
+        # of adding a wrapper script to the production image, which upstream
+        # does not have and which would then differ from the published one.
+        #
+        # `$$` is an escaped `$`: a single one would be substituted by Compose
+        # before the container ever sees it.
+        entrypoint:
+            - /bin/sh
+            - -c
+            - |
+                set -e
+
+                # Docker creates a missing bind-mount source as root, while
+                # this image runs as uid 1000. On Docker Desktop the mount
+                # layer hides that; on a Linux host it does not, and the
+                # failure you get otherwise is a permission error from deep
+                # inside setup. Say the actual fix instead.
+                if ! touch /data/.writable 2>/dev/null; then
+                    echo "ERROR: /data is not writable by uid $$(id -u)." >&2
+                    echo "  On the host:  sudo chown -R $$(id -u):$$(id -g) ./data" >&2
+                    echo "  Or rebuild for your uid:" >&2
+                    echo "    docker compose build --build-arg USER_ID=\$$(id -u)" >&2
+                    exit 1
+                fi
+                rm -f /data/.writable
+
+                if [ ! -f /data/warpgate.yaml ]; then
+                    if [ -z "$$WARPGATE_ADMIN_PASSWORD" ]; then
+                        # Generated rather than defaulted. A known password
+                        # baked into a compose file is fine right up until the
+                        # moment someone runs this on a reachable host, and
+                        # this is a gateway to other machines.
+                        WARPGATE_ADMIN_PASSWORD=$$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24)
+                        export WARPGATE_ADMIN_PASSWORD
+                        echo
+                        echo "=============================================="
+                        echo "  First run. Admin credentials:"
+                        echo
+                        echo "    username: admin"
+                        echo "    password: $$WARPGATE_ADMIN_PASSWORD"
+                        echo
+                        echo "  Stored only as a hash. Copy it now."
+                        echo "=============================================="
+                        echo
+                    fi
+
+                    warpgate unattended-setup \
+                        --data-path /data \
+                        --http-port 8888 \
+                        --ssh-port 2222 \
+                        --mysql-port 33306 \
+                        --record-sessions \
+                        --external-host "$$WARPGATE_EXTERNAL_HOST"
+                fi
+
+                exec warpgate run

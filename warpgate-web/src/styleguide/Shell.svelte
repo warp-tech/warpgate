@@ -139,8 +139,9 @@
 <section>
     <h2>Shell</h2>
     <p class="note">
-        Sidebar, top bar, breadcrumbs and command palette. Not wired into the
-        app — Phase 4 mounts it behind <code>VITE_NEW_UI</code>.
+        Sidebar, top bar, breadcrumbs and command palette. This is the same
+        component the admin UI mounts, rendered here against a fake permission
+        set so every gating rule can be exercised without an account.
     </p>
 
     <p class="label">Permission persona — everything below re-gates live</p>

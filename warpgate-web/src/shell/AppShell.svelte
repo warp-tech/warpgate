@@ -3,8 +3,7 @@
     /**
      * Admin shell: sidebar + top bar + content canvas + command palette.
      *
-     * Not wired into the app yet. Phase 4 mounts it behind VITE_NEW_UI so the
-     * existing shell keeps building until the last screen lands.
+     * Mounted by admin/AppNew.svelte, which wraps every admin route in it.
      *
      * The content canvas is capped at 1600px and padded 24px, per DESIGN.md.
      */

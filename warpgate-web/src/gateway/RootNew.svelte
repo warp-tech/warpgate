@@ -1,11 +1,10 @@
 <script lang="ts">
     /**
-     * Portal router for the redesigned UI, behind VITE_NEW_UI.
+     * Portal router.
      *
-     * Identical to Root.svelte except that the catch-all route mounts
-     * AppNew rather than App. The in-browser client routes are deliberately
-     * the same components: WebSsh and WebDesktop are chrome-only migrations
-     * scheduled with the client work, and their internals are out of scope.
+     * The catch-all route mounts AppNew, the portal shell; the in-browser
+     * client routes sit outside it because WebSsh and WebDesktop take over the
+     * whole viewport and render their own chrome.
      */
     import Router, { type WrappedComponent } from 'svelte-spa-router'
     import wrap from 'svelte-spa-router/wrap'
