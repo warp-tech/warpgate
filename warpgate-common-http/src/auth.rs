@@ -266,11 +266,6 @@ impl RequestAuthorization {
     }
 }
 
-/// Check if a host is localhost or 127.x.x.x (for development/testing scenarios)
-pub fn is_localhost_host(host: &str) -> bool {
-    host == "localhost" || host == "127.0.0.1" || host.starts_with("127.")
-}
-
 #[cfg(test)]
 mod tests {
     use uuid::Uuid;
