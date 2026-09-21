@@ -5,8 +5,8 @@
  * redesigned UI. See design/DESIGN.md for the system these implement and
  * design/IMPLEMENTATION-NOTES.md for where they deviate from it.
  *
- * Everything is prefixed `--wg-` rather than `--bs-`. Two reasons: Bootstrap
- * still owns `--bs-*` until the migration finishes, and src/embed is injected
+ * Everything is prefixed `--wg-` rather than `--bs-`. Bootstrap owned
+ * `--bs-*` while the two coexisted, and src/embed is injected
  * into arbitrary proxied HTTP targets, where a generic custom property name
  * could collide with the proxied app's own.
  *

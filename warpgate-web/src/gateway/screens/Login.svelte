@@ -493,7 +493,7 @@
 
     h1 {
         margin: 0 0 var(--wg-space-xl);
-        font: var(--wg-text-display-sm, var(--wg-text-headline-lg));
+        font: var(--wg-text-headline-lg);
     }
 
     .otp-form {

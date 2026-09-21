@@ -133,6 +133,6 @@
 
     h2 {
         margin: 0 0 var(--wg-space-md);
-        font: var(--wg-text-headline-sm, var(--wg-text-headline-md));
+        font: var(--wg-text-headline-md);
     }
 </style>

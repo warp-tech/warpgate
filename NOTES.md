@@ -1325,3 +1325,70 @@ None are Bootstrap. They split three ways:
   `hostkey-lead`, `probe-label`, `sg-type`, `sg-spacing` and the four
   `a-callout-*`. Fixed separately; a compatibility stylesheet is the wrong
   place for them.
+
+## …and sixteen dangling `var()` references, which a class checker cannot see
+
+Found immediately after, while reading `HelpText.svelte` for an unrelated
+reason. The orphaned-class audit asks about **classes**. Deleting Bootstrap
+also removed its **custom properties**, and a dangling `var()` is invisible to
+a class-based check, to the compiler, and to `svelte-check`.
+
+CSS makes this worse than a missing class. An undefined custom property in a
+`var()` with no fallback is **invalid at computed-value time**: the whole
+declaration is discarded and the property resolves to inherit (inherited
+properties) or initial (everything else). The failure is not "no style", it is
+"a different style", and nothing reports it.
+
+### Ten `--bs-*` references, in four files
+
+| site | what it did |
+|---|---|
+| `StickyActionBar` | `background: var(--bs-body-bg)` → **transparent**. A sticky bar that content scrolls under had no background: page text showed through the save bar on Parameters. `border-top` was dropped entirely. |
+| `LogViewer` header | `var(--bs-body-bg, #fff)` → the fallback fired, giving a **white bar in the dark theme**. Its separator was `rgba(0,0,0,.12)` — black on dark, invisible. |
+| `LogViewer` auth-failed rows | Bootstrap's danger palette via fallback hex; now `--wg-error` / `--wg-error-container`, with `--wg-on-error-container` for the text so the pairing carries its own contrast. |
+| `HelpText` | `color` → inherit, so help text rendered at full body colour; the `border-left` shorthand was dropped, leaving the `border-left-style: dotted` on the next line to draw a 3px rule in the current colour. |
+| `DesktopRecordingPlayer` | `var(--bs-font-monospace, monospace)` — harmless, the fallback fired. |
+
+Plus two dead `:global(.spinner-border)` rules. **sveltestrap's `Spinner`
+emitted that class; `ui/Spinner` does not.** Replacing the component silently
+un-centred both recording players' loading spinners, because the rule that
+positioned them stopped matching. A real `.loading` element now carries the
+same absolute centring.
+
+### Six references to tokens that never existed
+
+`--wg-text-headline-sm` (5 files) and `--wg-text-display-sm` (1) are mine, and
+are defined nowhere. DESIGN.md's type scale has headline-lg, headline-lg-mobile
+and headline-md, then goes to body — there is no headline-sm and no display
+step at all.
+
+Every site already carried a fallback, so every site already rendered the
+fallback; the references were an elaborate way of writing it. **Adding the two
+tokens would have been inventing a step the design system deliberately does not
+have**, so they are collapsed to what they already rendered instead: no visual
+change, six fewer phantom tokens. It is worth noting they were not even
+consistent — four fell back to `headline-md`, one to `body-lg`, one to
+`headline-lg`.
+
+### The checker was wrong once more, in the same way
+
+Its first run reported `--marker`, `--size` and `--wg-stat-ink` as broken. All
+three are set from the markup, as `style="--size: {n}px"` or the
+`style:--name={…}` directive, and all three work. Scanning only `<style>`
+blocks for definitions is the same scoping mistake as before, one namespace
+over. Fixed; the audit now reports **0 dangling `var()`**.
+
+### Why this survived a migration, a deletion commit and a clean svelte-check
+
+Removing a dependency breaks **references**, not **imports**, and references
+live in four namespaces:
+
+1. class names — `svelte-check` says nothing; caught by the scoped orphan audit
+2. custom properties — silent, and *changes* style rather than removing it;
+   now caught by the same tool
+3. class names a deleted component used to *emit* — `.spinner-border`; silent,
+   and only findable by reading the rules that target them
+4. SCSS variables — the one that is safe: sass errors on an undefined `$var`,
+   so a green build already proves there are none
+
+Three of the four fail silently. Bundle unchanged at 1719.2 KB / 705.3 gz.

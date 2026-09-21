@@ -876,12 +876,12 @@
         position: sticky;
         top: 0;
         z-index: 1;
-        background: var(--bs-body-bg, #fff);
+        background: var(--wg-surface);
         font-family: var(--wg-font-mono);
         font-size: 0.75rem;
         font-weight: 600;
         padding: 0.25rem 0;
-        border-bottom: 2px solid rgba(0, 0, 0, 0.12);
+        border-bottom: 2px solid var(--wg-border-strong);
         white-space: nowrap;
     }
 
@@ -940,13 +940,13 @@
 
             &.auth-failed {
                 .event-label {
-                    color: var(--bs-danger-text-emphasis, #dc3545);
+                    color: var(--wg-error);
                 }
 
                 .auth-failed-reason {
-                    background: rgba(var(--bs-danger-rgb, 220, 53, 69), 0.16);
-                    border: 1px solid rgba(var(--bs-danger-rgb, 220, 53, 69), 0.34);
-                    color: var(--bs-danger-text-emphasis, #dc3545);
+                    background: var(--wg-error-container);
+                    border: var(--wg-border-width) solid var(--wg-error);
+                    color: var(--wg-on-error-container);
                 }
             }
         }

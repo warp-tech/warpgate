@@ -471,7 +471,7 @@
 
     h2 {
         margin: 0;
-        font: var(--wg-text-headline-sm, var(--wg-text-headline-md));
+        font: var(--wg-text-headline-md);
     }
 
     .creds {

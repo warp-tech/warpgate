@@ -328,7 +328,9 @@
     style="background: {theme.background}"
 >
     {#if loading}
-        <Spinner size={24} label="Loading recording" />
+        <div class="loading">
+            <Spinner size={24} label="Loading recording" />
+        </div>
     {/if}
 
     {#if !loading && $mode === 'paused'}
@@ -398,7 +400,10 @@
         background: none;
     }
 
-    :global(.spinner-border), .pause-overlay {
+    /* .loading was :global(.spinner-border): sveltestrap's Spinner emitted
+       that class, ui/Spinner does not, and the rule had stopped matching. */
+    .loading,
+    .pause-overlay {
         appearance: none;
         -webkit-appearance: none;
         background: none;

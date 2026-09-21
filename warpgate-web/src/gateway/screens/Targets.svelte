@@ -595,7 +595,7 @@
     }
 
     .card-name {
-        font: var(--wg-text-headline-sm, var(--wg-text-body-lg));
+        font: var(--wg-text-body-lg);
         color: var(--wg-text);
         text-decoration: none;
         overflow-wrap: anywhere;

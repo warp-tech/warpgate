@@ -16,12 +16,10 @@
 <style>
     small {
         display: block;
-        color: var(--bs-secondary-color);
+        color: var(--wg-text-muted);
         line-height: 1.2;
-        margin: 0.5rem 0 1.5rem 0.5rem;
-        padding-left: 0.5rem;
-
-        border-left: 2px dashed rgba(var(--bs-secondary-color-rgb), 30%);
-        border-left-style: dotted;
+        margin: var(--wg-space-sm) 0 var(--wg-space-xl) var(--wg-space-sm);
+        padding-left: var(--wg-space-sm);
+        border-left: 2px dotted var(--wg-border-strong);
     }
 </style>
