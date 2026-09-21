@@ -110,7 +110,9 @@
             {#if tickets.length}
                 <div class="list-group list-group-flush mb-4">
                     {#each tickets as ticket (ticket.id)}
-                        <div class="list-group-item d-flex align-items-center gap-3">
+                        <div
+                            class="list-group-item d-flex align-items-center gap-3"
+                        >
                             <div>
                                 <strong>
                                     Access to {ticket.target} as

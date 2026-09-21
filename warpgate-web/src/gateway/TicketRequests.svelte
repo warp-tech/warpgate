@@ -343,7 +343,9 @@
         {#if requests.length}
             <div class="list-group list-group-flush mb-4">
                 {#each visibleRequests as request (request.id)}
-                    <div class="list-group-item d-flex align-items-center gap-3">
+                    <div
+                        class="list-group-item d-flex align-items-center gap-3"
+                    >
                         <span
                             class={statusColor(request.status)}
                             title={request.status}
@@ -393,7 +395,9 @@
         {#if tickets.length}
             <div class="list-group list-group-flush">
                 {#each tickets as ticket (ticket.id)}
-                    <div class="list-group-item d-flex align-items-center gap-3">
+                    <div
+                        class="list-group-item d-flex align-items-center gap-3"
+                    >
                         <Fa icon={faTicket} fw class="text-success" />
                         <div class="me-auto">
                             <strong>{ticket.targetName}</strong>
