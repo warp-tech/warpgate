@@ -176,14 +176,9 @@ impl DatabaseConfigProvider {
             if ssh_key.is_empty() {
                 continue;
             }
-            match russh::keys::PublicKey::from_openssh(ssh_key) {
-                Ok(mut key) => {
-                    key.set_comment("");
-                    desired.insert(
-                        key.to_openssh()
-                            .map_err(russh::keys::Error::from)?
-                            .to_string(),
-                    );
+            match UserPublicKeyCredential::parse_openssh(ssh_key) {
+                Ok(credential) => {
+                    desired.insert(credential.key.expose_secret().clone());
                 }
                 Err(_) => warn!("Invalid SSH key from LDAP: {}", ssh_key),
             }

@@ -59,6 +59,23 @@ pub struct UserPublicKeyCredential {
     pub key: Secret<String>,
 }
 
+impl UserPublicKeyCredential {
+    /// Parse an OpenSSH public key into its stored form, dropping the comment.
+    ///
+    /// SSH authentication compares the stored string verbatim against a freshly serialized
+    /// `{kind} {base64}`, so the comment that `~/.ssh/id_*.pub` carries has to be stripped here
+    /// or the key can never match. Every path that writes a public-key credential goes through
+    /// this, which is also what makes two keys differing only by comment the same key.
+    pub fn parse_openssh(openssh: &str) -> Result<Self, crate::WarpgateError> {
+        let mut key = russh::keys::PublicKey::from_openssh(openssh.trim())
+            .map_err(russh::keys::Error::from)?;
+        key.set_comment("");
+        Ok(Self {
+            key: key.to_openssh().map_err(russh::keys::Error::from)?.into(),
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Object)]
 pub struct UserCertificateCredential {
     pub certificate_pem: Secret<String>,
@@ -1023,5 +1040,48 @@ mod tests {
         );
         assert_eq!(name("https://warp.example.com:8888"), None);
         assert_eq!(name("warp.example.com/gateway"), None);
+    }
+}
+
+#[cfg(test)]
+mod public_key_credential_tests {
+    use super::UserPublicKeyCredential;
+
+    const KIND: &str = "ssh-ed25519";
+    const BASE64: &str = "AAAAC3NzaC1lZDI1NTE5AAAAIDZmiL6ZivmcgNSNKRkxSF2E1X2Hpo9CL1mIyo3BzV97";
+
+    fn stored(openssh: &str) -> String {
+        UserPublicKeyCredential::parse_openssh(openssh)
+            .expect("valid key")
+            .key
+            .expose_secret()
+            .clone()
+    }
+
+    /// SSH auth looks the key up by exact string equality against a freshly serialized
+    /// `{kind} {base64}` (see `config_providers::db`), so whatever is stored has to equal that
+    /// form. A key pasted straight out of `~/.ssh/id_ed25519.pub` carries a trailing comment,
+    /// which is what used to make portal-added keys unusable.
+    #[test]
+    fn the_stored_form_is_what_auth_compares_against() {
+        let expected = format!("{KIND} {BASE64}");
+        assert_eq!(stored(&format!("{KIND} {BASE64} eugene@laptop")), expected);
+        assert_eq!(stored(&format!("{KIND} {BASE64}")), expected);
+        assert_eq!(stored(&format!("  {KIND} {BASE64} a@b\n")), expected);
+    }
+
+    /// Two keys differing only by their comment are the same key.
+    #[test]
+    fn the_comment_does_not_make_a_different_key() {
+        assert_eq!(
+            stored(&format!("{KIND} {BASE64} one@host")),
+            stored(&format!("{KIND} {BASE64} another@host")),
+        );
+    }
+
+    #[test]
+    fn a_non_key_is_refused() {
+        assert!(UserPublicKeyCredential::parse_openssh("not a key").is_err());
+        assert!(UserPublicKeyCredential::parse_openssh("").is_err());
     }
 }

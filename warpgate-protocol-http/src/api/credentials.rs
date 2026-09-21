@@ -12,7 +12,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::{
     PasswordPolicy, PasswordPolicyViolation, User, UserPasswordCredential,
-    UserRequireCredentialsPolicy, WarpgateError, validate_password,
+    UserPublicKeyCredential, UserRequireCredentialsPolicy, WarpgateError, validate_password,
 };
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
@@ -403,7 +403,9 @@ impl Api {
             date_added: Set(Some(OffsetDateTime::now_utc())),
             last_used: Set(None),
             label: Set(body.label.clone()),
-            openssh_public_key: Set(body.openssh_public_key.clone()),
+            ..PublicKeyCredential::ActiveModel::from(UserPublicKeyCredential::parse_openssh(
+                &body.openssh_public_key,
+            )?)
         }
         .insert(db)
         .await
