@@ -19,6 +19,7 @@ use warpgate_db_entities::SessionApprovalRequest::{
 use warpgate_db_migrations::migrate_database;
 
 use super::*;
+use crate::test_fixtures::{http_target, test_user};
 
 async fn migrated_db() -> DatabaseConnection {
     set_config_migration_values(ConfigMigrationValues::default());
@@ -1298,7 +1299,7 @@ mod delivery {
     use warpgate_common::auth::{
         AuthResult, CredentialKind, CredentialPolicy, CredentialPolicyResponse,
     };
-    use warpgate_common::{GlobalParams, Secret, User, WarpgateConfig, WarpgateConfigStore};
+    use warpgate_common::{GlobalParams, User, WarpgateConfig, WarpgateConfigStore};
 
     use super::*;
     use crate::cluster::Cluster;
@@ -1358,18 +1359,6 @@ mod delivery {
         subject
     }
 
-    fn test_user() -> User {
-        User {
-            id: Uuid::new_v4(),
-            username: "someone".into(),
-            description: String::new(),
-            credential_policy: None,
-            rate_limit_bytes_per_second: None,
-            ldap_server_id: None,
-            allowed_ip_ranges: None,
-        }
-    }
-
     async fn decide(db: &DatabaseConnection, session_id: UserSessionId, target: &str) -> bool {
         record_decision(
             db,
@@ -1406,7 +1395,7 @@ mod delivery {
         let db = migrated_db().await;
         let services = test_services(&db).await;
         let session_id = UserSessionId(Uuid::new_v4());
-        let user = test_user();
+        let user = test_user("someone");
 
         // The question the state has since moved on from, and the current one.
         let node = services.cluster.node_id;
@@ -1487,7 +1476,7 @@ mod delivery {
         let db = migrated_db().await;
         let services = test_services(&db).await;
         let session_id = UserSessionId(Uuid::new_v4());
-        let asked_about = test_user();
+        let asked_about = test_user("someone");
 
         advertise_row_on(
             &db,
@@ -1500,7 +1489,7 @@ mod delivery {
         // The state was since rebuilt for a different user.
         let state_arc = services.auth_state_store.lock().await.create(
             &session_id,
-            &test_user(),
+            &test_user("someone"),
             Protocol::Ssh,
             "a-target",
             Box::new(RequireWebApproval),
@@ -1529,33 +1518,10 @@ mod delivery {
 // --- The polled gate: one row read per request -------------------------------
 
 mod polled_gate {
-    use warpgate_common::{Target, TargetHTTPOptions, TargetOptions, Tls};
 
     use super::delivery::test_services;
     use super::*;
     use crate::Services;
-
-    fn gated_target(name: &str) -> Target {
-        Target {
-            id: Uuid::new_v4(),
-            name: name.into(),
-            description: String::new(),
-            allow_roles: vec![],
-            options: TargetOptions::Http(TargetHTTPOptions {
-                url: "http://target".into(),
-                tls: Tls::default(),
-                headers: Default::default(),
-                external_host: None,
-            }),
-            rate_limit_bytes_per_second: None,
-            group_id: None,
-            ticket_max_duration_seconds: None,
-            ticket_requests_disabled: false,
-            ticket_require_approval: false,
-            require_approval: true,
-            ticket_max_uses: None,
-        }
-    }
 
     fn someone() -> AuthStateUserInfo {
         AuthStateUserInfo {
@@ -1574,7 +1540,7 @@ mod polled_gate {
             .poll_admin_approval(
                 crate::TargetAuthorization::for_test(
                     user_info.clone(),
-                    gated_target(target),
+                    http_target(target, true),
                     Protocol::Http,
                 ),
                 session_id,
@@ -1599,7 +1565,7 @@ mod polled_gate {
         // Spent at authentication: the fixture's 0 is the post-spend state.
         let ticket_id = ticket_with_uses(&db, 0).await;
 
-        let mut target = gated_target("open");
+        let mut target = http_target("open", true);
         target.require_approval = false;
         let gate = services
             .poll_admin_approval(
@@ -1640,7 +1606,7 @@ mod polled_gate {
         let authorization = || {
             crate::TargetAuthorization::for_ticket_session(
                 user_info.clone(),
-                gated_target("prod"),
+                http_target("prod", true),
                 Some(ticket_id),
                 Protocol::Http,
             )
@@ -1860,7 +1826,7 @@ mod polled_gate {
             .require_admin_approval(
                 crate::TargetAuthorization::for_test(
                     user_info.clone(),
-                    gated_target("prod"),
+                    http_target("prod", true),
                     Protocol::Http,
                 ),
                 session_id,

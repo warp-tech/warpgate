@@ -374,6 +374,7 @@ mod tests {
     use warpgate_common::auth::{AuthStateUserInfo, CredentialPolicyResponse};
 
     use super::*;
+    use crate::test_fixtures::test_user;
 
     struct RequireWebApproval;
 
@@ -408,18 +409,6 @@ mod tests {
         )))
     }
 
-    fn test_user() -> User {
-        User {
-            id: Uuid::new_v4(),
-            username: "alice".into(),
-            description: String::new(),
-            credential_policy: None,
-            rate_limit_bytes_per_second: None,
-            ldap_server_id: None,
-            allowed_ip_ranges: None,
-        }
-    }
-
     fn create_for(
         store: &mut AuthStateStore,
         user: &User,
@@ -440,7 +429,7 @@ mod tests {
     #[tokio::test]
     async fn create_keys_auth_state_by_session_id() {
         let mut store = AuthStateStore::without_request_recording();
-        let user = test_user();
+        let user = test_user("alice");
         let session_id = UserSessionId(Uuid::new_v4());
 
         let state = create_for(&mut store, &user, &session_id);
@@ -450,7 +439,7 @@ mod tests {
     #[tokio::test]
     async fn a_new_attempt_supersedes_the_session_s_previous_state() {
         let mut store = AuthStateStore::without_request_recording();
-        let user = test_user();
+        let user = test_user("alice");
         let session_id = UserSessionId(Uuid::new_v4());
 
         let first = create_for(&mut store, &user, &session_id);

@@ -442,31 +442,10 @@ pub async fn validate_ticket(
 mod tests {
     use tokio::sync::broadcast;
     use warpgate_common::auth::CredentialPolicyResponse;
-    use warpgate_common::{TargetHTTPOptions, TargetSSHOptions, Tls, UserSessionId};
+    use warpgate_common::{TargetHTTPOptions, TargetSSHOptions, UserSessionId};
 
     use super::*;
-
-    fn http_target() -> Target {
-        Target {
-            id: Uuid::new_v4(),
-            name: "web".into(),
-            description: String::new(),
-            allow_roles: vec![],
-            options: TargetOptions::Http(TargetHTTPOptions {
-                url: "http://target".into(),
-                tls: Tls::default(),
-                headers: Default::default(),
-                external_host: None,
-            }),
-            rate_limit_bytes_per_second: None,
-            group_id: None,
-            ticket_max_duration_seconds: None,
-            ticket_requests_disabled: false,
-            ticket_require_approval: false,
-            require_approval: false,
-            ticket_max_uses: None,
-        }
-    }
+    use crate::test_fixtures::http_target;
 
     #[test]
     fn specific_narrows_only_matching_kind_and_protocol() {
@@ -475,16 +454,19 @@ mod tests {
             username: "alice".into(),
         };
 
-        let narrowed = TargetAuthorization::for_test(user.clone(), http_target(), Protocol::Http)
-            .narrow::<TargetHTTPOptions>();
+        let narrowed =
+            TargetAuthorization::for_test(user.clone(), http_target("web", false), Protocol::Http)
+                .narrow::<TargetHTTPOptions>();
         assert!(narrowed.is_ok_and(|a| a.options().url == "http://target"));
 
-        let wrong_kind = TargetAuthorization::for_test(user.clone(), http_target(), Protocol::Http)
-            .narrow::<TargetSSHOptions>();
+        let wrong_kind =
+            TargetAuthorization::for_test(user.clone(), http_target("web", false), Protocol::Http)
+                .narrow::<TargetSSHOptions>();
         assert!(wrong_kind.is_err());
 
-        let wrong_protocol = TargetAuthorization::for_test(user, http_target(), Protocol::Ssh)
-            .narrow::<TargetHTTPOptions>();
+        let wrong_protocol =
+            TargetAuthorization::for_test(user, http_target("web", false), Protocol::Ssh)
+                .narrow::<TargetHTTPOptions>();
         assert!(wrong_protocol.is_err());
     }
 
@@ -512,7 +494,7 @@ mod tests {
         warpgate_db_migrations::migrate_database(&db).await.unwrap();
         let login_protection = LoginProtectionService::new(db.clone()).await.unwrap();
 
-        let target = http_target();
+        let target = http_target("web", false);
         let user_id = Uuid::new_v4();
         e::User::ActiveModel {
             id: Set(user_id),

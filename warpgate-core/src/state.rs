@@ -322,38 +322,17 @@ impl UserSessionState {
 #[cfg(all(test, feature = "sqlite"))]
 mod tests {
     use sea_orm::{ColumnTrait, Database, PaginatorTrait, QueryFilter};
-    use warpgate_common::{TargetHTTPOptions, TargetOptions, Tls, UserSessionId};
+    use warpgate_common::UserSessionId;
     use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
     use warpgate_db_migrations::migrate_database;
 
     use super::*;
+    use crate::test_fixtures::http_target;
 
     struct TestHandle;
 
     impl SessionHandle for TestHandle {
         fn close(&mut self) {}
-    }
-
-    fn target() -> Target {
-        Target {
-            id: Uuid::new_v4(),
-            name: "web".into(),
-            description: String::new(),
-            allow_roles: vec![],
-            options: TargetOptions::Http(TargetHTTPOptions {
-                url: "http://target".into(),
-                tls: Tls::default(),
-                headers: Default::default(),
-                external_host: None,
-            }),
-            rate_limit_bytes_per_second: None,
-            group_id: None,
-            ticket_max_duration_seconds: None,
-            ticket_requests_disabled: false,
-            ticket_require_approval: false,
-            require_approval: false,
-            ticket_max_uses: None,
-        }
     }
 
     /// A revoked login must not keep serving: an administrative close ends the
@@ -398,7 +377,7 @@ mod tests {
             .await
             .start_target_session(crate::TargetAuthorization::for_test(
                 user_info,
-                target(),
+                http_target("web", false),
                 Protocol::Http,
             ))
             .await;
@@ -435,7 +414,7 @@ mod tests {
             .await
             .unwrap();
         let parent_id = parent.lock().await.user_session_id();
-        let access_target = target();
+        let access_target = http_target("web", false);
 
         let opening = TargetSession::open_or_lookup(
             &db,
@@ -498,7 +477,7 @@ mod tests {
             .await
             .start_target_session(crate::TargetAuthorization::for_test(
                 user_info,
-                target(),
+                http_target("web", false),
                 Protocol::Ssh,
             ))
             .await
@@ -552,8 +531,8 @@ mod tests {
             .await
             .unwrap();
         let parent_id: UserSessionId = parent.lock().await.user_session_id();
-        let other_target = target();
-        let target = target();
+        let other_target = http_target("web", false);
+        let target = http_target("web", false);
 
         let first_id = parent
             .lock()
@@ -638,7 +617,7 @@ mod tests {
             username: "alice".into(),
         };
         let parent_id: UserSessionId = parent.lock().await.user_session_id();
-        let target = target();
+        let target = http_target("web", false);
 
         let first_id = parent
             .lock()
@@ -739,7 +718,7 @@ mod tests {
             },
         )
         .await;
-        let target = target();
+        let target = http_target("web", false);
         let first_authorization =
             crate::TargetAuthorization::for_test(user_info.clone(), target.clone(), Protocol::Http);
         let second_authorization =
@@ -845,7 +824,7 @@ mod tests {
             .await
             .unwrap();
         let parent_id = parent.lock().await.user_session_id();
-        let target = target();
+        let target = http_target("web", false);
         let wrong_user = AuthStateUserInfo {
             id: Uuid::new_v4(),
             username: "mallory".into(),

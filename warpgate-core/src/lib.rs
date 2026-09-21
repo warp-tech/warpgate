@@ -27,6 +27,9 @@ pub use credential_encryption::*;
 pub use data::*;
 pub use db_auth::*;
 pub use listener_status::*;
+#[cfg(test)]
+mod test_fixtures;
+
 pub use protocols::*;
 pub use services::*;
 pub use state::{SharedSessionHandle, State, UserSessionState, UserSessionStateInit};
