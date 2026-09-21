@@ -116,14 +116,17 @@ impl ProtocolServer for PostgresProtocolServer {
                         .await;
 
                         let span = session.make_logging_span();
+                        // The outcome logs run in the span too: anything logged outside it
+                        // is not attributed to the session. They are synchronous, so they
+                        // enter the span directly rather than nesting another future in it.
                         tokio::select! {
-                            result = session.run().instrument(span) => match result {
+                            result = session.run().instrument(span.clone()) => span.in_scope(|| match result {
                                 Ok(()) => info!("Session ended"),
                                 Err(e) => error!(error=%e, "Session failed"),
-                            },
-                            _ = abort_rx.recv() => {
+                            }),
+                            _ = abort_rx.recv() => span.in_scope(|| {
                                 warn!("Session aborted by admin");
-                            },
+                            }),
                         }
 
                         Ok(())
