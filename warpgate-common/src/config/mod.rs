@@ -1061,7 +1061,7 @@ mod public_key_credential_tests {
     /// SSH auth looks the key up by exact string equality against a freshly serialized
     /// `{kind} {base64}` (see `config_providers::db`), so whatever is stored has to equal that
     /// form. A key pasted straight out of `~/.ssh/id_ed25519.pub` carries a trailing comment,
-    /// which is what used to make portal-added keys unusable.
+    /// so storing it verbatim would yield a credential that can never match.
     #[test]
     fn the_stored_form_is_what_auth_compares_against() {
         let expected = format!("{KIND} {BASE64}");

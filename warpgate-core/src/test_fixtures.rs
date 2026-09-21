@@ -1,7 +1,7 @@
 //! Shared fixtures for this crate's tests.
 //!
-//! `Target` and `User` have a lot of fields that no single test cares about, so every test
-//! module used to carry its own literal and a new required field meant editing all of them.
+//! `Target` and `User` have more fields than any single test cares about, so they are built
+//! here once: a new required field on either is then one edit rather than one per test module.
 
 #![allow(
     dead_code,
