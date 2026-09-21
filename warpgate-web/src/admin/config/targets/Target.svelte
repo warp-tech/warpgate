@@ -24,6 +24,7 @@
     import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
+    import SecretRefInput from 'common/SecretRefInput.svelte'
     import StickyActionBar from 'common/StickyActionBar.svelte'
     import { TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
@@ -38,7 +39,6 @@
     import TargetRdpOptions from './rdp/Options.svelte'
     import TargetSshOptions from './ssh/Options.svelte'
     import TargetVncOptions from './vnc/Options.svelte'
-    import SecretRefInput from 'common/SecretRefInput.svelte'
 
     interface Props {
         params: { id: string }
@@ -245,16 +245,25 @@
                         {#if target.options.kind === 'Ssh'}
                             <TargetSshOptions
                                 id={target.id}
+                                name={target.name}
                                 options={target.options}
                             />
                         {/if}
 
                         {#if target.options.kind === 'Vnc'}
-                            <TargetVncOptions bind:options={target.options} />
+                            <TargetVncOptions
+                                id={target.id}
+                                name={target.name}
+                                bind:options={target.options}
+                            />
                         {/if}
 
                         {#if target.options.kind === 'Rdp'}
-                            <TargetRdpOptions bind:options={target.options} />
+                            <TargetRdpOptions
+                                id={target.id}
+                                name={target.name}
+                                bind:options={target.options}
+                            />
                         {/if}
 
                         {#if target.options.kind === 'Http'}
@@ -345,6 +354,11 @@
                                     bind:value={target.options.auth.password}
                                     inlineLabel="Password"
                                     disabled={!$adminPermissions.targetsEdit}
+                                    intendedUsage={{
+                                        kind: 'Target',
+                                        id: target.id,
+                                        name: target.name,
+                                    }}
                                 />
                             {/if}
 
@@ -402,6 +416,11 @@
                                     bind:value={target.options.auth.token}
                                     inlineLabel="Bearer Token"
                                     disabled={!$adminPermissions.targetsEdit}
+                                    intendedUsage={{
+                                        kind: 'Target',
+                                        id: target.id,
+                                        name: target.name,
+                                    }}
                                 />
                             {/if}
 

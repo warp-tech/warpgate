@@ -3,6 +3,7 @@
         api,
         type SecretBackendSummary,
         type SecretReferenceUsage,
+        type SecretReferenceUsageInstance,
     } from 'admin/lib/api'
 
     let backendsPromise: Promise<SecretBackendSummary[]> | null = null
@@ -20,6 +21,8 @@
         }
         return backendsPromise
     }
+
+    loadSecretBackends()
 
     const REFERENCE_SCHEME = 'secret://'
 
@@ -54,6 +57,7 @@
 </script>
 
 <script lang="ts">
+    import { faKeyboard } from '@fortawesome/free-regular-svg-icons'
     import { faKey } from '@fortawesome/free-solid-svg-icons'
     import {
         Button,
@@ -62,24 +66,31 @@
         ModalBody,
         ModalFooter,
         ModalHeader,
+        Tooltip,
     } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
+    import { dequal } from 'dequal'
     import Fa from 'svelte-fa'
 
     interface Props {
-        value: string
+        // Undefined when the parent's auth block has no value yet, e.g. right after
+        // switching to password auth; treated as empty.
+        value?: string
         disabled?: boolean
         // Whether the reference names one field of the secret (`#key`)
         withKey?: boolean
         // When set, the value may also be entered directly, under this label
         inlineLabel?: string
+
+        intendedUsage?: SecretReferenceUsageInstance
     }
 
     let {
-        value = $bindable(''),
+        value = $bindable(),
         disabled = false,
         withKey = true,
         inlineLabel,
+        intendedUsage,
     }: Props = $props()
 
     // svelte-ignore state_referenced_locally
@@ -93,11 +104,15 @@
     })
 
     function switchMode(toRef: boolean) {
-        refMode = toRef
         value = ''
+        if (toRef) {
+            open()
+        } else {
+            refMode = toRef
+        }
     }
 
-    let current = $derived(parseSecretRef(value))
+    let current = $derived(parseSecretRef(value ?? ''))
     let chosen = $derived(
         isSecretRef(value) && Boolean(current.backend && current.path),
     )
@@ -128,7 +143,9 @@
         Boolean(draftBackend && draftPath && (draftKey || !withKey)),
     )
     let sharedWith = $derived(
-        usage.find(u => u.reference === draft)?.usages ?? [],
+        (usage.find(u => u.reference === draft)?.usages ?? []).filter(
+            u => !dequal(intendedUsage, u),
+        ),
     )
 
     // Usage is per backend; a reply for a backend no longer selected is dropped.
@@ -201,15 +218,16 @@
 
     function save() {
         value = draft
+        refMode = true
         modalOpen = false
     }
 </script>
 
-{#if refMode}
-    <div class="d-flex align-items-center gap-3 mb-3">
+<div class="d-flex align-items-center gap-3 flex-grow-1">
+    {#if refMode}
         <Button
             color="secondary"
-            class="secret-ref-button d-flex align-items-center gap-2"
+            class="secret-ref-button d-flex align-items-center gap-2 mb-3"
             {disabled}
             onclick={open}
         >
@@ -217,18 +235,18 @@
             {label}
         </Button>
         {#if inlineLabel}
+            <Tooltip target="enterDirectlyButton">Enter directly</Tooltip>
             <Button
+                id="enterDirectlyButton"
                 color="link"
-                class="px-0 text-nowrap"
+                class="px-0 text-nowrap mb-3"
                 {disabled}
                 onclick={() => switchMode(false)}
             >
-                Enter directly
+                <Fa icon={faKeyboard} />
             </Button>
         {/if}
-    </div>
-{:else}
-    <div class="d-flex align-items-center gap-3">
+    {:else}
         <FormGroup floating label={inlineLabel ?? ''} class="flex-grow-1">
             <input
                 class="form-control"
@@ -238,16 +256,22 @@
                 bind:value
             >
         </FormGroup>
-        <Button
-            color="link"
-            class="px-0 mb-3 text-nowrap"
-            {disabled}
-            onclick={() => switchMode(true)}
-        >
-            Use secret backend
-        </Button>
-    </div>
-{/if}
+        {#await loadSecretBackends() then backends}
+            {#if backends.length}
+                <Tooltip target="useSecretButton">Use secret backend</Tooltip>
+                <Button
+                    id="useSecretButton"
+                    color="link"
+                    class="px-0 mb-3 text-nowrap"
+                    {disabled}
+                    onclick={() => switchMode(true)}
+                >
+                    <Fa icon={faKey} />
+                </Button>
+            {/if}
+        {/await}
+    {/if}
+</div>
 
 <Modal isOpen={modalOpen} toggle={() => (modalOpen = false)}>
     <ModalHeader>Secret</ModalHeader>

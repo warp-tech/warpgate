@@ -17,10 +17,11 @@
 
     interface Props {
         id: string
+        name: string
         options: TargetOptionsTargetSSHOptions
     }
 
-    let { id, options }: Props = $props()
+    let { id, name, options }: Props = $props()
 
     let hostKeyCheckInvalidated = $state(false)
     let sshTargets = $state<Target[]>([])
@@ -174,11 +175,16 @@
         </a>
     {/if}
     {#if options.auth.kind === 'Password'}
-        <div class="w-100 ms-3">
+        <div class="w-100 ms-3 d-flex align-items-center">
             <SecretRefInput
                 bind:value={options.auth.password}
                 inlineLabel="Password"
                 disabled={!$adminPermissions.targetsEdit}
+                intendedUsage={{
+                    kind: 'Target',
+                    id,
+                    name
+                }}
             />
         </div>
     {/if}

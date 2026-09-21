@@ -72,7 +72,8 @@
             asyncComponent: () => import('./ldap/LdapUserBrowser.svelte'),
         }),
         '/secret-backends': wrap({
-            asyncComponent: () => import('./secret-backends/SecretBackends.svelte') as any,
+            asyncComponent: () =>
+                import('./secret-backends/SecretBackends.svelte') as any,
         }),
         '/target-groups/create': wrap({
             asyncComponent: () =>
@@ -157,17 +158,17 @@
 
         <NavListItem
             class="mb-2"
-            title="LDAP servers"
-            description="Connect to directory services"
-            href="/config/ldap-servers"
+            title="Global parameters"
+            description="Change instance-wide settings"
+            href="/config/parameters"
             small={sidebarMode}
         />
 
         <NavListItem
             class="mb-2"
-            title="Global parameters"
-            description="Change instance-wide settings"
-            href="/config/parameters"
+            title="LDAP servers"
+            description="Connect to directory services"
+            href="/config/ldap-servers"
             small={sidebarMode}
         />
 

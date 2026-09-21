@@ -354,15 +354,24 @@
                                             checked={parameters.sshHostKeySecretRef != null}
                                             on:change={e => parameters.sshHostKeySecretRef = (e.currentTarget as HTMLInputElement).checked ? '' : undefined}
                                         />
-                                        <div>Load host keys from a secret backend</div>
+                                        <div>
+                                            Load host keys from a secret backend
+                                        </div>
                                     </label>
                                     {#if parameters.sshHostKeySecretRef != null}
-                                        <SecretRefInput bind:value={parameters.sshHostKeySecretRef} withKey={false} />
+                                        <SecretRefInput
+                                            bind:value={parameters.sshHostKeySecretRef}
+                                            withKey={false}
+                                        />
+                                        <HelpText>
+                                            The entry's <code>ed25519</code> and
+                                            <code>rsa</code> fields hold the
+                                            private keys in PEM format.
+                                            Otherwise the keys stored in the
+                                            database are used. Takes effect when
+                                            the SSH listener restarts.
+                                        </HelpText>
                                     {/if}
-                                    <HelpText>
-                                        The entry's <code>ed25519</code> and <code>rsa</code> fields hold the private keys in PEM format.
-                                        Otherwise the keys stored in the database are used. Takes effect when the SSH listener restarts.
-                                    </HelpText>
                                 </Subsection>
 
                                 <Subsection title="Target host keys">

@@ -3,45 +3,55 @@
     import {
         api,
         type CheckHealthResponse,
-        type SecretBackendRequest,
         type SecretBackend,
+        type SecretBackendRequest,
     } from 'admin/lib/api'
     import { adminPermissions } from 'admin/lib/store'
+    import EmptyState from 'common/EmptyState.svelte'
     import { stringifyError } from 'common/errors'
-    import InfoBox from 'common/InfoBox.svelte'
+    import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
     import { invalidateSecretBackends } from 'common/SecretRefInput.svelte'
+    import { from, map, type Observable } from 'rxjs'
+    import firstBy from 'thenby'
     import SecretBackendModal from './SecretBackendModal.svelte'
 
     let error: string | undefined = $state()
-    let backends: SecretBackend[] | undefined = $state()
     let health: Record<string, CheckHealthResponse> = $state({})
     let modalOpen = $state(false)
     let editing: SecretBackend | undefined = $state()
+    let gen = $state(0)
 
-    async function load() {
-        backends = await api.getSecretBackends()
-        // Probes run in the background so a slow backend doesn't hold up the page.
-        backends.forEach(backend => checkHealth(backend))
+    function load(): Observable<PaginatedResponse<SecretBackend>> {
+        return from(api.getSecretBackends()).pipe(
+            map(items => {
+                for (const b of items) {
+                    checkHealth(b)
+                }
+                const sorted = items.sort(firstBy(x => x.name))
+                return {
+                    items: sorted,
+                    offset: 0,
+                    total: sorted.length,
+                }
+            }),
+        )
     }
 
     async function checkHealth(backend: SecretBackend) {
         try {
-            health[backend.id] = await api.checkSecretBackendHealth({ id: backend.id })
+            health[backend.id] = await api.checkSecretBackendHealth({
+                id: backend.id,
+            })
         } catch (e) {
             health[backend.id] = { error: await stringifyError(e) }
         }
     }
 
-    load().catch(async e => {
-        error = await stringifyError(e)
-    })
-
-    async function run(action: () => Promise<unknown>) {
+    async function runAndInvalidate(action: () => Promise<unknown>) {
         error = undefined
         try {
             await action()
             invalidateSecretBackends()
-            await load()
         } catch (e) {
             error = await stringifyError(e)
         }
@@ -59,24 +69,30 @@
 
     function save(request: SecretBackendRequest) {
         const backend = editing
-        run(async () => {
+        runAndInvalidate(async () => {
             if (backend) {
-                await api.updateSecretBackend({ id: backend.id, secretBackendRequest: request })
+                await api.updateSecretBackend({
+                    id: backend.id,
+                    secretBackendRequest: request,
+                })
             } else {
                 await api.createSecretBackend({ secretBackendRequest: request })
             }
+            gen++
         })
     }
 
     function remove(backend: SecretBackend) {
-        run(() => api.deleteSecretBackend({ id: backend.id }))
+        runAndInvalidate(() => api.deleteSecretBackend({ id: backend.id }))
     }
 </script>
 
 <div class="page-summary-bar">
     <h1>Secret backends</h1>
     {#if $adminPermissions.configEdit}
-        <Button class="ms-auto" color="primary" onclick={openCreate}>Add</Button>
+        <Button class="ms-auto" color="primary" onclick={openCreate}
+            >Add</Button
+        >
     {/if}
 </div>
 
@@ -84,25 +100,18 @@
     <Alert color="danger">{error}</Alert>
 {/if}
 
-<InfoBox>
-    Target passwords and SSH keys can be a <code>secret://backend/mount/path#field</code> reference,
-    resolved from HashiCorp Vault or OpenBao when a connection is made. The path is the KV v2
-    path without the <code>data/</code> segment.
-</InfoBox>
-
-{#if backends}
-    {#if !backends.length}
-        <p class="text-muted">No secret backends.</p>
-    {/if}
-    <div class="list-group list-group-flush">
-        {#each backends as backend (backend.id)}
+{#key gen}
+    <ItemList {load} showSearch={false}>
+        {#snippet item(backend)}
             {@const status = health[backend.id]}
             <div class="list-group-item px-0">
                 <div class="d-flex align-items-center gap-2">
                     <strong>{backend.name}</strong>
                     <Badge color="secondary">{backend.backendType}</Badge>
                     {#if status?.error}
-                        <Badge color="danger" title={status.error}>Unhealthy</Badge>
+                        <Badge color="danger" title={status.error}
+                            >Unhealthy</Badge
+                        >
                     {:else if status}
                         <Badge color="success">Healthy</Badge>
                     {/if}
@@ -110,9 +119,9 @@
                         class="ms-auto"
                         color="link px-0"
                         onclick={e => {
-                            e.preventDefault()
-                            checkHealth(backend)
-                        }}
+                        e.preventDefault()
+                        checkHealth(backend)
+                    }}
                     >
                         Check health
                     </Button>
@@ -121,9 +130,9 @@
                             class="ms-3"
                             color="link px-0"
                             onclick={e => {
-                                e.preventDefault()
-                                openEdit(backend)
-                            }}
+                            e.preventDefault()
+                            openEdit(backend)
+                        }}
                         >
                             Edit
                         </Button>
@@ -131,9 +140,9 @@
                             class="ms-3"
                             color="link px-0"
                             onclick={e => {
-                                e.preventDefault()
-                                remove(backend)
-                            }}
+                            e.preventDefault()
+                            remove(backend)
+                        }}
                         >
                             Delete
                         </Button>
@@ -150,9 +159,15 @@
                     <div class="text-danger small">{status.error}</div>
                 {/if}
             </div>
-        {/each}
-    </div>
-{/if}
+        {/snippet}
+        {#snippet empty()}
+            <EmptyState
+                title="No secret backends yet"
+                hint="Secret backends let you reference passwords and private keys from Vault / OpenBao"
+            />
+        {/snippet}
+    </ItemList>
+{/key}
 
 {#if modalOpen}
     <SecretBackendModal bind:isOpen={modalOpen} instance={editing} {save} />
