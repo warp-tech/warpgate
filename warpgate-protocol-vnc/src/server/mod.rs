@@ -12,7 +12,6 @@ use anyhow::{Context, Result, anyhow, bail};
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use rustls::ServerConfig;
-use rustls::server::NoClientAuth;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, timeout_at};
@@ -26,7 +25,7 @@ use warpgate_core::{
 };
 use warpgate_desktop_auth::{DesktopAuthOutcome, authenticate, finalize_user_auth};
 use warpgate_desktop_ui as ui;
-use warpgate_tls::{ResolveServerCert, TlsCertificateAndPrivateKey};
+use warpgate_tls::{TlsCertificateAndPrivateKey, configure_tls_acceptor};
 
 use self::bridge::{run_proxy_session, wait_for_backend_size};
 use self::hold_screen::{collect_additional_credentials, render_while, show_banner};
@@ -46,15 +45,7 @@ pub async fn bind_server(
     proxy_protocol: bool,
     certificate_and_key: TlsCertificateAndPrivateKey,
 ) -> Result<BoxFuture<'static, Result<()>>> {
-    let tls_config = ServerConfig::builder_with_provider(Arc::new(
-        rustls::crypto::aws_lc_rs::default_provider(),
-    ))
-    .with_safe_default_protocol_versions()?
-    .with_client_cert_verifier(Arc::new(NoClientAuth))
-    .with_cert_resolver(Arc::new(ResolveServerCert(Arc::new(
-        certificate_and_key.into(),
-    ))));
-    let tls_config = Arc::new(tls_config);
+    let tls_config = Arc::new(configure_tls_acceptor(certificate_and_key)?);
 
     let listener = address.tcp_accept_stream().await?;
 

@@ -14,6 +14,6 @@ pub use maybe_tls_stream::{
 pub use mode::TlsMode;
 pub use rustls_helpers::{
     ClusterPeerVerifier, ResolveServerCert, configure_cluster_tls_connector,
-    configure_tls_connector,
+    configure_tls_acceptor, configure_tls_connector,
 };
 pub use rustls_root_certs::ROOT_CERT_STORE;

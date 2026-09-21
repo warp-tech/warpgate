@@ -4,12 +4,12 @@ use std::sync::Arc;
 use rustls::client::WebPkiServerVerifier;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::server::{ClientHello, ResolvesServerCert};
+use rustls::server::{ClientHello, NoClientAuth, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
-use rustls::{CertificateError, ClientConfig, Error as TlsError, SignatureScheme};
+use rustls::{CertificateError, ClientConfig, Error as TlsError, ServerConfig, SignatureScheme};
 use rustls_pki_types::pem::PemObject;
 
-use super::{ROOT_CERT_STORE, RustlsSetupError};
+use super::{ROOT_CERT_STORE, RustlsSetupError, TlsCertificateAndPrivateKey};
 
 #[derive(Debug)]
 pub struct ResolveServerCert(pub Arc<CertifiedKey>);
@@ -18,6 +18,24 @@ impl ResolvesServerCert for ResolveServerCert {
     fn resolve(&self, _: ClientHello) -> Option<Arc<CertifiedKey>> {
         Some(self.0.clone())
     }
+}
+
+/// The listener-side TLS policy for protocols that terminate TLS themselves and do not ask the
+/// client for a certificate. Mirrors [`configure_tls_connector`], so the crypto provider and the
+/// protocol-version floor are decided in one place for both directions.
+pub fn configure_tls_acceptor(
+    certificate_and_key: TlsCertificateAndPrivateKey,
+) -> Result<ServerConfig, RustlsSetupError> {
+    Ok(
+        ServerConfig::builder_with_provider(
+            Arc::new(rustls::crypto::aws_lc_rs::default_provider()),
+        )
+        .with_safe_default_protocol_versions()?
+        .with_client_cert_verifier(Arc::new(NoClientAuth))
+        .with_cert_resolver(Arc::new(ResolveServerCert(Arc::new(
+            certificate_and_key.into(),
+        )))),
+    )
 }
 
 pub async fn configure_tls_connector(

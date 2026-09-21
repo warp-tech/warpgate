@@ -5,19 +5,16 @@ mod session;
 mod stream;
 
 use std::fmt::Debug;
-use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use rustls::ServerConfig;
-use rustls::server::NoClientAuth;
 use session::PostgresSession;
 use tracing::{Instrument, error, info, warn};
 use warpgate_common::ListenEndpoint;
 use warpgate_common::helpers::net::{accept_loop, enable_tcp_keepalive};
 use warpgate_core::{AbortSessionHandle, ProtocolServer, Services, State, UserSessionStateInit};
-use warpgate_tls::{ResolveServerCert, TlsCertificateAndPrivateKey};
+use warpgate_tls::{TlsCertificateAndPrivateKey, configure_tls_acceptor};
 
 pub struct PostgresProtocolServer {
     services: Services,
@@ -43,14 +40,7 @@ impl ProtocolServer for PostgresProtocolServer {
             .next()
             .context("PostgreSQL requires a TLS certificate and key")?;
 
-        let tls_config = ServerConfig::builder_with_provider(Arc::new(
-            rustls::crypto::aws_lc_rs::default_provider(),
-        ))
-        .with_safe_default_protocol_versions()?
-        .with_client_cert_verifier(Arc::new(NoClientAuth))
-        .with_cert_resolver(Arc::new(ResolveServerCert(Arc::new(
-            certificate_and_key.into(),
-        ))));
+        let tls_config = configure_tls_acceptor(certificate_and_key)?;
 
         let listener = address
             .tcp_accept_stream()
