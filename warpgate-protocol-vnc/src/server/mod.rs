@@ -130,23 +130,14 @@ async fn handle_connection(
     tls_config: Arc<ServerConfig>,
     remote_address: SocketAddr,
 ) -> Result<()> {
-    // Bound the whole handshake + auth phase with a single timeout, so a viewer that
-    // can't speak our auth (or stalls) is dropped with an error instead of hanging.
-    // The relay afterwards is intentionally untimed.
-    let Some(session) = timeout_at(
-        Instant::now() + HANDSHAKE_TIMEOUT,
-        negotiate_and_authorize(
-            stream,
-            &services,
-            &server_handle,
-            tls_config,
-            remote_address,
-        ),
+    let Some(session) = negotiate_and_authorize(
+        stream,
+        &services,
+        &server_handle,
+        tls_config,
+        remote_address,
     )
-    .await
-    .map_err(|_| {
-        anyhow!("VNC handshake timed out; the viewer may not support our authentication")
-    })??
+    .await?
     else {
         // `None` = authentication was rejected (failure result already sent), quit
         return Ok(());
@@ -169,27 +160,44 @@ async fn negotiate_and_authorize(
 ) -> Result<Option<Box<ProxySession>>> {
     let allow_apple_dh = services.config.lock().await.store.vnc.enable_ard_auth;
 
+    // Bounds the handshake only. Everything the viewer is *held* for afterwards — a second
+    // factor, an administrator's approval — is bounded by `Deadline` inside the hold screen
+    // and by the approval gate's own timeout, both of which are far longer than this and must
+    // not be capped by it.
+    let handshake_deadline = Instant::now() + HANDSHAKE_TIMEOUT;
+    let handshake_timed_out =
+        || anyhow!("VNC handshake timed out; the viewer may not support our authentication");
+
     // ProtocolVersion + security-type negotiation, then branch per chosen type to get
     // the (possibly TLS-upgraded) viewer stream and the credentials it carries.
-    let (mut viewer, username, password): (Box<dyn ViewerStream>, _, _) =
-        match server_negotiate_security(&mut stream, allow_apple_dh).await? {
-            SecurityType::VeNCrypt => {
-                server_vencrypt_sub_negotiate(&mut stream).await?;
-                let mut tls = TlsAcceptor::from(tls_config)
-                    .accept(stream)
-                    .await
-                    .context("TLS handshake")?;
-                let (username, password) = server_read_plain_credentials(&mut tls).await?;
-                (Box::new(tls), username, password)
-            }
-            SecurityType::AppleDh => {
-                let (username, password) = server_apple_dh_auth(&mut stream).await?;
-                (Box::new(stream), username, password)
-            }
-            SecurityType::None | SecurityType::VncAuth => {
-                bail!("unexpected non-viewer security type negotiated")
-            }
-        };
+    let (mut viewer, username, password): (Box<dyn ViewerStream>, _, _) = timeout_at(
+        handshake_deadline,
+        async move {
+            Ok::<_, anyhow::Error>(
+                match server_negotiate_security(&mut stream, allow_apple_dh).await? {
+                    SecurityType::VeNCrypt => {
+                        server_vencrypt_sub_negotiate(&mut stream).await?;
+                        let mut tls = TlsAcceptor::from(tls_config)
+                            .accept(stream)
+                            .await
+                            .context("TLS handshake")?;
+                        let (username, password) =
+                            server_read_plain_credentials(&mut tls).await?;
+                        (Box::new(tls) as Box<dyn ViewerStream>, username, password)
+                    }
+                    SecurityType::AppleDh => {
+                        let (username, password) = server_apple_dh_auth(&mut stream).await?;
+                        (Box::new(stream) as Box<dyn ViewerStream>, username, password)
+                    }
+                    SecurityType::None | SecurityType::VncAuth => {
+                        bail!("unexpected non-viewer security type negotiated")
+                    }
+                },
+            )
+        },
+    )
+    .await
+    .map_err(|_| handshake_timed_out())??;
 
     let authenticated = match authenticate::<TargetVncOptions>(
         services,
@@ -217,20 +225,24 @@ async fn negotiate_and_authorize(
         }
     };
 
-    server_write_security_result(&mut viewer, true, "").await?;
-    // Consume the viewer's ClientInit; its shared-flag is irrelevant because the backend
-    // client opens its own connection (always shared) rather than passing this through.
-    server_read_client_init(&mut viewer).await?;
+    timeout_at(handshake_deadline, async {
+        server_write_security_result(&mut viewer, true, "").await?;
+        // Consume the viewer's ClientInit; its shared-flag is irrelevant because the backend
+        // client opens its own connection (always shared) rather than passing this through.
+        server_read_client_init(&mut viewer).await?;
 
-    // We render our own framebuffer, so send our own ServerInit
-    write_server_init(
-        &mut viewer,
-        ui::SCREEN_W,
-        ui::SCREEN_H,
-        &DEFAULT_PIXEL_FORMAT,
-        "Warpgate",
-    )
-    .await?;
+        // We render our own framebuffer, so send our own ServerInit
+        write_server_init(
+            &mut viewer,
+            ui::SCREEN_W,
+            ui::SCREEN_H,
+            &DEFAULT_PIXEL_FORMAT,
+            "Warpgate",
+        )
+        .await
+    })
+    .await
+    .map_err(|_| handshake_timed_out())??;
 
     let (viewer_rd, mut viewer_wr) = tokio::io::split(viewer);
     let (events_tx, mut events_rx) = mpsc::unbounded_channel();
