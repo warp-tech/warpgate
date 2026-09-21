@@ -263,13 +263,6 @@ async fn negotiate_and_authorize(
                 &interactive.target_name,
             )
             .await?;
-            // Interactive (TOTP / web-approval) auth fully succeeded: clear any failed
-            // attempts, mirroring the password-only `Accepted` path in `authenticate` and
-            // the SSH baseline, which clears counters once 2FA completes. Fail open.
-            let _ = services
-                .login_protection
-                .clear_failed_attempts(&interactive.remote_ip, &identity.username)
-                .await;
             authorization
         }
         // Already handled before the security handshake above.
