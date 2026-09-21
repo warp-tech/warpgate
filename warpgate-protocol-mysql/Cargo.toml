@@ -9,7 +9,6 @@ publish = false
 anyhow.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
-flate2 = { version = "1", features = ["zlib"], default-features = false }
 futures.workspace = true
 mysql_common = { version = "0.37", default-features = false }
 rand.workspace = true
@@ -32,4 +31,3 @@ warpgate-common-http = { path = "../warpgate-common-http", default-features = fa
 warpgate-core = { path = "../warpgate-core", default-features = false }
 warpgate-database-protocols = { path = "../warpgate-database-protocols", default-features = false }
 warpgate-tls = { path = "../warpgate-tls", default-features = false }
-webpki = { version = "0.22", default-features = false }

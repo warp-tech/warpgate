@@ -23,7 +23,6 @@ rsasl = { version = "2.3", default-features = false, features = [
     "provider",
 ] }
 rustls.workspace = true
-rustls-native-certs = { version = "0.8", default-features = false }
 thiserror.workspace = true
 tokio.workspace = true
 tokio-rustls.workspace = true

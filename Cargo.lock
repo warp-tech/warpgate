@@ -8208,19 +8208,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
-name = "tls-listener"
-version = "0.11.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1461056cc1ef47003f7ee16e4cef3741068d4c7f6b627bfce49b7c00c120a530"
-dependencies = [
- "futures-util",
- "pin-project-lite",
- "thiserror 2.0.20",
- "tokio",
- "tokio-rustls 0.26.4",
-]
-
-[[package]]
 name = "tls_codec"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8980,7 +8967,6 @@ dependencies = [
  "warpgate-db-entities",
  "warpgate-db-migrations",
  "warpgate-ldap",
- "warpgate-protocol-kubernetes",
  "warpgate-protocol-ssh",
  "warpgate-tls",
 ]
@@ -9025,7 +9011,6 @@ dependencies = [
  "rcgen",
  "spki 0.7.3",
  "thiserror 2.0.20",
- "tracing",
  "uuid",
  "x509-cert",
  "x509-parser",
@@ -9325,7 +9310,6 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "time",
- "tls-listener",
  "tokio",
  "tokio-rustls 0.26.4",
  "tokio-tungstenite 0.30.0",
@@ -9349,7 +9333,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bytes",
- "flate2",
  "futures",
  "mysql_common",
  "rand 0.10.2",
@@ -9369,7 +9352,6 @@ dependencies = [
  "warpgate-core",
  "warpgate-database-protocols",
  "warpgate-tls",
- "webpki",
 ]
 
 [[package]]
@@ -9385,7 +9367,6 @@ dependencies = [
  "rand 0.10.2",
  "rsasl",
  "rustls 0.23.45",
- "rustls-native-certs",
  "thiserror 2.0.20",
  "tokio",
  "tokio-rustls 0.26.4",
