@@ -3,7 +3,6 @@ mod common;
 mod error;
 mod relay;
 mod session;
-mod session_handle;
 mod stream;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -16,11 +15,10 @@ use rustls::server::NoClientAuth;
 use tracing::{Instrument, error, info, warn};
 use warpgate_common::ListenEndpoint;
 use warpgate_common::helpers::net::{accept_loop, enable_tcp_keepalive};
-use warpgate_core::{ProtocolServer, Services, State, UserSessionStateInit};
+use warpgate_core::{AbortSessionHandle, ProtocolServer, Services, State, UserSessionStateInit};
 use warpgate_tls::{ResolveServerCert, TlsCertificateAndPrivateKey};
 
 use crate::session::MySqlSession;
-use crate::session_handle::MySqlSessionHandle;
 
 pub struct MySQLProtocolServer {
     services: Services,
@@ -71,7 +69,7 @@ impl ProtocolServer for MySQLProtocolServer {
                             warn!(%error, "Failed to enable TCP keepalive");
                         }
 
-                        let (session_handle, mut abort_rx) = MySqlSessionHandle::new();
+                        let (session_handle, mut abort_rx) = AbortSessionHandle::new();
 
                         let (server_handle, wrapped_stream) =
                             State::register_user_session_with_stream(

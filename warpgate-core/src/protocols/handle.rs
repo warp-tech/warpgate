@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use sea_orm::{ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, mpsc};
 use tracing::{Instrument, info_span};
 use uuid::Uuid;
 use warpgate_common::auth::AuthStateUserInfo;
@@ -17,6 +17,28 @@ use crate::{ApprovedTarget, State, TargetAuthorization, UserSessionState};
 
 pub trait SessionHandle {
     fn close(&mut self);
+}
+
+/// A [`SessionHandle`] whose `close` just signals a receiver the session loop is selecting on.
+///
+/// Every protocol that runs one session per accepted connection wants exactly this; the
+/// receiver is handed back at construction so the caller can wire it into its own `select!`.
+pub struct AbortSessionHandle {
+    abort_tx: mpsc::UnboundedSender<()>,
+}
+
+impl AbortSessionHandle {
+    #[must_use]
+    pub fn new() -> (Self, mpsc::UnboundedReceiver<()>) {
+        let (abort_tx, abort_rx) = mpsc::unbounded_channel();
+        (Self { abort_tx }, abort_rx)
+    }
+}
+
+impl SessionHandle for AbortSessionHandle {
+    fn close(&mut self) {
+        let _ = self.abort_tx.send(());
+    }
 }
 
 // Deliberately not Clone: `Drop` tears the session down, so a second copy

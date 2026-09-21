@@ -30,13 +30,13 @@ use warpgate_common::helpers::net::accept_loop;
 use warpgate_common::{ListenEndpoint, TargetRdpOptions, WarpgateError};
 use warpgate_core::recordings::DesktopRecorder;
 use warpgate_core::{
-    DesktopInput, Services, State, TargetAuthorization, UserSessionStateInit, WarpgateServerHandle,
+    AbortSessionHandle, DesktopInput, Services, State, TargetAuthorization, UserSessionStateInit,
+    WarpgateServerHandle,
 };
 use warpgate_db_entities::Parameters;
 use warpgate_desktop_ui::{DEFAULT_SCREEN_H, DEFAULT_SCREEN_W};
 
 use crate::PROTOCOL_NAME;
-use crate::session_handle::RdpSessionHandle;
 
 mod bridge;
 mod clipboard;
@@ -106,7 +106,7 @@ pub async fn bind_server(
                 let cert_pem = cert_pem.clone();
                 let key_pem = key_pem.clone();
                 async move {
-                    let (session_handle, mut abort_rx) = RdpSessionHandle::new();
+                    let (session_handle, mut abort_rx) = AbortSessionHandle::new();
 
                     let (server_handle, viewer_stream) = State::register_user_session_with_stream(
                         &services.state,

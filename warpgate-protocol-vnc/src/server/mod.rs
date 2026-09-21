@@ -2,7 +2,6 @@ mod bridge;
 mod hold_screen;
 mod protocol;
 mod rfb;
-mod session_handle;
 
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -22,7 +21,9 @@ use tracing::{Instrument, debug, error, info, info_span, warn};
 use warpgate_common::helpers::net::accept_loop;
 use warpgate_common::{ListenEndpoint, TargetVncOptions};
 use warpgate_core::recordings::DesktopRecorder;
-use warpgate_core::{Services, State, UserSessionStateInit, WarpgateServerHandle};
+use warpgate_core::{
+    AbortSessionHandle, Services, State, UserSessionStateInit, WarpgateServerHandle,
+};
 use warpgate_desktop_auth::{DesktopAuthOutcome, authenticate, finalize_user_auth};
 use warpgate_desktop_ui as ui;
 use warpgate_tls::{ResolveServerCert, TlsCertificateAndPrivateKey};
@@ -37,7 +38,6 @@ use self::rfb::{
     SecurityType, server_apple_dh_auth, server_negotiate_security, server_read_client_init,
     server_read_plain_credentials, server_vencrypt_sub_negotiate, server_write_security_result,
 };
-use self::session_handle::VncSessionHandle;
 use crate::PROTOCOL_NAME;
 
 pub async fn bind_server(
@@ -67,7 +67,7 @@ pub async fn bind_server(
                 let tls_config = tls_config.clone();
                 let services = services.clone();
                 async move {
-                    let (session_handle, mut abort_rx) = VncSessionHandle::new();
+                    let (session_handle, mut abort_rx) = AbortSessionHandle::new();
 
                     let (server_handle, viewer_stream) = State::register_user_session_with_stream(
                         &services.state,
@@ -170,9 +170,8 @@ async fn negotiate_and_authorize(
 
     // ProtocolVersion + security-type negotiation, then branch per chosen type to get
     // the (possibly TLS-upgraded) viewer stream and the credentials it carries.
-    let (mut viewer, username, password): (Box<dyn ViewerStream>, _, _) = timeout_at(
-        handshake_deadline,
-        async move {
+    let (mut viewer, username, password): (Box<dyn ViewerStream>, _, _) =
+        timeout_at(handshake_deadline, async move {
             Ok::<_, anyhow::Error>(
                 match server_negotiate_security(&mut stream, allow_apple_dh).await? {
                     SecurityType::VeNCrypt => {
@@ -181,23 +180,25 @@ async fn negotiate_and_authorize(
                             .accept(stream)
                             .await
                             .context("TLS handshake")?;
-                        let (username, password) =
-                            server_read_plain_credentials(&mut tls).await?;
+                        let (username, password) = server_read_plain_credentials(&mut tls).await?;
                         (Box::new(tls) as Box<dyn ViewerStream>, username, password)
                     }
                     SecurityType::AppleDh => {
                         let (username, password) = server_apple_dh_auth(&mut stream).await?;
-                        (Box::new(stream) as Box<dyn ViewerStream>, username, password)
+                        (
+                            Box::new(stream) as Box<dyn ViewerStream>,
+                            username,
+                            password,
+                        )
                     }
                     SecurityType::None | SecurityType::VncAuth => {
                         bail!("unexpected non-viewer security type negotiated")
                     }
                 },
             )
-        },
-    )
-    .await
-    .map_err(|_| handshake_timed_out())??;
+        })
+        .await
+        .map_err(|_| handshake_timed_out())??;
 
     let authenticated = match authenticate::<TargetVncOptions>(
         services,

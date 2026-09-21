@@ -9,7 +9,6 @@
 mod client;
 mod clipboard;
 mod server;
-mod session_handle;
 
 use anyhow::Context;
 use futures::future::BoxFuture;
