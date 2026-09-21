@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use poem::Request;
 use tokio::sync::Mutex;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthResult, AuthStateUserInfo, RememberApprovalBy};
+use warpgate_common::auth::{AuthResult, AuthStateUserInfo};
 use warpgate_common::{TargetKubernetesOptions, UserSessionId, WarpgateError};
 use warpgate_common_http::logging::get_client_ip;
 use warpgate_core::approvals::{GatedConnection, admit_target_session};
@@ -206,17 +206,16 @@ async fn admit_kubernetes_session(
     handle: &Arc<Mutex<WarpgateServerHandle>>,
     resolved: TargetAuthorization<TargetKubernetesOptions>,
 ) -> Result<AdmittedTarget<TargetKubernetesOptions>, WarpgateError> {
+    let session_id = handle.lock().await.user_session_id();
+    let remote_ip = get_client_ip(request, services)
+        .await
+        .and_then(|ip| ip.parse().ok());
+
     admit_target_session(
         services,
         handle,
         resolved,
-        GatedConnection {
-            remote_ip: get_client_ip(request, services)
-                .await
-                .and_then(|ip| ip.parse().ok()),
-            // k8s has no AuthState
-            credentials: RememberApprovalBy::Nothing,
-        },
+        GatedConnection::for_session(services, session_id, remote_ip).await,
         || async { Ok(()) },
     )
     .await

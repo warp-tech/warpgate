@@ -52,6 +52,30 @@ pub struct GatedConnection {
 }
 
 impl GatedConnection {
+    /// Build the gate context for a session, taking the remembered-approval credentials from
+    /// its auth state.
+    ///
+    /// Matching a remembered approval needs the credentials that authenticated the session, and
+    /// `RememberApprovalBy::Nothing` disables the match entirely — so a protocol that passes it
+    /// while an auth state does exist silently opts out of the administrator-approval grace
+    /// period. Resolving it from the store here means a protocol cannot get that wrong by
+    /// omission; `Nothing` is then only what a session genuinely without an auth state gets.
+    pub async fn for_session(
+        services: &Services,
+        session_id: UserSessionId,
+        remote_ip: Option<IpAddr>,
+    ) -> Self {
+        let state = services.auth_state_store.lock().await.get(&session_id);
+        let credentials = match state {
+            Some(state) => state.lock().await.remembered_by(),
+            None => RememberApprovalBy::Nothing,
+        };
+        Self {
+            remote_ip,
+            credentials,
+        }
+    }
+
     /// Combine this user session context with the target session authorization context
     fn subject_for<O>(
         self,

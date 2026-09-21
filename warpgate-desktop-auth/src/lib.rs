@@ -22,9 +22,7 @@ pub use hold_screen::{
 pub use otp::{MAX_OTP_ATTEMPTS, OtpAction, OtpActionApplyOutcome, OtpEntry};
 use tokio::sync::Mutex;
 use tracing::warn;
-use warpgate_common::auth::{
-    AuthCredential, AuthResult, AuthSelector, AuthState, CredentialKind, RememberApprovalBy,
-};
+use warpgate_common::auth::{AuthCredential, AuthResult, AuthSelector, AuthState, CredentialKind};
 use warpgate_common::{
     Secret, TargetOptionsVariant, TargetSessionId, UserSessionId, WarpgateError,
 };
@@ -265,20 +263,12 @@ pub async fn admit_desktop_session<O: Send + Sync>(
     hold: &AdmissionHold,
 ) -> Result<AdmittedTarget<O>, WarpgateError> {
     let session_id = server_handle.lock().await.user_session_id();
-    let state = services.auth_state_store.lock().await.get(&session_id);
-    let credentials = match state {
-        Some(state) => state.lock().await.remembered_by(),
-        None => RememberApprovalBy::Nothing,
-    };
 
     admit_target_session(
         services,
         server_handle,
         authorization,
-        GatedConnection {
-            remote_ip,
-            credentials,
-        },
+        GatedConnection::for_session(services, session_id, remote_ip).await,
         || async {
             hold.awaiting_approval.store(true, Ordering::Relaxed);
             Ok(())
