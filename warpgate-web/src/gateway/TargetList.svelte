@@ -268,6 +268,9 @@
                 {/if}
             </span>
             <small class="protocol text-muted ms-auto">
+                {#if target.kind === TargetKind.Http}
+                    HTTP
+                {/if}
                 {#if target.kind === TargetKind.MySql}
                     MySQL
                 {/if}
