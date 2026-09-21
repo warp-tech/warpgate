@@ -242,7 +242,7 @@
                         bind:this={otpInput}
                         name="otp"
                         required
-                        pattern="\d&lbrace;6,8&rbrace;"
+                        pattern="\d&lbrace;6&rbrace;"
                         autofocus
                         inputmode="numeric"
                         disabled={busy}
