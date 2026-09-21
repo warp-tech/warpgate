@@ -172,8 +172,15 @@ export const possibleCredentials: Record<string, Set<CredentialKind>> = {
     ]),
 }
 
+// Matches `abbreviate_public_key` in warpgate-protocol-http, so the same key reads the same
+// whether the server abbreviated it or we did.
+const PUBLIC_KEY_ABBREVIATION_LENGTH = 10
+
 export function abbreviatePublicKey(key: string): string {
-    return `${key.slice(0, 16)}...${key.slice(-8)}`
+    if (key.length <= PUBLIC_KEY_ABBREVIATION_LENGTH) {
+        return key
+    }
+    return `${key.slice(0, PUBLIC_KEY_ABBREVIATION_LENGTH)}...${key.slice(-PUBLIC_KEY_ABBREVIATION_LENGTH)}`
 }
 
 export function makeKubernetesContext(opt: ConnectionOptions): string {
