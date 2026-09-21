@@ -102,7 +102,7 @@ pub async fn connect_to_db_and_migrate(
     // so the migrations can copy them into the DB; afterwards the config file's
     // copies are ignored.
     warpgate_db_entities::Parameters::set_config_migration_values(
-        ConfigMigrationValues::from_config(config, params)?,
+        ConfigMigrationValues::from_config(config),
     );
     migrate_database(&connection).await?;
     Ok(connection)
@@ -258,11 +258,19 @@ mod tests {
     use super::*;
 
     async fn open_session(db: &DatabaseConnection, node_id: Option<Uuid>) -> Uuid {
+        open_session_for_user(db, node_id, Uuid::new_v4()).await
+    }
+
+    async fn open_session_for_user(
+        db: &DatabaseConnection,
+        node_id: Option<Uuid>,
+        user_id: Uuid,
+    ) -> Uuid {
         let id = Uuid::new_v4();
         UserSession::Entity::insert(UserSession::ActiveModel {
             id: Set(warpgate_common::UserSessionId(id)),
             username: Set(Some("alice".into())),
-            user_id: Set(Some(Uuid::new_v4())),
+            user_id: Set(Some(user_id)),
             remote_address: Set("127.0.0.1:1".into()),
             started: Set(OffsetDateTime::now_utc()),
             ended: Set(None),

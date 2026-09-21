@@ -149,7 +149,7 @@
             <option value="PublicKey">Warpgate's own private keys</option>
             <option value="Password">Password</option>
             {#if $serverInfo?.runningOnEc2}
-                <option value="IamRole">IAM Role (experimental)</option>
+                <option value="IamRole">IAM Role</option>
             {/if}
         </select>
     </FormGroup>

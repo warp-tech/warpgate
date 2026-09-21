@@ -6,13 +6,14 @@ use sea_orm::sea_query::{Func, SimpleExpr};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
-use tracing::info;
+use tracing::{info, warn};
 use uuid::Uuid;
 use warpgate_common::encryption::idempotent_maybe_encrypt_secret;
 use warpgate_common::{
     AdminPermission, Role as RoleConfig, Target as TargetConfig, TargetOptions, TargetSSHOptions,
     WarpgateError, map_target_secrets,
 };
+use warpgate_common_http::errors::invalid_field;
 use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment, Ticket, TicketRequest};
 
 use super::AdminContext;
@@ -121,7 +122,10 @@ impl ListApi {
         admin.require(AdminPermission::TargetsCreate)?;
 
         if body.name.is_empty() {
-            return Ok(CreateTargetResponse::BadRequest(Json("name".into())));
+            return Ok(CreateTargetResponse::BadRequest(invalid_field(
+                "name",
+                "target name is empty",
+            )));
         }
 
         let db = &admin.services().db;
@@ -228,6 +232,7 @@ impl DetailApi {
         admin.require(AdminPermission::TargetsEdit)?;
 
         if body.name.is_empty() {
+            warn!("Rejecting request: target name is empty");
             return Ok(UpdateTargetResponse::BadRequest);
         }
 
@@ -238,6 +243,10 @@ impl DetailApi {
         };
 
         if target.kind != (&body.options).into() {
+            warn!(
+                target = %target.name,
+                "Rejecting request: a target's protocol cannot be changed after creation"
+            );
             return Ok(UpdateTargetResponse::BadRequest);
         }
 
@@ -353,7 +362,10 @@ impl DetailApi {
 
         let options: TargetSSHOptions = match target.options {
             TargetOptions::Ssh(x) => x,
-            _ => return Ok(TargetKnownSshHostKeysResponse::InvalidType),
+            _ => {
+                warn!("Rejecting request: known SSH host keys are only kept for SSH targets");
+                return Ok(TargetKnownSshHostKeysResponse::InvalidType);
+            }
         };
 
         let known_hosts = KnownHost::Entity::find()

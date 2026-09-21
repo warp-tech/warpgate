@@ -1,5 +1,7 @@
 use poem::FromRequest;
-use poem::http::uri::{Authority, Scheme};
+use poem::http::HeaderName;
+use poem::http::header::ACCEPT;
+use poem::http::uri::Scheme;
 use poem::web::Data;
 use url::Url;
 use warpgate_common::WarpgateError;
@@ -31,13 +33,7 @@ pub async fn construct_external_url(
             ctx.trusted_port(for_request),
         ))
     } else {
-        config.store.external_host.as_ref().map(|external_host| {
-            let external_host = if let Ok(authority) = external_host.parse::<Authority>() {
-                authority.host().to_string()
-            } else {
-                external_host.to_owned()
-            };
-
+        config.external_host_name().map(|external_host| {
             (
                 Some(Scheme::HTTPS),
                 Some(external_host),
@@ -69,6 +65,18 @@ pub async fn construct_external_url(
         }
     }
     Url::parse(&url).map_err(WarpgateError::UrlParse)
+}
+
+pub fn is_navigation_request(req: &poem::Request) -> bool {
+    let headers = req.headers();
+    let accepts_html = headers
+        .get(ACCEPT)
+        .and_then(|accept| accept.to_str().ok())
+        .is_some_and(|accept| accept.contains("text/html"));
+    let navigates = headers
+        .get(HeaderName::from_static("sec-fetch-mode"))
+        .is_none_or(|mode| mode == "navigate");
+    accepts_html && navigates
 }
 
 #[cfg(test)]

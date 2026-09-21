@@ -16,9 +16,8 @@ import pytest
 from .api_client import admin_client
 from .conftest import ProcessManager
 from .test_cluster_recordings import _find_in_progress_terminal_recording_id
-from .test_recordings_s3 import _read_until
 from .test_ssh_proto import common_args, setup_user_and_target
-from .util import wait_port
+from .util import read_until, wait_port
 
 
 class Test:
@@ -48,7 +47,7 @@ class Test:
             f"echo {marker}; sleep 30",
             password="123",
         )
-        _read_until(client.stdout, marker.encode(), time.monotonic() + timeout)
+        read_until(client.stdout, marker.encode(), time.monotonic() + timeout)
 
         recording_id = None
         deadline = time.monotonic() + 15

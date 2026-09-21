@@ -1,7 +1,7 @@
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::{ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, ModelTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, Set};
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, UserSsoCredential, WarpgateError};
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
@@ -162,19 +162,23 @@ impl DetailApi {
 
         let db = &admin.services().db;
 
-        let model = SsoCredential::ActiveModel {
-            id: Set(id.0),
-            user_id: Set(*user_id),
-            ..<_>::from(UserSsoCredential::from(&*body))
-        }
-        .update(db)
-        .await;
+        let updated = SsoCredential::Entity::update_many()
+            .set(SsoCredential::ActiveModel::from(UserSsoCredential::from(
+                &*body,
+            )))
+            .filter(SsoCredential::Column::Id.eq(id.0))
+            .filter(SsoCredential::Column::UserId.eq(*user_id))
+            .exec(db)
+            .await?;
 
-        match model {
-            Ok(model) => Ok(UpdateSsoCredentialResponse::Updated(Json(model.into()))),
-            Err(DbErr::RecordNotFound(_)) => Ok(UpdateSsoCredentialResponse::NotFound),
-            Err(e) => Err(e.into()),
+        if updated.rows_affected == 0 {
+            return Ok(UpdateSsoCredentialResponse::NotFound);
         }
+        let Some(model) = SsoCredential::Entity::find_by_id(id.0).one(db).await? else {
+            return Ok(UpdateSsoCredentialResponse::NotFound);
+        };
+
+        Ok(UpdateSsoCredentialResponse::Updated(Json(model.into())))
     }
 
     #[oai(

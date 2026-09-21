@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
-use russh::ChannelId;
 use russh::server::Handle;
+use russh::{ChannelId, Disconnect};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
 /// How much target output may be outstanding towards the client at once.
@@ -29,6 +29,10 @@ enum ChannelWriteOperation {
     ),
     Eof(Handle, ChannelId),
     Close(Handle, ChannelId),
+    /// Connection-level, not channel-scoped, but it still needs to be
+    /// ordered after any channel closes queued ahead of it — hence living in
+    /// the same queue rather than being sent to `Handle` directly.
+    Disconnect(Handle, Disconnect, String, String),
     Success(Handle, ChannelId),
     Failure(Handle, ChannelId),
     ExitStatus(Handle, ChannelId, u32),
@@ -66,6 +70,17 @@ impl ChannelWriter {
                     }
                     ChannelWriteOperation::Close(handle, channel) => {
                         let _ = handle.close(channel).await;
+                    }
+                    ChannelWriteOperation::Disconnect(
+                        handle,
+                        reason,
+                        description,
+                        language_tag,
+                    ) => {
+                        // Fire-and-forget like `Close` above. What differs is
+                        // the processing: a `Disconnect` makes russh's loop
+                        // exit and shut the stream down; a `Close` does not.
+                        let _ = handle.disconnect(reason, description, language_tag).await;
                     }
                     ChannelWriteOperation::Success(handle, channel) => {
                         let _ = handle.channel_success(channel).await;
@@ -154,6 +169,24 @@ impl ChannelWriter {
 
     pub fn close(&self, handle: Handle, channel: ChannelId) -> Result<()> {
         self.enqueue(ChannelWriteOperation::Close(handle, channel))
+    }
+
+    /// A channel `Close` never tells the client the connection is over, so
+    /// nothing obliges it to let go of the socket. This does: queued after
+    /// the closes it follows, it ends russh's own session loop.
+    pub fn disconnect(
+        &self,
+        handle: Handle,
+        reason: Disconnect,
+        description: String,
+        language_tag: String,
+    ) -> Result<()> {
+        self.enqueue(ChannelWriteOperation::Disconnect(
+            handle,
+            reason,
+            description,
+            language_tag,
+        ))
     }
 
     pub fn channel_success(&self, handle: Handle, channel: ChannelId) -> Result<()> {

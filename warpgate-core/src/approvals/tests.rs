@@ -1251,11 +1251,11 @@ mod delivery {
     use std::path::PathBuf;
     use std::sync::Arc;
 
-    use tokio::sync::{Mutex, broadcast};
+    use tokio::sync::Mutex;
     use warpgate_common::auth::{
         AuthResult, CredentialKind, CredentialPolicy, CredentialPolicyResponse,
     };
-    use warpgate_common::{GlobalParams, Secret, User, WarpgateConfig, WarpgateConfigStore};
+    use warpgate_common::{GlobalParams, User, WarpgateConfig, WarpgateConfigStore};
 
     use super::*;
     use crate::cluster::Cluster;
@@ -1299,11 +1299,9 @@ mod delivery {
             config_provider: Arc::new(DatabaseConfigProvider::new(db).into()),
             auth_state_store: Arc::new(Mutex::new(AuthStateStore::without_request_recording())),
             admin_token: Arc::new(None),
-            cluster_token: Arc::new(Secret::new("test".into())),
             login_protection: Arc::new(LoginProtectionService::new(db.clone()).await.unwrap()),
             global_params: Arc::new(params),
             listener_status: Default::default(),
-            admin_approval_request_tx: broadcast::channel(8).0,
             secret_backends,
         }
     }

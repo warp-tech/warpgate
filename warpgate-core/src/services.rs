@@ -16,7 +16,7 @@ use warpgate_db_entities::Parameters::MfaEnforcement;
 use warpgate_db_entities::{OtpCredential, Parameters, SsoCredential, UserSession};
 
 use crate::auth_state_store::ApprovalRequestSink;
-use crate::cluster::Cluster;
+use crate::cluster::{Cluster, ClusterNotification};
 use crate::db::connect_to_db_and_migrate;
 use crate::helpers::i64_seconds_to_duration;
 use crate::login_protection::LoginProtectionService;
@@ -37,43 +37,20 @@ pub struct Services {
     pub config_provider: Arc<ConfigProviderEnum>,
     pub auth_state_store: Arc<Mutex<AuthStateStore>>,
     pub admin_token: Arc<Option<Secret<String>>>,
-    pub cluster_token: Arc<Secret<String>>,
     pub rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
     pub login_protection: Arc<LoginProtectionService>,
     pub global_params: Arc<GlobalParams>,
     pub listener_status: ListenerStatusRegistry,
     pub secret_backends: Arc<SecretBackendRegistry>,
-    pub(crate) admin_approval_request_tx: broadcast::Sender<UserSessionId>,
 }
 
 /// How often a node picks up self approvals decided elsewhere. One query per
 /// node, so the interval is set by how long a user should wait after clicking.
 const APPROVAL_SWEEP_INTERVAL: Duration = Duration::from_secs(1);
 
-/// Upsert the token without conflicts from multiple nodes
-/// starting at the same time
-async fn resolve_cluster_token(db: &DatabaseConnection) -> Result<Secret<String>> {
-    // Ensures the row exists before the conditional update.
-    let params = Parameters::Entity::get(db).await?;
-    if let Some(token) = params.cluster_token {
-        return Ok(Secret::new(token));
-    }
-
-    Parameters::Entity::update_many()
-        .col_expr(
-            Parameters::Column::ClusterToken,
-            Expr::value(Secret::<String>::random().expose_secret().clone()),
-        )
-        .filter(Parameters::Column::ClusterToken.is_null())
-        .exec(db)
-        .await?;
-
-    Parameters::Entity::get(db)
-        .await?
-        .cluster_token
-        .map(Secret::new)
-        .ok_or_else(|| anyhow::anyhow!("cluster token missing after generation"))
-}
+/// Session changes arrive in bursts (a scan opening connections, a mass
+/// close); everything within this window becomes one cluster notification.
+const SESSION_CHANGE_COALESCE_WINDOW: Duration = Duration::from_millis(100);
 
 impl Services {
     pub async fn new(
@@ -94,7 +71,7 @@ impl Services {
 
         let auth_state_store = Arc::new(Mutex::new(AuthStateStore::new(ApprovalRequestSink {
             db: db.clone(),
-            node_id: cluster.node_id,
+            cluster: cluster.clone(),
         })));
 
         tokio::spawn({
@@ -150,13 +127,28 @@ impl Services {
             config_provider,
             auth_state_store,
             admin_token: Arc::new(admin_token.map(Secret::new)),
-            cluster_token: Arc::new(resolve_cluster_token(&db).await?),
             login_protection,
             global_params: Arc::new(params),
             listener_status: Arc::default(),
             secret_backends,
-            admin_approval_request_tx: broadcast::channel(100).0,
         };
+
+        {
+            let mut rx = services.state.lock().await.subscribe();
+            let cluster = services.cluster.clone();
+            tokio::spawn(async move {
+                // A missed burst still means "changed" - one notification covers it
+                while let Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) = rx.recv().await {
+                    tokio::time::sleep(SESSION_CHANGE_COALESCE_WINDOW).await;
+                    while !matches!(
+                        rx.try_recv(),
+                        Err(broadcast::error::TryRecvError::Empty
+                            | broadcast::error::TryRecvError::Closed)
+                    ) {}
+                    cluster.notify_global(ClusterNotification::SessionsChanged);
+                }
+            });
+        }
 
         // Asynchronously detect user approvals received by other nodes
         // and apply them to our AuthStates
@@ -174,10 +166,6 @@ impl Services {
         }
 
         Ok(services)
-    }
-
-    pub fn subscribe_admin_approval_request(&self) -> broadcast::Receiver<UserSessionId> {
-        self.admin_approval_request_tx.subscribe()
     }
 
     pub async fn admin_approval_timeout(&self) -> Result<Duration, WarpgateError> {

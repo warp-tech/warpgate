@@ -163,6 +163,38 @@ impl Sequence for ConnectionActivationSequence {
                 {
                     server_demand_active.pdu.capability_sets
                 } else {
+                    // Instead of reactivating after a Deactivate-All, a server may end the
+                    // session (MS-RDPBCGR §1.3.1.3) by sending a Set Error Info PDU carrying the
+                    // disconnect reason. FreeRDP-based servers such as GNOME Remote Desktop do
+                    // this, for example when the backend screencast session cannot be created.
+                    // Surface that reason so the disconnect is explained rather than reported as
+                    // an unexpected PDU.
+                    if let rdp::headers::ShareControlPdu::Data(rdp::headers::ShareDataHeader {
+                        share_data_pdu:
+                            rdp::headers::ShareDataPdu::ServerSetErrorInfo(rdp::server_error_info::ServerSetErrorInfoPdu(
+                                error_info,
+                            )),
+                        ..
+                    }) = share_control_ctx.pdu
+                    {
+                        // ERRINFO_NONE is informational (it clears a previously reported error),
+                        // not a disconnect. Skip it and keep waiting for the Demand Active PDU,
+                        // matching how the connection finalization sequence treats it.
+                        if let rdp::server_error_info::ErrorInfo::ProtocolIndependentCode(
+                            rdp::server_error_info::ProtocolIndependentCode::None,
+                        ) = error_info
+                        {
+                            self.state = ConnectionActivationState::CapabilitiesExchange;
+                            return Ok(Written::Nothing);
+                        }
+
+                        return Err(reason_err!(
+                            "ConnectionActivation::CapabilitiesExchange",
+                            "server ended the session with error info: {}",
+                            error_info.description()
+                        ));
+                    }
+
                     return Err(reason_err!(
                         "ConnectionActivation::CapabilitiesExchange",
                         "unexpected Share Control PDU during capabilities exchange: got {} (expected Server Demand Active PDU)",

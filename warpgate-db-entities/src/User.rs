@@ -39,7 +39,14 @@ impl Related<super::Role::Entity> for Entity {
     }
 
     fn via() -> Option<RelationDef> {
-        Some(super::UserRoleAssignment::Relation::User.def().rev())
+        Some(
+            super::UserRoleAssignment::Relation::User
+                .def()
+                .rev()
+                .on_condition(|_user, assignment| {
+                    super::UserRoleAssignment::Entity::active_condition(assignment)
+                }),
+        )
     }
 }
 

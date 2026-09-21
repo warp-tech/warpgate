@@ -61,9 +61,7 @@
     }
 
     function generateNewTotpKey() {
-        secretKey = Array.from({ length: 32 }, () =>
-            Math.floor(Math.random() * 255),
-        )
+        secretKey = Array.from(crypto.getRandomValues(new Uint8Array(32)))
     }
 
     /**

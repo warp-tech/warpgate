@@ -1,12 +1,9 @@
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use url::Url;
 use warpgate_common::TargetSessionId;
 use warpgate_core::recordings::{
     NDJsonRecordingWriter, Recorder, RecordingWriterOpener, SessionRecordings, TerminalRecorder,
@@ -80,14 +77,18 @@ pub enum SessionRecordingMetadata {
     Exec {
         namespace: String,
         pod: String,
-        container: String,
-        command: String,
+        /// Absent when the client named no container (kubectl omits it for
+        /// single-container pods and lets the API server choose).
+        container: Option<String>,
+        /// Full argv. `kubectl exec pod -- ls -la` sends one `command=` query
+        /// parameter per element, and every one of them belongs here.
+        command: Vec<String>,
     },
     #[serde(rename = "kubernetes-attach")]
     Attach {
         namespace: String,
         pod: String,
-        container: String,
+        container: Option<String>,
     },
 }
 
@@ -125,43 +126,4 @@ pub async fn start_recording_exec(
         .start::<TerminalRecorder, _>(target_session_id, None, metadata)
         .await
         .context("starting recording")
-}
-
-pub fn deduce_exec_recording_metadata(target_url: &Url) -> Option<SessionRecordingMetadata> {
-    let path = target_url.path();
-    #[allow(clippy::unwrap_used, reason = "static regex")]
-    let exec_url_regex =
-        Regex::new(r"^/api/v1/namespaces/([^/]+)/pods/([^/]+)/(exec|attach)$").unwrap();
-    if let Some(captures) = exec_url_regex.captures(path) {
-        let namespace = captures.get(1).map_or("unknown", |m| m.as_str()).into();
-        let pod = captures.get(2).map_or("unknown", |m| m.as_str()).into();
-        let operation = captures.get(3).map_or("unknown", |m| m.as_str());
-        let query = target_url.query().unwrap_or_default();
-        let parsed_query: HashMap<_, _> = url::form_urlencoded::parse(query.as_bytes()).collect();
-        let command = parsed_query
-            .get("command")
-            .cloned()
-            .unwrap_or_else(|| "unknown".into())
-            .into();
-        let container = parsed_query
-            .get("container")
-            .cloned()
-            .unwrap_or_else(|| "unknown".into())
-            .into();
-        return match operation {
-            "exec" => Some(SessionRecordingMetadata::Exec {
-                namespace,
-                pod,
-                container,
-                command,
-            }),
-            "attach" => Some(SessionRecordingMetadata::Attach {
-                namespace,
-                pod,
-                container,
-            }),
-            _ => None,
-        };
-    }
-    None
 }

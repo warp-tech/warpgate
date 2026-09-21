@@ -4,6 +4,7 @@ use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{AdminPermission, UserSessionId, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::approvals::{ApprovalDecision, record_decision};
+use warpgate_core::cluster::ClusterNotification;
 use warpgate_db_entities::SessionApprovalRequest::ApprovalActor;
 use warpgate_db_entities::{Node, SessionApprovalRequest as SAR};
 
@@ -127,7 +128,7 @@ pub async fn resolve_pending_approval(
     check_self_approval(ctx, &approver, &pending, decision).await?;
 
     let actor = acting_approver(ctx);
-    record_decision(
+    let decided = record_decision(
         &ctx.services().db,
         pending.session_id,
         pending.kind,
@@ -135,5 +136,11 @@ pub async fn resolve_pending_approval(
         decision,
         actor,
     )
-    .await
+    .await?;
+    if decided {
+        ctx.services()
+            .cluster
+            .notify_global(ClusterNotification::SessionApprovalsChanged);
+    }
+    Ok(decided)
 }

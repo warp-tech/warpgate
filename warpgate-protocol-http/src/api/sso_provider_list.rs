@@ -415,6 +415,7 @@ impl Api {
         session_middleware: Data<&Arc<Mutex<SessionStore>>>,
     ) -> Result<StartSloResponse, WarpgateError> {
         let Some(state) = session.get_sso_login_state() else {
+            warn!("SSO logout requested for a session that did not log in via SSO");
             return Ok(StartSloResponse::NotInSsoSession);
         };
 
@@ -429,6 +430,7 @@ impl Api {
             .iter()
             .find(|p| p.name == state.provider)
         else {
+            warn!(provider = %state.provider, "SSO logout requested for a provider that is no longer configured");
             return Ok(StartSloResponse::NotFound);
         };
 

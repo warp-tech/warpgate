@@ -20,6 +20,17 @@ impl Display for CredentialChangedVia {
     }
 }
 
+/// Who acted, and on which target. Every Kubernetes audit event carries exactly
+/// this identity, built once per request.
+#[derive(Clone)]
+pub struct KubernetesAuditSubject {
+    pub session_id: Uuid,
+    pub user_id: Uuid,
+    pub username: String,
+    pub target_id: Uuid,
+    pub target_name: String,
+}
+
 #[derive(Clone)]
 pub enum AuditEvent {
     CredentialCreated {
@@ -124,6 +135,81 @@ pub enum AuditEvent {
         reference: String,
         success: bool,
     },
+    /// `kubectl exec` — a command run inside an existing container.
+    KubernetesExecStarted {
+        subject: KubernetesAuditSubject,
+        namespace: String,
+        pod: String,
+        /// The container the client named. `None` when it named none: kubectl
+        /// omits it for single-container pods and lets the API server choose,
+        /// and guessing here would put an unverified name in the audit log.
+        container: Option<String>,
+        /// argv as a JSON array.
+        command: String,
+        tty: bool,
+        stdin: bool,
+    },
+    /// `kubectl attach` — a client attached to a container's existing streams.
+    KubernetesAttachStarted {
+        subject: KubernetesAuditSubject,
+        namespace: String,
+        pod: String,
+        container: Option<String>,
+        tty: bool,
+    },
+    /// `kubectl port-forward` — a tunnel to a pod's port was opened.
+    KubernetesPortForwardStarted {
+        subject: KubernetesAuditSubject,
+        namespace: String,
+        pod: String,
+        /// Requested ports as a JSON array, when the client named them in the
+        /// query. The websocket port-forward protocol negotiates ports per
+        /// stream instead and sends no query at all, so this is often absent —
+        /// and an empty list would read as "no ports", which is not the same.
+        ports: Option<String>,
+    },
+    /// The cluster refused a streaming request — typically RBAC. Recorded
+    /// separately because a denied attempt is exactly as interesting as a
+    /// successful one, and the `...Started` event alone cannot say which it was.
+    KubernetesStreamRejected {
+        subject: KubernetesAuditSubject,
+        namespace: String,
+        pod: String,
+        /// `exec`, `attach` or `portforward`.
+        subresource: String,
+        status: u16,
+    },
+    /// `kubectl debug` against a running pod: an ephemeral container was added
+    /// to it. One event per container in the request.
+    KubernetesDebugContainerCreated {
+        subject: KubernetesAuditSubject,
+        namespace: String,
+        pod: String,
+        debug_container: String,
+        image: String,
+        /// The container whose namespaces the debug container joins.
+        target_container: Option<String>,
+        /// argv as a JSON array.
+        command: String,
+        tty: bool,
+        response_status: u16,
+    },
+    /// A `Pod` object was created directly — how `kubectl debug node/...` and
+    /// `kubectl debug --copy-to` land a debug workload. Pods that a workload
+    /// object (Deployment, DaemonSet, Job) creates on the user's behalf are
+    /// not summarised; only the generic request log records those.
+    KubernetesPodCreated {
+        subject: KubernetesAuditSubject,
+        namespace: String,
+        pod: String,
+        /// Container images as a JSON array.
+        images: String,
+        node_name: Option<String>,
+        host_pid: bool,
+        host_network: bool,
+        privileged: bool,
+        response_status: u16,
+    },
 }
 
 impl AuditEvent {
@@ -146,7 +232,7 @@ impl AuditEvent {
                         via = %via,
                         user_id = %user_id,
                         username = %username,
-                        related_users = ?format_related_ids(&[*user_id, *actor_user_id]),
+                        related_users = %format_related_ids(&[*user_id, *actor_user_id]),
                         "Created credential"
                     );
                 } else {
@@ -157,7 +243,7 @@ impl AuditEvent {
                         via = %via,
                         user_id = %user_id,
                         username = %username,
-                        related_users = ?format_related_ids(&[*user_id, *actor_user_id]),
+                        related_users = %format_related_ids(&[*user_id, *actor_user_id]),
                         "Created credential"
                     );
                 }
@@ -179,7 +265,7 @@ impl AuditEvent {
                         via = %via,
                         user_id = %user_id,
                         username = %username,
-                        related_users = ?format_related_ids(&[*user_id, *actor_user_id]),
+                        related_users = %format_related_ids(&[*user_id, *actor_user_id]),
                         "Deleted credential"
                     );
                 } else {
@@ -190,7 +276,7 @@ impl AuditEvent {
                         via = %via,
                         user_id = %user_id,
                         username = %username,
-                        related_users = ?format_related_ids(&[*user_id, *actor_user_id]),
+                        related_users = %format_related_ids(&[*user_id, *actor_user_id]),
                         "Deleted credential"
                     );
                 }
@@ -205,7 +291,7 @@ impl AuditEvent {
                     _type = "UserCreated1",
                     user_id = %user_id,
                     username = %username,
-                        related_users = ?format_related_ids(&[*user_id, *actor_user_id]),
+                        related_users = %format_related_ids(&[*user_id, *actor_user_id]),
                     "Created user"
                 );
             }
@@ -219,7 +305,7 @@ impl AuditEvent {
                     _type = "UserDeleted1",
                     user_id = %user_id,
                     username = %username,
-                        related_users = ?format_related_ids(&[*user_id, *actor_user_id]),
+                        related_users = %format_related_ids(&[*user_id, *actor_user_id]),
                     "Deleted user"
                 );
             }
@@ -238,7 +324,7 @@ impl AuditEvent {
                     grantee_username = %grantee_username,
                     role_id = %role_id,
                     role_name = %role_name,
-                        related_users = ?format_related_ids(&[*grantee_id, *actor_user_id]),
+                        related_users = %format_related_ids(&[*grantee_id, *actor_user_id]),
                     ?related_access_roles,
                     "Granted access role"
                 );
@@ -258,7 +344,7 @@ impl AuditEvent {
                     grantee_username = %grantee_username,
                     role_id = %role_id,
                     role_name = %role_name,
-                        related_users = ?format_related_ids(&[*grantee_id, *actor_user_id]),
+                        related_users = %format_related_ids(&[*grantee_id, *actor_user_id]),
                     ?related_access_roles,
                     "Revoked access role"
                 );
@@ -278,7 +364,7 @@ impl AuditEvent {
                     grantee_username = %grantee_username,
                     admin_role_id = %admin_role_id,
                     admin_role_name = %admin_role_name,
-                        related_users = ?format_related_ids(&[*grantee_id, *actor_user_id]),
+                        related_users = %format_related_ids(&[*grantee_id, *actor_user_id]),
                     ?related_admin_roles,
                     "Granted admin role"
                 );
@@ -298,7 +384,7 @@ impl AuditEvent {
                     grantee_username = %grantee_username,
                     admin_role_id = %admin_role_id,
                     admin_role_name = %admin_role_name,
-                    related_users = ?format_related_ids(&[*grantee_id, *actor_user_id]),
+                    related_users = %format_related_ids(&[*grantee_id, *actor_user_id]),
                     ?related_admin_roles,
                     "Revoked admin role"
                 );
@@ -318,7 +404,7 @@ impl AuditEvent {
                     target_name = %target_name,
                     user_id = %user_id,
                     username = %username,
-                    related_users = ?format_related_ids(&[*user_id]),
+                    related_users = %format_related_ids(&[*user_id]),
                     "Target session started"
                 );
             }
@@ -337,7 +423,7 @@ impl AuditEvent {
                     target_name = %target_name,
                     user_id = %user_id,
                     username = %username,
-                    related_users = ?format_related_ids(&[*user_id]),
+                    related_users = %format_related_ids(&[*user_id]),
                     "Target session ended"
                 );
             }
@@ -360,7 +446,7 @@ impl AuditEvent {
                     username = %username,
                     target_account = target_account.as_deref(),
                     target_session_id = *target_session_id,
-                    related_users = ?format_related_ids(&[*user_id]),
+                    related_users = %format_related_ids(&[*user_id]),
                     "Logged on to target"
                 );
             }
@@ -377,7 +463,7 @@ impl AuditEvent {
                     ticket_id = %ticket_id,
                     username = %username,
                     target = %target,
-                    related_users = ?format_related_ids(&[*user_id, *actor_user_id]),
+                    related_users = %format_related_ids(&[*user_id, *actor_user_id]),
                     "Created ticket"
                 );
             }
@@ -394,7 +480,7 @@ impl AuditEvent {
                     ticket_id = %ticket_id,
                     username = %username,
                     target = %target,
-                    related_users = ?format_related_ids(&[*user_id, *actor_user_id]),
+                    related_users = %format_related_ids(&[*user_id, *actor_user_id]),
                     "Deleted ticket"
                 );
             }
@@ -410,6 +496,165 @@ impl AuditEvent {
                     reference = %reference,
                     success = %success,
                     "Resolved secret from backend"
+                );
+            }
+            Self::KubernetesExecStarted {
+                subject,
+                namespace,
+                pod,
+                container,
+                command,
+                tty,
+                stdin,
+            } => {
+                // An absent optional field is left out of the row entirely
+                // rather than rendered as a placeholder that would read like a
+                // real name; tracing records nothing for a `None`.
+                info!(
+                    target: "audit",
+                    _type = "KubernetesExecStarted1",
+                    session = %subject.session_id,
+                    user_id = %subject.user_id,
+                    username = %subject.username,
+                    target_id = %subject.target_id,
+                    target_name = %subject.target_name,
+                    related_users = %format_related_ids(&[subject.user_id]),
+                    namespace = %namespace,
+                    pod = %pod,
+                    container = container.as_deref(),
+                    command = %command,
+                    tty = %tty,
+                    stdin = %stdin,
+                    "Kubernetes exec"
+                );
+            }
+            Self::KubernetesAttachStarted {
+                subject,
+                namespace,
+                pod,
+                container,
+                tty,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "KubernetesAttachStarted1",
+                    session = %subject.session_id,
+                    user_id = %subject.user_id,
+                    username = %subject.username,
+                    target_id = %subject.target_id,
+                    target_name = %subject.target_name,
+                    related_users = %format_related_ids(&[subject.user_id]),
+                    namespace = %namespace,
+                    pod = %pod,
+                    container = container.as_deref(),
+                    tty = %tty,
+                    "Kubernetes attach"
+                );
+            }
+            Self::KubernetesPortForwardStarted {
+                subject,
+                namespace,
+                pod,
+                ports,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "KubernetesPortForwardStarted1",
+                    session = %subject.session_id,
+                    user_id = %subject.user_id,
+                    username = %subject.username,
+                    target_id = %subject.target_id,
+                    target_name = %subject.target_name,
+                    related_users = %format_related_ids(&[subject.user_id]),
+                    namespace = %namespace,
+                    pod = %pod,
+                    ports = ports.as_deref(),
+                    "Kubernetes port forwarding"
+                );
+            }
+            Self::KubernetesStreamRejected {
+                subject,
+                namespace,
+                pod,
+                subresource,
+                status,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "KubernetesStreamRejected1",
+                    session = %subject.session_id,
+                    user_id = %subject.user_id,
+                    username = %subject.username,
+                    target_id = %subject.target_id,
+                    target_name = %subject.target_name,
+                    related_users = %format_related_ids(&[subject.user_id]),
+                    namespace = %namespace,
+                    pod = %pod,
+                    subresource = %subresource,
+                    status = %status,
+                    "Kubernetes stream rejected by the cluster"
+                );
+            }
+            Self::KubernetesDebugContainerCreated {
+                subject,
+                namespace,
+                pod,
+                debug_container,
+                image,
+                target_container,
+                command,
+                tty,
+                response_status,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "KubernetesDebugContainerCreated1",
+                    session = %subject.session_id,
+                    user_id = %subject.user_id,
+                    username = %subject.username,
+                    target_id = %subject.target_id,
+                    target_name = %subject.target_name,
+                    related_users = %format_related_ids(&[subject.user_id]),
+                    namespace = %namespace,
+                    pod = %pod,
+                    debug_container = %debug_container,
+                    image = %image,
+                    target_container = target_container.as_deref(),
+                    command = %command,
+                    tty = %tty,
+                    response_status = %response_status,
+                    "Kubernetes debug container"
+                );
+            }
+            Self::KubernetesPodCreated {
+                subject,
+                namespace,
+                pod,
+                images,
+                node_name,
+                host_pid,
+                host_network,
+                privileged,
+                response_status,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "KubernetesPodCreated1",
+                    session = %subject.session_id,
+                    user_id = %subject.user_id,
+                    username = %subject.username,
+                    target_id = %subject.target_id,
+                    target_name = %subject.target_name,
+                    related_users = %format_related_ids(&[subject.user_id]),
+                    namespace = %namespace,
+                    pod = %pod,
+                    images = %images,
+                    node_name = node_name.as_deref(),
+                    host_pid = %host_pid,
+                    host_network = %host_network,
+                    privileged = %privileged,
+                    response_status = %response_status,
+                    "Kubernetes pod created"
                 );
             }
         }

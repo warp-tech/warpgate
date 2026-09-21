@@ -8,7 +8,7 @@ use poem::Request;
 use poem_openapi::SecurityScheme;
 use poem_openapi::auth::ApiKey;
 use warpgate_common::{AdminPermission, AdminPermissionSet, WarpgateError};
-use warpgate_common_http::{AuthenticatedRequestContext, RequestAuthorization};
+use warpgate_common_http::AuthenticatedRequestContext;
 
 use super::common::admin_permission_set;
 
@@ -51,7 +51,7 @@ async fn admin_access(req: &Request, _key: ApiKey) -> Option<AdminAccess> {
 /// origin node has already authorized the admin before forwarding, so it gets every permission.
 async fn cluster_or_admin_access(req: &Request, _key: ApiKey) -> Option<AdminAccess> {
     let ctx = req.data::<AuthenticatedRequestContext>().cloned()?;
-    if matches!(ctx.auth, RequestAuthorization::ClusterToken) {
+    if ctx.auth.is_cluster_peer() {
         return Some(AdminAccess {
             ctx,
             permissions: AdminPermissionSet::all(),

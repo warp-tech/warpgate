@@ -1,3 +1,4 @@
+use poem::http::StatusCode;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
@@ -11,10 +12,15 @@ use warpgate_common::{
     AdminPermission, AdminRole as AdminRoleConfig, User as UserConfig,
     UserRequireCredentialsPolicy, WarpgateError,
 };
+use warpgate_common_http::errors::{bad_request, invalid_field};
+use warpgate_core::State;
 use warpgate_core::logging::{AuditEvent, format_related_ids};
-use warpgate_db_entities::{AdminRole, Role, User, UserAdminRoleAssignment, UserRoleAssignment};
+use warpgate_db_entities::{
+    AdminRole, Role, User, UserAdminRoleAssignment, UserRoleAssignment, UserSession,
+};
 
-use super::AdminContext;
+use super::{AdminContext, ClusterOrAdminContext};
+use crate::api::cluster_proxy::fan_out_to_peers_expecting;
 use crate::api::common::case_insensitive_search;
 
 #[derive(Object)]
@@ -85,7 +91,10 @@ impl ListApi {
         admin.require(AdminPermission::UsersCreate)?;
 
         if body.username.is_empty() {
-            return Ok(CreateUserResponse::BadRequest(Json("name".into())));
+            return Ok(CreateUserResponse::BadRequest(invalid_field(
+                "name",
+                "username is empty",
+            )));
         }
 
         let db = &admin.services().db;
@@ -94,7 +103,10 @@ impl ListApi {
         // existing one only by case is the same account. Rejected here to give a
         // field-level error rather than a bare unique-constraint failure.
         if username_taken(db, &body.username, None).await? {
-            return Ok(CreateUserResponse::BadRequest(Json("username".into())));
+            return Ok(CreateUserResponse::BadRequest(invalid_field(
+                "username",
+                "a user with this username already exists",
+            )));
         }
 
         let values = User::ActiveModel {
@@ -240,12 +252,18 @@ impl DetailApi {
         };
 
         if body.username.is_empty() {
-            return Ok(UpdateUserResponse::BadRequest(Json("username".into())));
+            return Ok(UpdateUserResponse::BadRequest(invalid_field(
+                "username",
+                "username is empty",
+            )));
         }
 
         // Excludes this account, so re-casing or keeping one's own name is fine.
         if username_taken(db, &body.username, Some(user.id)).await? {
-            return Ok(UpdateUserResponse::BadRequest(Json("username".into())));
+            return Ok(UpdateUserResponse::BadRequest(invalid_field(
+                "username",
+                "another user already has this username",
+            )));
         }
 
         let mut model: User::ActiveModel = user.into();
@@ -275,16 +293,29 @@ impl DetailApi {
     #[oai(path = "/users/:id", method = "delete", operation_id = "delete_user")]
     async fn api_delete_user(
         &self,
-        admin: AdminContext,
+        admin: ClusterOrAdminContext,
         id: Path<Uuid>,
+        req: &poem::Request,
     ) -> Result<DeleteUserResponse, WarpgateError> {
         admin.require(AdminPermission::UsersDelete)?;
 
         let db = &admin.services().db;
 
+        let close_live_sessions = State::close_local_sessions(&admin.services().state, |s| {
+            s.user_info.as_ref().is_some_and(|u| u.id == id.0)
+        });
+        if admin.is_intra_cluster_request() {
+            close_live_sessions.await;
+            return Ok(DeleteUserResponse::Deleted);
+        }
+
         let Some(user) = User::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(DeleteUserResponse::NotFound);
         };
+
+        // kill DB sessions before killing handles to avoid a race
+        UserSession::revoke_all_for_user(db, user.id).await?;
+        close_live_sessions.await;
 
         UserRoleAssignment::Entity::delete_many()
             .filter(UserRoleAssignment::Column::UserId.eq(user.id))
@@ -304,6 +335,11 @@ impl DetailApi {
         .emit();
 
         user.delete(db).await?;
+
+        for (node, status) in fan_out_to_peers_expecting(&admin, req, StatusCode::NO_CONTENT).await
+        {
+            warn!(%node, %status, "Failed to close the user's sessions on a cluster node");
+        }
 
         Ok(DeleteUserResponse::Deleted)
     }
@@ -327,8 +363,8 @@ impl DetailApi {
         };
 
         if user.ldap_server_id.is_none() {
-            return Ok(UnlinkUserFromLdapResponse::BadRequest(Json(
-                "User is not linked to LDAP".to_string(),
+            return Ok(UnlinkUserFromLdapResponse::BadRequest(bad_request(
+                "User is not linked to LDAP",
             )));
         }
 
@@ -361,8 +397,8 @@ impl DetailApi {
         };
 
         if user.ldap_server_id.is_some() {
-            return Ok(AutoLinkUserToLdapResponse::BadRequest(Json(
-                "User is already linked to LDAP".to_string(),
+            return Ok(AutoLinkUserToLdapResponse::BadRequest(bad_request(
+                "User is already linked to LDAP",
             )));
         }
 
@@ -372,8 +408,8 @@ impl DetailApi {
             .await?;
 
         if ldap_servers.is_empty() {
-            return Ok(AutoLinkUserToLdapResponse::BadRequest(Json(
-                "No enabled LDAP servers configured".to_string(),
+            return Ok(AutoLinkUserToLdapResponse::BadRequest(bad_request(
+                "No enabled LDAP servers configured",
             )));
         }
 
@@ -398,9 +434,9 @@ impl DetailApi {
         }
 
         if ldap_server_id.is_none() {
-            return Ok(AutoLinkUserToLdapResponse::BadRequest(Json(format!(
-                "No LDAP user found with username: {username}",
-            ))));
+            return Ok(AutoLinkUserToLdapResponse::BadRequest(bad_request(
+                format!("No LDAP user found with username: {username}",),
+            )));
         }
 
         let mut model: User::ActiveModel = user.into();

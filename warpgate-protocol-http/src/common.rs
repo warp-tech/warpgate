@@ -18,7 +18,7 @@ use warpgate_common::auth::{AuthResult, AuthState, AuthStateUserInfo, Credential
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Protocol, UserSessionId, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
-use warpgate_common_http::ext::construct_external_url;
+use warpgate_common_http::ext::{construct_external_url, is_navigation_request};
 use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
@@ -167,12 +167,6 @@ pub fn page_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
             .await?
             .map_or(err_resp, IntoResponse::into_response))
     })
-}
-
-pub fn is_navigation_request(req: &Request) -> bool {
-    req.headers()
-        .get(HeaderName::from_static("sec-fetch-mode"))
-        .is_none_or(|mode| mode == "navigate")
 }
 
 pub fn redirect_navigations(
@@ -348,7 +342,7 @@ pub async fn authorize_session(
 
     // when auth is completed, we must rotate the cookie *on the first hop*
     // since cookies set by a forwarded request are not passed back to the client
-    if !warpgate_common_http::is_cluster_peer_request(req, &ctx.services().cluster_token) {
+    if !warpgate_common_http::is_cluster_peer_request(req, &ctx.services().cluster.cluster_token) {
         // we are the first hop
 
         let jar = <&CookieJar>::from_request_without_body(req)
@@ -442,7 +436,7 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
         .await?
         .for_request();
     let session = <&Session>::from_request_without_body(&req).await?;
-    let is_cluster_peer = is_cluster_peer_request(&req, &ctx.services().cluster_token);
+    let is_cluster_peer = is_cluster_peer_request(&req, &ctx.services().cluster.cluster_token);
 
     let mut session_auth = session.get_auth();
     // A forwarded request's Host is the cluster SNI name by construction, so the
@@ -517,10 +511,14 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
 mod tests {
     use super::{StatusCode, gateway_redirect, host_is_subdomain_of_or_equal};
 
+    const BROWSER_ACCEPT: &str = "text/html,application/xhtml+xml,*/*;q=0.8";
+
     #[test]
     fn gateway_redirect_navigation_redirects_to_login() {
         for mode in [None, Some("navigate")] {
-            let mut req = poem::Request::builder().uri_str("/api/data");
+            let mut req = poem::Request::builder()
+                .uri_str("/api/data")
+                .header("accept", BROWSER_ACCEPT);
             if let Some(mode) = mode {
                 req = req.header("sec-fetch-mode", mode);
             }
@@ -538,13 +536,28 @@ mod tests {
     #[test]
     fn gateway_redirect_fetch_gets_401() {
         // https://github.com/warp-tech/warpgate/issues/1989
-        for mode in ["cors", "same-origin", "no-cors"] {
-            let req = poem::Request::builder()
-                .uri_str("/api/data")
-                .header("sec-fetch-mode", mode)
-                .finish();
-            let resp = gateway_redirect(&req);
-            assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        let cases = [
+            (None, None),
+            (Some("*/*"), None),
+            (Some("application/json"), Some("cors")),
+            (Some(BROWSER_ACCEPT), Some("cors")),
+            (Some(BROWSER_ACCEPT), Some("same-origin")),
+            (Some(BROWSER_ACCEPT), Some("no-cors")),
+        ];
+        for (accept, mode) in cases {
+            let mut req = poem::Request::builder().uri_str("/api/data");
+            if let Some(accept) = accept {
+                req = req.header("accept", accept);
+            }
+            if let Some(mode) = mode {
+                req = req.header("sec-fetch-mode", mode);
+            }
+            let resp = gateway_redirect(&req.finish());
+            assert_eq!(
+                resp.status(),
+                StatusCode::UNAUTHORIZED,
+                "{accept:?} {mode:?}"
+            );
         }
     }
 
