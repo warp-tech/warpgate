@@ -76,15 +76,23 @@ impl GatedConnection {
 ///
 /// protocols that can communicate with the user during the wait, must drive require_admin_approval() + poll_admin_approval() themselves
 ///
+/// `notify_waiting` is called if waiting for an administrator (TODO use a more explicit event sender)
+///
 /// Refusal return WarpgateError::SessionNotApproved
 ///
 /// This wraps require_admin_approval()
-pub async fn admit_target_session<O: Send + Sync>(
+pub async fn admit_target_session<O, F, Fut>(
     services: &Services,
     handle: &Arc<Mutex<WarpgateServerHandle>>,
     authorization: TargetAuthorization<O>,
     connection: GatedConnection,
-) -> Result<AdmittedTarget<O>, WarpgateError> {
+    notify_waiting: F,
+) -> Result<AdmittedTarget<O>, WarpgateError>
+where
+    O: Send + Sync,
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<(), WarpgateError>>,
+{
     let started = handle
         .lock()
         .await
@@ -98,9 +106,7 @@ pub async fn admit_target_session<O: Send + Sync>(
     let session_id = handle.lock().await.user_session_id();
 
     let outcome: GateOutcome<O> = services
-        .require_admin_approval(authorization, session_id, connection, || async {
-            Ok::<_, WarpgateError>(())
-        })
+        .require_admin_approval(authorization, session_id, connection, notify_waiting)
         .await?;
 
     let Some(approved) = outcome.approved() else {

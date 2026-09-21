@@ -3,6 +3,7 @@
 //! Collects that factor over the live RDP session before the target is dialed.
 
 use std::convert::Infallible;
+use std::future::Future;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -11,7 +12,8 @@ use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 use warpgate_core::{AuthorizedIdentity, DesktopInput, Scancode, Services};
 use warpgate_desktop_auth::{
     Deadline, HoldEvent, HoldFrame, HoldInputSource, HoldPainter as HoldPainterExt,
-    InteractiveAuth, OtpAction, run_hold_screen as run_hold_screen_driver,
+    InteractiveAuth, OtpAction, hold_while as hold_while_driver,
+    run_hold_screen as run_hold_screen_driver,
 };
 use warpgate_desktop_ui as ui;
 
@@ -32,37 +34,67 @@ pub(super) async fn run_hold_screen(
     server_in_tx: &Sender<ServerInput>,
     screen: &mut ui::Screen,
 ) -> Result<Option<AuthorizedIdentity>> {
-    // A resize can arrive mid-hold (a viewer window drag, or mstsc's initial Display Control
-    // layout): the input reader records it here and the painter follows it. Shared behind a
-    // lock because the reader and the painter are separate objects (so the driver can await
-    // input and paint without aliasing one `&mut` across its `select!`); the lock is never
-    // held across an await, which keeps the reader cancel-safe.
-    let shared_screen = Arc::new(Mutex::new(*screen));
-    let mut input = RdpHoldInput {
-        events,
-        screen: shared_screen.clone(),
-    };
-    let mut painter = RdpHoldPainter {
-        inner: HoldPainter::new(*screen),
-        server_in_tx: server_in_tx.clone(),
-        screen: shared_screen.clone(),
-    };
-
+    let mut hold = RdpHold::new(events, server_in_tx, *screen);
     let result = run_hold_screen_driver(
         services,
         interactive.state_id,
         crate::PROTOCOL_NAME,
         &interactive.username,
         interactive.remote_ip,
-        &mut input,
-        &mut painter,
+        &mut hold.input,
+        &mut hold.painter,
         Deadline::until_auth_state_expires(),
     )
     .await;
-
-    // Hand the negotiated size back to the caller so it dials the target at it.
-    *screen = *shared_screen.lock().unwrap_or_else(PoisonError::into_inner);
+    *screen = hold.screen();
     result
+}
+
+/// Await `wait` while rendering hold UI, see [hold_while_driver]
+pub(super) async fn hold_while<T>(
+    wait: impl Future<Output = T>,
+    events: &mut UnboundedReceiver<ServerEvent>,
+    server_in_tx: &Sender<ServerInput>,
+    screen: &mut ui::Screen,
+    frame: impl Fn() -> HoldFrame<'static>,
+) -> Result<Option<T>> {
+    let mut hold = RdpHold::new(events, server_in_tx, *screen);
+    let result = hold_while_driver(wait, &mut hold.input, &mut hold.painter, frame).await;
+    *screen = hold.screen();
+    result
+}
+
+struct RdpHold<'a> {
+    input: RdpHoldInput<'a>,
+    painter: RdpHoldPainter,
+    screen: Arc<Mutex<ui::Screen>>,
+}
+
+impl<'a> RdpHold<'a> {
+    fn new(
+        events: &'a mut UnboundedReceiver<ServerEvent>,
+        server_in_tx: &Sender<ServerInput>,
+        screen: ui::Screen,
+    ) -> Self {
+        let shared = Arc::new(Mutex::new(screen));
+        Self {
+            input: RdpHoldInput {
+                events,
+                screen: shared.clone(),
+            },
+            painter: RdpHoldPainter {
+                inner: HoldPainter::new(screen),
+                server_in_tx: server_in_tx.clone(),
+                screen: shared.clone(),
+            },
+            screen: shared,
+        }
+    }
+
+    /// The size the viewer has settled on so far.
+    fn screen(&self) -> ui::Screen {
+        *self.screen.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 }
 
 /// Reads RDP viewer input for the hold screen, mapping scancodes / Unicode keys to OTP
@@ -108,20 +140,11 @@ impl HoldPainterExt for RdpHoldPainter {
     async fn paint(&mut self, frame: HoldFrame<'_>) -> Result<()> {
         self.inner
             .set_screen(*self.screen.lock().unwrap_or_else(PoisonError::into_inner));
-        match frame {
-            HoldFrame::Prompt(prompt) => {
-                self.inner
-                    .paint(&self.server_in_tx, |screen, tick| {
-                        ui::render_authentication(screen, tick, prompt)
-                    })
-                    .await
-            }
-            HoldFrame::Connecting => {
-                self.inner
-                    .paint(&self.server_in_tx, ui::render_connecting)
-                    .await
-            }
-        }
+        self.inner
+            .paint(&self.server_in_tx, |screen, tick| {
+                frame.render(screen, tick)
+            })
+            .await
     }
 
     fn render_interval(&self) -> Duration {
@@ -285,6 +308,173 @@ fn key_otp_action(keysym: u32) -> Option<OtpAction> {
         0x0d | 0x0a => OtpAction::Submit, // CR / LF
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod hold_while_tests {
+    use tokio::sync::mpsc::{channel, unbounded_channel};
+
+    use super::*;
+
+    fn pointer() -> ServerEvent {
+        ServerEvent::Input(DesktopInput::Pointer {
+            x: 1,
+            y: 1,
+            buttons: 0,
+        })
+    }
+
+    fn screen() -> ui::Screen {
+        ui::Screen {
+            width: 800,
+            height: 600,
+        }
+    }
+
+    /// A viewer-side sink for the painted frames, drained so painting never blocks.
+    fn viewer() -> Sender<ServerInput> {
+        let (tx, mut rx) = channel(16);
+        tokio::spawn(async move { while rx.recv().await.is_some() {} });
+        tx
+    }
+
+    /// The channel is unbounded and the hold lasts as long as an administrator
+    /// takes, so anything the viewer sends meanwhile has to be taken off it —
+    /// otherwise a client that keeps typing grows the gateway's memory for the
+    /// length of the window.
+    ///
+    /// The hold here never resolves, which is the case that matters: the drain
+    /// has to happen *during* the wait, not after it.
+    #[tokio::test]
+    async fn viewer_input_does_not_pile_up_behind_the_hold() {
+        let (tx, mut events) = unbounded_channel();
+        let mut screen = screen();
+
+        for _ in 0..1000 {
+            tx.send(pointer()).unwrap();
+        }
+
+        let held = std::future::pending::<()>();
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(200),
+                hold_while(held, &mut events, &viewer(), &mut screen, || {
+                    HoldFrame::Connecting
+                }),
+            )
+            .await
+            .is_err(),
+            "the hold does not resolve, so the pump should still be waiting",
+        );
+
+        assert!(
+            events.try_recv().is_err(),
+            "every event sent during the hold must have been taken off the channel",
+        );
+    }
+
+    /// What the hold produced still reaches the caller.
+    #[tokio::test]
+    async fn the_held_outcome_is_returned() {
+        let (_tx, mut events) = unbounded_channel::<ServerEvent>();
+        let mut screen = screen();
+
+        assert_eq!(
+            hold_while(
+                std::future::ready(7),
+                &mut events,
+                &viewer(),
+                &mut screen,
+                || HoldFrame::Connecting
+            )
+            .await
+            .unwrap(),
+            Some(7),
+        );
+    }
+
+    /// A viewer can settle a new size mid-hold; the target has to be dialled at
+    /// the size actually being shown, not the one negotiated before the wait.
+    #[tokio::test]
+    async fn a_size_settled_during_the_hold_is_kept() {
+        let (tx, mut events) = unbounded_channel();
+        let mut screen = screen();
+
+        tx.send(ServerEvent::Size {
+            width: 1024,
+            height: 768,
+        })
+        .unwrap();
+        tx.send(pointer()).unwrap();
+        tx.send(ServerEvent::Size {
+            width: 1920,
+            height: 1080,
+        })
+        .unwrap();
+
+        // Resolves only after the queued events have been drained.
+        let held = tokio::time::sleep(Duration::from_millis(200));
+        hold_while(held, &mut events, &viewer(), &mut screen, || {
+            HoldFrame::Connecting
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(screen.width, 1920);
+        assert_eq!(screen.height, 1080);
+    }
+
+    /// Nothing is left to admit once the viewer is gone, and the caller has to
+    /// hear about it: holding on would keep the approval request standing for a
+    /// connection that no longer exists.
+    #[tokio::test]
+    async fn a_departed_viewer_ends_the_hold() {
+        let (tx, mut events) = unbounded_channel::<ServerEvent>();
+        let mut screen = screen();
+
+        tx.send(pointer()).unwrap();
+        drop(tx);
+
+        assert!(
+            hold_while(
+                std::future::pending::<()>(),
+                &mut events,
+                &viewer(),
+                &mut screen,
+                || HoldFrame::Connecting
+            )
+            .await
+            .unwrap()
+            .is_none(),
+            "the hold must end when the viewer disconnects, not wait out the window",
+        );
+    }
+
+    /// The frames painted during the hold are the ones that keep the viewer from
+    /// freezing on whatever it showed last.
+    #[tokio::test]
+    async fn the_viewer_is_painted_during_the_hold() {
+        let (_tx, mut events) = unbounded_channel::<ServerEvent>();
+        let (viewer_tx, mut viewer_rx) = channel(16);
+        let mut screen = screen();
+
+        let _ = tokio::time::timeout(
+            Duration::from_millis(250),
+            hold_while(
+                std::future::pending::<()>(),
+                &mut events,
+                &viewer_tx,
+                &mut screen,
+                || HoldFrame::Connecting,
+            ),
+        )
+        .await;
+
+        assert!(
+            matches!(viewer_rx.try_recv(), Ok(ServerInput::Frame { .. })),
+            "a frame must have been pushed to the viewer while the hold ran",
+        );
+    }
 }
 
 #[cfg(test)]
