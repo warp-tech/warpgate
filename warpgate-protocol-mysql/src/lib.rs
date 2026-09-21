@@ -15,7 +15,7 @@ use rustls::ServerConfig;
 use rustls::server::NoClientAuth;
 use tracing::{Instrument, error, info, warn};
 use warpgate_common::ListenEndpoint;
-use warpgate_common::helpers::net::accept_loop;
+use warpgate_common::helpers::net::{accept_loop, enable_tcp_keepalive};
 use warpgate_core::{ProtocolServer, Services, State, UserSessionStateInit};
 use warpgate_tls::{ResolveServerCert, TlsCertificateAndPrivateKey};
 
@@ -67,6 +67,10 @@ impl ProtocolServer for MySQLProtocolServer {
                     let tls_config = tls_config.clone();
                     let services = services.clone();
                     async move {
+                        if let Err(error) = enable_tcp_keepalive(&stream) {
+                            warn!(%error, "Failed to enable TCP keepalive");
+                        }
+
                         let (session_handle, mut abort_rx) = MySqlSessionHandle::new();
 
                         let (server_handle, wrapped_stream) =

@@ -7,7 +7,6 @@ mod stream;
 
 use std::fmt::Debug;
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use futures::FutureExt;
@@ -16,10 +15,9 @@ use rustls::ServerConfig;
 use rustls::server::NoClientAuth;
 use session::PostgresSession;
 use session_handle::PostgresSessionHandle;
-use socket2::{Socket, TcpKeepalive};
 use tracing::{Instrument, error, info, warn};
 use warpgate_common::ListenEndpoint;
-use warpgate_common::helpers::net::accept_loop;
+use warpgate_common::helpers::net::{accept_loop, enable_tcp_keepalive};
 use warpgate_core::{ProtocolServer, Services, State, UserSessionStateInit};
 use warpgate_tls::{ResolveServerCert, TlsCertificateAndPrivateKey};
 
@@ -70,27 +68,9 @@ impl ProtocolServer for PostgresProtocolServer {
                     let tls_config = tls_config.clone();
                     let services = services.clone();
                     async move {
-                        // Enable TCP keepalive to prevent idle connections from timing out
-                        // This is especially important during web auth approval wait
-                        // Use socket2 to configure keepalive (tokio TcpStream doesn't expose it directly)
-                        let stream = (|| {
-                            let socket = Socket::from(stream.into_std()?);
-                            let keepalive = TcpKeepalive::new()
-                                .with_time(Duration::from_secs(60)) // Start keepalive after 60s of inactivity
-                                .with_interval(Duration::from_secs(10)) // Send probes every 10s
-                                .with_retries(3); // 3 retries before considering dead
-                            socket.set_tcp_keepalive(&keepalive)?;
-                            socket.set_tcp_nodelay(true)?;
-                            tokio::net::TcpStream::from_std(socket.into())
-                        })();
-
-                        let stream = match stream {
-                            Ok(stream) => stream,
-                            Err(error) => {
-                                warn!(%error, "Failed to set up an accepted connection");
-                                return Ok(());
-                            }
-                        };
+                        if let Err(error) = enable_tcp_keepalive(&stream) {
+                            warn!(%error, "Failed to enable TCP keepalive");
+                        }
 
                         let (session_handle, mut abort_rx) = PostgresSessionHandle::new();
 

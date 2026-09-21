@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::{Stream, StreamExt};
+use socket2::{SockRef, TcpKeepalive};
 use tokio::net::TcpStream;
 use tokio::sync::Semaphore;
 use tokio::time::timeout;
@@ -85,6 +86,20 @@ pub async fn accept_client(stream: &mut TcpStream, proxy_protocol: bool) -> Opti
     }
 
     Some(address)
+}
+
+/// Keep an idle accepted connection alive.
+///
+/// A client parked on a web-approval or administrator-approval prompt sends nothing for as long
+/// as the decision takes, which an intermediate NAT or firewall is free to forget. Nodelay is
+/// already set by [`accept_client`], so this only covers the keepalive probes.
+pub fn enable_tcp_keepalive(stream: &TcpStream) -> std::io::Result<()> {
+    SockRef::from(stream).set_tcp_keepalive(
+        &TcpKeepalive::new()
+            .with_time(Duration::from_secs(60))
+            .with_interval(Duration::from_secs(10))
+            .with_retries(3),
+    )
 }
 
 /// Wait for up to `budget` for the stream to send something
