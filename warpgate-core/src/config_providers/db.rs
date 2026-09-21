@@ -1167,7 +1167,7 @@ mod tests {
     /// What production actually compares: the digest the approval row carries,
     /// not the struct. A field missing from the encoding is invisible to `==`.
     fn identity_digest(credential: StoredCredential) -> String {
-        StoredCredentials::new(vec![credential]).unwrap().digest()
+        StoredCredentials::new(vec![credential]).digest()
     }
 
     fn offered_key(key: &str) -> AuthCredential {
