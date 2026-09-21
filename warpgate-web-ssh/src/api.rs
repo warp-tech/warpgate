@@ -47,30 +47,35 @@ pub async fn ws_handler(
     Ok(ws.on_upgrade(move |socket| async move {
         let (mut sink, mut stream) = socket.split();
 
-        // drain buffered events first (in case of a reconnect)
-        for msg in session.drain_buffer().await {
-            if let Ok(json) = serde_json::to_string(&msg) {
-                let _ = sink.send(Message::Text(json)).await;
-            }
-        }
         let mut keepalive = tokio::time::interval(Duration::from_secs(30));
         keepalive.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         keepalive.tick().await; // consume the immediate first tick
 
         loop {
-            tokio::select! {
-                () = session.wait_buffer() => {
-                    let msgs = session.drain_buffer().await;
-                    for msg in msgs {
-                        if let Ok(json) = serde_json::to_string(&msg)
-                            && sink.send(Message::Text(json)).await.is_err() {
-                            break;
-                        }
-                    }
-                    if session.is_dead() {
-                        break;
-                    }
+            // Register interest in new output *before* draining, so anything pushed while we
+            // are sending isn't a missed wakeup (`notify_waiters` stores no permit). The drain
+            // at the top of the loop also covers the reconnect case, where the buffer already
+            // holds output from before this socket existed.
+            let notified = session.wait_buffer();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+
+            let mut closed = false;
+            for msg in session.drain_buffer().await {
+                if let Ok(json) = serde_json::to_string(&msg)
+                    && sink.send(Message::Text(json)).await.is_err()
+                {
+                    closed = true;
+                    break;
                 }
+            }
+            if closed || session.is_dead() {
+                break;
+            }
+
+            tokio::select! {
+                // Woken by new output; the loop re-drains at the top.
+                () = notified.as_mut() => {}
 
                 maybe_msg = stream.next() => {
                     match maybe_msg {
