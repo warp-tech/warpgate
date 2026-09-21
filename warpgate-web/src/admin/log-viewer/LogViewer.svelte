@@ -891,7 +891,7 @@
         grid-template-columns: subgrid;
         align-items: start;
         box-sizing: border-box;
-        border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+        border-bottom: var(--wg-border-width) solid var(--wg-border);
         font-family: var(--wg-font-mono);
         font-size: 0.75rem;
         padding: 0.1rem 0;

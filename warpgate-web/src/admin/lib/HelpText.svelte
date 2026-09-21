@@ -14,7 +14,7 @@
 </small>
 
 <style>
-    small {
+    .help-text {
         display: block;
         color: var(--wg-text-muted);
         line-height: 1.2;

@@ -1138,3 +1138,11 @@
         />
     {/if}
 </div>
+
+<style>
+    /* The save-error callout. This screen had no <style> block at all, which
+       is why the class resolved to nothing. */
+    .notice {
+        margin-bottom: var(--wg-space-lg);
+    }
+</style>

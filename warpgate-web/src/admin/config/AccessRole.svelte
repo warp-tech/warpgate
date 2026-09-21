@@ -200,7 +200,7 @@
     onconfirm={confirmRemove}
     oncancel={() => (removing = false)}
 >
-    <p class="panel">
+    <p>
         Every user holding this role loses it, and every target that grants
         access through it stops granting that access. Neither list is shown
         here, so there is no way to see from this screen how many are affected.

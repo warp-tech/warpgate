@@ -272,6 +272,12 @@
 {/if}
 
 <style>
+    .head-actions {
+        display: flex;
+        align-items: center;
+        gap: var(--wg-space-sm);
+    }
+
     .head {
         display: flex;
         align-items: center;

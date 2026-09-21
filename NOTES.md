@@ -1392,3 +1392,61 @@ live in four namespaces:
    so a green build already proves there are none
 
 Three of the four fail silently. Bundle unchanged at 1719.2 KB / 705.3 gz.
+
+## The last of it: eleven classes in the new screens with no rule behind them
+
+With Bootstrap's classes bridged and the dangling `var()`s gone, the audit was
+left with 29 orphans, none of them Bootstrap's. Reading each one rather than
+trusting the count split them three ways.
+
+**Intentional hooks — no rule wanted.** A wrapper element whose children carry
+the styling (`wg-tabs`, `wg-skeleton`, `wg-status-label`, `wg-check-label`), a
+class passed to a child component so a caller can target it (`wg-table-search`,
+`wg-table-density`), and — the one worth naming — `a-callout-info` and its
+three siblings in the styleguide, which are **selectors the contrast audit
+looks elements up by**. A class can be an address rather than a style.
+
+**False positives.** String literals inside an expression that feed a spliced
+name or are not classes at all: `diamond`, `dot`, `warning` (they become
+`wg-marker-{shape}`), `certificate`, `oidc` (a `kubeconfigMode` value).
+
+**Genuinely missing rules — eleven, all mine.** These render as bare markup:
+
+- **`panel`, in three delete dialogs.** `<p class="panel">` carrying the
+  consequence text, defined nowhere, in AccessRole, AdminRole and LdapServer.
+  The fix is not a `.panel` rule in three files — that is the fork this repo
+  keeps producing — but `ConfirmDialog` styling its own body, once. It now
+  wraps `{@render children()}` in an element it owns and reaches the caller's
+  paragraphs through `.wg-confirm-body :global(p)`, which is the only way:
+  snippet content carries the **caller's** scope hash, not the component's.
+  The three call sites drop the class entirely.
+- **`hostkey` and `hostkey-lead`, in the SSH host-key prompt.** The one that
+  matters. The dialog asks the user to compare a fingerprint out of band, and
+  the key is a single unbroken base64 run — with no rule it overflowed the
+  modal, so the thing being verified was partly off-screen. Now a sunken code
+  block with `overflow-wrap: anywhere`.
+- `head-actions` (Roles), `head-titles` (User, needs `min-width: 0` or a long
+  username pushes the actions off the edge), `notice` (Parameters — which
+  turned out to have **no `<style>` block at all**, which is why it resolved to
+  nothing), `tl-field` (Session), `help-text` (HelpText hung its styling on the
+  bare `small` element, leaving the class it names meaningless; the class now
+  carries it).
+
+### One more theme bug, from a different angle
+
+Hardcoded black and white in CSS is wrong by construction — it can be right in
+at most one of the two palettes. A sweep found 24 declarations, 23 of them
+legitimate: the token layer itself, the players' and terminal's black chrome,
+the modal scrim, `EmbeddedUI` (injected into third-party pages), and the QR
+code's white ground, which is documented in place because a QR inverted by a
+dark palette is unreadable to most scanners.
+
+The 24th was `.log-row`'s `border-bottom: 1px solid rgba(0, 0, 0, 0.06)` —
+6% black on a dark surface, i.e. no row separators in the audit log at all. The
+same defect as the sticky header's, one rule below it, missed on the first pass
+because I was grepping for `--bs-` rather than reading the block.
+
+```
+orphaned classes  29 -> 21, all 21 classified as hooks or false positives
+bundle            1720.0 KB raw / 705.5 gz
+```

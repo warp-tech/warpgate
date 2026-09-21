@@ -556,6 +556,25 @@
         gap: var(--wg-space-xs);
     }
 
+    .hostkey-lead {
+        margin: 0 0 var(--wg-space-sm);
+        font: var(--wg-text-body-md);
+    }
+
+    .hostkey {
+        display: block;
+        margin-top: var(--wg-space-md);
+        padding: var(--wg-space-sm);
+        background: var(--wg-surface-sunken);
+        border: var(--wg-border-width) solid var(--wg-border);
+        border-radius: var(--wg-radius-sm);
+        color: var(--wg-text);
+        font: var(--wg-text-code-sm);
+        // One unbroken base64 run. Without this it overflows the dialog and
+        // the user cannot read the fingerprint they are being asked to check.
+        overflow-wrap: anywhere;
+    }
+
     .sr-only {
         position: absolute;
         width: 1px;

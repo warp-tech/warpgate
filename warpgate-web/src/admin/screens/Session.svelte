@@ -349,6 +349,14 @@
         background: var(--wg-text-subtle);
     }
 
+    /* Keeps a label and its value together as one unit inside the
+       wrapping .tl-fields row. */
+    .tl-field {
+        display: inline-flex;
+        gap: var(--wg-space-xs);
+        min-width: 0;
+    }
+
     .tl-label {
         color: var(--wg-text-muted);
     }

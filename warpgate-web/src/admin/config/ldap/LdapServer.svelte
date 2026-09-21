@@ -264,7 +264,7 @@
     onconfirm={confirmRemove}
     oncancel={() => (removing = false)}
 >
-    <p class="panel">
+    <p>
         Users linked to this directory stop being able to sign in through it.
         Their Warpgate accounts remain, but the credentials that came from the
         directory — including SSH keys loaded from it — are no longer available.

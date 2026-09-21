@@ -280,7 +280,7 @@
     onconfirm={confirmRemove}
     oncancel={() => (removing = false)}
 >
-    <p class="panel">
+    <p>
         Every administrator holding this role loses the permissions it grants,
         immediately. If it is the only role granting someone admin access, they
         lose that access — and this screen does not list who holds it.

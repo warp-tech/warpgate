@@ -597,6 +597,12 @@
         font: var(--wg-text-headline-lg);
     }
 
+    /* Without this the username cannot shrink, so a long one pushes the
+       actions off the right edge instead of truncating. */
+    .head-titles {
+        min-width: 0;
+    }
+
     .head-meta {
         margin-top: var(--wg-space-xs);
     }

@@ -81,7 +81,9 @@
 
 <Modal bind:open {title} size="sm" onclose={oncancel}>
     {#if children}
-        {@render children()}
+        <div class="wg-confirm-body">
+            {@render children()}
+        </div>
     {/if}
 
     {#if needsTyping}
@@ -107,6 +109,22 @@
 </Modal>
 
 <style>
+    .wg-confirm-body {
+        font: var(--wg-text-body-md);
+        color: var(--wg-text-muted);
+    }
+
+    /* The body comes from the caller's snippet, so its elements carry the
+       CALLER's scope hash, not this component's. :global is the only way to
+       reach them, and it is bounded by the wrapper above. */
+    .wg-confirm-body :global(p) {
+        margin: 0 0 var(--wg-space-sm);
+    }
+
+    .wg-confirm-body :global(p:last-child) {
+        margin-bottom: 0;
+    }
+
     .wg-confirm-prompt {
         margin: var(--wg-space-lg) 0 var(--wg-space-sm);
         font: var(--wg-text-body-md);
