@@ -217,6 +217,7 @@ async fn admit_kubernetes_session(
             // k8s has no AuthState
             credentials: RememberApprovalBy::Nothing,
         },
+        || async { Ok(()) },
     )
     .await
 }
