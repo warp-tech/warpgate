@@ -1514,3 +1514,38 @@ Behaviour is unchanged, and that is asserted rather than assumed: the set of
 `bind:value`, `bind:checked`, `onchange`, `oninput` and `onclick` expressions
 in all three rewritten files hashes identically to `HEAD`. Only wrapping
 elements moved. Bundle 1720.3 KB raw / 705.5 gz.
+
+## A lost behaviour hiding behind a dead branch
+
+I had this noted as "pre-existing dead config" and was about to delete it. It
+was not. It was a regression I introduced.
+
+`gateway/AppNew.svelte` passes `'on:navigation'` through svelte-spa-router's
+`props`, and `redirecting` is never true, so the portal's "Opening your
+session" spinner is unreachable. The easy reading is that nothing ever
+dispatched it. Checking the history instead of assuming:
+
+```
+6342fcb3  HTTP targets support (fixes #116)
+    <TargetList on:navigation={() => redirecting = true} />
+    function loadURL (url) { dispatch('navigation'); location.href = url }
+```
+
+Upstream dispatched it **immediately before `location.href = url`**, so the
+portal replaced the target list with a spinner for the gap between the click
+and the browser leaving — which on a slow HTTP target is long enough to look
+like the click did nothing. `screens/Targets.svelte` replaced `TargetList` and
+dispatches nothing, and in Svelte 5 `'on:navigation'` is not an event listener
+at all, just a prop whose name contains a colon. Two independent breaks, so
+nothing complained.
+
+Reconnected as an ordinary callback prop, which is what `on:` meant in Svelte
+4. It fires only on the `location.href` branch: the new-tab branch leaves this
+page where it is, and a spinner over a list that is still usable would be a
+lie.
+
+**The lesson is about the word "dead".** A branch that cannot be reached is
+either configuration nobody needs or a feature whose wire was cut, and the two
+are indistinguishable from the current tree. `git log -S` on the dead symbol
+is what tells them apart, and it costs one command. I nearly deleted a feature
+to make an audit come out clean.

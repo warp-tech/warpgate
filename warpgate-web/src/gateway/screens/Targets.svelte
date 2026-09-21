@@ -103,6 +103,18 @@
         openWebSshSession,
     } from '../lib/webSessions'
 
+    interface Props {
+        /**
+         * Called just before this screen replaces the page with an HTTP
+         * target. The shell uses it to show "Opening your session" for the
+         * gap between the click and the browser leaving, which on a slow
+         * target is long enough to look like nothing happened.
+         */
+        onnavigate?: () => void
+    }
+
+    const { onnavigate }: Props = $props()
+
     const PROTOCOL_LABELS: Record<string, string> = {
         [TargetKind.Ssh]: 'SSH',
         [TargetKind.Http]: 'HTTP',
@@ -248,6 +260,11 @@
         if (get(openTargetsInNewTab)) {
             window.open(url, '_blank')
         } else {
+            // The shell swaps the page for "Opening your session" while the
+            // browser leaves. Only on this branch: a new tab leaves this one
+            // where it was, and a spinner over a list that is still usable
+            // would be a lie.
+            onnavigate?.()
             location.href = url
         }
     }

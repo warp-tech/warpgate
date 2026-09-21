@@ -95,7 +95,11 @@
         '/': wrap({
             asyncComponent: () => import('./screens/Targets.svelte'),
             props: {
-                'on:navigation': () => (redirecting = true),
+                // A plain callback prop. This was `'on:navigation'`, which in
+                // Svelte 4 was an event listener and in Svelte 5 is a prop
+                // whose name happens to contain a colon — nothing read it, so
+                // the spinner below could never appear.
+                onnavigate: () => (redirecting = true),
             },
             conditions: [requireLogin],
         }),
