@@ -337,3 +337,49 @@ options, defaulting to whatever the edit screen defaults to.
 **Not changed in this fork.** Adding the control changes what the screen sends
 to the API, which is behaviour rather than presentation, and this redesign is
 scoped to presentation. Reported rather than fixed.
+
+## 8. "No login in progress" is signalled as a 404, on every page load
+
+`warpgate-protocol-http/src/api/auth.rs`
+
+```rust
+let Some(state_arc) = get_auth_state_for_request(req, &ctx).await? else {
+    return Ok(AuthStateResponse::NotFound);   // 404
+};
+```
+
+`GET /@warpgate/api/auth/state` answers 404 when no authentication flow has
+been started. That is the ordinary state of a fresh visit, so **every first
+load of the sign-in page produces a 404**, and the client is written to read it
+as a state rather than a failure:
+
+```js
+// gateway/screens/Login.svelte
+if (err instanceof ResponseError && err.response.status === 404) {
+    authState = ApiAuthState.NotStarted
+}
+```
+
+Using a 404 to mean "nothing here yet" is defensible REST. The cost is that it
+is indistinguishable from a real failure everywhere it surfaces:
+
+- **Browser console**, red, on every page load. The browser logs a non-2xx
+  fetch at the network layer, before any application code sees the response,
+  so no amount of client-side handling can suppress it.
+- **Server log**, as `WARN HTTP: Request failed ... status=404 Not Found`,
+  also on every page load, sitting alongside genuine faults.
+
+In this fork's deployment it was reported as a bug twice on the strength of
+those two lines alone, and sent two separate investigations after a healthy
+system. The signal-to-noise cost is real: an operator watching the log for
+trouble sees a warning every time anyone opens the page.
+
+**Fix:** return `200` with `{"state": "NotStarted"}` — the variant already
+exists in `ApiAuthState` and the client already maps the 404 onto exactly that
+value, so the state machine does not change. 404 would then mean what it says.
+
+Failing that, logging it at `debug` rather than `warn` would at least clear the
+server log, though the console line would remain.
+
+**Not changed in this fork.** It is an API response-shape change, and this
+redesign is scoped to presentation. Reported rather than fixed.
