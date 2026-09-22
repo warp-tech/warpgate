@@ -9,6 +9,7 @@
 //! kept as separate objects so the driver can await input and paint without aliasing one
 //! `&mut` across the `select!`.
 
+use std::convert::Infallible;
 use std::future::Future;
 use std::net::IpAddr;
 use std::pin::Pin;
@@ -20,7 +21,7 @@ use tracing::warn;
 use warpgate_common::auth::AuthResult;
 use warpgate_common::{Protocol, UserSessionId};
 use warpgate_core::{AuthorizedIdentity, Services, TIMEOUT};
-use warpgate_desktop_ui::AuthPrompt;
+use warpgate_desktop_ui::{self as ui, AuthPrompt, Screen};
 
 use crate::{OtpAction, OtpActionApplyOutcome, OtpEntry, auth_prompt};
 
@@ -43,6 +44,18 @@ pub enum HoldFrame<'a> {
     Prompt(&'a AuthPrompt),
     /// A "connecting to target" screen, shown once authentication completes.
     Connecting,
+    /// Waiting on an admin approval
+    AwaitingApproval,
+}
+
+impl HoldFrame<'_> {
+    pub fn render(&self, screen: Screen, tick: u64) -> Result<Vec<u8>, Infallible> {
+        match self {
+            Self::Prompt(prompt) => ui::render_authentication(screen, tick, prompt),
+            Self::Connecting => ui::render_connecting(screen, tick),
+            Self::AwaitingApproval => ui::render_awaiting_approval(screen, tick),
+        }
+    }
 }
 
 /// Reads viewer input for the hold screen, mapping the protocol's raw keyboard encoding
@@ -90,6 +103,35 @@ impl Deadline {
 
     fn elapsed(&mut self) -> Pin<&mut Sleep> {
         self.sleep.as_mut()
+    }
+}
+
+/// Await `until` while sending frames from `frame()` and draining input events
+/// Return `None` if the viewer disconnected before `until`
+pub async fn hold_while<T, I, P>(
+    until: impl Future<Output = T>,
+    input: &mut I,
+    painter: &mut P,
+    frame: impl Fn() -> HoldFrame<'static>,
+) -> Result<Option<T>>
+where
+    I: HoldInputSource,
+    P: HoldPainter,
+{
+    let mut ticker = interval(painter.render_interval());
+    ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    tokio::pin!(until);
+
+    loop {
+        tokio::select! {
+            done = &mut until => return Ok(Some(done)),
+            event = input.next() => {
+                if matches!(event, HoldEvent::Disconnected) {
+                    return Ok(None);
+                }
+            }
+            _ = ticker.tick() => painter.paint(frame()).await?,
+        }
     }
 }
 

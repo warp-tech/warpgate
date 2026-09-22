@@ -221,6 +221,7 @@ pub async fn admit_web_client_session<O: Send + Sync>(
             remote_ip: remote_address.map(|address| address.ip()),
             credentials: RememberApprovalBy::Nothing,
         },
+        || async { Ok(()) },
     )
     .await?;
 
