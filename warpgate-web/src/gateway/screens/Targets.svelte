@@ -443,8 +443,16 @@
             <CollapsibleGroupHeader {group} {state} />
         {/snippet}
 
-        {#snippet container(rows)}
-            <ul class="grid">
+        {#snippet container(rows, items)}
+            <!--
+              Below four cards the grid's own visual language is the problem:
+              auto-fill lays out tracks for a full row whatever the content, so
+              one card sits in the left track with three empty ones beside it
+              and reads as a layout fault rather than as "you have one target".
+              Capping the width lets the same cards size themselves against a
+              measure that matches the content.
+            -->
+            <ul class="grid" class:grid-sparse={items.length < 4}>
                 {@render rows()}
             </ul>
         {/snippet}
@@ -591,6 +599,16 @@
         list-style: none;
         margin: 0;
         padding: 0;
+    }
+
+    /*
+     * 1-3 targets. One track per card up to three, so the row is full at any
+     * count in that range and nothing is left hanging beside an empty track.
+     * The max-width stops two cards stretching to half a wide screen each.
+     */
+    .grid-sparse {
+        grid-template-columns: repeat(auto-fit, minmax(16rem, 20rem));
+        max-width: 64rem;
     }
 
     .card {

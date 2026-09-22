@@ -1836,3 +1836,71 @@ the screens load. Only `ParameterUpdate` makes them optional, and nothing binds
 to that. The count is left non-zero on purpose — it is the honest answer to
 "what could throw if these ever became optional", and silencing it would throw
 away the only warning that exists when an API field later gains a `?`.
+
+## Sparse-data pass: three screens that only knew how to be populated
+
+First review against a running instance with real but minimal data. Three
+reports, one root cause: every screen was designed and reviewed against a
+populated mockup, so n=1 was never drawn.
+
+### What the brief asked for that already existed
+
+The matrix brief asked for a sticky header row, a sticky first column and an
+`overflow-x` container as though they were missing. All three were already
+there — `.matrix thead th`, `.corner`/`.target-col`, `.matrix-scroll`. Written
+from a screenshot, which is the right way to report a bug and the wrong way to
+specify a fix. Checked before building, so the work went into what was actually
+absent.
+
+### 1. Roles matrix
+
+The sparse case was not the table, it was the box around it. `.matrix-scroll`
+is a block element, so it stretched to the full content width while the table
+inside stayed one column wide: a page-wide bordered rectangle containing a
+single checkbox. `width: fit-content` with `max-width: 100%` makes the border
+hug the content and still lets the dense case scroll.
+
+Added: a role filter — only targets could be filtered, and at twenty roles by
+forty targets the harder axis was the unsearchable one; a line naming the
+sparse case in numbers; and a 12rem ceiling with ellipsis on role columns,
+because real role names are not "admin" and eight of them at natural width push
+the checkboxes past the viewport.
+
+The explanatory copy is byte-identical to HEAD, and so is the access logic —
+both asserted rather than claimed.
+
+### 2. Portal target list
+
+The orphaned "Ungrouped" header was fixed in `ItemList`, not in the screen.
+Suppressing it in the consumer's `groupHeader` snippet would have left
+`GroupControls.available` still true, so "collapse all" would have hidden the
+only card behind a header that is no longer drawn — a trap rather than a fix.
+`buildRows` now returns the ungrouped shape when there is one distinct key,
+which drops the header and empties `keys`, and `available` follows.
+
+The grid is `repeat(auto-fill, minmax(16rem, 1fr))`, which lays out a full
+row's worth of tracks whatever the content — so one card sat in the left track
+with three empty ones beside it. Below four cards it switches to `auto-fit`
+with a 20rem cap, so the row is full at one, two or three.
+
+### 3. Username menu
+
+Was a bare link to the portal profile: no affordance, no destination, and a
+landing page with no sidebar. Now an account menu with a chevron trigger —
+Profile, API tokens, Credentials, then sign-out — so each destination is named
+before it is chosen and the profile page stops being a hub to pass through.
+
+`ui/Menu` only drew the kebab used for overflow. A kebab beside a word reads as
+actions ON that word, so the trigger gained a `chevron` variant.
+
+The brief asked for a breadcrumb on the destination. It is not needed and was
+not added: the portal header persists across `/profile`, carrying both a logo
+linking home and — for admins — an Admin link back to the other shell. Checked
+in `gateway/AppNew.svelte` rather than assumed.
+
+### The standing gap
+
+All three came from reviewing against populated mockups. Worth adopting the
+brief's recommendation: once a seed script exists, walk every migrated screen
+at zero, one and realistic volumes. Zero is covered by the Phase 2 empty
+states. One is the gap.

@@ -41,6 +41,7 @@
     let loading = $state(true)
     let error: string | undefined = $state()
     let filter = $state('')
+    let roleFilter = $state('')
 
     const natural = naturalCompareFactory()
 
@@ -137,6 +138,29 @@
             : targets,
     )
 
+    // Columns filter on the same terms as rows. At twenty roles by forty
+    // targets, being able to narrow only one axis still leaves you hunting
+    // for a cell.
+    const visibleRoles = $derived(
+        roleFilter.trim()
+            ? roles.filter(r =>
+                  r.name
+                      .toLowerCase()
+                      .includes(roleFilter.trim().toLowerCase()),
+              )
+            : roles,
+    )
+
+    // A 1x1 grid is indistinguishable from a broken one unless something says
+    // otherwise. This is about explaining the shape of the page, so it tracks
+    // what exists rather than what the filters currently show.
+    const sparse = $derived(
+        !loading &&
+            roles.length > 0 &&
+            targets.length > 0 &&
+            roles.length * targets.length <= 4,
+    )
+
     load()
 </script>
 
@@ -195,6 +219,16 @@
         {/snippet}
     </EmptyState>
 {:else}
+    {#if sparse}
+        <p class="sparse-note">
+            You have {roles.length}
+            {roles.length === 1 ? 'role' : 'roles'}
+            and {targets.length}
+            {targets.length === 1 ? 'target' : 'targets'}. The grid grows a
+            column per role and a row per target.
+        </p>
+    {/if}
+
     <div class="toolbar">
         <Input
             label="Filter targets"
@@ -204,10 +238,25 @@
             bind:value={filter}
             class="filter"
         />
+        <Input
+            label="Filter roles"
+            labelHidden
+            type="search"
+            placeholder="Filter roles…"
+            bind:value={roleFilter}
+            class="filter"
+        />
         {#if !$adminPermissions.accessRolesAssign}
             <Badge tone="warning">Read-only — you cannot assign roles</Badge>
         {/if}
     </div>
+
+    {#if !visibleRoles.length}
+        <p class="sparse-note">
+            No roles match “{roleFilter}”. The grid needs at least one role
+            column to show anything.
+        </p>
+    {/if}
 
     <div class="matrix-scroll">
         <table class="matrix">
@@ -218,7 +267,7 @@
             <thead>
                 <tr>
                     <th scope="col" class="corner">Target</th>
-                    {#each roles as role (role.id)}
+                    {#each visibleRoles as role (role.id)}
                         <th scope="col" class="role-col">
                             <a
                                 class="role-link"
@@ -247,7 +296,7 @@
                                 {target.name}
                             </a>
                         </th>
-                        {#each roles as role (role.id)}
+                        {#each visibleRoles as role (role.id)}
                             <td class="cell">
                                 <Checkbox
                                     label="Allow {role.name} on {target.name}"
@@ -261,7 +310,7 @@
                     </tr>
                 {:else}
                     <tr>
-                        <td colspan={roles.length + 1} class="no-match">
+                        <td colspan={visibleRoles.length + 1} class="no-match">
                             No targets match “{filter}”
                         </td>
                     </tr>
@@ -316,6 +365,16 @@
         max-height: 70vh;
         border: var(--wg-border-width) solid var(--wg-border);
         border-radius: var(--wg-radius-panel);
+        /*
+         * Hug the table. As a plain block this stretched to the full content
+         * width whatever was inside it, so one role and one target drew a
+         * page-wide bordered box around a single checkbox — which is what made
+         * the sparse case look like a rendering fault rather than a small
+         * table. fit-content keeps the border tight to the content; the
+         * max-width keeps the dense case scrolling rather than overflowing.
+         */
+        width: fit-content;
+        max-width: 100%;
     }
 
     .matrix {
@@ -387,6 +446,27 @@
 
     .role-col {
         min-width: 6rem;
+        /*
+         * Real role names are not "admin". Without a ceiling each column takes
+         * whatever its longest name needs, and eight of them push the grid
+         * past the viewport before the checkboxes are reached. The full name
+         * stays available as the link's title.
+         */
+        max-width: 12rem;
+    }
+
+    .role-link {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .sparse-note {
+        margin: 0 0 var(--wg-space-md);
+        max-width: 72ch;
+        font: var(--wg-text-body-md);
+        color: var(--wg-text-muted);
     }
 
     .role-link,

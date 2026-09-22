@@ -60,6 +60,13 @@
         label: string
         /** Visible trigger text. Omit for the icon-only overflow affordance. */
         triggerLabel?: string
+        /**
+         * The trigger's affordance. `kebab` is the overflow "more actions"
+         * control; `chevron` is what a named menu wants, because a kebab
+         * beside a word reads as actions ON that word rather than a menu it
+         * opens.
+         */
+        triggerIcon?: 'kebab' | 'chevron'
         align?: 'start' | 'end'
         disabled?: boolean
         class?: string
@@ -69,6 +76,7 @@
         groups,
         label,
         triggerLabel,
+        triggerIcon = 'kebab',
         align = 'end',
         disabled = false,
         class: className = '',
@@ -231,11 +239,31 @@
         {#if triggerLabel}
             <span>{triggerLabel}</span>
         {/if}
-        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-            <circle cx="8" cy="3" r="1.4" fill="currentColor" />
-            <circle cx="8" cy="8" r="1.4" fill="currentColor" />
-            <circle cx="8" cy="13" r="1.4" fill="currentColor" />
-        </svg>
+        {#if triggerIcon === 'chevron'}
+            <svg
+                viewBox="0 0 16 16"
+                width="14"
+                height="14"
+                aria-hidden="true"
+                class="wg-menu-chevron"
+                class:wg-menu-chevron-open={open}
+            >
+                <path
+                    d="M4 6.5L8 10.5L12 6.5"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                />
+            </svg>
+        {:else}
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                <circle cx="8" cy="3" r="1.4" fill="currentColor" />
+                <circle cx="8" cy="8" r="1.4" fill="currentColor" />
+                <circle cx="8" cy="13" r="1.4" fill="currentColor" />
+            </svg>
+        {/if}
     </button>
 
     {#if open}
@@ -334,6 +362,20 @@
 </div>
 
 <style>
+    .wg-menu-chevron {
+        transition: transform var(--wg-duration-fast) var(--wg-easing);
+    }
+
+    .wg-menu-chevron-open {
+        transform: rotate(180deg);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .wg-menu-chevron {
+            transition: none;
+        }
+    }
+
     .wg-menu {
         position: relative;
         display: inline-flex;

@@ -168,8 +168,28 @@
         // inside a collapsed group - without touching the persisted state.
         const hidden = filter ? new Set<GK>() : new Set(collapsedGroups)
 
+        const keys = [...new Set(entries.map(entry => entry.key))]
+
+        // One group is not a grouping. A lone "Ungrouped" header above a
+        // single card is hierarchy with nothing to organise: it draws the eye,
+        // implies siblings that do not exist, and makes a sparse list read as
+        // a broken one. Collapsing it would hide the only content behind a
+        // header the user cannot see, so `keys` is emptied too — that is what
+        // GroupControls.available reads, so "collapse all" correctly
+        // disappears rather than becoming a trap.
+        if (keys.length <= 1) {
+            return {
+                keys: [],
+                rows: entries.map(entry => ({
+                    ...entry,
+                    groupStart: false,
+                    collapsed: false,
+                })),
+            }
+        }
+
         return {
-            keys: [...new Set(entries.map(entry => entry.key))],
+            keys,
             rows: entries.map((entry, _index) => ({
                 ...entry,
                 groupStart:
