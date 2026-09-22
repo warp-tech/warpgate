@@ -35,6 +35,9 @@ exclude = [
     "vendor/vnc-rs",
     "vendor/ironrdp-async",
     "vendor/ironrdp-connector",
+    "vendor/ironrdp-dvc",
+    "vendor/ironrdp-egfx",
+    "vendor/ironrdp-graphics",
     "vendor/ironrdp-server",
     "vendor/ironrdp-session",
     "vendor/picky",
@@ -50,6 +53,9 @@ resolver = "2"
 [patch.crates-io]
 ironrdp-async = { path = "vendor/ironrdp-async" }
 ironrdp-connector = { path = "vendor/ironrdp-connector" }
+ironrdp-dvc = { path = "vendor/ironrdp-dvc" }
+ironrdp-egfx = { path = "vendor/ironrdp-egfx" }
+ironrdp-graphics = { path = "vendor/ironrdp-graphics" }
 ironrdp-server = { path = "vendor/ironrdp-server" }
 ironrdp-session = { path = "vendor/ironrdp-session" }
 picky = { path = "vendor/picky" }
