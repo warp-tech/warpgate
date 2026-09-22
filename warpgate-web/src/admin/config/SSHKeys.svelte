@@ -10,6 +10,7 @@
     import CopyableTextArea from 'common/CopyableTextArea.svelte'
     import { stringifyError } from 'common/errors'
     import InfoBox from 'common/InfoBox.svelte'
+    import ConfirmDeleteModal from 'common/ConfirmDeleteModal.svelte'
     import ClientKeyModal from './ClientKeyModal.svelte'
     import GenerateClientKeyModal from './GenerateClientKeyModal.svelte'
 
@@ -19,6 +20,10 @@
     let keyModalOpen = $state(false)
     let editingKey: SSHClientKey | undefined = $state()
     let generateModalOpen = $state(false)
+    let deleteKeyModalOpen = $state(false)
+    let keyPendingDeletion: SSHClientKey | undefined = $state()
+    let deleteHostModalOpen = $state(false)
+    let hostPendingDeletion: SSHKnownHost | undefined = $state()
 
     async function load() {
         clientKeys = await api.getSshOwnKeys()
@@ -75,11 +80,29 @@
         })
     }
 
-    async function deleteKey(key: SSHClientKey) {
+    function requestDeleteKey(key: SSHClientKey) {
+        keyPendingDeletion = key
+        deleteKeyModalOpen = true
+    }
+
+    async function deleteKey() {
+        const key = keyPendingDeletion
+        if (!key) {
+            return
+        }
         await run(() => api.deleteSshOwnKey(key))
     }
 
-    async function deleteHost(host: SSHKnownHost) {
+    function requestDeleteHost(host: SSHKnownHost) {
+        hostPendingDeletion = host
+        deleteHostModalOpen = true
+    }
+
+    async function deleteHost() {
+        const host = hostPendingDeletion
+        if (!host) {
+            return
+        }
         await run(() => api.deleteSshKnownHost(host))
     }
 </script>
@@ -131,7 +154,7 @@
                             color="link px-0"
                             onclick={e => {
                                 e.preventDefault()
-                                deleteKey(key)
+                                requestDeleteKey(key)
                             }}
                         >
                             Delete
@@ -159,6 +182,24 @@
     />
 {/if}
 
+{#if deleteKeyModalOpen}
+    <ConfirmDeleteModal
+        bind:isOpen={deleteKeyModalOpen}
+        title="Delete SSH key"
+        message={`Are you sure you want to delete the key "${keyPendingDeletion?.label}"? This cannot be undone.`}
+        confirm={deleteKey}
+    />
+{/if}
+
+{#if deleteHostModalOpen}
+    <ConfirmDeleteModal
+        bind:isOpen={deleteHostModalOpen}
+        title="Delete known host"
+        message={`Are you sure you want to delete the known host "${hostPendingDeletion?.host}:${hostPendingDeletion?.port}"? This cannot be undone.`}
+        confirm={deleteHost}
+    />
+{/if}
+
 <div class="mb-3"></div>
 {#if knownHosts}
     {#if knownHosts.length}
@@ -177,7 +218,7 @@
                         color="link px-0"
                         onclick={e => {
                             e.preventDefault()
-                            deleteHost(host)
+                            requestDeleteHost(host)
                         }}
                         disabled={!$adminPermissions.configEdit}
                     >
