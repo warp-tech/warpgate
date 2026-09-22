@@ -45,4 +45,8 @@ warpgate-vault = { path = "../warpgate-vault" }
 zeroize = { version = "^1.5", default-features = false }
 
 [dev-dependencies]
+reqwest.workspace = true
+tracing-subscriber = { version = "0.3", default-features = false, features = [
+    "fmt",
+] }
 warpgate-db-migrations = { path = "../warpgate-db-migrations", features = ["sqlite"] }

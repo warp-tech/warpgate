@@ -230,6 +230,28 @@ MUTATIONS = [
         "    error.to_string()",
     ),
     (
+        # The same error, the other sink. The entry above keeps it out of the
+        # browser; this one keeps a newline in it from forging a log record
+        # that reads exactly like one Warpgate wrote. Anchored on the named
+        # function for the same reason: the call is inside the SSH session's
+        # event loop, where no test can stand.
+        "logging: a connection error is escaped before it reaches the log",
+        "warpgate-protocol-ssh/src/server/session.rs",
+        '    error!(?error, "Target connection failed");',
+        '    error!(%error, "Target connection failed");',
+    ),
+    (
+        # The same forgery, a layer up. The entry above escapes it at one sink;
+        # this escapes it at the type that owns the body, so every `%`-formatted
+        # sink is safe at once — including web-ssh's, which this branch does not
+        # edit. And unlike the entry above there is no call site to revert: the
+        # anchor is the rendering itself, so nothing can orphan the test.
+        "logging: a Vault error body is escaped by the type that owns it",
+        "warpgate-vault/src/error.rs",
+        '    #[error("Vault returned {status}: {body:?}")]',
+        '    #[error("Vault returned {status}: {body}")]',
+    ),
+    (
         "vault: certificate_ttl outside the allowed range is refused at config load",
         "warpgate-vault/src/client.rs",
         "            return Err(VaultError::InvalidCertificateTtl(ttl));",
@@ -809,6 +831,17 @@ DISCRIMINATES = {
     ],
     "web-ssh: connection errors are sanitised before the user sees them": [
         "a_browser_never_sees_the_error_s_own_words"
+    ],
+    "logging: a connection error is escaped before it reaches the log": [
+        # Not `a_newline_from_vault_cannot_forge_a_log_record`, which this used
+        # to name: a Vault body is escaped by its own Display now, so that test
+        # passes with this sink reverted. The one named here uses an error whose
+        # Display is raw, which is the only thing this sink is left standing
+        # between.
+        "a_newline_in_a_connection_error_cannot_forge_a_log_record"
+    ],
+    "logging: a Vault error body is escaped by the type that owns it": [
+        "a_newline_in_a_vault_error_body_cannot_forge_a_log_record"
     ],
 }
 

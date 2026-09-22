@@ -220,11 +220,62 @@ fn reject_with_allowed_auth_methods(allowed_auth_methods: MethodSet) -> russh::s
     }
 }
 
+/// The server-side record of a failed target connection.
+///
+/// Named, like web-ssh's `shown_to_the_browser`, so a test has somewhere to
+/// stand: a call inside the event loop does not.
+///
+/// `{:?}` and not `{}`, the rule the connect path states for itself. Remote text
+/// reaches some of these variants with its control characters intact, and a
+/// newline in one forges a whole record in the default text format that a
+/// reader cannot tell from one Warpgate wrote. Debug escapes it; Display hands
+/// it to the log as written.
+///
+/// `#[deny(dead_code)]` is what ties the event loop to this function. `mod
+/// tests` is `#[cfg(test)]`, so a call site that goes back to logging inline
+/// leaves only the test calling this — and an ordinary build then stops with an
+/// error, rather than a warning nobody gates on while the orphaned test stays
+/// green.
+#[deny(dead_code)]
+fn log_target_connection_failure(error: &ConnectionError) {
+    error!(?error, "Target connection failed");
+}
+
 #[cfg(test)]
 mod tests {
-    use russh::{MethodKind, MethodSet};
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
 
-    use super::reject_with_allowed_auth_methods;
+    use reqwest::StatusCode;
+    use russh::{MethodKind, MethodSet};
+    use tracing_subscriber::fmt::MakeWriter;
+    use warpgate_vault::VaultError;
+
+    use super::{ConnectionError, log_target_connection_failure, reject_with_allowed_auth_methods};
+
+    /// `tracing-subscriber` ships no `MakeWriter` for a buffer the test can
+    /// still read afterwards: its `Arc<W>` impl wants `&W: Write`, which a
+    /// `Mutex` is not.
+    #[derive(Clone, Default)]
+    struct Captured(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().write(buf)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl MakeWriter<'_> for Captured {
+        type Writer = Self;
+
+        fn make_writer(&self) -> Self::Writer {
+            self.clone()
+        }
+    }
 
     #[test]
     fn rejected_public_key_auth_advertises_only_configured_methods() {
@@ -242,6 +293,81 @@ mod tests {
         assert_eq!(advertised_methods, configured_methods);
         assert!(!advertised_methods.contains(&MethodKind::Password));
         assert!(!advertised_methods.contains(&MethodKind::KeyboardInteractive));
+    }
+
+    /// One record out of the sink, with the formatter's trailing break removed.
+    fn captured_record(error: &ConnectionError) -> String {
+        let captured = Captured::default();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_writer(captured.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || log_target_connection_failure(error));
+
+        let logged = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
+        logged.strip_suffix('\n').unwrap_or(&logged).to_owned()
+    }
+
+    /// One failure, one record, whatever the error's Display carries.
+    ///
+    /// A transparent variant and not the Vault one this was written for:
+    /// `VaultError::Api` escapes its own body now, so a Vault error passes here
+    /// with the sink reverted to `%error` and says nothing about it. An error
+    /// whose Display is the inner one's text, raw, is the shape remote text
+    /// arrives in until someone escapes it at the type — and this sink is what
+    /// stands in the way meanwhile. Bound to the sink rather than to `format!`,
+    /// which would pass with the sink reverted.
+    #[test]
+    fn a_newline_in_a_connection_error_cannot_forge_a_log_record() {
+        let error = ConnectionError::Io(std::io::Error::other(
+            "permission denied\n  ERROR warpgate::ssh: Authenticated with certificate",
+        ));
+        assert!(
+            error.to_string().contains('\n'),
+            "the fixture carries no newline, so nothing below is evidence"
+        );
+
+        let record = captured_record(&error);
+        assert!(
+            !record.contains('\n'),
+            "the error forged a second record: {record:?}"
+        );
+        assert!(
+            record.contains("\\n"),
+            "the error never reached the log: {record:?}"
+        );
+    }
+
+    /// The path the finding was about, end to end: Vault's body, this sink.
+    ///
+    /// It holds while either layer does — the escape in `VaultError`'s Display
+    /// or the `{:?}` here — which is what having both is for, and why guard 57
+    /// is not measured against it. The guard that fails on the Display half
+    /// lives in `warpgate-vault`.
+    #[test]
+    fn a_newline_from_vault_cannot_forge_a_log_record() {
+        let error = ConnectionError::Vault(VaultError::Api {
+            status: StatusCode::FORBIDDEN,
+            body: "permission denied\n  ERROR warpgate::ssh: Authenticated with certificate"
+                .to_owned(),
+        });
+        let ConnectionError::Vault(VaultError::Api { body, .. }) = &error else {
+            panic!("the fixture is no longer the variant under test");
+        };
+        assert!(
+            body.contains('\n'),
+            "the body carries no newline, so nothing below is evidence"
+        );
+
+        let record = captured_record(&error);
+        assert!(
+            !record.contains('\n'),
+            "Vault's body forged a second record: {record:?}"
+        );
+        assert!(
+            record.contains("\\n"),
+            "the body never reached the log: {record:?}"
+        );
     }
 }
 
@@ -1333,7 +1459,7 @@ impl ServerSession {
                         ));
                     }
                     error => {
-                        tracing::error!(%error, "Target connection failed");
+                        log_target_connection_failure(&error);
                         // `client_message()` and not `{error}`: the full text is
                         // for the log above, and carries Vault URLs and role
                         // names a connected user must not be handed.

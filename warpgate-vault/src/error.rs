@@ -9,7 +9,15 @@ pub enum VaultError {
     #[error("Vault request failed: {0}")]
     Request(#[from] reqwest::Error),
 
-    #[error("Vault returned {status}: {body}")]
+    /// `{body:?}` and not `{body}`: the body is Vault's own bytes, bounded and
+    /// UTF-8-repaired but with its control characters intact, and a newline in
+    /// it forges a whole record in the default log format that a reader cannot
+    /// tell from one Warpgate wrote. Escaped here rather than at each sink
+    /// because the sinks are the part that gets forgotten — this value reaches
+    /// the SSH session's log, web-ssh's, and whatever the next protocol adds,
+    /// and every one of them has to be right. The field stays raw:
+    /// `client_message` classifies on its text.
+    #[error("Vault returned {status}: {body:?}")]
     Api {
         status: reqwest::StatusCode,
         body: String,
@@ -153,5 +161,46 @@ impl VaultError {
             | VaultError::InvalidLease(_) => "Invalid response from Vault",
             VaultError::Aws(e) => e.client_message(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use reqwest::StatusCode;
+
+    use super::VaultError;
+
+    /// The body is the one string in this enum a stranger writes, and the log
+    /// is where it lands.
+    ///
+    /// Asserted on `to_string()` and not on a sink, because the sinks are the
+    /// point: there are several, they are edited one at a time, and this branch
+    /// touches only one of them. What the field carries is checked first, or a
+    /// fixture that quietly lost its newline would pass the rest.
+    #[test]
+    fn a_newline_in_a_vault_error_body_cannot_forge_a_log_record() {
+        let error = VaultError::Api {
+            status: StatusCode::FORBIDDEN,
+            body: "permission denied\n  ERROR warpgate::ssh: Authenticated with certificate"
+                .to_owned(),
+        };
+
+        let VaultError::Api { body, .. } = &error else {
+            panic!("the fixture is no longer the variant under test");
+        };
+        assert!(
+            body.contains('\n'),
+            "the body carries no newline, so nothing below is evidence"
+        );
+
+        let rendered = error.to_string();
+        assert!(
+            !rendered.contains('\n'),
+            "the body forged a second record: {rendered:?}"
+        );
+        assert!(
+            rendered.contains("\\n"),
+            "the body never reached the message: {rendered:?}"
+        );
     }
 }
