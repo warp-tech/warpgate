@@ -771,6 +771,18 @@ textarea.form-control {
     background: var(--wg-surface-container-high);
 }
 
+/* Tone variants on a badge. Border and ink rather than a filled ground, which
+   is how ui/Badge draws them — a log full of solid red blocks is unreadable. */
+.bg-danger {
+    border-color: var(--wg-error);
+    color: var(--wg-error);
+}
+
+.bg-warning {
+    border-color: var(--wg-secondary);
+    color: var(--wg-secondary);
+}
+
 /* ── alerts ──────────────────────────────────────────────────────────── */
 .alert {
     padding: var(--wg-space-md) var(--wg-space-lg);

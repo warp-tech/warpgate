@@ -29,7 +29,7 @@
 
     const steps = $derived([
         {
-            href: 'https://warpgate.null.page/docs/',
+            href: 'https://warpgate.null.page/docs/?utm_source=app&utm_content=getting-started',
             external: true,
             done: false,
             title: 'Check out the documentation',

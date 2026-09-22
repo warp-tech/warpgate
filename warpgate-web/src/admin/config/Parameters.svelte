@@ -15,7 +15,7 @@
     import Section from 'admin/lib/Section.svelte'
     import SectionedForm from 'admin/lib/SectionedForm.svelte'
     import Subsection from 'admin/lib/Subsection.svelte'
-    import { humantimeDuration } from 'common/duration'
+    import DurationInput from 'common/DurationInput.svelte'
     import { stringifyError } from 'common/errors'
     import InfoBox from 'common/InfoBox.svelte'
     import Loadable from 'common/Loadable.svelte'
@@ -365,19 +365,11 @@
                                     </HelpText>
 
                                     <Subsection title="Limits">
-                                        <label class="wg-field-group">
-                                            <span class="wg-field-label"
-                                                >Default max ticket duration
-                                                (blank = unlimited)</span
-                                            >
-
-                                            <input
-                                                type="text"
-                                                class="form-control"
-                                                placeholder="e.g. 8h, 30m, 1d"
-                                                use:humantimeDuration={{ seconds: parameters.ticketMaxDurationSeconds, onChange: v => { parameters.ticketMaxDurationSeconds = v } }}
-                                            >
-                                        </label>
+                                        <DurationInput
+                                            label="Default max ticket duration (blank = unlimited)"
+                                            seconds={parameters.ticketMaxDurationSeconds}
+                                            onChange={v => { parameters.ticketMaxDurationSeconds = v }}
+                                        />
                                         <HelpText>
                                             Global default. Can be overridden
                                             per target. Examples: 30m, 8h, 1d,
@@ -406,19 +398,11 @@
                             </Section>
 
                             <Section id="api-tokens" title="API tokens">
-                                <label class="wg-field-group">
-                                    <span class="wg-field-label"
-                                        >Maximum API token duration (blank =
-                                        unlimited)</span
-                                    >
-
-                                    <input
-                                        type="text"
-                                        class="form-control"
-                                        placeholder="e.g. 8h, 30m, 1d"
-                                        use:humantimeDuration={{ seconds: parameters.maxApiTokenDurationSeconds, onChange: v => { parameters.maxApiTokenDurationSeconds = v } }}
-                                    >
-                                </label>
+                                <DurationInput
+                                    label="Maximum API token duration (blank = unlimited)"
+                                    seconds={parameters.maxApiTokenDurationSeconds}
+                                    onChange={v => { parameters.maxApiTokenDurationSeconds = v }}
+                                />
                             </Section>
 
                             <Section id="ui" title="UI">
@@ -524,19 +508,11 @@
                                         first.
                                     </HelpText>
 
-                                    <label class="wg-field-group">
-                                        <span class="wg-field-label"
-                                            >Require re-authentication after
-                                            (blank = never)</span
-                                        >
-
-                                        <input
-                                            type="text"
-                                            class="form-control"
-                                            placeholder="e.g. 8h, 30m, 1d"
-                                            use:humantimeDuration={{ seconds: parameters.webAuthMaxAgeSeconds, onChange: v => { parameters.webAuthMaxAgeSeconds = v } }}
-                                        >
-                                    </label>
+                                    <DurationInput
+                                        label="Require re-authentication after (blank = never)"
+                                        seconds={parameters.webAuthMaxAgeSeconds}
+                                        onChange={v => { parameters.webAuthMaxAgeSeconds = v }}
+                                    />
                                     <HelpText>
                                         Forces users to sign in again once
                                         before accessing Web SSH or creating
@@ -546,18 +522,11 @@
                                     </HelpText>
                                 {/if}
 
-                                <label class="wg-field-group">
-                                    <span class="wg-field-label"
-                                        >Web approval cache period</span
-                                    >
-
-                                    <input
-                                        type="text"
-                                        class="form-control"
-                                        placeholder="e.g. 5m, 1h"
-                                        use:humantimeDuration={{ seconds: parameters.webApprovalGracePeriodSeconds, onChange: v => { parameters.webApprovalGracePeriodSeconds = v } }}
-                                    >
-                                </label>
+                                <DurationInput
+                                    label="Web approval cache period"
+                                    seconds={parameters.webApprovalGracePeriodSeconds}
+                                    onChange={v => { parameters.webApprovalGracePeriodSeconds = v }}
+                                />
                                 <HelpText>
                                     After a user approves an in-browser
                                     authentication request, remember the
@@ -622,36 +591,22 @@
                                 id="session-approvals"
                                 title="Session approvals"
                             >
-                                <label class="wg-field-group">
-                                    <span class="wg-field-label"
-                                        >Approval timeout</span
-                                    >
-
-                                    <input
-                                        type="text"
-                                        class="form-control"
-                                        placeholder="e.g. 5m, 1h"
-                                        use:humantimeDuration={{ seconds: parameters.adminApprovalTimeoutSeconds, onChange: v => { parameters.adminApprovalTimeoutSeconds = v } }}
-                                    >
-                                </label>
+                                <DurationInput
+                                    label="Approval timeout"
+                                    seconds={parameters.adminApprovalTimeoutSeconds}
+                                    onChange={v => { parameters.adminApprovalTimeoutSeconds = v }}
+                                />
                                 <HelpText>
                                     A session held for administrator approval is
                                     rejected if not approved within this time.
                                     Blank = use the default 10 minute timeout.
                                 </HelpText>
 
-                                <label class="wg-field-group">
-                                    <span class="wg-field-label"
-                                        >Admin approval cache period</span
-                                    >
-
-                                    <input
-                                        type="text"
-                                        class="form-control"
-                                        placeholder="e.g. 5m, 1h"
-                                        use:humantimeDuration={{ seconds: parameters.adminApprovalGracePeriodSeconds, onChange: v => { parameters.adminApprovalGracePeriodSeconds = v } }}
-                                    >
-                                </label>
+                                <DurationInput
+                                    label="Admin approval cache period"
+                                    seconds={parameters.adminApprovalGracePeriodSeconds}
+                                    onChange={v => { parameters.adminApprovalGracePeriodSeconds = v }}
+                                />
                                 <HelpText>
                                     After an administrator approves a session,
                                     remember the approval for this period and do
@@ -706,32 +661,18 @@
                                                 </label>
                                             </div>
                                             <div class="col-sm-6">
-                                                <label class="wg-field-group">
-                                                    <span class="wg-field-label"
-                                                        >Failure window</span
-                                                    >
-
-                                                    <input
-                                                        type="text"
-                                                        class="form-control"
-                                                        placeholder="e.g. 15m"
-                                                        use:humantimeDuration={{ seconds: parameters.lpIpTimeWindowSeconds, onChange: v => { if (v != null) { parameters.lpIpTimeWindowSeconds = v } } }}
-                                                    >
-                                                </label>
+                                                <DurationInput
+                                                    label="Failure window"
+                                                    seconds={parameters.lpIpTimeWindowSeconds}
+                                                    onChange={v => { if (v != null) { parameters.lpIpTimeWindowSeconds = v } }}
+                                                />
                                             </div>
                                             <div class="col-6">
-                                                <label class="wg-field-group">
-                                                    <span class="wg-field-label"
-                                                        >Initial block</span
-                                                    >
-
-                                                    <input
-                                                        type="text"
-                                                        class="form-control"
-                                                        placeholder="e.g. 30m"
-                                                        use:humantimeDuration={{ seconds: parameters.lpIpBaseBlockDurationSeconds, onChange: v => { if (v != null) { parameters.lpIpBaseBlockDurationSeconds = v } } }}
-                                                    >
-                                                </label>
+                                                <DurationInput
+                                                    label="Initial block"
+                                                    seconds={parameters.lpIpBaseBlockDurationSeconds}
+                                                    onChange={v => { if (v != null) { parameters.lpIpBaseBlockDurationSeconds = v } }}
+                                                />
                                             </div>
                                             <div class="col-6">
                                                 <label class="wg-field-group">
@@ -754,32 +695,18 @@
                                                 </label>
                                             </div>
                                             <div class="col-6">
-                                                <label class="wg-field-group">
-                                                    <span class="wg-field-label"
-                                                        >Max block</span
-                                                    >
-
-                                                    <input
-                                                        type="text"
-                                                        class="form-control"
-                                                        placeholder="e.g. 24h"
-                                                        use:humantimeDuration={{ seconds: parameters.lpIpMaxBlockDurationSeconds, onChange: v => { if (v != null) { parameters.lpIpMaxBlockDurationSeconds = v } } }}
-                                                    >
-                                                </label>
+                                                <DurationInput
+                                                    label="Max block"
+                                                    seconds={parameters.lpIpMaxBlockDurationSeconds}
+                                                    onChange={v => { if (v != null) { parameters.lpIpMaxBlockDurationSeconds = v } }}
+                                                />
                                             </div>
                                             <div class="col-6">
-                                                <label class="wg-field-group">
-                                                    <span class="wg-field-label"
-                                                        >Cooldown reset</span
-                                                    >
-
-                                                    <input
-                                                        type="text"
-                                                        class="form-control"
-                                                        placeholder="e.g. 24h"
-                                                        use:humantimeDuration={{ seconds: parameters.lpIpCooldownResetSeconds, onChange: v => { if (v != null) { parameters.lpIpCooldownResetSeconds = v } } }}
-                                                    >
-                                                </label>
+                                                <DurationInput
+                                                    label="Cooldown reset"
+                                                    seconds={parameters.lpIpCooldownResetSeconds}
+                                                    onChange={v => { if (v != null) { parameters.lpIpCooldownResetSeconds = v } }}
+                                                />
                                             </div>
                                         </div>
                                         <HelpText>
@@ -820,22 +747,11 @@
                                                     </label>
                                                 </div>
                                                 <div class="col-sm-6">
-                                                    <label
-                                                        class="wg-field-group"
-                                                    >
-                                                        <span
-                                                            class="wg-field-label"
-                                                            >Failure
-                                                            window</span
-                                                        >
-
-                                                        <input
-                                                            type="text"
-                                                            class="form-control"
-                                                            placeholder="e.g. 60m"
-                                                            use:humantimeDuration={{ seconds: parameters.lpUserTimeWindowSeconds, onChange: v => { if (v != null) { parameters.lpUserTimeWindowSeconds = v } } }}
-                                                        >
-                                                    </label>
+                                                    <DurationInput
+                                                        label="Failure window"
+                                                        seconds={parameters.lpUserTimeWindowSeconds}
+                                                        onChange={v => { if (v != null) { parameters.lpUserTimeWindowSeconds = v } }}
+                                                    />
                                                 </div>
                                             </div>
                                             <Checkbox
@@ -843,18 +759,12 @@
                                                 bind:checked={parameters.lpUserAutoUnlock}
                                             />
                                             {#if parameters.lpUserAutoUnlock}
-                                                <label class="wg-field-group">
-                                                    <span class="wg-field-label"
-                                                        >Auto-unlock delay</span
-                                                    >
-
-                                                    <input
-                                                        type="text"
-                                                        class="form-control"
-                                                        placeholder="e.g. 60m"
-                                                        use:humantimeDuration={{ seconds: parameters.lpUserLockoutDurationSeconds, onChange: v => { if (v != null) { parameters.lpUserLockoutDurationSeconds = v } } }}
-                                                    >
-                                                </label>
+                                                <DurationInput
+                                                    label="Auto-unlock delay"
+                                                    seconds={parameters.lpUserLockoutDurationSeconds}
+                                                    onChange={v => { if (v != null) { parameters.lpUserLockoutDurationSeconds = v } }}
+                                                    class="mb-2"
+                                                />
                                             {/if}
                                         </Subsection>
 
@@ -873,18 +783,12 @@
                                         </Subsection>
 
                                         <Subsection title="Data retention">
-                                            <label class="wg-field-group">
-                                                <span class="wg-field-label"
-                                                    >Keep records for</span
-                                                >
-
-                                                <input
-                                                    type="text"
-                                                    class="form-control"
-                                                    placeholder="e.g. 30d"
-                                                    use:humantimeDuration={{ seconds: parameters.loginProtectionRetentionSeconds, onChange: v => { if (v != null) { parameters.loginProtectionRetentionSeconds = v } } }}
-                                                >
-                                            </label>
+                                            <DurationInput
+                                                label="Keep records for"
+                                                seconds={parameters.loginProtectionRetentionSeconds}
+                                                onChange={v => { if (v != null) { parameters.loginProtectionRetentionSeconds = v } }}
+                                                class="mb-3"
+                                            />
                                         </Subsection>
 
                                         <InfoBox>

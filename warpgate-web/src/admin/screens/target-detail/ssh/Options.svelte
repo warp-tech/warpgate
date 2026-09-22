@@ -119,7 +119,7 @@
         { value: 'PublicKey', label: "Warpgate's own private keys" },
         { value: 'Password', label: 'Password' },
         ...($serverInfo?.runningOnEc2
-            ? [{ value: 'IamRole', label: 'IAM role (experimental)' }]
+            ? [{ value: 'IamRole', label: 'IAM role' }]
             : []),
     ])
 </script>

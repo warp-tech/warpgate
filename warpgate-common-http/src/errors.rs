@@ -4,11 +4,24 @@ use std::sync::Arc;
 
 use poem::http::{Method, Uri};
 use poem::{Endpoint, IntoResponse, Request, Response};
+use poem_openapi::payload::Json;
 use uuid::Uuid;
 use warpgate_common::{UserFacingReason, WarpgateError};
 
 use crate::ext::is_navigation_request;
 use crate::internal_page::internal_page;
+
+// Response-body JSON errors do not hit render_error and need manual logging here
+pub fn bad_request(reason: impl Into<String>) -> Json<String> {
+    let reason = reason.into();
+    tracing::warn!("Rejecting request: {reason}");
+    Json(reason)
+}
+
+pub fn invalid_field(field: &str, reason: &str) -> Json<String> {
+    tracing::warn!("Rejecting request: {reason}");
+    Json(field.to_owned())
+}
 
 pub fn render_error(error: poem::Error, method: &Method, uri: &Uri, as_document: bool) -> Response {
     let status = error.status();

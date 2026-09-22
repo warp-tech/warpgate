@@ -6,9 +6,8 @@ import requests
 
 from .api_client import admin_client, sdk
 from .conftest import ProcessManager, WarpgateProcess
-from .test_recordings_s3 import _read_until
 from .test_ssh_proto import common_args, setup_user_and_target
-from .util import open_wg_sqlite_db as _db
+from .util import open_wg_sqlite_db as _db, read_until
 from .util import wait_port
 
 
@@ -81,7 +80,7 @@ def _open_session_on_a(processes, node_a, pubkey, timeout):
         f"echo {marker}; sleep 60",
         password="123",
     )
-    output = _read_until(ssh_client.stdout, marker.encode(), time.monotonic() + timeout)
+    output = read_until(ssh_client.stdout, marker.encode(), time.monotonic() + timeout)
     assert marker.encode() in output, "marker never appeared in session output"
 
     deadline = time.monotonic() + 15

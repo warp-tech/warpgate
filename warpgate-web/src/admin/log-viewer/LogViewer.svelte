@@ -352,6 +352,63 @@
         target: string
     }
 
+    /** Identity every Kubernetes audit event carries. */
+    interface KubernetesEvent {
+        user_id: string
+        username: string
+        target_id: string
+        target_name: string
+        namespace: string
+        pod: string
+    }
+
+    interface KubernetesExecStarted1 extends KubernetesEvent {
+        _type: 'KubernetesExecStarted1'
+        container?: string
+        /** argv, stored as a JSON array in a single field. */
+        command: string
+        tty: string
+        stdin: string
+    }
+
+    interface KubernetesAttachStarted1 extends KubernetesEvent {
+        _type: 'KubernetesAttachStarted1'
+        container?: string
+        tty: string
+    }
+
+    interface KubernetesPortForwardStarted1 extends KubernetesEvent {
+        _type: 'KubernetesPortForwardStarted1'
+        /** Absent when the client negotiated ports per stream instead. */
+        ports?: string
+    }
+
+    interface KubernetesStreamRejected1 extends KubernetesEvent {
+        _type: 'KubernetesStreamRejected1'
+        subresource: string
+        status: string
+    }
+
+    interface KubernetesDebugContainerCreated1 extends KubernetesEvent {
+        _type: 'KubernetesDebugContainerCreated1'
+        debug_container: string
+        image: string
+        target_container?: string
+        command: string
+        tty: string
+        response_status: string
+    }
+
+    interface KubernetesPodCreated1 extends KubernetesEvent {
+        _type: 'KubernetesPodCreated1'
+        images: string
+        node_name?: string
+        host_pid: string
+        host_network: string
+        privileged: string
+        response_status: string
+    }
+
     type RichLogEntry =
         | AccessRoleGranted1
         | AccessRoleRevoked1
@@ -368,43 +425,63 @@
         | TicketCreated1
         | TicketDeleted1
         | WebApprovalBypassed1
+        | KubernetesExecStarted1
+        | KubernetesAttachStarted1
+        | KubernetesPortForwardStarted1
+        | KubernetesStreamRejected1
+        | KubernetesDebugContainerCreated1
+        | KubernetesPodCreated1
 
     function richLogType(entry: LogEntry): string {
         return String(entry.values?._type ?? '').replace(/^"|"$/g, '')
     }
 
+    const richLogTypes: ReadonlySet<string> = new Set<RichLogEntry['_type']>([
+        'AccessRoleGranted1',
+        'AccessRoleRevoked1',
+        'AdminRoleGranted1',
+        'AdminRoleRevoked1',
+        'UserCreated1',
+        'UserDeleted1',
+        'UserAuthenticated1',
+        'UserAuthenticationFailed1',
+        'TargetSessionStarted1',
+        'TargetSessionEnded1',
+        'CredentialCreated1',
+        'CredentialDeleted1',
+        'TicketCreated1',
+        'TicketDeleted1',
+        'KubernetesExecStarted1',
+        'KubernetesAttachStarted1',
+        'KubernetesPortForwardStarted1',
+        'KubernetesStreamRejected1',
+        'KubernetesDebugContainerCreated1',
+        'KubernetesPodCreated1',
+    ])
+
     function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
-        const type = richLogType(entry)
-        if (type === 'AccessRoleGranted1') {
-            return entry.values as AccessRoleGranted1
-        } else if (type === 'AccessRoleRevoked1') {
-            return entry.values as AccessRoleRevoked1
-        } else if (type === 'AdminRoleGranted1') {
-            return entry.values as AdminRoleGranted1
-        } else if (type === 'AdminRoleRevoked1') {
-            return entry.values as AdminRoleRevoked1
-        } else if (type === 'UserCreated1') {
-            return entry.values as UserCreated1
-        } else if (type === 'UserDeleted1') {
-            return entry.values as UserDeleted1
-        } else if (type === 'UserAuthenticated1') {
-            return entry.values as UserAuthenticated1
-        } else if (type === 'UserAuthenticationFailed1') {
-            return entry.values as UserAuthenticationFailed1
-        } else if (type === 'TargetSessionStarted1') {
-            return entry.values as TargetSessionStarted1
-        } else if (type === 'TargetSessionEnded1') {
-            return entry.values as TargetSessionEnded1
-        } else if (type === 'CredentialCreated1') {
-            return entry.values as CredentialCreated1
-        } else if (type === 'CredentialDeleted1') {
-            return entry.values as CredentialDeleted1
-        } else if (type === 'TicketCreated1') {
-            return entry.values as TicketCreated1
-        } else if (type === 'TicketDeleted1') {
-            return entry.values as TicketDeleted1
+        return richLogTypes.has(richLogType(entry))
+            ? (entry.values as RichLogEntry)
+            : null
+    }
+
+    /**
+     * Kubernetes audit events pack argv, ports and image lists into one field
+     * as a JSON array, so a log row stays a flat set of values.
+     */
+    function formatJsonList(
+        raw: string | undefined,
+        separator: string,
+    ): string {
+        if (!raw) {
+            return ''
         }
-        return null
+        try {
+            const parsed: unknown = JSON.parse(raw)
+            return Array.isArray(parsed) ? parsed.join(separator) : raw
+        } catch {
+            return raw
+        }
     }
 
     function genericValues(entry: LogEntry): [string, unknown][] {
@@ -769,6 +846,164 @@
                                         />
                                         on
                                         <strong>{richEntry.target}</strong>
+                                    </div>
+                                {:else if richEntry?._type === 'KubernetesExecStarted1'}
+                                    <div class="rich-entry">
+                                        <UserBadge
+                                            id={richEntry.user_id}
+                                            name={richEntry.username}
+                                        />
+                                        ran
+                                        <strong
+                                            >{formatJsonList(
+                                                richEntry.command,
+                                                ' ',
+                                            ) || '(image entrypoint)'}</strong
+                                        >
+                                        in
+                                        <strong
+                                            >{richEntry.namespace}/{richEntry.pod}</strong
+                                        >
+                                        {#if richEntry.container}
+                                            container
+                                            <strong
+                                                >{richEntry.container}</strong
+                                            >
+                                        {/if}
+                                        on
+                                        <TargetBadge
+                                            id={richEntry.target_id}
+                                            name={richEntry.target_name}
+                                        />
+                                    </div>
+                                {:else if richEntry?._type === 'KubernetesAttachStarted1'}
+                                    <div class="rich-entry">
+                                        <UserBadge
+                                            id={richEntry.user_id}
+                                            name={richEntry.username}
+                                        />
+                                        attached to
+                                        <strong
+                                            >{richEntry.namespace}/{richEntry.pod}</strong
+                                        >
+                                        {#if richEntry.container}
+                                            container
+                                            <strong
+                                                >{richEntry.container}</strong
+                                            >
+                                        {/if}
+                                        on
+                                        <TargetBadge
+                                            id={richEntry.target_id}
+                                            name={richEntry.target_name}
+                                        />
+                                    </div>
+                                {:else if richEntry?._type === 'KubernetesPortForwardStarted1'}
+                                    <div class="rich-entry">
+                                        <UserBadge
+                                            id={richEntry.user_id}
+                                            name={richEntry.username}
+                                        />
+                                        forwarded
+                                        {#if richEntry.ports}
+                                            port(s)
+                                            <strong
+                                                >{formatJsonList(
+                                                    richEntry.ports,
+                                                    ', ',
+                                                )}</strong
+                                            >
+                                        {/if}
+                                        from
+                                        <strong
+                                            >{richEntry.namespace}/{richEntry.pod}</strong
+                                        >
+                                        on
+                                        <TargetBadge
+                                            id={richEntry.target_id}
+                                            name={richEntry.target_name}
+                                        />
+                                    </div>
+                                {:else if richEntry?._type === 'KubernetesStreamRejected1'}
+                                    <div class="rich-entry">
+                                        Cluster rejected
+                                        <strong>{richEntry.subresource}</strong>
+                                        on
+                                        <strong
+                                            >{richEntry.namespace}/{richEntry.pod}</strong
+                                        >
+                                        for
+                                        <UserBadge
+                                            id={richEntry.user_id}
+                                            name={richEntry.username}
+                                        />
+                                        <span class="badge bg-danger">
+                                            {richEntry.status}
+                                        </span>
+                                    </div>
+                                {:else if richEntry?._type === 'KubernetesDebugContainerCreated1'}
+                                    <div class="rich-entry">
+                                        <UserBadge
+                                            id={richEntry.user_id}
+                                            name={richEntry.username}
+                                        />
+                                        added debug container
+                                        <strong
+                                            >{richEntry.debug_container}</strong
+                                        >
+                                        ({richEntry.image}) to
+                                        <strong
+                                            >{richEntry.namespace}/{richEntry.pod}</strong
+                                        >
+                                        {#if richEntry.target_container}
+                                            targeting
+                                            <strong
+                                                >{richEntry.target_container}</strong
+                                            >
+                                        {/if}
+                                        on
+                                        <TargetBadge
+                                            id={richEntry.target_id}
+                                            name={richEntry.target_name}
+                                        />
+                                    </div>
+                                {:else if richEntry?._type === 'KubernetesPodCreated1'}
+                                    <div class="rich-entry">
+                                        <UserBadge
+                                            id={richEntry.user_id}
+                                            name={richEntry.username}
+                                        />
+                                        created pod
+                                        <strong
+                                            >{richEntry.namespace}/{richEntry.pod}</strong
+                                        >
+                                        ({formatJsonList(richEntry.images, ', ')})
+                                        {#if richEntry.node_name}
+                                            on node
+                                            <strong
+                                                >{richEntry.node_name}</strong
+                                            >
+                                        {/if}
+                                        on
+                                        <TargetBadge
+                                            id={richEntry.target_id}
+                                            name={richEntry.target_name}
+                                        />
+                                        {#if richEntry.privileged === 'true'}
+                                            <span class="badge bg-danger">
+                                                privileged
+                                            </span>
+                                        {/if}
+                                        {#if richEntry.host_pid === 'true'}
+                                            <span class="badge bg-warning">
+                                                hostPID
+                                            </span>
+                                        {/if}
+                                        {#if richEntry.host_network === 'true'}
+                                            <span class="badge bg-warning">
+                                                hostNetwork
+                                            </span>
+                                        {/if}
                                     </div>
                                 {:else}
                                     <span class="text">

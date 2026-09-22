@@ -5,7 +5,7 @@ use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::{Deserialize, Serialize};
-use tracing::debug;
+use tracing::{debug, warn};
 use warpgate_common::WarpgateError;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
@@ -69,18 +69,24 @@ impl Api {
 
         let Some(provider_config) = config.store.sso_providers.iter().find(|p| p.name == *name)
         else {
+            warn!(provider = %name, "SSO login requested for a provider that is not configured");
             return Ok(StartSsoResponse::NotFound);
         };
 
         if matches!(
             provider_config.return_url_domain,
             SsoReturnUrlDomainPreference::ExternalHost
-        ) && let (Some(request_host), Some(external_host)) = (
-            ctx.trusted_hostname(req),
-            config.store.external_host.as_deref(),
-        ) && !is_localhost_host(&request_host)
-            && !host_is_subdomain_of_or_equal(&request_host, external_host)
+        ) && let (Some(request_host), Some(external_host)) =
+            (ctx.trusted_hostname(req), config.external_host_name())
+            && !is_localhost_host(&request_host)
+            && !host_is_subdomain_of_or_equal(&request_host, &external_host)
         {
+            warn!(
+                %request_host,
+                %external_host,
+                provider = %name,
+                "SSO login refused: this provider returns to `external_host`, and the host the browser used is neither that host nor a subdomain of it. Point `external_host` at the hostname users open Warpgate on, or set `return_url_domain: host_header` on the provider."
+            );
             return Ok(StartSsoResponse::IncompatibleSsoDomain);
         }
 

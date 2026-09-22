@@ -29,7 +29,7 @@
     const authOptions = $derived([
         { value: 'Password', label: 'Password' },
         ...($serverInfo?.runningOnEc2
-            ? [{ value: 'IamRole', label: 'IAM role (experimental)' }]
+            ? [{ value: 'IamRole', label: 'IAM role' }]
             : []),
     ])
 </script>

@@ -1,0 +1,116 @@
+{{- if .Values.postgresql.enabled }}
+{{- $name := include "warpgate.postgresql.fullname" . }}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $name }}
+{{- $passwordRef := split "/" (include "warpgate.postgresql.passwordSecret" .) }}
+{{- if and (not .Values.postgresql.passwordSecret) (or $existing .Release.IsInstall) }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "warpgate.labels" . | nindent 4 }}
+  annotations:
+    # The StatefulSet's PVC survives `helm uninstall`, and its initdb only ever
+    # honoured the password it was created with - so the password has to
+    # survive too, or a reinstall onto the retained volume can't authenticate.
+    # Being kept is also what lets an upgrade leave it out of the manifest when
+    # `lookup` can't read the live one back.
+    helm.sh/resource-policy: keep
+type: Opaque
+data:
+  # Kept across upgrades by reading back the live Secret; `helm template` has no
+  # cluster to read and renders a fresh password instead.
+  password: {{ index ($existing.data | default dict) "password" | default (randAlphaNum 32 | b64enc) }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "warpgate.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5432
+      targetPort: postgresql
+      protocol: TCP
+      name: postgresql
+  selector:
+    {{- include "warpgate.postgresql.selectorLabels" . | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "warpgate.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: {{ $name }}
+  selector:
+    matchLabels:
+      {{- include "warpgate.postgresql.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "warpgate.postgresql.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: postgresql
+          image: "{{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }}"
+          imagePullPolicy: {{ .Values.postgresql.image.pullPolicy }}
+          env:
+            - name: POSTGRES_USER
+              value: warpgate
+            - name: POSTGRES_DB
+              value: warpgate
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $passwordRef._0 }}
+                  key: {{ $passwordRef._1 }}
+            # The volume root is not empty on most CSI drivers, so initdb needs
+            # a subdirectory of its own.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgresql
+              containerPort: 5432
+              protocol: TCP
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "warpgate", "-d", "warpgate"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          {{- with .Values.postgresql.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      {{- with .Values.postgresql.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.postgresql.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with .Values.postgresql.storage.className }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.postgresql.storage.size }}
+{{- end }}

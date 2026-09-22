@@ -7,6 +7,7 @@ use uuid::Uuid;
 use warpgate_common::{Secret, Target as TargetConfig, WarpgateError};
 use warpgate_common_http::SessionAuthorization;
 use warpgate_common_http::auth::AuthenticatedRequestContext;
+use warpgate_common_http::errors::bad_request;
 use warpgate_core::ticket_requests::{
     ActivateTicketRequestError, CreateTicketRequestError, CreateTicketRequestParams,
     activate_ticket_request, create_ticket_request, delete_ticket,
@@ -194,8 +195,8 @@ impl Api {
 
         let target_name = body.target_name.trim().to_string();
         if target_name.is_empty() {
-            return Ok(CreateTicketRequestResponse::BadRequest(Json(
-                "target_name is required".into(),
+            return Ok(CreateTicketRequestResponse::BadRequest(bad_request(
+                "target_name is required",
             )));
         }
 
@@ -219,7 +220,7 @@ impl Api {
                 auto_approved_ticket_secret: result.auto_approved_secret,
             }))),
             Err(CreateTicketRequestError::InvalidInput(msg)) => {
-                Ok(CreateTicketRequestResponse::BadRequest(Json(msg)))
+                Ok(CreateTicketRequestResponse::BadRequest(bad_request(msg)))
             }
             Err(CreateTicketRequestError::Internal(e)) => Err(e),
         }

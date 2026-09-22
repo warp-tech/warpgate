@@ -28,7 +28,7 @@
         { value: 'Certificate', label: 'Client certificate' },
         { value: 'Token', label: 'Bearer token' },
         ...($serverInfo?.runningOnEc2
-            ? [{ value: 'IamRole', label: 'IAM role (experimental)' }]
+            ? [{ value: 'IamRole', label: 'IAM role' }]
             : []),
     ])
 </script>
