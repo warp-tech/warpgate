@@ -16,7 +16,10 @@ use crate::pdu::{
     CapabilitiesResponsePdu, CapsVersion, ClosePdu, CreateResponsePdu, CreationStatus, DrdynvcClientPdu,
     DrdynvcServerPdu,
 };
-use crate::{DvcProcessor, DynamicChannelId, DynamicChannelName, DynamicVirtualChannel, encode_dvc_messages};
+use crate::{
+    DvcProcessor, DynamicChannelId, DynamicChannelMut, DynamicChannelName, DynamicVirtualChannel,
+    encode_dvc_messages,
+};
 
 pub trait DvcClientProcessor: DvcProcessor {}
 
@@ -163,6 +166,22 @@ impl DrdynvcClient {
 
     pub fn get_dvc_by_channel_id_mut(&mut self, channel_id: u32) -> Option<&mut DynamicVirtualChannel> {
         self.dynamic_channels.get_by_channel_id_mut(channel_id)
+    }
+
+    /// Returns a mutable handle to the processor of the pre-registered channel of type `T`.
+    ///
+    /// Returns `None` until the server has created the channel and the processor has started.
+    pub fn get_dvc_mut<T>(&mut self) -> Option<DynamicChannelMut<'_, T>>
+    where
+        T: DvcClientProcessor,
+    {
+        let dvc_channel = self.dynamic_channels.get_by_type_id_mut(TypeId::of::<T>())?;
+        let channel_id = dvc_channel.channel_id?;
+        dvc_channel
+            .channel_processor
+            .as_any_mut()
+            .downcast_mut()
+            .map(|processor| DynamicChannelMut::new(channel_id, processor))
     }
 
     fn create_capabilities_response(&mut self, server_version: CapsVersion) -> SvcMessage {
@@ -347,6 +366,12 @@ impl DynamicChannelSet {
         self.type_id_to_channel_id
             .get(&type_id)
             .and_then(|id| self.active_channels.get(id))
+    }
+
+    fn get_by_type_id_mut(&mut self, type_id: TypeId) -> Option<&mut DynamicVirtualChannel> {
+        self.type_id_to_channel_id
+            .get(&type_id)
+            .and_then(|id| self.active_channels.get_mut(id))
     }
 
     fn get_by_channel_id(&self, id: DynamicChannelId) -> Option<&DynamicVirtualChannel> {
