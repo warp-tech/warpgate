@@ -25,6 +25,47 @@ use crate::utils::Bits;
 /// Sliding window size shared by compressor and decompressor.
 pub(crate) const HISTORY_SIZE: usize = 2_500_000;
 
+/// Ceiling on the decompressed output of a single ZGFX segment.
+///
+/// This is a resource limit, not a wire requirement. A match-copy chain can
+/// expand a few bytes of input into unbounded output, so the decompressor needs
+/// some ceiling or a small hostile segment can exhaust memory. Left unbounded, a
+/// fuzz input reached a 1.5 GB peak.
+///
+/// MS-RDPEGFX 3.1.9.1.2 ("RDP 8.0 compressor limits") does supply a number: a
+/// compliant compressor MUST NOT produce any single segment representing more
+/// than 65,535 uncompressed bytes, whether sent as SINGLE or as one part of a
+/// MULTIPART stream. This crate's own compressor honors that bound: `wrapper.rs`
+/// panics if asked to wrap a compressed segment past it, and
+/// `compress_and_wrap_egfx`, the only production caller, falls back to
+/// uncompressed rather than risk exceeding it.
+///
+/// So 65,535 bounds every segment a conforming peer will ever send. 64 MiB is
+/// still used here, not that number, because this ceiling exists to catch
+/// non-conforming or hostile input, not to police conforming input: a decoder
+/// that hard-rejects at exactly the compressor-side limit has no margin for a
+/// peer implementation with a minor, benign spec deviation. 64 MiB sits far
+/// above any plausible frame while still bounding the damage, so it can only
+/// fire on an attack. Same footing as the compositor's total-byte budget: an
+/// explicit implementation limit, documented as ours rather than dressed up as
+/// a spec requirement.
+pub(crate) const MAX_DECOMPRESSED_PER_SEGMENT: usize = 64 * 1024 * 1024;
+
+/// Ceiling on the total decompressed output of a single multipart ZGFX message.
+///
+/// Each segment is already bounded by [`MAX_DECOMPRESSED_PER_SEGMENT`], but
+/// summing enough small segments could otherwise drive the aggregate up to
+/// whatever the declared `uncompressedSize` field claims, and that field is a
+/// 32-bit value fully controlled by the sender (up to roughly 4.29 GiB). A
+/// multipart message built from dozens of small segments, each just under the
+/// per-segment ceiling, can exhaust memory long before `uncompressedSize` is
+/// reached.
+///
+/// 256 MiB, same footing as `MAX_COMPOSITOR_BYTES` in ironrdp-egfx's
+/// `compositor.rs`: a fixed implementation budget a hostile sender cannot
+/// inflate by lying about its own declared total.
+pub(crate) const MAX_DECOMPRESSED_TOTAL: usize = 256 * 1024 * 1024;
+
 pub struct Decompressor {
     history: FixedCircularBuffer,
 }
@@ -49,6 +90,28 @@ impl Decompressor {
                 for segment in segments {
                     let written = self.handle_segment(&segment, output)?;
                     bytes_written += written;
+
+                    // Early detection: a header declaring uncompressedSize=N but segments
+                    // producing more than N short-circuits here rather than after the full
+                    // allocation. The declared u32 size remains the wire-format upper bound;
+                    // realistic-traffic limits below that are a caller-layer concern.
+                    if bytes_written > uncompressed_size {
+                        return Err(ZgfxError::MultipartTotalExceedsDeclared {
+                            written: bytes_written,
+                            declared: uncompressed_size,
+                        });
+                    }
+
+                    // Separate from the check above: uncompressed_size is attacker-controlled,
+                    // so a hostile sender can set it arbitrarily high and still pass that check.
+                    // This bounds the actual aggregate allocation regardless of what the sender
+                    // declares.
+                    if bytes_written > MAX_DECOMPRESSED_TOTAL {
+                        return Err(ZgfxError::MultipartTotalExceedsBudget {
+                            written: bytes_written,
+                            budget: MAX_DECOMPRESSED_TOTAL,
+                        });
+                    }
                 }
 
                 if bytes_written != uncompressed_size {
@@ -85,24 +148,46 @@ impl Decompressor {
 
         let mut bits = BitSlice::from_slice(encoded_data);
 
-        // The value of the last byte indicates the number of unused bits in the final byte
-        bits = &bits
-            [..8 * (encoded_data.len() - 1) - usize::from(*encoded_data.last().expect("encoded_data is not empty"))];
+        // The low 3 bits of the last byte indicate the number of unused bits in the final
+        // byte (0-7); MS-RDPEGFX 3.1.9.1.2.4 reserves the five high-order bits. Mask them
+        // off rather than reading the whole byte, or a sender that leaves them non-zero
+        // (nothing in the spec requires zeroing a reserved field) makes this look like a
+        // huge trailing-bit count and silently truncates real token data instead of
+        // decoding it.
+        // Use checked arithmetic so attacker-controlled trailing-bit counts that exceed the
+        // available bit budget surface as a typed error rather than an unsigned underflow panic.
+        let trailing_unused = usize::from(*encoded_data.last().expect("encoded_data is not empty") & 0x07);
+        let bit_count = 8usize
+            .checked_mul(encoded_data.len() - 1)
+            .and_then(|n| n.checked_sub(trailing_unused))
+            .ok_or(ZgfxError::InvalidTrailingBitCount(trailing_unused))?;
+        bits = &bits[..bit_count];
         let mut bits = Bits::new(bits);
         let mut bytes_written = 0;
 
         while !bits.is_empty() {
+            // Token prefix lookup uses bit-budget-aware indexing so a truncated
+            // segment whose remaining bits are shorter than every prefix surfaces
+            // as TokenBitsNotFound rather than an out-of-range slice panic.
             let token = TOKEN_TABLE
                 .iter()
-                .find(|token| token.prefix == bits[..token.prefix.len()])
+                .find(|token| bits.get(..token.prefix.len()).is_some_and(|s| s == token.prefix))
                 .ok_or(ZgfxError::TokenBitsNotFound)?;
+            // The prefix length was just validated by the find above; this split
+            // cannot exceed the remaining bit budget.
             let _prefix = bits.split_to(token.prefix.len());
 
             match token.ty {
                 TokenType::NullLiteral => {
                     // The prefix value is encoded with a "0" prefix,
                     // then read 8 bits containing the byte to output.
-                    let value = bits.split_to(8).load_be::<u8>();
+                    let value = bits
+                        .try_split_to(8)
+                        .ok_or(ZgfxError::IncompleteBitStream {
+                            needed: 8,
+                            remaining: bits.len(),
+                        })?
+                        .load_be::<u8>();
 
                     self.history.write_u8(value)?;
                     output.push(value);
@@ -119,10 +204,33 @@ impl Decompressor {
                     distance_value_size,
                     distance_base,
                 } => {
-                    let written =
-                        handle_match(&mut bits, distance_value_size, distance_base, &mut self.history, output)?;
+                    let max_remaining = MAX_DECOMPRESSED_PER_SEGMENT.checked_sub(bytes_written).ok_or(
+                        ZgfxError::SegmentDecompressedSizeExceedsLimit {
+                            decompressed: bytes_written,
+                            limit: MAX_DECOMPRESSED_PER_SEGMENT,
+                        },
+                    )?;
+                    let written = handle_match(
+                        &mut bits,
+                        distance_value_size,
+                        distance_base,
+                        &mut self.history,
+                        output,
+                        max_remaining,
+                    )?;
                     bytes_written += written;
                 }
+            }
+
+            // The per-token check above bounds a single match copy; this bounds their
+            // sum, which is what a hostile stream actually exploits. Catches the
+            // cumulative NullLiteral / Literal / Match contribution that could
+            // otherwise inflate a small input into a multi-gigabyte allocation.
+            if bytes_written > MAX_DECOMPRESSED_PER_SEGMENT {
+                return Err(ZgfxError::SegmentDecompressedSizeExceedsLimit {
+                    decompressed: bytes_written,
+                    limit: MAX_DECOMPRESSED_PER_SEGMENT,
+                });
             }
         }
 
@@ -142,17 +250,38 @@ fn handle_match(
     distance_base: u32,
     history: &mut FixedCircularBuffer,
     output: &mut Vec<u8>,
+    max_remaining: usize,
 ) -> Result<usize, ZgfxError> {
     // Each token has been assigned a different base distance
     // and number of additional value bits to be added to compute the full distance.
 
-    let distance = usize::try_from(distance_base + bits.split_to(distance_value_size).load_be::<u32>())
-        .map_err(|_| ZgfxError::InvalidIntegralConversion("token's full distance"))?;
+    let distance_value = bits
+        .try_split_to(distance_value_size)
+        .ok_or(ZgfxError::IncompleteBitStream {
+            needed: distance_value_size,
+            remaining: bits.len(),
+        })?
+        .load_be::<u32>();
+    let full_distance = distance_base
+        .checked_add(distance_value)
+        .ok_or(ZgfxError::InvalidIntegralConversion("token's full distance"))?;
+    let distance =
+        usize::try_from(full_distance).map_err(|_| ZgfxError::InvalidIntegralConversion("token's full distance"))?;
 
     if distance == 0 {
-        read_unencoded_bytes(bits, history, output).map_err(ZgfxError::from)
+        read_unencoded_bytes(bits, history, output, max_remaining)
     } else {
-        read_encoded_bytes(bits, distance, history, output)
+        // Bound the match distance against the history size to prevent the
+        // circular buffer's position arithmetic from underflowing on an
+        // attacker-controlled distance. This is defense-in-depth alongside
+        // the bound check inside FixedCircularBuffer::read_with_offset.
+        if distance > HISTORY_SIZE {
+            return Err(ZgfxError::MatchDistanceOutOfRange {
+                distance,
+                history_size: HISTORY_SIZE,
+            });
+        }
+        read_encoded_bytes(bits, distance, history, output, max_remaining)
     }
 }
 
@@ -160,18 +289,52 @@ fn read_unencoded_bytes(
     bits: &mut Bits<'_>,
     history: &mut FixedCircularBuffer,
     output: &mut Vec<u8>,
-) -> io::Result<usize> {
+    max_remaining: usize,
+) -> Result<usize, ZgfxError> {
     // A match distance of zero is a special case,
     // which indicates that an unencoded run of bytes follows.
-    // The count of bytes is encoded as a 15-bit value
-    let length = bits.split_to(15).load_be::<usize>();
+    // The count of bytes is encoded as a 15-bit value.
+    let length = bits
+        .try_split_to(15)
+        .ok_or(ZgfxError::IncompleteBitStream {
+            needed: 15,
+            remaining: bits.len(),
+        })?
+        .load_be::<usize>();
+
+    // Enforce the per-segment cap before any allocation. length is a 15-bit
+    // value (max 32,767) so it can never exceed MAX_DECOMPRESSED_PER_SEGMENT,
+    // but it may exceed max_remaining if the prior tokens already filled most
+    // of the budget.
+    if length > max_remaining {
+        return Err(ZgfxError::SegmentDecompressedSizeExceedsLimit {
+            decompressed: MAX_DECOMPRESSED_PER_SEGMENT
+                .saturating_sub(max_remaining)
+                .saturating_add(length),
+            limit: MAX_DECOMPRESSED_PER_SEGMENT,
+        });
+    }
 
     if bits.remaining_bits_of_last_byte() > 0 {
         let pad_to_byte_boundary = 8 - bits.remaining_bits_of_last_byte();
-        bits.split_to(pad_to_byte_boundary);
+        bits.try_split_to(pad_to_byte_boundary)
+            .ok_or(ZgfxError::IncompleteBitStream {
+                needed: pad_to_byte_boundary,
+                remaining: bits.len(),
+            })?;
     }
 
-    let unencoded_bits = bits.split_to(length * 8);
+    // length is a 15-bit value (max 32767); multiplied by 8 cannot overflow usize on
+    // any supported platform (max ~262 Kbits). Use checked_mul for defence anyway.
+    let unencoded_bit_count = length
+        .checked_mul(8)
+        .ok_or(ZgfxError::InvalidIntegralConversion("unencoded byte-run bit count"))?;
+    let unencoded_bits = bits
+        .try_split_to(unencoded_bit_count)
+        .ok_or(ZgfxError::IncompleteBitStream {
+            needed: unencoded_bit_count,
+            remaining: bits.len(),
+        })?;
 
     // FIXME: not very efficient, but we need to rework the `Bits` helper and refactor a bit otherwise
     let unencoded_bits = unencoded_bits.to_bitvec();
@@ -187,28 +350,65 @@ fn read_encoded_bytes(
     distance: usize,
     history: &mut FixedCircularBuffer,
     output: &mut Vec<u8>,
+    max_remaining: usize,
 ) -> Result<usize, ZgfxError> {
     // A match length prefix follows the token and indicates
     // how many additional bits will be needed to get the full length
     // (the number of bytes to be copied).
 
     let length_token_size = bits.leading_ones();
-    bits.split_to(length_token_size + 1); // length token + zero bit
+    // length token + zero bit
+    let prefix_len = length_token_size
+        .checked_add(1)
+        .ok_or(ZgfxError::LengthTokenSizeTooLarge(length_token_size))?;
+    bits.try_split_to(prefix_len).ok_or(ZgfxError::IncompleteBitStream {
+        needed: prefix_len,
+        remaining: bits.len(),
+    })?;
 
     let length = if length_token_size == 0 {
         // special case
-
         3
     } else {
-        let length = bits.split_to(length_token_size + 1).load_be::<usize>();
+        // The length-value bit width must fit a usize load_be call. Bound it before
+        // attempting any allocation or split so an attacker cannot drive the
+        // exponent into a pow overflow or load_be panic.
+        let value_bits = length_token_size
+            .checked_add(1)
+            .ok_or(ZgfxError::LengthTokenSizeTooLarge(length_token_size))?;
+        let usize_bits =
+            usize::try_from(usize::BITS).map_err(|_| ZgfxError::LengthTokenSizeTooLarge(length_token_size))?;
+        if value_bits >= usize_bits {
+            return Err(ZgfxError::LengthTokenSizeTooLarge(length_token_size));
+        }
+        let value = bits
+            .try_split_to(value_bits)
+            .ok_or(ZgfxError::IncompleteBitStream {
+                needed: value_bits,
+                remaining: bits.len(),
+            })?
+            .load_be::<usize>();
 
-        let length_token_size = u32::try_from(length_token_size)
-            .map_err(|_| ZgfxError::InvalidIntegralConversion("length of the token size"))?;
-
-        let base = 2usize.pow(length_token_size + 1);
-
-        base + length
+        let exponent = u32::try_from(value_bits).map_err(|_| ZgfxError::LengthTokenSizeTooLarge(length_token_size))?;
+        let base = 1usize
+            .checked_shl(exponent)
+            .ok_or(ZgfxError::LengthTokenSizeTooLarge(length_token_size))?;
+        base.checked_add(value)
+            .ok_or(ZgfxError::LengthTokenSizeTooLarge(length_token_size))?
     };
+
+    // Enforce the per-segment cap before allocating. A match-copy of length N
+    // grows the output by N bytes; rejecting before the circular buffer read
+    // prevents an attacker-controlled match length from inflating the output
+    // beyond the spec-defined bound.
+    if length > max_remaining {
+        return Err(ZgfxError::SegmentDecompressedSizeExceedsLimit {
+            decompressed: MAX_DECOMPRESSED_PER_SEGMENT
+                .saturating_sub(max_remaining)
+                .saturating_add(length),
+            limit: MAX_DECOMPRESSED_PER_SEGMENT,
+        });
+    }
 
     let output_length = output.len();
     history.read_with_offset(distance, length, output)?;
@@ -442,6 +642,7 @@ static TOKEN_TABLE: LazyLock<[Token; 40]> = LazyLock::new(|| {
     ]
 });
 
+#[non_exhaustive]
 #[derive(Debug)]
 pub enum ZgfxError {
     IOError(io::Error),
@@ -453,6 +654,32 @@ pub enum ZgfxError {
     },
     TokenBitsNotFound,
     InvalidIntegralConversion(&'static str),
+    InvalidTrailingBitCount(usize),
+    SegmentSizeExceedsBuffer {
+        size: usize,
+        remaining: usize,
+    },
+    IncompleteBitStream {
+        needed: usize,
+        remaining: usize,
+    },
+    MatchDistanceOutOfRange {
+        distance: usize,
+        history_size: usize,
+    },
+    LengthTokenSizeTooLarge(usize),
+    SegmentDecompressedSizeExceedsLimit {
+        decompressed: usize,
+        limit: usize,
+    },
+    MultipartTotalExceedsDeclared {
+        written: usize,
+        declared: usize,
+    },
+    MultipartTotalExceedsBudget {
+        written: usize,
+        budget: usize,
+    },
 }
 
 impl core::fmt::Display for ZgfxError {
@@ -472,6 +699,48 @@ impl core::fmt::Display for ZgfxError {
             Self::InvalidIntegralConversion(type_name) => {
                 write!(f, "invalid `{type_name}`: out of range integral type conversion")
             }
+            Self::InvalidTrailingBitCount(count) => {
+                write!(f, "invalid trailing-bit count {count} exceeds available bit budget")
+            }
+            Self::SegmentSizeExceedsBuffer { size, remaining } => {
+                write!(
+                    f,
+                    "multipart segment claims {size} bytes but only {remaining} bytes remain in the buffer"
+                )
+            }
+            Self::IncompleteBitStream { needed, remaining } => {
+                write!(
+                    f,
+                    "incomplete bitstream: needed {needed} bits, only {remaining} bits remain in the segment"
+                )
+            }
+            Self::MatchDistanceOutOfRange { distance, history_size } => {
+                write!(
+                    f,
+                    "match distance {distance} exceeds history buffer size {history_size}"
+                )
+            }
+            Self::LengthTokenSizeTooLarge(size) => {
+                write!(f, "match-length token size {size} exceeds the supported bit budget")
+            }
+            Self::SegmentDecompressedSizeExceedsLimit { decompressed, limit } => {
+                write!(
+                    f,
+                    "segment decompressed size {decompressed} exceeds the {limit} byte per-segment ceiling"
+                )
+            }
+            Self::MultipartTotalExceedsDeclared { written, declared } => {
+                write!(
+                    f,
+                    "multipart decompressed bytes {written} exceed the declared uncompressedSize {declared}"
+                )
+            }
+            Self::MultipartTotalExceedsBudget { written, budget } => {
+                write!(
+                    f,
+                    "multipart decompressed bytes {written} exceed the {budget} byte total budget"
+                )
+            }
         }
     }
 }
@@ -485,6 +754,14 @@ impl core::error::Error for ZgfxError {
             Self::InvalidDecompressedSize { .. } => None,
             Self::TokenBitsNotFound => None,
             Self::InvalidIntegralConversion(_) => None,
+            Self::InvalidTrailingBitCount(_) => None,
+            Self::SegmentSizeExceedsBuffer { .. } => None,
+            Self::IncompleteBitStream { .. } => None,
+            Self::MatchDistanceOutOfRange { .. } => None,
+            Self::LengthTokenSizeTooLarge(_) => None,
+            Self::SegmentDecompressedSizeExceedsLimit { .. } => None,
+            Self::MultipartTotalExceedsDeclared { .. } => None,
+            Self::MultipartTotalExceedsBudget { .. } => None,
         }
     }
 }
@@ -534,6 +811,22 @@ mod tests {
     #[test]
     fn zgfx_decompresses_only_one_literal() {
         let buffer = [0b1100_1000, 0x03];
+        let expected = vec![0x01];
+
+        let mut zgfx = Decompressor::new();
+        let mut decompressed = Vec::with_capacity(expected.len());
+        zgfx.decompress_segment(buffer.as_ref(), &mut decompressed).unwrap();
+        assert_eq!(decompressed, expected);
+    }
+
+    /// MS-RDPEGFX 3.1.9.1.2.4 reserves the five high-order bits of the trailer byte;
+    /// only the low 3 bits are the unused-bit count. Same trailer as
+    /// `zgfx_decompresses_only_one_literal` (3 unused bits) with the reserved bits set
+    /// to a nonzero pattern, which must decode identically rather than being read as a
+    /// much larger unused-bit count.
+    #[test]
+    fn zgfx_ignores_reserved_bits_in_trailer_byte() {
+        let buffer = [0b1100_1000, 0x03 | 0b1010_0000];
         let expected = vec![0x01];
 
         let mut zgfx = Decompressor::new();
@@ -676,5 +969,50 @@ mod tests {
         let mut decompressed = Vec::with_capacity(expected.len());
         zgfx.decompress_segment(buffer.as_ref(), &mut decompressed).unwrap();
         assert_eq!(decompressed, expected);
+    }
+
+    /// MAX_DECOMPRESSED_PER_SEGMENT alone does not bound a multipart message: each
+    /// segment here is comfortably under that per-segment ceiling, but five of them
+    /// sum past MAX_DECOMPRESSED_TOTAL while staying under the declared
+    /// uncompressedSize, so the pre-existing MultipartTotalExceedsDeclared check alone
+    /// would let the full allocation happen before erroring. Uses real LZ compression
+    /// of a repetitive buffer to keep the wire input small (a few hundred KB) while
+    /// still exercising the real decompress path against real segment sizes, rather
+    /// than faking bytes_written.
+    #[test]
+    fn multipart_total_exceeds_budget_before_declared_size_is_reached() {
+        let per_segment_decompressed = 60 * 1024 * 1024; // 60 MiB, under the 64 MiB per-segment cap
+        let raw = vec![0xABu8; per_segment_decompressed];
+
+        let mut compressor = Compressor::new();
+        let compressed = compressor.compress(&raw).unwrap();
+
+        // 5 segments * 60 MiB = 300 MiB, over the 256 MiB budget, under the declared size.
+        let segment_count: u16 = 5;
+        let per_segment_decompressed_u32 = u32::try_from(per_segment_decompressed).unwrap();
+        let total_declared: u32 = per_segment_decompressed_u32 * u32::from(segment_count) + 1000;
+
+        let mut buffer = vec![0xE1u8]; // MULTIPART descriptor
+        buffer.extend_from_slice(&segment_count.to_le_bytes());
+        buffer.extend_from_slice(&total_declared.to_le_bytes());
+        for _ in 0..segment_count {
+            let seg_size = u32::try_from(compressed.len() + 1).unwrap(); // +1 for the header byte
+            buffer.extend_from_slice(&seg_size.to_le_bytes());
+            buffer.push(0x24); // type 4 + PACKET_COMPRESSED
+            buffer.extend_from_slice(&compressed);
+        }
+
+        let mut zgfx = Decompressor::new();
+        let mut output = Vec::new();
+        let err = zgfx.decompress(&buffer, &mut output).unwrap_err();
+
+        assert!(
+            matches!(err, ZgfxError::MultipartTotalExceedsBudget { .. }),
+            "expected MultipartTotalExceedsBudget, got {err:?}"
+        );
+        // The budget check fires partway through segment 5 (4 * 60 MiB = 240 MiB is
+        // still under budget; adding the 5th pushes to 300 MiB), so output holds at
+        // most 5 segments' worth, not the full declared 300 MiB + 1000.
+        assert!(output.len() <= per_segment_decompressed * 5);
     }
 }

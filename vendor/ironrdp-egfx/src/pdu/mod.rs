@@ -8,6 +8,7 @@
 //! For server implementations, the following utilities are provided:
 //!
 //! - [`Avc420Region`] - Region metadata for H.264 frames
+//! - [`avc_to_annex_b`] - Convert H.264 AVC format to Annex B
 //! - [`annex_b_to_avc`] - Convert H.264 Annex B to AVC format
 //! - [`align_to_16`] - Align dimensions to H.264 macroblock boundaries
 //! - [`encode_avc420_bitmap_stream`] - Create AVC420 bitmap streams

@@ -73,6 +73,9 @@ version = "0.2"
 version = "0.8"
 features = ["rdp"]
 
+[dependencies.wide]
+version = "0.7"
+
 [dev-dependencies.bmp]
 version = "0.5"
 
@@ -175,6 +178,8 @@ wildcard_dependencies = "warn"
 wildcard_imports = "warn"
 
 [lints.rust]
+# Vendored code: silence upstream lints so they do not surface in our builds.
+warnings = { level = "allow", priority = 1 }
 absolute_paths_not_starting_with_crate = "warn"
 ambiguous_negative_literals = "warn"
 elided_lifetimes_in_paths = "warn"

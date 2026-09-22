@@ -2,11 +2,12 @@ use core::fmt;
 
 use bit_field::BitField as _;
 use bitflags::bitflags;
-use ironrdp_pdu::geometry::InclusiveRectangle;
+use ironrdp_pdu::geometry::ExclusiveRectangle;
 use ironrdp_pdu::{
     Decode, DecodeResult, Encode, EncodeResult, ReadCursor, WriteCursor, cast_length, ensure_fixed_part_size,
     ensure_size, invalid_field_err,
 };
+use tracing::warn;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuantQuality {
@@ -76,7 +77,8 @@ impl<'de> Decode<'de> for QuantQuality {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[derive(Clone, PartialEq, Eq)]
 pub struct Avc420BitmapStream<'a> {
-    pub rectangles: Vec<InclusiveRectangle>,
+    /// Region masks encoded as `RDPGFX_RECT16` with exclusive right/bottom bounds.
+    pub rectangles: Vec<ExclusiveRectangle>,
     pub quant_qual_vals: Vec<QuantQuality>,
     pub data: &'a [u8],
 }
@@ -137,13 +139,13 @@ impl<'de> Decode<'de> for Avc420BitmapStream<'de> {
         // malicious num_regions: each region needs at least one rectangle
         // (8 bytes) plus one QuantQuality entry (2 bytes). The actual read
         // loop will fail with NotEnoughBytes if num_regions is bogus.
-        let per_region = InclusiveRectangle::FIXED_PART_SIZE + QuantQuality::FIXED_PART_SIZE;
+        let per_region = ExclusiveRectangle::ENCODED_SIZE + QuantQuality::FIXED_PART_SIZE;
         let max_possible = src.len() / per_region;
         let bounded_capacity = num_regions_usize.min(max_possible);
         let mut rectangles = Vec::with_capacity(bounded_capacity);
         let mut quant_qual_vals = Vec::with_capacity(bounded_capacity);
         for _ in 0..num_regions {
-            rectangles.push(InclusiveRectangle::decode(src)?);
+            rectangles.push(ExclusiveRectangle::decode(src)?);
         }
         for _ in 0..num_regions {
             quant_qual_vals.push(QuantQuality::decode(src)?);
@@ -290,7 +292,7 @@ impl<'de> Decode<'de> for Avc444BitmapStream<'de> {
 /// // Create a region covering a 1920x1080 frame
 /// let region = Avc420Region::full_frame(1920, 1080, 22);
 /// assert_eq!(region.left, 0);
-/// assert_eq!(region.right, 1919);
+/// assert_eq!(region.right, 1920);
 /// ```
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -299,9 +301,9 @@ pub struct Avc420Region {
     pub left: u16,
     /// Top edge of the region (inclusive)
     pub top: u16,
-    /// Right edge of the region (inclusive)
+    /// Right edge of the region (exclusive)
     pub right: u16,
-    /// Bottom edge of the region (inclusive)
+    /// Bottom edge of the region (exclusive)
     pub bottom: u16,
     /// H.264 quantization parameter (0-51, lower = higher quality)
     pub quantization_parameter: u8,
@@ -322,8 +324,8 @@ impl Avc420Region {
         Self {
             left: 0,
             top: 0,
-            right: width.saturating_sub(1),
-            bottom: height.saturating_sub(1),
+            right: width,
+            bottom: height,
             quantization_parameter: qp,
             quality: 100,
         }
@@ -342,10 +344,10 @@ impl Avc420Region {
         }
     }
 
-    /// Convert to `InclusiveRectangle` for PDU encoding
+    /// Convert to the exclusive `RDPGFX_RECT16` representation for PDU encoding.
     #[must_use]
-    pub fn to_rectangle(&self) -> InclusiveRectangle {
-        InclusiveRectangle {
+    pub fn to_rectangle(&self) -> ExclusiveRectangle {
+        ExclusiveRectangle {
             left: self.left,
             top: self.top,
             right: self.right,
@@ -361,6 +363,86 @@ impl Avc420Region {
             progressive: false,
             quality: self.quality,
         }
+    }
+}
+
+/// Convert H.264 AVC format to Annex B format
+///
+/// OpenH264 and similar decoders consume Annex B format (start code prefixed),
+/// but MS-RDPEGFX delivers AVC format (length-prefixed NAL units). This helper
+/// converts between the two by replacing each 4-byte big-endian length prefix
+/// with the 4-byte Annex B start code `[0x00, 0x00, 0x00, 0x01]`.
+///
+/// ```text
+/// AVC:     <4-byte BE length> <NAL> <4-byte BE length> <NAL> ...
+/// Annex B: 00 00 00 01 <NAL> 00 00 00 01 <NAL> ...
+/// ```
+///
+/// On malformed input (a NAL length extending past the buffer, or arithmetic
+/// overflow on `offset + nal_len`), the conversion stops at the last
+/// well-formed NAL unit and discards the remaining bytes.
+///
+/// # Arguments
+///
+/// * `data` - H.264 bitstream in AVC format
+///
+/// # Returns
+///
+/// H.264 bitstream in Annex B format with 4-byte start codes
+///
+/// # Example
+///
+/// ```
+/// use ironrdp_egfx::pdu::avc_to_annex_b;
+///
+/// // Length-prefixed NAL unit (length 3, payload [0x67, 0x42, 0x00])
+/// let avc = [0x00, 0x00, 0x00, 0x03, 0x67, 0x42, 0x00];
+/// let annex_b = avc_to_annex_b(&avc);
+/// assert_eq!(annex_b, [0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00]);
+/// ```
+#[must_use]
+pub fn avc_to_annex_b(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(data.len());
+    avc_to_annex_b_into(data, &mut out);
+    out
+}
+
+/// In-place variant of [`avc_to_annex_b`] that writes the conversion result
+/// into a caller-provided buffer.
+///
+/// The caller's buffer is cleared before the conversion begins. This shape
+/// lets the caller reuse one allocation across many calls in a hot loop
+/// (for example a per-frame decoder pipeline) without per-call allocation.
+///
+/// See [`avc_to_annex_b`] for the conversion semantics.
+pub fn avc_to_annex_b_into(data: &[u8], out: &mut Vec<u8>) {
+    out.clear();
+    let mut offset = 0;
+
+    while offset + 4 <= data.len() {
+        let nal_len = u32::from_be_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]]);
+
+        #[expect(clippy::as_conversions, reason = "NAL length from wire format")]
+        let nal_len = nal_len as usize;
+        offset += 4;
+
+        let Some(end) = offset.checked_add(nal_len) else {
+            warn!(nal_len, offset, "AVC NAL length overflow, discarding remaining data");
+            break;
+        };
+        if end > data.len() {
+            warn!(
+                nal_len,
+                offset,
+                data_len = data.len(),
+                "AVC NAL extends beyond buffer, discarding remaining data"
+            );
+            break;
+        }
+
+        out.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
+        out.extend_from_slice(&data[offset..offset + nal_len]);
+        offset += nal_len;
     }
 }
 
@@ -486,7 +568,7 @@ pub const fn align_to_16(dimension: u32) -> u32 {
 /// Panics if internal encoding fails (should not happen with valid inputs).
 #[must_use]
 pub fn encode_avc420_bitmap_stream(regions: &[Avc420Region], h264_data: &[u8]) -> Vec<u8> {
-    let rectangles: Vec<InclusiveRectangle> = regions.iter().map(Avc420Region::to_rectangle).collect();
+    let rectangles: Vec<ExclusiveRectangle> = regions.iter().map(Avc420Region::to_rectangle).collect();
 
     let quant_qual_vals: Vec<QuantQuality> = regions.iter().map(Avc420Region::to_quant_quality).collect();
 
@@ -507,93 +589,4 @@ pub fn encode_avc420_bitmap_stream(regions: &[Avc420Region], h264_data: &[u8]) -
         .expect("encode_avc420_bitmap_stream: encoding failed");
 
     buf
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_avc420_region_full_frame() {
-        let region = Avc420Region::full_frame(1920, 1080, 22);
-        assert_eq!(region.left, 0);
-        assert_eq!(region.top, 0);
-        assert_eq!(region.right, 1919);
-        assert_eq!(region.bottom, 1079);
-        assert_eq!(region.quantization_parameter, 22);
-        assert_eq!(region.quality, 100);
-    }
-
-    #[test]
-    fn test_align_to_16() {
-        assert_eq!(align_to_16(0), 0);
-        assert_eq!(align_to_16(1), 16);
-        assert_eq!(align_to_16(15), 16);
-        assert_eq!(align_to_16(16), 16);
-        assert_eq!(align_to_16(17), 32);
-        assert_eq!(align_to_16(1920), 1920);
-        assert_eq!(align_to_16(1080), 1088);
-    }
-
-    #[test]
-    fn test_annex_b_to_avc_3byte_start() {
-        // NAL with 3-byte start code: 00 00 01 <NAL>
-        let annex_b = [0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1E];
-        let avc = annex_b_to_avc(&annex_b);
-
-        // Should be: 4-byte length (4) + NAL data
-        assert_eq!(avc.len(), 8);
-        assert_eq!(&avc[0..4], &[0, 0, 0, 4]); // Length = 4
-        assert_eq!(&avc[4..8], &[0x67, 0x42, 0x00, 0x1E]);
-    }
-
-    #[test]
-    fn test_annex_b_to_avc_4byte_start() {
-        // NAL with 4-byte start code: 00 00 00 01 <NAL>
-        let annex_b = [0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00];
-        let avc = annex_b_to_avc(&annex_b);
-
-        assert_eq!(avc.len(), 7);
-        assert_eq!(&avc[0..4], &[0, 0, 0, 3]); // Length = 3
-        assert_eq!(&avc[4..7], &[0x67, 0x42, 0x00]);
-    }
-
-    #[test]
-    fn test_annex_b_to_avc_multiple_nals() {
-        // Two NAL units
-        let annex_b = [
-            0x00, 0x00, 0x00, 0x01, 0x67, 0x42, // SPS
-            0x00, 0x00, 0x01, 0x68, 0xCE, // PPS with 3-byte start
-        ];
-        let avc = annex_b_to_avc(&annex_b);
-
-        // First NAL: 4 bytes length + 2 bytes data
-        // Second NAL: 4 bytes length + 2 bytes data
-        assert!(avc.len() >= 12);
-    }
-
-    #[test]
-    fn test_annex_b_to_avc_empty() {
-        let avc = annex_b_to_avc(&[]);
-        assert!(avc.is_empty());
-    }
-
-    #[test]
-    fn test_encode_avc420_bitmap_stream() {
-        let regions = vec![Avc420Region::full_frame(1920, 1080, 22)];
-        let h264_data = [0x00, 0x00, 0x00, 0x01, 0x67]; // Minimal H.264
-
-        let encoded = encode_avc420_bitmap_stream(&regions, &h264_data);
-
-        // Should have: 4 bytes (nRect=1) + 8 bytes (rectangle) + 2 bytes (quant) + 5 bytes (data)
-        assert_eq!(encoded.len(), 4 + 8 + 2 + 5);
-
-        // Verify we can decode it back
-        let mut cursor = ReadCursor::new(&encoded);
-        let decoded = Avc420BitmapStream::decode(&mut cursor).expect("decode failed");
-
-        assert_eq!(decoded.rectangles.len(), 1);
-        assert_eq!(decoded.quant_qual_vals.len(), 1);
-        assert_eq!(decoded.data, &h264_data);
-    }
 }

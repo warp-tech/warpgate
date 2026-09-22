@@ -15,6 +15,20 @@ impl FixedCircularBuffer {
     }
 
     pub(crate) fn read_with_offset(&self, offset: usize, length: usize, output: &mut impl io::Write) -> io::Result<()> {
+        // Defence-in-depth: callers should already have bounded the offset against the
+        // buffer size, but reject out-of-range values here so a stray attacker-controlled
+        // offset surfaces as a typed I/O error rather than an unsigned-underflow panic
+        // in the position calculation below.
+        if offset > self.buffer.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "circular buffer offset {offset} exceeds buffer size {}",
+                    self.buffer.len()
+                ),
+            ));
+        }
+
         let position = (self.buffer.len() + self.position - offset) % self.buffer.len();
 
         // will take the offset if the destination length is greater than the offset,

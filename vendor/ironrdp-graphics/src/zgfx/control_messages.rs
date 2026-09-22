@@ -27,11 +27,24 @@ impl<'a> SegmentedDataPdu<'a> {
                 let uncompressed_size = usize::try_from(buffer.read_u32::<LittleEndian>()?)
                     .map_err(|_| ZgfxError::InvalidIntegralConversion("segments uncompressed size"))?;
 
-                let mut segments = Vec::with_capacity(segment_count);
+                // Each segment consumes at least 4 bytes (size header) plus 1 byte
+                // (compression-type-and-flags header). Cap the preallocation against the
+                // remaining buffer so an attacker-controlled segment_count cannot drive
+                // an oversized allocation. Mirrors the pattern from PR #1271 on
+                // Avc420BitmapStream::decode.
+                const MIN_SEGMENT_BYTES: usize = 5;
+                let max_possible_segments = buffer.len() / MIN_SEGMENT_BYTES;
+                let mut segments = Vec::with_capacity(core::cmp::min(segment_count, max_possible_segments));
                 for _ in 0..segment_count {
                     let size = usize::try_from(buffer.read_u32::<LittleEndian>()?)
                         .map_err(|_| ZgfxError::InvalidIntegralConversion("segment data size"))?;
-                    let (segment_data, new_buffer) = buffer.split_at(size);
+                    let (segment_data, new_buffer) =
+                        buffer
+                            .split_at_checked(size)
+                            .ok_or(ZgfxError::SegmentSizeExceedsBuffer {
+                                size,
+                                remaining: buffer.len(),
+                            })?;
                     buffer = new_buffer;
 
                     segments.push(BulkEncodedData::from_buffer(segment_data)?);

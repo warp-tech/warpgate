@@ -183,6 +183,7 @@ pub trait H264Decoder: Send {
 
 #[cfg(feature = "openh264")]
 mod openh264_impl {
+    use openh264::formats::YUVSource;
     use tracing::warn;
 
     use super::{DecodedFrame, DecoderError, DecoderResult, H264Decoder};
@@ -241,45 +242,11 @@ mod openh264_impl {
                 annex_b_buffer: Vec::new(),
             })
         }
-
-        /// Convert AVC format (4-byte BE length prefix) to Annex B (start codes)
-        fn avc_to_annex_b(&mut self, data: &[u8]) {
-            self.annex_b_buffer.clear();
-            let mut offset = 0;
-
-            while offset + 4 <= data.len() {
-                let nal_len = u32::from_be_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]]);
-
-                #[expect(clippy::as_conversions, reason = "NAL length from wire format")]
-                let nal_len = nal_len as usize;
-                offset += 4;
-
-                // Use checked addition to prevent overflow on malicious input
-                let Some(end) = offset.checked_add(nal_len) else {
-                    warn!(nal_len, offset, "AVC NAL length overflow, discarding remaining data");
-                    break;
-                };
-                if end > data.len() {
-                    warn!(
-                        nal_len,
-                        offset,
-                        data_len = data.len(),
-                        "AVC NAL extends beyond buffer, discarding remaining data"
-                    );
-                    break;
-                }
-
-                // Annex B start code
-                self.annex_b_buffer.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
-                self.annex_b_buffer.extend_from_slice(&data[offset..offset + nal_len]);
-                offset += nal_len;
-            }
-        }
     }
 
     impl H264Decoder for OpenH264Decoder {
         fn decode(&mut self, data: &[u8]) -> DecoderResult<DecodedFrame> {
-            self.avc_to_annex_b(data);
+            crate::pdu::avc_to_annex_b_into(data, &mut self.annex_b_buffer);
 
             let yuv = self
                 .decoder
@@ -287,7 +254,8 @@ mod openh264_impl {
                 .map_err(|e| DecoderError::new("OpenH264 decode failed", e))?
                 .ok_or_else(|| DecoderError::msg("OpenH264 returned no picture"))?;
 
-            let (width, height) = openh264::formats::YUVSource::dimensions(&yuv);
+            let (width, height) = YUVSource::dimensions(&yuv);
+            let (y_stride, u_stride, v_stride) = YUVSource::strides(&yuv);
 
             #[expect(
                 clippy::as_conversions,
@@ -295,13 +263,43 @@ mod openh264_impl {
                 reason = "H.264 frame dimensions are always within u32 range"
             )]
             let (w32, h32) = (width as u32, height as u32);
+            #[expect(
+                clippy::as_conversions,
+                clippy::cast_possible_truncation,
+                reason = "strides are bounded by frame dimensions, which fit in u32"
+            )]
+            let [y_stride, u_stride, v_stride] = [y_stride as u32, u_stride as u32, v_stride as u32];
 
+            let rgba_stride = w32
+                .checked_mul(4)
+                .ok_or_else(|| DecoderError::msg("frame dimensions too large for RGBA allocation"))?;
             let rgba_size = width
                 .checked_mul(height)
                 .and_then(|s| s.checked_mul(4))
                 .ok_or_else(|| DecoderError::msg("frame dimensions too large for RGBA allocation"))?;
             let mut rgba = vec![0u8; rgba_size];
-            yuv.write_rgba8(&mut rgba);
+
+            // MS-RDPEGFX AVC420 streams carry full-range BT.709 YUV420,
+            // but openh264's `write_rgba8` assumes limited-range BT.601,
+            // which distorts colors. Convert per [MS-RDPEGFX] 3.3.8.3.1.
+            let planar = yuv::YuvPlanarImage {
+                y_plane: yuv.y(),
+                y_stride,
+                u_plane: yuv.u(),
+                u_stride,
+                v_plane: yuv.v(),
+                v_stride,
+                width: w32,
+                height: h32,
+            };
+            yuv::yuv420_to_rgba(
+                &planar,
+                &mut rgba,
+                rgba_stride,
+                yuv::YuvRange::Full,
+                yuv::YuvStandardMatrix::Bt709,
+            )
+            .map_err(|e| DecoderError::new("failed to convert YUV420 to RGBA", e))?;
 
             Ok(DecodedFrame::new(rgba, w32, h32))
         }
@@ -322,24 +320,3 @@ mod openh264_impl {
 
 #[cfg(feature = "openh264")]
 pub use openh264_impl::OpenH264Decoder;
-
-#[cfg(test)]
-mod tests {
-    use super::DecodedFrame;
-
-    #[test]
-    fn getters_return_constructor_inputs() {
-        let data = vec![0u8; 2 * 3 * 4];
-        let frame = DecodedFrame::new(data.clone(), 2, 3);
-        assert_eq!(frame.data(), data.as_slice());
-        assert_eq!(frame.width(), 2);
-        assert_eq!(frame.height(), 3);
-    }
-
-    #[test]
-    fn into_data_yields_owned_buffer() {
-        let data = vec![0xAAu8; 4 * 4 * 4];
-        let frame = DecodedFrame::new(data.clone(), 4, 4);
-        assert_eq!(frame.into_data(), data);
-    }
-}

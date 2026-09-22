@@ -24,6 +24,16 @@ impl<'a> Bits<'a> {
         value
     }
 
+    /// Checked counterpart to [`split_to`] that returns `None` instead of panicking when
+    /// `at` exceeds the current bit budget. Callers that consume attacker-controlled
+    /// bitstreams should prefer this variant and map `None` to a typed error.
+    pub(crate) fn try_split_to(&mut self, at: usize) -> Option<&'a BitSlice<u8, Msb0>> {
+        if at > self.bits_slice.len() {
+            return None;
+        }
+        Some(self.split_to(at))
+    }
+
     pub(crate) fn remaining_bits_of_last_byte(&self) -> usize {
         self.remaining_bits_of_last_byte
     }

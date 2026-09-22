@@ -1221,7 +1221,7 @@ impl<'a> Decode<'a> for ResetGraphicsPdu {
         if monitor_count > MONITOR_COUNT_MAX {
             return Err(invalid_field_err!(
                 "monitor_count",
-                "invalid reset graphics monitor count"
+                "invalid reset graphics monitor count",
             ));
         }
 

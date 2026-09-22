@@ -12,7 +12,7 @@
 //! mask is used co control pixel's full transparency (`src_color.a = 0`), full opacity
 //! (`src_color.a = 255`) or pixel inversion (`dst_color.rgb = vec3(255) - dst_color.rgb`).
 //!
-//! Xor basks could be 1, 8, 16, 24 or 32 bits per pixel, and andMask is always 1 bit per pixel.
+//! XOR masks can be 1, 4, 8, 16, 24, or 32 bits per pixel, and andMask is always 1 bit per pixel.
 //!
 //! Rules for decoding masks:
 //! - `andMask == 0` -> dst_color Copy pixel from xorMask
@@ -24,7 +24,7 @@ use ironrdp_pdu::pointer::{ColorPointerAttribute, LargePointerAttribute, Pointer
 
 use crate::color_conversion::rdp_16bit_to_rgb;
 
-const SUPPORTED_COLOR_BPP: [u16; 4] = [1, 16, 24, 32];
+const SUPPORTED_COLOR_BPP: [u16; 6] = [1, 4, 8, 16, 24, 32];
 
 #[derive(Debug)]
 pub enum PointerError {
@@ -130,6 +130,15 @@ impl DecodedPointer {
         src: &PointerAttribute<'_>,
         target: PointerBitmapTarget,
     ) -> Result<Self, PointerError> {
+        Self::decode_pointer_attribute_with_palette(src, target, None)
+    }
+
+    /// Decode a New Pointer Update using the session color palette for indexed XOR pixels.
+    pub fn decode_pointer_attribute_with_palette(
+        src: &PointerAttribute<'_>,
+        target: PointerBitmapTarget,
+        palette: Option<&[[u8; 3]; 256]>,
+    ) -> Result<Self, PointerError> {
         Self::decode_pointer(
             PointerData {
                 width: src.color_pointer.width,
@@ -141,6 +150,7 @@ impl DecodedPointer {
                 hot_spot_y: src.color_pointer.hot_spot.y,
             },
             target,
+            palette,
         )
     }
 
@@ -159,12 +169,22 @@ impl DecodedPointer {
                 hot_spot_y: src.hot_spot.y,
             },
             target,
+            None,
         )
     }
 
     pub fn decode_large_pointer_attribute(
         src: &LargePointerAttribute<'_>,
         target: PointerBitmapTarget,
+    ) -> Result<Self, PointerError> {
+        Self::decode_large_pointer_attribute_with_palette(src, target, None)
+    }
+
+    /// Decode a Large Pointer Update using the session color palette for indexed XOR pixels.
+    pub fn decode_large_pointer_attribute_with_palette(
+        src: &LargePointerAttribute<'_>,
+        target: PointerBitmapTarget,
+        palette: Option<&[[u8; 3]; 256]>,
     ) -> Result<Self, PointerError> {
         Self::decode_pointer(
             PointerData {
@@ -177,17 +197,20 @@ impl DecodedPointer {
                 hot_spot_y: src.hot_spot.y,
             },
             target,
+            palette,
         )
     }
 
-    fn decode_pointer(data: PointerData<'_>, target: PointerBitmapTarget) -> Result<Self, PointerError> {
+    fn decode_pointer(
+        data: PointerData<'_>,
+        target: PointerBitmapTarget,
+        palette: Option<&[[u8; 3]; 256]>,
+    ) -> Result<Self, PointerError> {
         if data.width == 0 || data.height == 0 {
             return Ok(Self::new_invisible());
         }
 
         if !SUPPORTED_COLOR_BPP.contains(&data.xor_bpp) {
-            // 8bpp indexed colors are not supported yet (palette messages are not implemented)
-            // Other unknown bpps are not supported either
             return Err(PointerError::NotSupportedBpp { bpp: data.xor_bpp });
         }
 
@@ -230,7 +253,7 @@ impl DecodedPointer {
                 (xor_stride_cursor, and_stride_cursor)
             };
 
-            let mut color_reader = ColorStrideReader::new(data.xor_bpp, xor_stride)?;
+            let mut color_reader = ColorStrideReader::new(data.xor_bpp, xor_stride, palette)?;
             let mut bitmask_reader = BitmaskStrideReader::new(and_stride);
 
             let compute_inverted_pixel = if target.should_invert_pixels_using_check_pattern() {
@@ -341,7 +364,7 @@ impl BitmaskStrideReader {
     }
 }
 
-enum ColorStrideReader {
+enum ColorStrideReader<'a> {
     Color {
         /// INVARIANT: `bpp == 16 || bpp == 24 || bpp == 32`
         bpp: u16,
@@ -349,13 +372,15 @@ enum ColorStrideReader {
         stride_data_bytes: usize,
         stride_padding: usize,
     },
+    Indexed(IndexedStrideReader<'a>),
     Bitmask(BitmaskStrideReader),
 }
 
-impl ColorStrideReader {
-    fn new(bpp: u16, stride: Stride) -> Result<Self, PointerError> {
+impl<'a> ColorStrideReader<'a> {
+    fn new(bpp: u16, stride: Stride, palette: Option<&'a [[u8; 3]; 256]>) -> Result<Self, PointerError> {
         Ok(match bpp {
             1 => Self::Bitmask(BitmaskStrideReader::new(stride)),
+            4 | 8 => Self::Indexed(IndexedStrideReader::new(bpp, stride, palette)?),
             bpp => Self::Color {
                 bpp: {
                     // Enforce the bpp == 16 || bpp == 24 || bpp == 32 invariant.
@@ -406,14 +431,74 @@ impl ColorStrideReader {
                     _ => unreachable!("per the invariant on self.bpp, this path is unreachable"),
                 }
             }
-            ColorStrideReader::Bitmask(bitask) => {
-                if bitask.next_bit(cursor) == 1 {
+            ColorStrideReader::Indexed(indexed) => {
+                let [r, g, b] = indexed.next_color(cursor);
+                [r, g, b, 0xff]
+            }
+            ColorStrideReader::Bitmask(bitmask) => {
+                if bitmask.next_bit(cursor) == 1 {
                     [0xff, 0xff, 0xff, 0xff]
                 } else {
                     [0, 0, 0, 0xff]
                 }
             }
         }
+    }
+}
+
+struct IndexedStrideReader<'a> {
+    bpp: u16,
+    palette: &'a [[u8; 3]; 256],
+    current_byte: u8,
+    next_high_nibble: bool,
+    read_stride_bytes: usize,
+    stride_data_bytes: usize,
+    stride_padding: usize,
+}
+
+impl<'a> IndexedStrideReader<'a> {
+    fn new(bpp: u16, stride: Stride, palette: Option<&'a [[u8; 3]; 256]>) -> Result<Self, PointerError> {
+        let palette = palette.ok_or(PointerError::NotSupportedBpp { bpp })?;
+
+        Ok(Self {
+            bpp,
+            palette,
+            current_byte: 0,
+            next_high_nibble: true,
+            read_stride_bytes: 0,
+            stride_data_bytes: stride.data_bytes,
+            stride_padding: stride.padding,
+        })
+    }
+
+    fn next_color(&mut self, cursor: &mut ReadCursor<'_>) -> [u8; 3] {
+        let index = match self.bpp {
+            8 => usize::from(self.read_next_byte(cursor)),
+            4 => {
+                if self.next_high_nibble {
+                    self.current_byte = self.read_next_byte(cursor);
+                    self.next_high_nibble = false;
+                    usize::from(self.current_byte >> 4)
+                } else {
+                    self.next_high_nibble = true;
+                    usize::from(self.current_byte & 0x0f)
+                }
+            }
+            _ => unreachable!("per the invariant on self.bpp, this path is unreachable"),
+        };
+
+        self.palette[index]
+    }
+
+    fn read_next_byte(&mut self, cursor: &mut ReadCursor<'_>) -> u8 {
+        if self.read_stride_bytes == self.stride_data_bytes {
+            self.read_stride_bytes = 0;
+            self.next_high_nibble = true;
+            cursor.read_slice(self.stride_padding);
+        }
+
+        self.read_stride_bytes += 1;
+        cursor.read_u8()
     }
 }
 
@@ -434,4 +519,62 @@ struct PointerData<'a> {
     and_mask: &'a [u8],
     hot_spot_x: u16,
     hot_spot_y: u16,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ironrdp_pdu::pointer::Point16;
+
+    #[test]
+    fn decodes_indexed_new_pointer_with_palette() {
+        let mut palette = [[0u8; 3]; 256];
+        palette[1] = [0x10, 0x20, 0x30];
+        palette[2] = [0x40, 0x50, 0x60];
+        palette[3] = [0x70, 0x80, 0x90];
+
+        let pointer_8bpp = PointerAttribute {
+            xor_bpp: 8,
+            color_pointer: ColorPointerAttribute {
+                cache_index: 0,
+                hot_spot: Point16 { x: 0, y: 0 },
+                width: 2,
+                height: 1,
+                xor_mask: &[1, 2],
+                and_mask: &[0, 0],
+            },
+        };
+        let pointer_4bpp = PointerAttribute {
+            xor_bpp: 4,
+            color_pointer: ColorPointerAttribute {
+                cache_index: 1,
+                hot_spot: Point16 { x: 0, y: 0 },
+                width: 3,
+                height: 1,
+                xor_mask: &[0x12, 0x30],
+                and_mask: &[0, 0],
+            },
+        };
+
+        assert_eq!(
+            DecodedPointer::decode_pointer_attribute_with_palette(
+                &pointer_8bpp,
+                PointerBitmapTarget::Accelerated,
+                Some(&palette),
+            )
+            .expect("8bpp pointer should decode")
+            .bitmap_data,
+            vec![0x10, 0x20, 0x30, 0xff, 0x40, 0x50, 0x60, 0xff],
+        );
+        assert_eq!(
+            DecodedPointer::decode_pointer_attribute_with_palette(
+                &pointer_4bpp,
+                PointerBitmapTarget::Accelerated,
+                Some(&palette),
+            )
+            .expect("4bpp pointer should decode")
+            .bitmap_data,
+            vec![0x10, 0x20, 0x30, 0xff, 0x40, 0x50, 0x60, 0xff, 0x70, 0x80, 0x90, 0xff,],
+        );
+    }
 }

@@ -52,7 +52,6 @@ fn high_count(n: usize) -> usize {
 ///
 /// Band indices match `ComponentCodecQuant::for_band()`:
 ///   0=HL1, 1=LH1, 2=HH1, 3=HL2, 4=LH2, 5=HH2, 6=HL3, 7=LH3, 8=HH3, 9=LL3
-#[expect(clippy::similar_names, reason = "lw/hw/lh/hh are standard DWT band dimensions")]
 pub fn band_layout() -> [BandInfo; 10] {
     let (lw1, hw1) = (low_count(64), high_count(64)); // (33, 31)
     let (lw2, hw2) = (low_count(lw1), high_count(lw1)); // (17, 16)
