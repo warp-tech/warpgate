@@ -78,7 +78,13 @@
     }
 
     let {
-        value = $bindable(''),
+        // NO FALLBACK, deliberately. Svelte throws props_invalid_value for
+        // `bind:value={x}` when x is undefined and the prop has one, and the
+        // callers bind directly into API objects whose string fields are
+        // optional — a target with no password has `password: undefined`.
+        // Nothing here reads `value` except the binding below, and Svelte
+        // renders undefined as an empty field.
+        value = $bindable(),
         label,
         labelHidden = false,
         placeholder,

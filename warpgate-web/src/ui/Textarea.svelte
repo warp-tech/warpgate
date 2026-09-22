@@ -49,7 +49,10 @@
     }
 
     let {
-        value = $bindable(''),
+        // No fallback, for the same reason as ui/Input: the Kubernetes
+        // options bind `options.auth.certificate` and `privateKey`, both
+        // optional, and a fallback makes Svelte throw on undefined.
+        value = $bindable(),
         label,
         labelHidden = false,
         placeholder,

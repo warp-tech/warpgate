@@ -1788,3 +1788,51 @@ selectors have identical specificity, so order is the whole argument.
 It was proved by reproduction, not by passing: the reveal was removed, the app
 rebuilt, and the guard reported both pages BLACK and exited 1. Restored, it
 reports both revealed.
+
+## props_invalid_value: the target detail screen died before rendering
+
+```
+Uncaught Error: https://svelte.dev/e/props_invalid_value
+    at O (Input.svelte)
+    at Te (Options.svelte)
+    at s (Target.svelte)
+```
+
+Svelte 5 refuses `bind:x={expr}` when `expr` is undefined **and** the child
+declares `x = $bindable(<fallback>)` — a fallback would silently diverge from
+the parent's state, so it throws instead. `ui/Input` and `ui/Textarea` both
+declared `value = $bindable('')`.
+
+Their call sites bind straight into API objects, and those fields are genuinely
+optional. Confirmed in the generated models rather than assumed:
+
+```
+TargetRdpOptions.domain?: string
+TargetHTTPOptions.externalHost?: string
+```
+
+So an RDP target saved with no domain, or an HTTP target with no external host,
+threw on mount — before the screen rendered anything. That is the "stuck in
+loading" state: `Loadable` never resolves because the child blew up building
+its own subtree.
+
+`bind:` needs an lvalue, so `?? ''` is not available at the call site. The fix
+is in the primitives: drop the fallback. Safe, because neither component reads
+`value` for anything but the native binding, and Svelte's `set_value` does
+`element.value = value ?? ''`.
+
+### The guard, and what it deliberately still reports
+
+`bindcheck.mjs` maps every component's `$bindable(<fallback>)` props, then
+finds `bind:` sites whose expression reaches INTO an object — `options.domain`
+rather than a local variable the component owns. Local state is never
+undefined; API fields are.
+
+It reports 27 remaining, all `Checkbox`/`Toggle` bound to booleans. **Those are
+not bugs**, and the models were checked one by one rather than mass-edited:
+`allowInsecureAlgos`, `interactiveLogon`, `verifyTls`, `pathStyle`, `verify`
+and the parameter flags are all `boolean`, not `boolean?`, on the READ models
+the screens load. Only `ParameterUpdate` makes them optional, and nothing binds
+to that. The count is left non-zero on purpose — it is the honest answer to
+"what could throw if these ever became optional", and silencing it would throw
+away the only warning that exists when an API field later gains a `?`.
