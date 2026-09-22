@@ -54,3 +54,22 @@ in `warpgate.patch` (which is source-only); re-apply it by hand on re-vendor.
 
 [1]: https://github.com/Devolutions/IronRDP/pull/1436
 [2]: https://github.com/Devolutions/IronRDP/pull/1452
+
+## Graphics Pipeline (EGFX) output
+
+Backport of upstream #1461 ("render the EGFX graphics pipeline output"), plus the
+session-side `ResetGraphics` handling from upstream #1874:
+
+- `ActiveStage::process` drains the client-side compositor of a registered
+  `GraphicsPipelineClient` after each X224 frame, composites the regions into the
+  `DecodedImage` (`composite_graphics_updates`, upstream's verbatim) and surfaces them as
+  one `ActiveStageOutput::GraphicsUpdate`, so every consumer renders EGFX with no new
+  code. It is a no-op when the graphics DVC is not registered.
+- On `ResetGraphics` the image is resized with `DecodedImage::reset_preserving_pointer`
+  and the next graphics update is widened to the whole new surface, which is how a
+  consumer learns the new size (upstream does the same; there is no new output variant).
+- `apply_rgba32` is no longer gated behind the `qoi` feature, and `ActiveStage` /
+  `x224::Processor` gain `get_dvc_mut`, as upstream.
+
+Needs `vendor/ironrdp-dvc` (for `DrdynvcClient::get_dvc_mut`) and `vendor/ironrdp-egfx`.
+Drops out on re-vendor from an upstream release that contains #1461 and #1874.

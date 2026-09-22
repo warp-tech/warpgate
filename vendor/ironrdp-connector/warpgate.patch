@@ -1,6 +1,48 @@
-diff -ru ironrdp-connector-0.10.0/src/connection.rs base/src/connection.rs
---- ironrdp-connector-0.10.0/src/connection.rs	2006-07-24 03:21:28.000000000 +0200
-+++ base/src/connection.rs	2026-09-14 17:44:17.818847210 +0200
+diff '--color=auto' -ru ironrdp-connector-0.10.0/src/connection_activation.rs base/src/connection_activation.rs
+--- ironrdp-connector-0.10.0/src/connection_activation.rs	2006-07-24 02:21:28.000000000 +0100
++++ base/src/connection_activation.rs	2026-09-23 00:40:55.014131489 +0100
+@@ -163,6 +163,38 @@
+                 {
+                     server_demand_active.pdu.capability_sets
+                 } else {
++                    // Instead of reactivating after a Deactivate-All, a server may end the
++                    // session (MS-RDPBCGR §1.3.1.3) by sending a Set Error Info PDU carrying the
++                    // disconnect reason. FreeRDP-based servers such as GNOME Remote Desktop do
++                    // this, for example when the backend screencast session cannot be created.
++                    // Surface that reason so the disconnect is explained rather than reported as
++                    // an unexpected PDU.
++                    if let rdp::headers::ShareControlPdu::Data(rdp::headers::ShareDataHeader {
++                        share_data_pdu:
++                            rdp::headers::ShareDataPdu::ServerSetErrorInfo(rdp::server_error_info::ServerSetErrorInfoPdu(
++                                error_info,
++                            )),
++                        ..
++                    }) = share_control_ctx.pdu
++                    {
++                        // ERRINFO_NONE is informational (it clears a previously reported error),
++                        // not a disconnect. Skip it and keep waiting for the Demand Active PDU,
++                        // matching how the connection finalization sequence treats it.
++                        if let rdp::server_error_info::ErrorInfo::ProtocolIndependentCode(
++                            rdp::server_error_info::ProtocolIndependentCode::None,
++                        ) = error_info
++                        {
++                            self.state = ConnectionActivationState::CapabilitiesExchange;
++                            return Ok(Written::Nothing);
++                        }
++
++                        return Err(reason_err!(
++                            "ConnectionActivation::CapabilitiesExchange",
++                            "server ended the session with error info: {}",
++                            error_info.description()
++                        ));
++                    }
++
+                     return Err(reason_err!(
+                         "ConnectionActivation::CapabilitiesExchange",
+                         "unexpected Share Control PDU during capabilities exchange: got {} (expected Server Demand Active PDU)",
+diff '--color=auto' -ru ironrdp-connector-0.10.0/src/connection.rs base/src/connection.rs
+--- ironrdp-connector-0.10.0/src/connection.rs	2006-07-24 02:21:28.000000000 +0100
++++ base/src/connection.rs	2026-09-23 00:40:55.014082191 +0100
 @@ -752,7 +752,9 @@
      user_channel_id: u16,
      output: &mut WriteBuf,
@@ -55,51 +97,20 @@ diff -ru ironrdp-connector-0.10.0/src/connection.rs base/src/connection.rs
          _ => Ok(Written::Nothing),
      }
  }
-diff -ru ironrdp-connector-0.10.0/src/connection_activation.rs base/src/connection_activation.rs
---- ironrdp-connector-0.10.0/src/connection_activation.rs	2006-07-24 03:21:28.000000000 +0200
-+++ base/src/connection_activation.rs	2026-09-14 17:44:17.819327794 +0200
-@@ -163,6 +163,38 @@
-                 {
-                     server_demand_active.pdu.capability_sets
-                 } else {
-+                    // Instead of reactivating after a Deactivate-All, a server may end the
-+                    // session (MS-RDPBCGR §1.3.1.3) by sending a Set Error Info PDU carrying the
-+                    // disconnect reason. FreeRDP-based servers such as GNOME Remote Desktop do
-+                    // this, for example when the backend screencast session cannot be created.
-+                    // Surface that reason so the disconnect is explained rather than reported as
-+                    // an unexpected PDU.
-+                    if let rdp::headers::ShareControlPdu::Data(rdp::headers::ShareDataHeader {
-+                        share_data_pdu:
-+                            rdp::headers::ShareDataPdu::ServerSetErrorInfo(rdp::server_error_info::ServerSetErrorInfoPdu(
-+                                error_info,
-+                            )),
-+                        ..
-+                    }) = share_control_ctx.pdu
-+                    {
-+                        // ERRINFO_NONE is informational (it clears a previously reported error),
-+                        // not a disconnect. Skip it and keep waiting for the Demand Active PDU,
-+                        // matching how the connection finalization sequence treats it.
-+                        if let rdp::server_error_info::ErrorInfo::ProtocolIndependentCode(
-+                            rdp::server_error_info::ProtocolIndependentCode::None,
-+                        ) = error_info
-+                        {
-+                            self.state = ConnectionActivationState::CapabilitiesExchange;
-+                            return Ok(Written::Nothing);
-+                        }
-+
-+                        return Err(reason_err!(
-+                            "ConnectionActivation::CapabilitiesExchange",
-+                            "server ended the session with error info: {}",
-+                            error_info.description()
-+                        ));
+@@ -845,6 +867,10 @@
+                         early_capability_flags |= ClientEarlyCapabilityFlags::WANT_32_BPP_SESSION;
+                     }
+ 
++                    if config.support_dyn_vc_gfx_protocol {
++                        early_capability_flags |= ClientEarlyCapabilityFlags::SUPPORT_DYN_VC_GFX_PROTOCOL;
 +                    }
 +
-                     return Err(reason_err!(
-                         "ConnectionActivation::CapabilitiesExchange",
-                         "unexpected Share Control PDU during capabilities exchange: got {} (expected Server Demand Active PDU)",
-diff -ru ironrdp-connector-0.10.0/src/credssp.rs base/src/credssp.rs
---- ironrdp-connector-0.10.0/src/credssp.rs	2006-07-24 03:21:28.000000000 +0200
-+++ base/src/credssp.rs	2026-09-10 23:17:00.795332731 +0200
+                     Some(early_capability_flags)
+                 },
+                 dig_product_id: Some(config.dig_product_id.clone()),
+diff '--color=auto' -ru ironrdp-connector-0.10.0/src/credssp.rs base/src/credssp.rs
+--- ironrdp-connector-0.10.0/src/credssp.rs	2006-07-24 02:21:28.000000000 +0100
++++ base/src/credssp.rs	2026-09-23 00:40:55.014188980 +0100
 @@ -98,6 +98,7 @@
          server_name: ServerName,
          server_public_key: Vec<u8>,
@@ -121,9 +132,9 @@ diff -ru ironrdp-connector-0.10.0/src/credssp.rs base/src/credssp.rs
              client_mode,
              service_principal_name,
          )
-diff -ru ironrdp-connector-0.10.0/src/lib.rs base/src/lib.rs
---- ironrdp-connector-0.10.0/src/lib.rs	2006-07-24 03:21:28.000000000 +0200
-+++ base/src/lib.rs	2026-09-10 23:17:00.795568105 +0200
+diff '--color=auto' -ru ironrdp-connector-0.10.0/src/lib.rs base/src/lib.rs
+--- ironrdp-connector-0.10.0/src/lib.rs	2006-07-24 02:21:28.000000000 +0100
++++ base/src/lib.rs	2026-09-23 00:40:55.014222359 +0100
 @@ -224,6 +224,10 @@
      pub request_data: Option<NegoRequestData>,
      /// If true, the INFO_AUTOLOGON flag is set in the [`ClientInfoPdu`](ironrdp_pdu::rdp::ClientInfoPdu)
@@ -135,3 +146,32 @@ diff -ru ironrdp-connector-0.10.0/src/lib.rs base/src/lib.rs
      /// If true, the INFO_NOAUDIOPLAYBACK flag is set in the [`ClientInfoPdu`](ironrdp_pdu::rdp::ClientInfoPdu)
      pub enable_audio_playback: bool,
      pub performance_flags: PerformanceFlags,
+@@ -256,6 +260,28 @@
+     /// [\[MS-RDPBCGR\] 2.2.1.3.7]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/861f2bbb-6ca2-4c5a-8c44-0714fa901e70
+     /// [`MultiTransportChannelData`]: ironrdp_pdu::gcc::MultiTransportChannelData
+     pub multitransport_flags: Option<gcc::MultiTransportFlags>,
++
++    /// Advertise client support for the Remote Desktop Protocol: Graphics Pipeline Extension.
++    ///
++    /// When `true`, the connector sets `RNS_UD_CS_SUPPORT_DYNVC_GFX_PROTOCOL` in `earlyCapabilityFlags`.
++    /// [\[MS-RDPBCGR\] 2.2.1.3.2] defines this Client Core Data flag.
++    /// [\[MS-RDPEGFX\] 1.5.1] requires clients to advertise it before using EGFX.
++    ///
++    /// Enable this only after registering an EGFX-capable [`DvcClientProcessor`].
++    /// [`GraphicsPipelineClient`] provides IronRDP's implementation.
++    /// Register it with [`DrdynvcClient::with_dynamic_channel`].
++    /// Then attach the DRDYNVC client through [`ClientConnector::with_static_channel`].
++    /// Advertising the flag without a processor can make a server route graphics to an unhandled channel.
++    /// The desktop then remains blank.
++    ///
++    /// The default is `false`, so EGFX is not advertised.
++    ///
++    /// [\[MS-RDPBCGR\] 2.2.1.3.2]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/00f1da4a-ee9c-421a-852f-c19f92343d73
++    /// [\[MS-RDPEGFX\] 1.5.1]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpegfx/da5c75f9-cd99-450c-98c4-014a496942b0
++    /// [`DvcClientProcessor`]: https://docs.rs/ironrdp-dvc/latest/ironrdp_dvc/trait.DvcClientProcessor.html
++    /// [`DrdynvcClient::with_dynamic_channel`]: https://docs.rs/ironrdp-dvc/latest/ironrdp_dvc/struct.DrdynvcClient.html#method.with_dynamic_channel
++    /// [`GraphicsPipelineClient`]: https://docs.rs/ironrdp-egfx/latest/ironrdp_egfx/client/struct.GraphicsPipelineClient.html
++    pub support_dyn_vc_gfx_protocol: bool,
+ }
+ 
+ ironrdp_core::assert_impl!(Config: Send, Sync);
