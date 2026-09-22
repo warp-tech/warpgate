@@ -703,6 +703,49 @@ async fn remembered_approval(
 
 const GRACE: Duration = Duration::from_secs(3600);
 
+/// A login whose only factor was the approval itself has no stored
+/// credentials, and is remembered on the empty set — a bucket of its own,
+/// never matched by a login that presented a credential.
+#[tokio::test]
+async fn an_approval_only_login_is_remembered_on_the_empty_credential_set() {
+    let db = migrated_db().await;
+    let session_id = UserSessionId(Uuid::new_v4());
+    let subject = ApprovalSubject {
+        remote_ip: Some("10.0.0.5".parse().unwrap()),
+        remember_by: RememberApprovalBy::from_credentials(vec![]),
+        ..plain_subject("prod")
+    };
+    advertise_row(&db, session_id, &subject).await;
+    assert!(approve_with_scope(&db, session_id, "prod", ApprovalScope::AllTargets).await);
+
+    let empty_key = |target: &str| {
+        WebApprovalMatchKey::build(
+            ApprovalKind::Admin,
+            "10.0.0.5".parse().unwrap(),
+            Protocol::Ssh,
+            "someone",
+            target,
+            &RememberApprovalBy::from_credentials(vec![]),
+        )
+        .unwrap()
+    };
+    assert!(
+        approval_is_remembered(&db, &empty_key("prod"), GRACE)
+            .await
+            .unwrap()
+    );
+    assert!(
+        approval_is_remembered(&db, &empty_key("staging"), GRACE)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE)
+            .await
+            .unwrap()
+    );
+}
+
 /// The bypass answers from the stored rows, so it must demand the full
 /// match: the kind, the target, the credentials, and a fresh resolution.
 #[tokio::test]
