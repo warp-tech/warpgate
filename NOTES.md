@@ -1732,3 +1732,59 @@ fixes it rather than a change that merely coincides with working.
 previous commit working.** "Cookies will be scoped to request host" is the
 correct mode for a gateway reached by IP; it is a warning only because the
 usual deployment has a hostname.
+
+## The black screen: the app was mounting into a hidden div
+
+The bug behind every "it runs but I can't open it" report, and it was mine.
+
+Both `index.html` files hide the mount point deliberately, so the page cannot
+flash unstyled markup before the stylesheet arrives:
+
+```html
+<style> #app { display: none; } </style>
+<div id="app"></div>
+```
+
+`theme/_theme.scss` was what revealed it again:
+
+```scss
+#app { display: block; -webkit-font-smoothing: antialiased; }
+```
+
+That file was deleted with Bootstrap in `e0135fd3` and **nothing replaced the
+rule**. Since that commit both entry points have mounted the application into a
+permanently hidden div. Everything worked — the router ran, `/api/info`
+resolved, `requireLogin` redirected to `/login`, every component mounted, the
+`/auth/state` call went out — and none of it was visible. The screen was black
+rather than white only because `:root` already sets `color-scheme: dark`, so
+the user agent painted its own dark default with no author background over it.
+
+Deleting Bootstrap also removed its Reboot, which was the rest of the base
+layer. The redesigned screens were written while Reboot was still in place and
+depend on it without saying so — `box-sizing: border-box` above all, without
+which every `width: 100%` control with padding overflows its container. The
+base layer in `tokens.css` now carries the minimum they actually need: the
+`#app` reveal, border-box, and `body` margin/background/colour/font.
+
+### Why nothing caught it
+
+- `svelte-check` does not read CSS.
+- Biome parses CSS but has no opinion about whether an element is visible.
+- The build succeeds either way — there is nothing to fail.
+- **The orphan-class audit only ever looked at class selectors.** `#app` is an
+  id, so the one tool built specifically to find "markup that lost its CSS"
+  had a blind spot shaped exactly like this bug.
+
+That is the fifth blind spot found in my own tooling on this project, and the
+only one that cost the user a working application.
+
+### The guard
+
+`basecheck.mjs` asserts the end state against the BUILT output rather than the
+source: for every entry HTML, if it hides `#app`, then some stylesheet it links
+must reveal it, and that link must come after the inline rule — the two
+selectors have identical specificity, so order is the whole argument.
+
+It was proved by reproduction, not by passing: the reveal was removed, the app
+rebuilt, and the guard reported both pages BLACK and exited 1. Restored, it
+reports both revealed.

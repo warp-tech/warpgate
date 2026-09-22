@@ -365,6 +365,50 @@
     font-family: var(--wg-font-mono);
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+ * Base layer
+ *
+ * Bootstrap's Reboot used to provide all of this. It went with Bootstrap, and
+ * the redesigned screens were authored while it was still in place, so they
+ * depend on it without ever saying so. This is the minimum they actually need
+ * — not a general-purpose reset.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+/*
+ * THE MOUNT POINT MUST BE REVEALED HERE.
+ *
+ * Both index.html files carry `<style>#app { display: none }</style>` so the
+ * page cannot flash unstyled markup before this stylesheet arrives. Whatever
+ * un-hides it therefore has to live in CSS that is part of the bundle. When
+ * theme/_theme.scss was deleted this rule went with it, and the whole
+ * application mounted into a hidden div: the router ran, the API was called,
+ * every component mounted, and the screen stayed black.
+ *
+ * If you are ever tempted to remove this, delete the rule in the two
+ * index.html files in the same commit.
+ */
+#app {
+    display: block;
+    -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Every control in ui/ is sized as `width: 100%` plus padding plus a border.
+ * That arithmetic only works under border-box, which Reboot used to set.
+ */
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--wg-surface);
+    color: var(--wg-text);
+    font: var(--wg-text-body-md);
+}
+
 @media (prefers-reduced-motion: reduce) {
     :root {
         --wg-duration-instant: 0ms;
