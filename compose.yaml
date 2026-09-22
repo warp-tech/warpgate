@@ -23,15 +23,22 @@
 # and `docker compose up` will skip setup and just run.
 #
 # ── Deploying somewhere other than your laptop ───────────────────────────────
-# Set WARPGATE_EXTERNAL_HOST to the address users will reach, because it is
-# baked into the URLs Warpgate hands out for HTTP targets and tickets. A
-# gateway set up as `localhost` and then reached at 10.13.14.56 will show links
-# that point back at the visitor's own machine.
+# WARPGATE_EXTERNAL_HOST is unset by default, and that is the safe setting: it
+# leaves session cookies scoped to whatever host you browse to, so the gateway
+# works at localhost, at a hostname and at an IP without further thought.
 #
-#     WARPGATE_EXTERNAL_HOST=10.13.14.56 docker compose up -d
+# Set it when you use HTTP targets, whose URLs are built from it:
 #
-# It is read only during first-time setup; afterwards it lives in
-# data/warpgate.yaml and this variable is ignored.
+#     WARPGATE_EXTERNAL_HOST=gateway.example.com docker compose up -d
+#
+# Setting it also scopes session cookies to that host, so it must match the
+# address people actually type. Set to `localhost` while users reach the box at
+# 10.13.14.56, the browser drops every session cookie and sign-in silently does
+# nothing.
+#
+# It is read ONLY during first-time setup. Afterwards it lives in
+# data/warpgate.yaml and this variable is ignored — to change it later, edit
+# that file, or delete ./data to start over.
 #
 # ── Reviewing UI changes ─────────────────────────────────────────────────────
 # This file does a release build, so a Svelte edit means rebuilding the image.
@@ -45,6 +52,17 @@ services:
         build:
             context: .
             dockerfile: docker/Dockerfile
+            args:
+                # Fat LTO on the final binary needs more memory than a default
+                # Docker Desktop VM has (it takes half the host's RAM, so 7.6
+                # GB on a 16 GB machine) and the build is SIGKILLed partway
+                # through the last crate. This profile is defined in
+                # Cargo.toml, inherits `release` and only turns LTO off.
+                #
+                # For a full-LTO build, give the VM ~12 GB (Docker Desktop >
+                # Settings > Resources) and run:
+                #     CARGO_PROFILE=release docker compose build
+                CARGO_PROFILE: ${CARGO_PROFILE:-release-no-lto}
         image: warpgate:local
         ports:
             - '8888:8888'
@@ -53,8 +71,16 @@ services:
         volumes:
             - ./data:/data
         environment:
-            # Baked into generated URLs at setup time. See the note above.
-            WARPGATE_EXTERNAL_HOST: ${WARPGATE_EXTERNAL_HOST:-localhost}
+            # Deliberately EMPTY by default rather than `localhost`.
+            #
+            # external_host decides the session cookie's Domain. Defaulted to
+            # localhost and then reached at any other address, the cookie is
+            # scoped to `.localhost`, the browser discards it, every request is
+            # anonymous, and the sign-in page loads but never takes. Left
+            # empty, cookies are scoped to whatever host the request arrived
+            # on, which is correct everywhere. Set it once you know the public
+            # address — HTTP target URLs need it.
+            WARPGATE_EXTERNAL_HOST: ${WARPGATE_EXTERNAL_HOST:-}
             # Empty means "generate one and print it".
             WARPGATE_ADMIN_PASSWORD: ${WARPGATE_ADMIN_PASSWORD:-}
         stdin_open: true
@@ -109,13 +135,26 @@ services:
                         echo
                     fi
 
+                    if [ -n "$$WARPGATE_EXTERNAL_HOST" ]; then
+                        echo "external host: $$WARPGATE_EXTERNAL_HOST"
+                        echo "Session cookies are scoped to it, so reach the"
+                        echo "gateway at exactly that address or sign-in will"
+                        echo "appear to do nothing."
+                        set -- --external-host "$$WARPGATE_EXTERNAL_HOST"
+                    else
+                        echo "external host: not set. Cookies will be scoped"
+                        echo "to whatever host you browse to, which works at"
+                        echo "any address. Set WARPGATE_EXTERNAL_HOST if you"
+                        echo "use HTTP targets, whose URLs are built from it."
+                        set --
+                    fi
+
                     warpgate unattended-setup \
                         --data-path /data \
                         --http-port 8888 \
                         --ssh-port 2222 \
                         --mysql-port 33306 \
-                        --record-sessions \
-                        --external-host "$$WARPGATE_EXTERNAL_HOST"
+                        --record-sessions "$$@"
                 fi
 
                 exec warpgate run

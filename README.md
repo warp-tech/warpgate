@@ -65,10 +65,15 @@ host toolchain, no build arguments, no separate setup step.
 The TLS certificate is self-signed on first run, so the browser warns once.
 
 On first run an admin password is generated and **printed to the log** — copy
-it, it is stored only as a hash. To pick your own, or to deploy somewhere that
-is not your laptop, see [`.env.example`](.env.example): `WARPGATE_EXTERNAL_HOST`
-has to match the address users actually reach, because it is baked into the
-URLs Warpgate generates.
+it, it is stored only as a hash. To pick your own, see [`.env.example`](.env.example).
+
+`WARPGATE_EXTERNAL_HOST` is unset by default and that is deliberate. Warpgate
+scopes the session cookie to it, so an external_host that does not match the
+address people actually type means the browser discards every session cookie —
+the sign-in page loads, takes a password, and returns you to the sign-in page.
+Unset, cookies follow whatever host the request arrived on, which works at
+localhost, at a hostname and at an IP alike. Set it when you serve HTTP
+targets, whose URLs are generated from it.
 
 For reviewing UI changes, [`docker/docker-compose.dev.yml`](docker/docker-compose.dev.yml)
 rebuilds the frontend in seconds instead of rebuilding the image.

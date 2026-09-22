@@ -21,10 +21,27 @@ ENV SOURCE_DATE_EPOCH=0
 
 WORKDIR /opt/warpgate
 
+# Which cargo profile to build the binary with.
+#
+# `release` sets lto = true, and fat LTO on this binary needs more memory than
+# a default Docker Desktop VM has: one rustc process holds every crate's IR at
+# once and gets SIGKILLed on a 16 GB machine. `release-no-lto` is defined in
+# Cargo.toml for exactly this and is otherwise identical — same opt-level, same
+# features, same stripping.
+#
+# `--profile release` is what `--release` expands to, so the default leaves CI
+# and the published image byte-identical. compose.yaml opts into the other one.
+#
+# cargo names the output directory after the profile, so the binary is copied
+# to a fixed path and the runtime stage copies from there.
+ARG CARGO_PROFILE=release
+
 RUN just npm ci \
     && just openapi \
     && just npm run build \
-    && cargo build --features mysql,postgres,rdp-openssl-tls --release
+    && cargo build --features mysql,postgres,rdp-openssl-tls \
+        --profile "${CARGO_PROFILE}" \
+    && cp "target/${CARGO_PROFILE}/warpgate" /warpgate-bin
 
 FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
 LABEL maintainer=heywoodlh
@@ -43,7 +60,7 @@ EOF
 # RUN adduser warpgate --system --home /data
 RUN adduser warpgate --disabled-password --gecos "" --uid ${USER_ID} --home /data --shell /usr/sbin/nologin
 
-COPY --from=build /opt/warpgate/target/release/warpgate /usr/local/bin/warpgate
+COPY --from=build /warpgate-bin /usr/local/bin/warpgate
 
 VOLUME /data
 

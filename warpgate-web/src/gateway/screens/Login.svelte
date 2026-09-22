@@ -121,10 +121,20 @@
         try {
             authState = (await api.getDefaultAuthState()).state
         } catch (err) {
-            if (err instanceof ResponseError) {
-                if (err.response.status === 404) {
-                    authState = ApiAuthState.NotStarted
-                }
+            // A 404 is the ordinary case: no auth flow has been started yet,
+            // so this is a fresh visit. Warpgate logs it as a WARN, which
+            // makes it look like a fault in the server log; it is not.
+            //
+            // EVERYTHING ELSE RETHROWS. It used to fall through both branches
+            // and be swallowed, which left authState undefined — and with it
+            // undefined, atStart is false, so the password form, the SSO
+            // section and the cancel button are all hidden and the screen
+            // renders the heading 'Continue signing in' over nothing at all.
+            // A server-side fault on /auth/state produced a sign-in page with
+            // no way to sign in and no error explaining why. Rethrowing hands
+            // it to Loadable, which says what went wrong.
+            if (err instanceof ResponseError && err.response.status === 404) {
+                authState = ApiAuthState.NotStarted
             } else {
                 throw err
             }

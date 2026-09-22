@@ -1618,3 +1618,82 @@ Settled with a two-line throwaway compose file: `$HOME` rendered as
 `C:\Users\AA3777371` (substituted by Compose), `$$HOME` rendered as `$$HOME`
 (preserved as an escape). So the container receives a literal `$`, which is
 what the script needs.
+
+## A sign-in page that loads and then does nothing
+
+Reported as "application is running but I can't open it on browser", with this
+repeating in the server log:
+
+```
+WARN HTTP: Request failed method=GET
+  url=https://10.13.14.56:8888/@warpgate/api/auth/state status=404
+```
+
+**The 404 is not the fault.** `Login.svelte` documents it: a 404 on
+`/auth/state` means no auth flow has been started, which is what a fresh visit
+looks like. Warpgate logs every 404 as a WARN, so the normal case looks like a
+failure in the log. What the line does prove is that the browser reached the
+server and the frontend executed — so whatever is wrong is after load.
+
+### The cause was my compose default
+
+`external_host` decides the session cookie's `Domain` attribute:
+
+```rust
+let domain = format!(".{host}");   // warpgate-protocol-http/src/lib.rs
+```
+
+My `compose.yaml` defaulted `WARPGATE_EXTERNAL_HOST` to `localhost`, so setup
+wrote `external_host: localhost` and the gateway issued cookies for
+`.localhost`. Reached at `10.13.14.56`, the browser discards them: every
+request is anonymous, `/auth/state` 404s forever because no session identifies
+an auth flow, and a correct password returns you to the sign-in page. My own
+local run logged the giveaway and I read past it:
+
+```
+Cookie domain configured: .localhost (base host: localhost)
+```
+
+Unset, warpgate scopes cookies to whatever host the request arrived on, which
+is correct at localhost, at a hostname and at an IP alike. So the variable is
+**opt-in now**, and the container states which mode it is in on first run.
+Verified both branches in a container with the binary stubbed: unset omits
+`--external-host` entirely, set appends it.
+
+`external_host` is still needed for HTTP target URLs, so the docs say to set it
+*and* that it must match what users type — rather than presenting it as a
+harmless nicety.
+
+### A real defect found while chasing it
+
+`Login.svelte`'s `init()` did not do what its own docblock said:
+
+```
+* init():  getDefaultAuthState; a 404 means NotStarted; anything else
+*          rethrows rather than being swallowed into a blank form.
+```
+
+```js
+if (err instanceof ResponseError) {
+    if (err.response.status === 404) { authState = NotStarted }
+    // no else — a 500 falls through both branches
+} else { throw err }
+```
+
+A non-404 `ResponseError` was swallowed. `authState` stayed `undefined`, and
+because `atStart` is derived from three concrete states, undefined makes it
+false — hiding the password form, the SSO section and the cancel button. The
+screen renders the heading "Continue signing in" over nothing. **A server-side
+fault on `/auth/state` produced a sign-in page with no way to sign in and no
+error saying why.** Now anything that is not a 404 rethrows into `Loadable`,
+which shows what happened.
+
+### What to check when a page loads but does nothing
+
+In order of how often it is the answer:
+
+1. `external_host` versus the address in the address bar — a mismatch drops
+   every session cookie and nothing in the UI says so.
+2. A 404 in the log that the frontend treats as a normal state.
+3. An error swallowed by a `catch` that handles one status and forgets the
+   rest — the shape above, now swept for across the codebase.
