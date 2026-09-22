@@ -22,6 +22,7 @@ use ironrdp::core::WriteBuf;
 use ironrdp::displaycontrol::client::DisplayControlClient;
 use ironrdp::displaycontrol::pdu::MonitorLayoutEntry;
 use ironrdp::dvc::DrdynvcClient;
+use ironrdp_egfx::client::{GraphicsPipelineClient, GraphicsPipelineHandler};
 use ironrdp::graphics::image_processing::PixelFormat;
 use ironrdp::pdu::gcc::KeyboardType;
 use ironrdp::pdu::geometry::InclusiveRectangle;
@@ -676,8 +677,18 @@ fn build_config(
         pointer_software_rendering: true,
         desktop_scale_factor: 0,
         multitransport_flags: None,
+        // Must match the channel `connect` registers: advertising the Graphics Pipeline
+        // without a processor for it leaves the desktop blank.
+        support_dyn_vc_gfx_protocol: options.graphics_pipeline,
     }
 }
+
+/// Graphics Pipeline event sink. Decoded surfaces reach the framebuffer through the
+/// session's compositor drain rather than these callbacks, so every method keeps its
+/// no-op default.
+struct GraphicsPipelineOutput;
+
+impl GraphicsPipelineHandler for GraphicsPipelineOutput {}
 
 async fn connect(
     config: connector::Config,
@@ -701,11 +712,19 @@ async fn connect(
     // Advertise the Display Control DVC so viewer-driven resolution changes can be pushed
     // to the target mid-session (MS-RDPEDISP). The capabilities callback has nothing to
     // reply with; `ActiveStage::encode_resize` drives the channel once it is ready.
+    let mut drdynvc =
+        DrdynvcClient::new().with_dynamic_channel(DisplayControlClient::new(|_caps| Ok(Vec::new())));
+    if config.support_dyn_vc_gfx_protocol {
+        // The session drains the client-side compositor into the framebuffer, so the
+        // graphics pipeline's per-command callbacks are unused. With no H.264 decoder the
+        // client advertises only the non-AVC capability sets it can actually decode.
+        drdynvc = drdynvc.with_dynamic_channel(GraphicsPipelineClient::new(
+            Box::new(GraphicsPipelineOutput),
+            None,
+        ));
+    }
     let mut connector = connector::ClientConnector::new(config, client_addr)
-        .with_static_channel(
-            DrdynvcClient::new()
-                .with_dynamic_channel(DisplayControlClient::new(|_caps| Ok(Vec::new()))),
-        )
+        .with_static_channel(drdynvc)
         .with_static_channel(CliprdrClient::new(Box::new(clipboard)));
 
     let should_upgrade = ironrdp_tokio::connect_begin(&mut framed, &mut connector)

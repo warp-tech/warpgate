@@ -3713,8 +3713,6 @@ dependencies = [
 [[package]]
 name = "ironrdp-dvc"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a5de64988ddabf96928e2f042e1772a5f7201f0001ea99012129c73a105fc52"
 dependencies = [
  "ironrdp-core",
  "ironrdp-pdu",
@@ -3735,6 +3733,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ironrdp-egfx"
+version = "0.3.0"
+dependencies = [
+ "bit_field",
+ "bitflags 2.13.1",
+ "ironrdp-core",
+ "ironrdp-dvc",
+ "ironrdp-graphics",
+ "ironrdp-pdu",
+ "tracing",
+]
+
+[[package]]
 name = "ironrdp-error"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3743,8 +3754,6 @@ checksum = "cd344ce9518ab83f6f7568ca4f1bc6dc8c55bd2da04cb5ee7b3e8740d5041734"
 [[package]]
 name = "ironrdp-graphics"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7493e426b6a8104cd497e518ba7781a9c7fc9a5f58a9cc0c1111e6d66f63bcc"
 dependencies = [
  "bit_field",
  "bitflags 2.13.1",
@@ -3754,6 +3763,7 @@ dependencies = [
  "ironrdp-pdu",
  "num-derive",
  "num-traits",
+ "wide",
  "yuv",
 ]
 
@@ -3840,6 +3850,7 @@ dependencies = [
  "ironrdp-core",
  "ironrdp-displaycontrol",
  "ironrdp-dvc",
+ "ironrdp-egfx",
  "ironrdp-error",
  "ironrdp-graphics",
  "ironrdp-pdu",
@@ -6744,6 +6755,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
+name = "safe_arch"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96b02de82ddbe1b636e6170c21be622223aea188ef2e139be0a5b219ec215323"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "salsa20"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9409,6 +9429,7 @@ dependencies = [
  "bytes",
  "futures",
  "ironrdp",
+ "ironrdp-egfx",
  "ironrdp-server",
  "ironrdp-tokio",
  "openssl",
@@ -9925,6 +9946,16 @@ checksum = "5d4a4db5077702ca3015d3d02d74974948aba2ad9e12ab7df718ee64ccd7e97d"
 dependencies = [
  "libredox",
  "wasite",
+]
+
+[[package]]
+name = "wide"
+version = "0.7.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ce5da8ecb62bcd8ec8b7ea19f69a51275e91299be594ea5cc6ef7819e16cd03"
+dependencies = [
+ "bytemuck",
+ "safe_arch",
 ]
 
 [[package]]
