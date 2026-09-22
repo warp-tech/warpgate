@@ -1697,3 +1697,38 @@ In order of how often it is the answer:
 2. A 404 in the log that the frontend treats as a normal state.
 3. An error swallowed by a `catch` that handles one status and forgets the
    rest — the shape above, now swept for across the codebase.
+
+## `docker compose run warpgate setup` ran the gateway instead
+
+Reported from the server: setup was invoked, and the log answered "Warpgate is
+now running", binding listeners. The argument vanished.
+
+Overriding `entrypoint` with `["/bin/sh", "-c", SCRIPT]` means Docker appends
+the command to that array — and for `sh -c SCRIPT arg…`, **the first trailing
+argument binds to `$0`, not `$1`**. So `setup` became `$0`, `"$#"` stayed 0,
+the script never saw it, and fell through to its own `exec warpgate run`. Every
+subcommand the image supports — `setup`, `check`, `recover-access`,
+`client-keys` — was swallowed identically. The entrypoint override had quietly
+removed a whole interface.
+
+Two changes: a `warpgate-entrypoint` placeholder as the last entrypoint element
+to absorb `$0`, so real arguments start at `$1`; and an explicit passthrough,
+placed after the `/data` writability guard so `run warpgate check` still gets
+the clear message when the mount is wrong, but before the bootstrap:
+
+```sh
+if [ "$#" -gt 0 ]; then
+    exec warpgate "$@"
+fi
+```
+
+Verified in a container with the binary stubbed: no args bootstraps then runs;
+`setup`, `check` and `recover-access` each exec through untouched. And the
+broken shape was re-run without the placeholder to confirm it reproduces —
+`setup` ignored, gateway started — so the placeholder is demonstrably what
+fixes it rather than a change that merely coincides with working.
+
+**The `ExternalHostUnknown` warning in that same log is the fix from the
+previous commit working.** "Cookies will be scoped to request host" is the
+correct mode for a gateway reached by IP; it is a warning only because the
+usual deployment has a hostname.

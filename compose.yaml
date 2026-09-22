@@ -93,6 +93,13 @@ services:
         # of adding a wrapper script to the production image, which upstream
         # does not have and which would then differ from the published one.
         #
+        # The trailing "warpgate-entrypoint" is load-bearing. Docker appends
+        # the command to this array, and `sh -c SCRIPT foo` binds foo to $0,
+        # not $1 — so without a placeholder to absorb $0, `docker compose run
+        # warpgate setup` left "$#" at 0, the script never saw `setup`, and ran
+        # the gateway instead. With it, arguments start at $1 and the
+        # passthrough below forwards them to warpgate untouched.
+        #
         # `$$` is an escaped `$`: a single one would be substituted by Compose
         # before the container ever sees it.
         entrypoint:
@@ -114,6 +121,14 @@ services:
                     exit 1
                 fi
                 rm -f /data/.writable
+
+                # Anything passed on the command line is a warpgate subcommand
+                # — `docker compose run warpgate setup`, `check`,
+                # `recover-access`, `client-keys`. Forward it and stop; the
+                # bootstrap below is only for the argument-less `up` path.
+                if [ "$$#" -gt 0 ]; then
+                    exec warpgate "$$@"
+                fi
 
                 if [ ! -f /data/warpgate.yaml ]; then
                     if [ -z "$$WARPGATE_ADMIN_PASSWORD" ]; then
@@ -158,3 +173,4 @@ services:
                 fi
 
                 exec warpgate run
+            - warpgate-entrypoint
