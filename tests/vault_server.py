@@ -234,7 +234,7 @@ class RealVault:
                 time.sleep(0.5)
         raise Exception(f"{self.image} did not come up on {self.url}")
 
-    def _api(self, method: str, path: str, payload=None, token=ROOT_TOKEN):
+    def _api(self, method: str, path: str, payload=None, token=ROOT_TOKEN, timeout=10):
         request = urllib.request.Request(
             f"{self.url}/v1/{path}",
             method=method,
@@ -248,7 +248,7 @@ class RealVault:
         # explicitly rather than turning verification off — the same
         # certificate Warpgate is given through `ca_bundle`.
         context = ssl.create_default_context(cafile=str(self._ca_path))
-        with urllib.request.urlopen(request, timeout=10, context=context) as response:
+        with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
             body = response.read()
             return json.loads(body) if body else {}
 
@@ -268,7 +268,15 @@ class RealVault:
             )
 
         self._api("POST", "sys/mounts/" + MOUNT, {"type": "ssh"})
-        self._api("POST", f"{MOUNT}/config/ca", {"generate_signing_key": True})
+        # The server default, deliberately: the end-to-end tests consume this CA
+        # through the role's `algorithm_signer: default`, and a faster key type
+        # would narrow what the contract exercises. That default is an
+        # RSA-4096 key generated inside this call, which on a loaded runner
+        # outlasted the 10 s every other call gets. Only this one waits longer,
+        # so a server that has stopped answering still fails fast elsewhere.
+        self._api(
+            "POST", f"{MOUNT}/config/ca", {"generate_signing_key": True}, timeout=60
+        )
         self._api(
             "POST",
             f"{MOUNT}/roles/{ROLE}",
