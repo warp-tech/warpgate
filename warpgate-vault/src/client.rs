@@ -1420,24 +1420,166 @@ mod tests {
         );
     }
 
-    /// A body is a body whatever the status code on it says, and this one is
-    /// parsed for every session that asks for a certificate.
-    #[tokio::test]
-    async fn test_an_oversized_success_body_is_refused_rather_than_buffered() {
+    /// How the stub answers the signing request in the size-limit tests.
+    #[derive(Clone, Copy, Debug)]
+    enum SignBody {
+        /// Exactly `MAX_RESPONSE_BODY` bytes, then one small chunk that crosses
+        /// it. Until that chunk arrives the client has not been over the limit,
+        /// so only the crossing can produce `OversizedResponse`.
+        Crossing,
+        /// Advertises a body past the limit and hangs up well short of it: the
+        /// shape the old stub produced when its one `write_all` went short.
+        TruncatedBelowLimit,
+    }
+
+    /// The last bytes of the body. Small, so the crossing is one write, and the
+    /// end of a valid document, so only the size check stands between this body
+    /// and a parse.
+    const CROSSING_CHUNK: &[u8] = b"AAAAAAAAAAAAAAAA\"}}";
+
+    /// What the stub put on the wire for the signing request.
+    ///
+    /// Reported rather than discarded: the old stub ignored its `write_all`,
+    /// so a short write on a loaded machine surfaced as the client failing.
+    #[derive(Debug)]
+    struct Delivery {
+        body_bytes_before_crossing: usize,
+        before_crossing: std::io::Result<()>,
+        /// An error here is legitimate: a bounded client may hang up as soon as
+        /// it is over the limit, before the stub has finished.
+        crossing: Option<std::io::Result<()>>,
+    }
+
+    async fn write_sign_body<S>(socket: &mut S, mode: SignBody) -> Delivery
+    where
+        S: tokio::io::AsyncWrite + Unpin,
+    {
+        let prefix = br#"{"data":{"signed_key":""#;
+        let mut body = prefix.to_vec();
+        body.resize(MAX_RESPONSE_BODY, b'A');
+        let mut written = 0usize;
+
+        let before_crossing = match mode {
+            SignBody::Crossing => {
+                async {
+                    socket
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n",
+                        )
+                        .await?;
+                    for piece in body.chunks(16 * 1024) {
+                        socket
+                            .write_all(format!("{:x}\r\n", piece.len()).as_bytes())
+                            .await?;
+                        socket.write_all(piece).await?;
+                        socket.write_all(b"\r\n").await?;
+                        socket.flush().await?;
+                        written += piece.len();
+                    }
+                    Ok::<(), std::io::Error>(())
+                }
+                .await
+            }
+            SignBody::TruncatedBelowLimit => {
+                async {
+                    let advertised = MAX_RESPONSE_BODY + CROSSING_CHUNK.len();
+                    socket
+                        .write_all(
+                            format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {advertised}\r\n\r\n"
+                            )
+                            .as_bytes(),
+                        )
+                        .await?;
+                    let half = body.get(..MAX_RESPONSE_BODY / 2).unwrap_or(&body);
+                    socket.write_all(half).await?;
+                    socket.flush().await?;
+                    written += half.len();
+                    socket.shutdown().await
+                }
+                .await
+            }
+        };
+
+        let crossing = match (mode, &before_crossing) {
+            (SignBody::Crossing, Ok(())) => Some(
+                async {
+                    socket
+                        .write_all(format!("{:x}\r\n", CROSSING_CHUNK.len()).as_bytes())
+                        .await?;
+                    socket.write_all(CROSSING_CHUNK).await?;
+                    socket.write_all(b"\r\n0\r\n\r\n").await?;
+                    socket.flush().await?;
+                    socket.shutdown().await
+                }
+                .await,
+            ),
+            _ => None,
+        };
+
+        Delivery {
+            body_bytes_before_crossing: written,
+            before_crossing,
+            crossing,
+        }
+    }
+
+    /// Like `spawn_server`, but the signing answer is written in controlled
+    /// pieces and the task ends with that request, so the test can join it and
+    /// read back what was delivered.
+    async fn spawn_sign_body_server(
+        login: String,
+        mode: SignBody,
+        log: Arc<StdMutex<Vec<String>>>,
+    ) -> (String, tokio::task::JoinHandle<Delivery>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = format!("https://{}", listener.local_addr().unwrap());
+        let acceptor = test_tls_acceptor();
+
+        let server = tokio::spawn(async move {
+            loop {
+                let stream = match listener.accept().await {
+                    Ok((stream, _)) => stream,
+                    Err(error) => {
+                        return Delivery {
+                            body_bytes_before_crossing: 0,
+                            before_crossing: Err(error),
+                            crossing: None,
+                        };
+                    }
+                };
+                let Ok(mut socket) = acceptor.accept(stream).await else {
+                    continue;
+                };
+                let mut buf = vec![0u8; 8192];
+                let read = socket.read(&mut buf).await.unwrap_or(0);
+                let request = String::from_utf8_lossy(&buf[..read]).into_owned();
+                let is_login = request.contains("/login");
+                log.lock().unwrap().push(request);
+                if is_login {
+                    let _ = socket.write_all(login.as_bytes()).await;
+                    let _ = socket.shutdown().await;
+                    continue;
+                }
+                return write_sign_body(&mut socket, mode).await;
+            }
+        });
+
+        (address, server)
+    }
+
+    /// Runs one signing request against `spawn_sign_body_server` and returns
+    /// the client's error beside the stub's own account of what it sent.
+    async fn sign_against(mode: SignBody) -> (VaultError, Delivery) {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-        let oversized = format!(
-            r#"{{"data":{{"signed_key":"{}"}}}}"#,
-            "A".repeat(MAX_RESPONSE_BODY + 1)
-        );
         let log = Arc::new(StdMutex::new(vec![]));
-        let vault = spawn_server(
+        let (vault, server) = spawn_sign_body_server(
             json_response(r#"{"auth":{"client_token":"s.stub-token","lease_duration":3600}}"#),
-            json_response(&oversized),
+            mode,
             log.clone(),
         )
-        .await
-        .unwrap();
+        .await;
 
         let tmp = scratch();
         let secret_id_path = tmp.path().join("secret-id");
@@ -1449,15 +1591,90 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(
-            matches!(error, VaultError::OversizedResponse),
-            "expected the body to be refused on size, got {error:?}"
-        );
+        // A watchdog, not a budget: the stub ends on its own once it has
+        // written or failed to.
+        let delivery = tokio::time::timeout(Duration::from_secs(60), server)
+            .await
+            .expect("the stub never finished answering the signing request")
+            .unwrap();
+
         // Otherwise this passes just as well when the request was never sent.
         assert!(
             log.lock().unwrap().iter().any(|r| r.contains("/sign/")),
             "no signing request was made, so nothing was under test"
         );
+        (error, delivery)
+    }
+
+    /// Checked before the client's error, so that the stub failing is reported
+    /// as the stub failing and not as the client mishandling a short body.
+    fn assert_the_stub_reached_the_crossing(delivery: &Delivery) {
+        assert!(
+            delivery.before_crossing.is_ok(),
+            "the stub failed before the crossing chunk, so the client was never over the limit: {delivery:?}"
+        );
+        assert_eq!(
+            delivery.body_bytes_before_crossing, MAX_RESPONSE_BODY,
+            "the stub did not deliver the body up to the limit: {delivery:?}"
+        );
+    }
+
+    fn assert_refused_on_size(error: &VaultError) {
+        assert!(
+            matches!(error, VaultError::OversizedResponse),
+            "expected the body to be refused on size, got {error:?}"
+        );
+    }
+
+    /// A body is a body whatever the status code on it says, and this one is
+    /// parsed for every session that asks for a certificate.
+    #[tokio::test]
+    async fn test_an_oversized_success_body_is_refused_rather_than_buffered() {
+        let (error, delivery) = sign_against(SignBody::Crossing).await;
+        assert_the_stub_reached_the_crossing(&delivery);
+        assert_refused_on_size(&error);
+    }
+
+    /// The control for the test above: a body that ends early is a transport
+    /// error, not a size refusal, so the two failure shapes stay apart.
+    #[tokio::test]
+    async fn a_body_cut_short_below_the_limit_is_a_transport_error() {
+        let (error, delivery) = sign_against(SignBody::TruncatedBelowLimit).await;
+        assert!(
+            delivery.before_crossing.is_ok(),
+            "the stub could not deliver even the short body: {delivery:?}"
+        );
+        assert!(delivery.body_bytes_before_crossing < MAX_RESPONSE_BODY);
+        // Found by walking the chain: reqwest files a failed `chunk()` under
+        // `Decode`, with the transport's end-of-file two sources down.
+        let cut_short = match &error {
+            VaultError::Request(e) => {
+                let mut source: Option<&(dyn std::error::Error + 'static)> = Some(e);
+                std::iter::from_fn(|| {
+                    let current = source?;
+                    source = current.source();
+                    Some(current)
+                })
+                .any(|e| {
+                    e.downcast_ref::<std::io::Error>()
+                        .is_some_and(|io| io.kind() == std::io::ErrorKind::UnexpectedEof)
+                })
+            }
+            _ => false,
+        };
+        assert!(
+            cut_short,
+            "expected a transport error for a body that ended early, got {error:?}"
+        );
+    }
+
+    /// The strict assertion has to be able to fail on the shape it replaced a
+    /// flake with; one that also passed on a truncated body would prove nothing.
+    #[tokio::test]
+    #[should_panic(expected = "expected the body to be refused on size")]
+    async fn the_size_assertion_rejects_a_truncated_body() {
+        let (error, _) = sign_against(SignBody::TruncatedBelowLimit).await;
+        assert_refused_on_size(&error);
     }
 
     /// Vault reports `lease_duration: 0` for a token with no lease at all — a
