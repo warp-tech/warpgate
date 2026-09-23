@@ -12,7 +12,5 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "time"] }
 tracing.workspace = true
-warpgate-common = { path = "../warpgate-common" }
-
-# Vault/OpenBao client — API-compatible, same binary works for both
 vaultrs = { version = "0.7", default-features = false, features = ["rustls"] }
+warpgate-common = { path = "../warpgate-common" }

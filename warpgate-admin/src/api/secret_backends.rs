@@ -14,7 +14,7 @@ use warpgate_common::{
     AdminPermission, BackendType, SecretError, SecretRef, SecretResolver as _, StoredSecret,
     TargetSecrets, VaultAuthConfig, WarpgateError,
 };
-use warpgate_db_entities::{Parameters, SecretBackend, SshClientKey, Target};
+use warpgate_db_entities::{SecretBackend, SshClientKey, Target};
 
 use super::AdminContext;
 use crate::api::common::is_unique_violation;
@@ -104,15 +104,11 @@ pub struct SecretReferenceUsageSshClientKey {
     pub label: String,
 }
 
-#[derive(Object)]
-pub struct SecretReferenceUsageSshHostKey {}
-
 #[derive(Union)]
 #[oai(discriminator_name = "kind", one_of)]
 pub enum SecretReferenceUsageInstance {
     Target(SecretReferenceUsageTarget),
     SshClientKey(SecretReferenceUsageSshClientKey),
-    SshHostKey(SecretReferenceUsageSshHostKey),
 }
 
 impl Display for SecretReferenceUsageInstance {
@@ -120,7 +116,6 @@ impl Display for SecretReferenceUsageInstance {
         match self {
             Self::Target(target) => write!(f, "target '{}'", target.name),
             Self::SshClientKey(key) => write!(f, "SSH client key '{}'", key.label),
-            Self::SshHostKey(_) => write!(f, "the SSH host key setting"),
         }
     }
 }
@@ -250,14 +245,11 @@ fn update_active_model(
     if let Some(provided_secret) = auth.secret_mut() {
         let provided_value = provided_secret.stored_value();
         *provided_secret = if provided_value.is_empty() {
-            stored
-                .cloned()
-                // Cannot happen since Option occupancy is based on enum kind
-                .ok_or_else(|| {
-                    WarpgateError::InconsistentState(
-                        "The login secret is required for this authentication method".into(),
-                    )
-                })?
+            stored.cloned().ok_or_else(|| {
+                WarpgateError::InvalidRequest(
+                    "The login secret is required for this authentication method".into(),
+                )
+            })?
         } else {
             StoredSecret::from(idempotent_maybe_encrypt_secret(provided_value)?)
         };
@@ -309,16 +301,6 @@ async fn existing_references_to_backend(
                 }),
             );
         }
-    }
-    if let Some(reference) = Parameters::Entity::get(db).await?.ssh_host_key_secret_ref
-        && reference.backend == backend_name
-    {
-        found
-            .entry(reference.clone())
-            .or_default()
-            .push(SecretReferenceUsageInstance::SshHostKey(
-                SecretReferenceUsageSshHostKey {},
-            ))
     }
     Ok(found)
 }

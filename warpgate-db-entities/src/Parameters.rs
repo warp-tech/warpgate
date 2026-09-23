@@ -8,7 +8,7 @@ use uuid::Uuid;
 use warpgate_aws::S3StorageConfig;
 use warpgate_common::auth::CredentialKind;
 use warpgate_common::{
-    PasswordPolicy, Protocol, SecretRef, UserAuthCredential, UserRequireCredentialsPolicy,
+    PasswordPolicy, Protocol, UserAuthCredential, UserRequireCredentialsPolicy,
 };
 
 #[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum)]
@@ -266,10 +266,6 @@ pub struct Model {
     pub ssh_host_key_ed25519: String,
     #[sea_orm(column_type = "Text")]
     pub ssh_host_key_rsa: String,
-    /// A secret-backend entry whose fields, named after [`SshHostKeyKind::name`],
-    /// hold the host key PEMs; null uses the keys above.
-    #[sea_orm(column_type = "Text", nullable)]
-    pub ssh_host_key_secret_ref: Option<SecretRef>,
 }
 
 impl Model {
@@ -468,7 +464,6 @@ mod tests {
             retiring_key_fp: None,
             ssh_host_key_ed25519: "".into(),
             ssh_host_key_rsa: "".into(),
-            ssh_host_key_secret_ref: None,
         }
     }
 

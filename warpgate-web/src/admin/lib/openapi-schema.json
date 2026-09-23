@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.29.0-14-g2afa13cc-modified"
+    "version": "v0.29.0-19-g263fa7ca-modified"
   },
   "servers": [
     {
@@ -3941,16 +3941,6 @@
         "responses": {
           "201": {
             "description": ""
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
           }
         },
         "security": [
@@ -6327,10 +6317,6 @@
           "ssh_host_key_verification": {
             "$ref": "#/components/schemas/SshHostKeyVerificationMode"
           },
-          "ssh_host_key_secret_ref": {
-            "type": "string",
-            "maxLength": 1024
-          },
           "password_login_mode": {
             "$ref": "#/components/schemas/PasswordLoginMode"
           },
@@ -6549,10 +6535,6 @@
           },
           "ssh_host_key_verification": {
             "$ref": "#/components/schemas/SshHostKeyVerificationMode"
-          },
-          "ssh_host_key_secret_ref": {
-            "type": "string",
-            "description": "`scheme://backend/path` of the secret-backend entry holding the SSH host keys"
           },
           "password_login_mode": {
             "$ref": "#/components/schemas/PasswordLoginMode"
@@ -7485,17 +7467,13 @@
           },
           {
             "$ref": "#/components/schemas/SecretReferenceUsageInstance_SecretReferenceUsageSshClientKey"
-          },
-          {
-            "$ref": "#/components/schemas/SecretReferenceUsageInstance_SecretReferenceUsageSshHostKey"
           }
         ],
         "discriminator": {
           "propertyName": "kind",
           "mapping": {
             "Target": "#/components/schemas/SecretReferenceUsageInstance_SecretReferenceUsageTarget",
-            "SshClientKey": "#/components/schemas/SecretReferenceUsageInstance_SecretReferenceUsageSshClientKey",
-            "SshHostKey": "#/components/schemas/SecretReferenceUsageInstance_SecretReferenceUsageSshHostKey"
+            "SshClientKey": "#/components/schemas/SecretReferenceUsageInstance_SecretReferenceUsageSshClientKey"
           }
         }
       },
@@ -7518,28 +7496,6 @@
           },
           {
             "$ref": "#/components/schemas/SecretReferenceUsageSshClientKey"
-          }
-        ]
-      },
-      "SecretReferenceUsageInstance_SecretReferenceUsageSshHostKey": {
-        "allOf": [
-          {
-            "type": "object",
-            "required": [
-              "kind"
-            ],
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "SshHostKey"
-                ],
-                "example": "SshHostKey"
-              }
-            }
-          },
-          {
-            "$ref": "#/components/schemas/SecretReferenceUsageSshHostKey"
           }
         ]
       },
@@ -7581,10 +7537,6 @@
             "type": "string"
           }
         }
-      },
-      "SecretReferenceUsageSshHostKey": {
-        "type": "object",
-        "title": "SecretReferenceUsageSshHostKey"
       },
       "SecretReferenceUsageTarget": {
         "type": "object",

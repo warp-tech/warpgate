@@ -8,8 +8,7 @@ use serde::Serialize;
 use serde_json::Value;
 use warpgate_aws::{S3Credentials, S3Storage};
 use warpgate_common::{
-    AdminPermission, PasswordPolicy, SecretError, SecretRef, SecretResolver,
-    UserRequireCredentialsPolicy, WarpgateError,
+    AdminPermission, PasswordPolicy, UserRequireCredentialsPolicy, WarpgateError,
 };
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::RecordingsStorageConfig;
@@ -66,8 +65,6 @@ struct ParameterValues {
     pub ssh_client_auth_password: bool,
     pub ssh_client_auth_keyboard_interactive: bool,
     pub ssh_host_key_verification: Parameters::SshHostKeyVerificationMode,
-    /// `scheme://backend/path` of the secret-backend entry holding the SSH host keys
-    pub ssh_host_key_secret_ref: Option<String>,
     pub password_login_mode: Parameters::PasswordLoginMode,
     pub mfa_enforcement: Parameters::MfaEnforcement,
     pub mfa_policy_exempt_sso_users: bool,
@@ -120,8 +117,6 @@ struct ParameterUpdate {
     pub ssh_client_auth_password: Option<bool>,
     pub ssh_client_auth_keyboard_interactive: Option<bool>,
     pub ssh_host_key_verification: Option<Parameters::SshHostKeyVerificationMode>,
-    #[oai(deserialize_with = "parse_nullable", validator(max_length = 1024))]
-    pub ssh_host_key_secret_ref: Option<Option<String>>,
     pub password_login_mode: Option<Parameters::PasswordLoginMode>,
     pub mfa_enforcement: Option<Parameters::MfaEnforcement>,
     pub mfa_policy_exempt_sso_users: Option<bool>,
@@ -181,18 +176,6 @@ struct ParameterUpdate {
     pub recordings_storage: Option<RecordingsStorageConfig>,
 }
 
-/// Validate on save to reduce the change of breaking the SSH listener
-async fn validate_host_key_secret_ref(
-    reference: &str,
-    secret_backend: &dyn SecretResolver,
-) -> Result<SecretRef, String> {
-    let reference: SecretRef = reference.parse().map_err(|e: SecretError| e.to_string())?;
-    warpgate_protocol_ssh::load_host_keys_from_backend(&reference, secret_backend)
-        .await
-        .map_err(|e| format!("Could not load SSH host keys from {reference}: {e}"))?;
-    Ok(reference)
-}
-
 #[derive(Serialize, Object)]
 struct AnalyticsPreview {
     /// The target URL the report would be POSTed to.
@@ -217,8 +200,6 @@ enum GetAnalyticsPreviewResponse {
 enum UpdateParametersResponse {
     #[oai(status = 201)]
     Done,
-    #[oai(status = 400)]
-    BadRequest(Json<String>),
 }
 
 #[derive(Serialize, Object)]
@@ -249,10 +230,6 @@ impl Api {
             ssh_client_auth_password: parameters.ssh_client_auth_password,
             ssh_client_auth_keyboard_interactive: parameters.ssh_client_auth_keyboard_interactive,
             ssh_host_key_verification: parameters.ssh_host_key_verification,
-            ssh_host_key_secret_ref: parameters
-                .ssh_host_key_secret_ref
-                .as_ref()
-                .map(ToString::to_string),
             password_login_mode: parameters.password_login_mode,
             mfa_enforcement: parameters.mfa_enforcement,
             mfa_policy_exempt_sso_users: parameters.mfa_policy_exempt_sso_users,
@@ -352,21 +329,6 @@ impl Api {
             .ssh_client_auth_keyboard_interactive
             .map_or(NotSet, Set);
         parameters.ssh_host_key_verification = body.ssh_host_key_verification.map_or(NotSet, Set);
-        if let Some(update) = &body.ssh_host_key_secret_ref {
-            let reference = match update {
-                Some(reference) => {
-                    match validate_host_key_secret_ref(reference, &*services.secret_backends).await
-                    {
-                        Ok(reference) => Some(reference),
-                        Err(error) => {
-                            return Ok(UpdateParametersResponse::BadRequest(Json(error)));
-                        }
-                    }
-                }
-                None => None,
-            };
-            parameters.ssh_host_key_secret_ref = Set(reference);
-        }
         parameters.password_login_mode = body.password_login_mode.map_or(NotSet, Set);
         parameters.mfa_enforcement = body.mfa_enforcement.map_or(NotSet, Set);
         parameters.mfa_policy_exempt_sso_users =

@@ -77,8 +77,6 @@
         // switching to password auth; treated as empty.
         value?: string
         disabled?: boolean
-        // Whether the reference names one field of the secret (`#key`)
-        withKey?: boolean
         // When set, the value may also be entered directly, under this label
         inlineLabel?: string
 
@@ -88,7 +86,6 @@
     let {
         value = $bindable(),
         disabled = false,
-        withKey = true,
         inlineLabel,
         intendedUsage,
     }: Props = $props()
@@ -140,7 +137,7 @@
         }),
     )
     let complete = $derived(
-        Boolean(draftBackend && draftPath && (draftKey || !withKey)),
+        Boolean(draftBackend && draftPath && draftKey),
     )
     let sharedWith = $derived(
         (usage.find(u => u.reference === draft)?.usages ?? []).filter(
@@ -301,15 +298,13 @@
                 bind:value={draftPath}
             >
         </FormGroup>
-        {#if withKey}
-            <FormGroup floating label="Field">
-                <input
-                    class="form-control font-monospace"
-                    placeholder="password"
-                    bind:value={draftKey}
-                >
-            </FormGroup>
-        {/if}
+        <FormGroup floating label="Field">
+            <input
+                class="form-control font-monospace"
+                placeholder="password"
+                bind:value={draftKey}
+            >
+        </FormGroup>
         {#if sharedWith.length}
             <div class="form-text">
                 Also used by
@@ -317,10 +312,8 @@
                     {i ? ', ' : ''}
                     {#if usage.kind === 'Target'}
                         <a href="#/config/targets/{usage.id}">{usage.name}</a>
-                    {:else if usage.kind === 'SshClientKey'}
-                        <a href="#/config/ssh">SSH client key {usage.label}</a>
                     {:else}
-                        <a href="#/config/parameters">the SSH host keys</a>
+                        <a href="#/config/ssh">SSH client key {usage.label}</a>
                     {/if}
                 {/each}
             </div>

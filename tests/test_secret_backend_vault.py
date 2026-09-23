@@ -68,6 +68,12 @@ def _backend_ids(api) -> dict:
     return {b.name: b.id for b in api.get_secret_backends()}
 
 
+def _usage_targets(entry: sdk.SecretReferenceUsage) -> dict:
+    """id -> name of the targets in a usage entry"""
+    targets = [u.actual_instance for u in entry.usages if u.actual_instance.kind == "Target"]
+    return {t.id: t.name for t in targets}
+
+
 def _resolve_status(api, reference: str) -> int:
     """HTTP status of a resolve test: 204 when the reference resolves."""
     try:
@@ -321,12 +327,14 @@ class TestSecretBackendVault:
             api.delete_secret_backend(backend_id)
 
     def test_secret_reference_usage_reports_target(self, processes: ProcessManager, shared_wg, timeout):
-        # secret_references() only inspects stored target config, so this doesn't need a
-        # live/reachable backend at all -- the shared wg instance (no backend configured) is fine.
+        # Usage only inspects stored config, so the backend doesn't need to be reachable.
         url = f"https://localhost:{shared_wg.http_port}"
         reference = "secret://vault-test/secret/shared#password"
 
         with admin_client(url) as api:
+            backend = api.create_secret_backend(
+                _vault_backend("vault-test", "http://127.0.0.1:1", token="unused")
+            )
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"ssh-{uuid4()}",
@@ -351,12 +359,13 @@ class TestSecretBackendVault:
                 )
             )
 
-            usage = api.get_secret_reference_usage()
+            usage = api.get_secret_reference_usage(backend.id)
             entry = next(u for u in usage if u.reference == reference)
             assert entry.backend == "vault-test"
-            assert len(entry.targets) == 1
-            assert entry.targets[0].id == target.id
-            assert entry.targets[0].name == target.name
+            assert _usage_targets(entry) == {target.id: target.name}
+
+            api.delete_target(target.id)
+            api.delete_secret_backend(backend.id)
 
     def test_secret_reference_usage_multiple_targets_share_secret(
         self, processes: ProcessManager, backend_engine, timeout, stop_at_end
@@ -425,20 +434,18 @@ class TestSecretBackendVault:
                 )
             )
 
-            usage = api.get_secret_reference_usage()
+            usage = api.get_secret_reference_usage(_backend_ids(api)["vault-test"])
             entry = next(u for u in usage if u.reference == reference)
             assert entry.backend == "vault-test"
-            assert len(entry.targets) == 2
-            assert {t.id for t in entry.targets} == {ssh_target.id, postgres_target.id}
+            assert set(_usage_targets(entry)) == {ssh_target.id, postgres_target.id}
 
             # deleting one of the two sharing targets must not touch the upstream secret, and the
             # other target must keep resolving it fine
             api.delete_target(ssh_target.id)
 
-            usage = api.get_secret_reference_usage()
+            usage = api.get_secret_reference_usage(_backend_ids(api)["vault-test"])
             entry = next(u for u in usage if u.reference == reference)
-            assert len(entry.targets) == 1
-            assert entry.targets[0].id == postgres_target.id
+            assert set(_usage_targets(entry)) == {postgres_target.id}
 
             assert _resolve_status(api, reference) == 204
 
@@ -920,56 +927,6 @@ class TestSecretBackendVault:
         assert b"tbl" in out
         assert client.returncode == 0
 
-    def test_ssh_host_keys_from_vault(self, processes: ProcessManager, backend_engine, timeout, stop_at_end):
-        vault: VaultInstance = processes.start_vault(engine=backend_engine)
-        stop_at_end(lambda: _stop_vault(vault))
-
-        key_path = processes.ctx.tmpdir / f"host-key-{uuid4()}"
-        subprocess.check_call(
-            ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-m", "PKCS8", "-f", str(key_path)],
-            stdout=subprocess.DEVNULL,
-        )
-        public_key = key_path.with_suffix(".pub").read_text().split()[1]
-        vault.kv_put("secret", "warpgate-host-keys", ed25519=key_path.read_text())
-
-        wg = _start_wg_with_backends(
-            processes,
-            [_vault_backend("vault-test", vault.addr, token=vault.root_token, backend_type=vault.backend_type)],
-        )
-        wait_port(wg.ssh_port, for_process=wg.process)
-        with admin_client(f"https://localhost:{wg.http_port}") as api:
-            api.update_parameters(
-                sdk.ParameterUpdate(
-                    ssh_host_key_secret_ref=f"secret://vault-test/secret/warpgate-host-keys"
-                )
-            )
-        _stop_wg(wg)
-
-        # the parameter is read when the SSH listener binds
-        wg = processes.start_wg(share_with=wg)
-        stop_at_end(lambda: _stop_wg(wg))
-        wait_port(wg.ssh_port, for_process=wg.process)
-
-        # The host key is exchanged before authentication, so a login attempt that
-        # goes nowhere still records it.
-        known_hosts = processes.ctx.tmpdir / f"known-hosts-{uuid4()}"
-        subprocess.run(
-            [
-                "ssh",
-                "-o", "StrictHostKeyChecking=accept-new",
-                "-o", f"UserKnownHostsFile={known_hosts}",
-                "-o", "HostKeyAlgorithms=ssh-ed25519",
-                "-o", "PreferredAuthentications=none",
-                "-o", "BatchMode=yes",
-                "-p", str(wg.ssh_port),
-                "nobody@localhost",
-                "true",
-            ],
-            capture_output=True,
-            timeout=timeout,
-        )
-        assert public_key in known_hosts.read_text()
-
     def test_ssh_client_key_from_vault(self, processes: ProcessManager, backend_engine, timeout, stop_at_end):
         vault: VaultInstance = processes.start_vault(engine=backend_engine)
         stop_at_end(lambda: _stop_vault(vault))
@@ -994,13 +951,13 @@ class TestSecretBackendVault:
 
         with admin_client(f"https://localhost:{wg.http_port}") as api:
             key = api.import_ssh_own_key_reference(
-                sdk.ImportSSHClientKeyReferenceRequest(
+                sdk.ImportSshClientKeyReferenceRequest(
                     label="vault-key",
                     reference=f"secret://vault-test/secret/warpgate-client-key#private_key",
                     is_default=False,
                 )
             )
-            assert key.backend == "vault-test"
+            assert key.secret_backend == "vault-test"
             assert key.public_key.split()[1] == public_key.split()[1]
 
             role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))

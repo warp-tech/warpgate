@@ -129,8 +129,8 @@ pub struct SecretBackendConfig {
 
 pub const REFERENCE_SCHEME: &str = "secret://";
 
-/// `secret://backend/mount/path[#field]`: an entry in a KV v2 engine of one
-/// of the configured backends.
+/// `secret://backend/mount/path#field`: one field of an entry in a KV v2
+/// engine of one of the configured backends.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SecretRef {
     pub backend: String,
@@ -138,8 +138,8 @@ pub struct SecretRef {
     pub mount: String,
     /// The entry within the mount, without the `data/` segment
     pub path: String,
-    /// The entry field holding the value; a reference to the whole entry has none
-    pub field: Option<String>,
+    /// The entry field holding the value
+    pub field: String,
 }
 
 impl SecretRef {
@@ -152,13 +152,9 @@ impl fmt::Display for SecretRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{REFERENCE_SCHEME}{}/{}/{}",
-            self.backend, self.mount, self.path
-        )?;
-        if let Some(field) = &self.field {
-            write!(f, "#{field}")?;
-        }
-        Ok(())
+            "{REFERENCE_SCHEME}{}/{}/{}#{}",
+            self.backend, self.mount, self.path, self.field
+        )
     }
 }
 
@@ -171,13 +167,9 @@ impl FromStr for SecretRef {
         let (backend, rest) = rest.split_once('/').ok_or_else(invalid)?;
         validate_backend_name(backend)?;
 
-        let (kv_path, field) = match rest.split_once('#') {
-            Some((p, f)) if !f.is_empty() => (p, Some(f.to_string())),
-            Some((p, _)) => (p, None),
-            None => (rest, None),
-        };
+        let (kv_path, field) = rest.split_once('#').ok_or_else(invalid)?;
         let (mount, path) = kv_path.split_once('/').ok_or_else(invalid)?;
-        if mount.is_empty() || path.is_empty() {
+        if mount.is_empty() || path.is_empty() || field.is_empty() {
             return Err(invalid());
         }
 
@@ -185,7 +177,7 @@ impl FromStr for SecretRef {
             backend: backend.to_string(),
             mount: mount.to_string(),
             path: path.to_string(),
-            field,
+            field: field.to_string(),
         })
     }
 }
@@ -414,14 +406,6 @@ mod tests {
     const REFERENCE: &str = "secret://vault-prod/secret/db#password";
 
     #[test]
-    fn parses_reference_without_field() {
-        let r: SecretRef = "secret://vault-prod/secret/myapp".parse().unwrap();
-        assert_eq!(r.field, None);
-        assert_eq!(r.mount, "secret");
-        assert_eq!(r.path, "myapp");
-    }
-
-    #[test]
     fn parses_backend_mount_path_and_field() {
         let r: SecretRef = "secret://vault-prod/kv/prod/myapp#password"
             .parse()
@@ -430,14 +414,7 @@ mod tests {
         assert_eq!(r.mount, "kv");
         assert_eq!(r.path, "prod/myapp");
         assert_eq!(r.kv_path(), "kv/prod/myapp");
-        assert_eq!(r.field, Some("password".to_string()));
-    }
-
-    #[test]
-    fn trailing_hash_produces_no_field() {
-        let r: SecretRef = "secret://vault-prod/secret/myapp#".parse().unwrap();
-        assert_eq!(r.field, None);
-        assert_eq!(r.kv_path(), "secret/myapp");
+        assert_eq!(r.field, "password");
     }
 
     #[test]
@@ -449,7 +426,9 @@ mod tests {
             "secret://vault-prod/",
             "secret://vault-prod/secret",
             "secret://vault-prod/secret/",
-            "secret://vault-prod//myapp",
+            "secret://vault-prod//myapp#password",
+            "secret://vault-prod/secret/myapp",
+            "secret://vault-prod/secret/myapp#",
             "vault://vault-prod/secret/myapp",
         ] {
             assert!(
@@ -480,7 +459,7 @@ mod tests {
 
     #[test]
     fn display_round_trips() {
-        for raw in ["secret://vault-prod/secret/myapp", REFERENCE] {
+        for raw in ["secret://vault-prod/kv/a/b#c", REFERENCE] {
             assert_eq!(SecretRef::from_str(raw).unwrap().to_string(), raw);
         }
     }

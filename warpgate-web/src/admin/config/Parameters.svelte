@@ -22,7 +22,6 @@
     import InfoBox from 'common/InfoBox.svelte'
     import Loadable from 'common/Loadable.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
-    import SecretRefInput from 'common/SecretRefInput.svelte'
     import StickyActionBar from 'common/StickyActionBar.svelte'
     import { api as gatewayApi } from 'gateway/lib/api'
     import { reloadServerInfo } from 'gateway/lib/store'
@@ -134,7 +133,6 @@
                     parameters.adminApprovalTimeoutSeconds ?? null,
                 adminApprovalGracePeriodSeconds:
                     parameters.adminApprovalGracePeriodSeconds ?? null,
-                sshHostKeySecretRef: parameters.sshHostKeySecretRef ?? null,
             } as unknown as ParameterValues
             await api.updateParameters({ parameterUpdate })
             await reloadServerInfo()
@@ -340,38 +338,6 @@
                                         password authentication can help prevent
                                         brute-force attacks.
                                     </HelpText>
-                                </Subsection>
-
-                                <Subsection title="Host keys">
-                                    <label
-                                        for="sshHostKeyFromBackend"
-                                        class="d-flex align-items-center mb-3"
-                                    >
-                                        <Input
-                                            id="sshHostKeyFromBackend"
-                                            class="mb-0 me-2"
-                                            type="switch"
-                                            checked={parameters.sshHostKeySecretRef != null}
-                                            on:change={e => parameters.sshHostKeySecretRef = (e.currentTarget as HTMLInputElement).checked ? '' : undefined}
-                                        />
-                                        <div>
-                                            Load host keys from a secret backend
-                                        </div>
-                                    </label>
-                                    {#if parameters.sshHostKeySecretRef != null}
-                                        <SecretRefInput
-                                            bind:value={parameters.sshHostKeySecretRef}
-                                            withKey={false}
-                                        />
-                                        <HelpText>
-                                            The entry's <code>ed25519</code> and
-                                            <code>rsa</code> fields hold the
-                                            private keys in PEM format.
-                                            Otherwise the keys stored in the
-                                            database are used. Takes effect when
-                                            the SSH listener restarts.
-                                        </HelpText>
-                                    {/if}
                                 </Subsection>
 
                                 <Subsection title="Target host keys">

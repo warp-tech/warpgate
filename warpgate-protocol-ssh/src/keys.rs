@@ -10,8 +10,7 @@ use uuid::Uuid;
 use warpgate_common::encryption::{idempotent_maybe_decrypt, idempotent_maybe_encrypt_secret};
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{
-    MaybeSecretRef, SecretError, SecretRef, SecretResolver, SshHostKeyKind, StoredSecret,
-    WarpgateError,
+    MaybeSecretRef, SecretRef, SecretResolver, SshHostKeyKind, StoredSecret, WarpgateError,
 };
 use warpgate_db_entities::{Parameters, SshClientKey};
 
@@ -67,16 +66,9 @@ pub async fn ensure_host_keys(
     Ok(())
 }
 
-/// The host keys: from the secret backend entry referenced in the parameters,
-/// otherwise the ones stored in the parameters row.
-pub async fn load_host_keys(
-    db: &DatabaseConnection,
-    secret_backend: &dyn SecretResolver,
-) -> Result<Vec<PrivateKey>, WarpgateError> {
+/// The host keys stored in the parameters row.
+pub async fn load_host_keys(db: &DatabaseConnection) -> Result<Vec<PrivateKey>, WarpgateError> {
     let row = Parameters::Entity::get(db).await?;
-    if let Some(reference) = &row.ssh_host_key_secret_ref {
-        return load_host_keys_from_backend(reference, secret_backend).await;
-    }
     [row.ssh_host_key_ed25519, row.ssh_host_key_rsa]
         .into_iter()
         .map(|stored| {
@@ -86,34 +78,6 @@ pub async fn load_host_keys(
             )?)
         })
         .collect()
-}
-
-/// Reads the fields named after each [`SshHostKeyKind`]; a kind without a field is
-/// skipped, but at least one key must be present.
-pub async fn load_host_keys_from_backend(
-    reference: &SecretRef,
-    secret_backend: &dyn SecretResolver,
-) -> Result<Vec<PrivateKey>, WarpgateError> {
-    let mut keys = Vec::new();
-    for kind in SshHostKeyKind::ALL {
-        let reference = SecretRef {
-            field: Some(kind.name().to_owned()),
-            ..reference.clone()
-        };
-        match secret_backend.resolve(&reference).await {
-            Ok(pem) => keys.push(decode_secret_key(pem.expose_secret(), None)?),
-            Err(SecretError::NotFound { .. }) => {
-                debug!("No {} host key at {reference}", kind.name());
-            }
-            Err(error) => return Err(error.into()),
-        }
-    }
-    if keys.is_empty() {
-        return Err(WarpgateError::InconsistentState(format!(
-            "no SSH host keys found at {reference}"
-        )));
-    }
-    Ok(keys)
 }
 
 fn encode_pkcs8_pem_string(key: &PrivateKey) -> Result<String, WarpgateError> {

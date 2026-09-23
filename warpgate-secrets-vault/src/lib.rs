@@ -177,11 +177,6 @@ impl VaultBackend {
 #[async_trait]
 impl SecretResolver for VaultBackend {
     async fn resolve(&self, reference: &SecretRef) -> Result<Secret<String>, SecretError> {
-        let field = reference.field.as_deref().ok_or_else(|| {
-            SecretError::InvalidRef(format!(
-                "a #field is required for Vault references (got '{reference}')"
-            ))
-        })?;
         self.assert_path_allowed(reference)?;
 
         let data = match self.read_kv(reference).await {
@@ -193,7 +188,7 @@ impl SecretResolver for VaultBackend {
             Err(e) => return Err(read_error(reference, e)),
         };
 
-        data.get(field)
+        data.get(&reference.field)
             .map(|v| Secret::new(value_to_string(v)))
             .ok_or_else(|| SecretError::NotFound {
                 path: reference.kv_path(),
@@ -337,7 +332,7 @@ mod tests {
     use super::*;
 
     fn reference(kv_path: &str) -> SecretRef {
-        format!("secret://b/{kv_path}").parse().unwrap()
+        format!("secret://b/{kv_path}#f").parse().unwrap()
     }
 
     #[test]

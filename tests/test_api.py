@@ -285,7 +285,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         id="import_ssh_own_key_reference",
         permission="config_edit",
         call=lambda api, r: api.import_ssh_own_key_reference_with_http_info(
-            sdk.ImportSSHClientKeyReferenceRequest(
+            sdk.ImportSshClientKeyReferenceRequest(
                 label=f"key-{uuid4()}",
                 reference="secret://not-configured/secret/key#private_key",
                 is_default=False,
@@ -295,15 +295,21 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     ),
     AdminApiTestCase(
         id="get_secret_backends",
-        permission=None,
+        permission="config_edit",
         call=lambda api, r: api.get_secret_backends_with_http_info(),
         expected_statuses={200},
     ),
     AdminApiTestCase(
-        id="get_secret_reference_usage",
+        id="get_secret_backends_summary",
         permission=None,
-        call=lambda api, r: api.get_secret_reference_usage_with_http_info(),
+        call=lambda api, r: api.get_secret_backends_summary_with_http_info(),
         expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_secret_reference_usage",
+        permission="targets_edit",
+        call=lambda api, r: api.get_secret_reference_usage_with_http_info(str(uuid4())),
+        expected_statuses={404},
     ),
     AdminApiTestCase(
         id="create_secret_backend",
@@ -366,7 +372,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         id="import_ssh_own_key",
         permission="config_edit",
         call=lambda api, r: api.import_ssh_own_key_with_http_info(
-            sdk.ImportSSHClientKeyRequest(
+            sdk.ImportSshClientKeyRequest(
                 label=f"key-{uuid4()}",
                 secret_key=open("ssh-keys/id_ed25519").read(),
                 is_default=False,

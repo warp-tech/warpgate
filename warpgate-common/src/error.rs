@@ -41,6 +41,9 @@ pub enum WarpgateError {
     NoHostInUrl,
     #[error("Inconsistent state: {0}")]
     InconsistentState(String),
+    /// A request that passed schema validation but is still not acceptable
+    #[error("{0}")]
+    InvalidRequest(String),
     /// Somebody called WarpgateServerHandle::set_user_info twice
     #[error("user session is already attributed to another user")]
     UserSessionAlreadyAttributed,
@@ -116,6 +119,7 @@ impl UserFacingReason for WarpgateError {
             | Self::RateLimiterInvalidQuota(_)
             | Self::ExternalHostUnknown
             | Self::NoHostInUrl
+            | Self::InvalidRequest(_)
             | Self::SessionEnd => self.to_string(),
 
             Self::Sso(e) => e.user_facing_reason(),
@@ -198,6 +202,7 @@ impl ResponseError for WarpgateError {
             | Self::RoleNotFound(_)
             | Self::IpAddrNotAllowed(..) => poem::http::StatusCode::UNAUTHORIZED,
             Self::UserAlreadyExists(_) => poem::http::StatusCode::CONFLICT,
+            Self::InvalidRequest(_) => poem::http::StatusCode::BAD_REQUEST,
             Self::NoAdminAccess | Self::NoAdminPermission(_) => poem::http::StatusCode::FORBIDDEN,
             Self::SessionLimitReached => poem::http::StatusCode::TOO_MANY_REQUESTS,
             Self::SessionNotApproved => poem::http::StatusCode::FORBIDDEN,

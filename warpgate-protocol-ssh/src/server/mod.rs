@@ -43,7 +43,7 @@ pub async fn bind_server(
 ) -> Result<BoxFuture<'static, Result<()>>> {
     let russh_config_init = Arc::new({
         RusshConfigInit {
-            keys: load_host_keys(&services.db, &*services.secret_backends).await?,
+            keys: load_host_keys(&services.db).await?,
         }
     });
 
