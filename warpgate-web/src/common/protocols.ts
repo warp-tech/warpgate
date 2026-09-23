@@ -129,6 +129,34 @@ export function makeExamplePostgreSQLURI(opt: ConnectionOptions): string {
     return `postgresql://${makePostgreSQLUsername(opt)}${pwSuffix}@${protocolHost(opt, 'postgres')}:${protocolPortString(opt, 'postgres')}/${dbName}?sslmode=require`
 }
 
+export const makeRedisUsername = makeMySQLUsername
+
+export function makeExampleRedisCommand(opt: ConnectionOptions): string {
+    const args = [
+        'redis-cli',
+        '-h',
+        protocolHost(opt, 'redis'),
+        '-p',
+        protocolPortString(opt, 'redis'),
+        '--user',
+        makeRedisUsername(opt),
+    ]
+    if (!opt.ticketSecret) {
+        args.push('--askpass')
+    }
+    const db = opt.targetDefaultDatabaseName?.trim()
+    if (db) {
+        args.push('-n', db)
+    }
+    return shellEscape(args)
+}
+
+export function makeExampleRedisURI(opt: ConnectionOptions): string {
+    const pwSuffix = opt.ticketSecret ? '' : ':<password>'
+    const db = opt.targetDefaultDatabaseName?.trim()
+    return `redis://${makeRedisUsername(opt)}${pwSuffix}@${protocolHost(opt, 'redis')}:${protocolPortString(opt, 'redis')}${db ? `/${db}` : ''}`
+}
+
 export function makeTargetURL(opt: ConnectionOptions): string {
     const host = `${opt.targetExternalHost ?? protocolHost(opt, 'http')}:${protocolPort(opt, 'http') ?? 443}`
 
@@ -170,6 +198,7 @@ export const possibleCredentials: Record<string, Set<CredentialKind>> = {
         CredentialKind.Totp,
         CredentialKind.WebUserApproval,
     ]),
+    redis: new Set([CredentialKind.Password]),
 }
 
 export function abbreviatePublicKey(key: string): string {
@@ -316,6 +345,7 @@ export const PROTOCOL_PROPERTIES: Record<string, ProtocolProperties> = {
     Kubernetes: { sessionsCanBeClosed: false },
     VNC: { sessionsCanBeClosed: true },
     RDP: { sessionsCanBeClosed: true },
+    Redis: { sessionsCanBeClosed: true },
 }
 
 export type ProtocolID =
@@ -326,6 +356,7 @@ export type ProtocolID =
     | 'kubernetes'
     | 'vnc'
     | 'rdp'
+    | 'redis'
 
 // Get effective possible credentials for a protocol, considering global SSH auth settings
 export function getEffectivePossibleCredentials(

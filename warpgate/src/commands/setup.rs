@@ -16,7 +16,7 @@ use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{
     GlobalParams, HttpConfig, KubernetesConfig, ListenEndpoint, MySqlConfig, PostgresConfig,
-    RdpConfig, Secret, SshConfig, VncConfig, WarpgateConfigStore,
+    RdpConfig, RedisConfig, Secret, SshConfig, VncConfig, WarpgateConfigStore,
 };
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
 use warpgate_core::db::connect_to_db_and_migrate;
@@ -321,6 +321,31 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
                 store.rdp.listen = prompt_endpoint(
                     "Endpoint to listen for RDP connections on",
                     &RdpConfig::default().listen,
+                );
+            }
+        }
+    }
+
+    // Redis listens in plaintext by default (unlike the other DB protocols)
+    // since it has no in-protocol STARTTLS and most self-hosted Redis
+    // deployments run without TLS.
+    if let Commands::UnattendedSetup { redis_port, .. } = &cli.command {
+        if let Some(redis_port) = redis_port {
+            store.redis.enable = true;
+            store.redis.listen =
+                ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), *redis_port));
+        }
+    } else {
+        if !is_docker() {
+            store.redis.enable = dialoguer::Confirm::with_theme(&theme)
+                .default(false)
+                .with_prompt("Accept Redis connections?")
+                .interact()?;
+
+            if store.redis.enable {
+                store.redis.listen = prompt_endpoint(
+                    "Endpoint to listen for Redis connections on",
+                    &RedisConfig::default().listen,
                 );
             }
         }

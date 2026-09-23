@@ -98,6 +98,18 @@
         }
       ]
     },
+    "redis": {
+      "$ref": "#/$defs/RedisConfig",
+      "default": {
+        "certificate": "",
+        "enable": false,
+        "external_host": null,
+        "external_port": null,
+        "key": "",
+        "listen": "[::]:6379",
+        "proxy_protocol": false
+      }
+    },
     "ssh": {
       "$ref": "#/$defs/SshConfig",
       "default": {
@@ -416,6 +428,50 @@
         "path": {
           "type": "string",
           "default": "./data/recordings"
+        }
+      }
+    },
+    "RedisConfig": {
+      "type": "object",
+      "properties": {
+        "certificate": {
+          "description": "Unlike the other database-protocol listeners, Redis has no in-protocol\nSTARTTLS: an empty certificate/key means the listener runs in plaintext.",
+          "type": "string",
+          "default": ""
+        },
+        "enable": {
+          "type": "boolean",
+          "default": false
+        },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "external_port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "default": null,
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "key": {
+          "type": "string",
+          "default": ""
+        },
+        "listen": {
+          "$ref": "#/$defs/ListenEndpoint",
+          "default": "[::]:6379"
+        },
+        "proxy_protocol": {
+          "description": "Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.",
+          "type": "boolean",
+          "default": false
         }
       }
     },

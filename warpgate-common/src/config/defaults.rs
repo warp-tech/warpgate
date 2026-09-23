@@ -31,6 +31,10 @@ pub const fn _default_rdp_port() -> u16 {
     3389
 }
 
+pub const fn _default_redis_port() -> u16 {
+    6379
+}
+
 #[inline]
 pub fn _default_username() -> String {
     "root".to_owned()
@@ -86,6 +90,11 @@ pub fn _default_vnc_listen() -> ListenEndpoint {
 #[inline]
 pub fn _default_rdp_listen() -> ListenEndpoint {
     ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 3389))
+}
+
+#[inline]
+pub fn _default_redis_listen() -> ListenEndpoint {
+    ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 6379))
 }
 
 #[inline]

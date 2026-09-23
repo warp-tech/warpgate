@@ -1545,6 +1545,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "cookie-factory"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "396de984970346b0d9e93d1415082923c679e5ae5c3ee3dcbd104f5610af126b"
+
+[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1618,6 +1624,12 @@ dependencies = [
  "digest 0.10.7",
  "spin 0.10.1",
 ]
+
+[[package]]
+name = "crc16"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "338089f42c427b86394a5ee60ff321da23a5c89c9d89514c829687b26359fcff"
 
 [[package]]
 name = "crc32fast"
@@ -6181,6 +6193,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "redis-protocol"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cdba59219406899220fc4cdfd17a95191ba9c9afb719b5fa5a083d63109a9f1"
+dependencies = [
+ "bytes",
+ "bytes-utils",
+ "cookie-factory",
+ "crc16",
+ "log",
+ "nom",
+ "tokio-util",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8938,6 +8965,7 @@ dependencies = [
  "warpgate-protocol-mysql",
  "warpgate-protocol-postgres",
  "warpgate-protocol-rdp",
+ "warpgate-protocol-redis",
  "warpgate-protocol-ssh",
  "warpgate-protocol-vnc",
  "warpgate-tls",
@@ -9427,6 +9455,31 @@ dependencies = [
  "warpgate-desktop-ui",
  "warpgate-tls",
  "x509-cert",
+]
+
+[[package]]
+name = "warpgate-protocol-redis"
+version = "0.28.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "futures",
+ "humantime",
+ "redis-protocol",
+ "rustls 0.23.43",
+ "socket2 0.6.5",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-rustls 0.26.4",
+ "tokio-util",
+ "tracing",
+ "url",
+ "uuid",
+ "warpgate-aws",
+ "warpgate-common",
+ "warpgate-common-http",
+ "warpgate-core",
+ "warpgate-tls",
 ]
 
 [[package]]

@@ -94,6 +94,7 @@ pub enum Protocol {
     Kubernetes,
     Vnc,
     Rdp,
+    Redis,
 }
 
 impl Protocol {
@@ -110,6 +111,7 @@ impl Protocol {
             Self::Kubernetes => "Kubernetes",
             Self::Vnc => "VNC",
             Self::Rdp => "RDP",
+            Self::Redis => "Redis",
         }
     }
 }

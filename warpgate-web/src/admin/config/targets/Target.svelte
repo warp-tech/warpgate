@@ -134,7 +134,7 @@
                 >
                     <ModalHeader>Access instructions</ModalHeader>
                     <ModalBody>
-                        {#if target.options.kind === 'Ssh' || target.options.kind === 'MySql' || target.options.kind === 'Postgres' || target.options.kind === 'Kubernetes'}
+                        {#if target.options.kind === 'Ssh' || target.options.kind === 'MySql' || target.options.kind === 'Postgres' || target.options.kind === 'Kubernetes' || target.options.kind === 'Redis'}
                             <Loadable promise={api.getUsers()}>
                                 {#snippet children(users)}
                                     <FormGroup floating label="Select a user">
@@ -160,7 +160,10 @@
                                 targetKind={target.options.kind}
                                 targetExternalHost={target.options.kind === TargetKind.Http ? target.options.externalHost : undefined}
                                 targetDefaultDatabaseName={(target.options.kind === TargetKind.MySql || target.options.kind === TargetKind.Postgres)
-                                ? target.options.defaultDatabaseName : undefined}
+                                ? target.options.defaultDatabaseName
+                                : target.options.kind === TargetKind.Redis
+                                ? target.options.database?.toString()
+                                : undefined}
                             />
                         {/key}
                     </ModalBody>
@@ -194,6 +197,9 @@
                             {/if}
                             {#if target.options.kind === 'Kubernetes'}
                                 Kubernetes target
+                            {/if}
+                            {#if target.options.kind === 'Redis'}
+                                Redis target
                             {/if}
                         </div>
                     </div>
@@ -412,6 +418,138 @@
 
                             <TlsConfiguration bind:value={target.options.tls} />
                         {/if}
+
+                        {#if target.options.kind === 'Redis'}
+                            <div class="row">
+                                <div class="col-8">
+                                    <FormGroup floating label="Target host">
+                                        <input
+                                            class="form-control"
+                                            bind:value={target.options.host}
+                                        >
+                                    </FormGroup>
+                                </div>
+                                <div class="col-4">
+                                    <FormGroup floating label="Target port">
+                                        <input
+                                            class="form-control"
+                                            type="number"
+                                            bind:value={target.options.port}
+                                            min="1"
+                                            max="65535"
+                                            step="1"
+                                        >
+                                    </FormGroup>
+                                </div>
+                            </div>
+
+                            <FormGroup
+                                floating
+                                label="Username (optional, Redis ACL)"
+                            >
+                                <input
+                                    class="form-control"
+                                    bind:value={target.options.username}
+                                >
+                            </FormGroup>
+
+                            <FormGroup floating label="Authenticate using">
+                                <select
+                                    class="form-control"
+                                    value={target.options.auth?.kind ?? 'None'}
+                                    onchange={e => {
+                                    const kind = e.currentTarget.value
+                                    if (target.options.kind !== 'Redis') return
+                                    if (kind === 'None') {
+                                        target.options.auth = undefined
+                                    } else if (kind === 'Password') {
+                                        target.options.auth = { kind: 'Password', password: '' }
+                                    } else {
+                                        target.options.auth = { kind: 'IamRole', service: 'ElastiCache' }
+                                    }
+                                }}
+                                >
+                                    <option value="None">
+                                        No authentication
+                                    </option>
+                                    <option value="Password">Password</option>
+                                    {#if $serverInfo?.runningOnEc2}
+                                        <option value="IamRole">
+                                            IAM Role (experimental)
+                                        </option>
+                                    {/if}
+                                </select>
+                            </FormGroup>
+
+                            {#if target.options.auth?.kind === 'Password'}
+                                <FormGroup floating label="Password">
+                                    <input
+                                        class="form-control"
+                                        type="password"
+                                        autocomplete="off"
+                                        bind:value={target.options.auth.password}
+                                    >
+                                </FormGroup>
+                            {/if}
+
+                            {#if target.options.auth?.kind === 'IamRole'}
+                                <FormGroup floating label="AWS service">
+                                    <select
+                                        class="form-control"
+                                        bind:value={target.options.auth.service}
+                                    >
+                                        <option value="ElastiCache">
+                                            ElastiCache
+                                        </option>
+                                        <option value="MemoryDb">
+                                            MemoryDB
+                                        </option>
+                                    </select>
+                                </FormGroup>
+                                <FormGroup
+                                    floating
+                                    label="IAM cluster/replication-group id"
+                                >
+                                    <input
+                                        class="form-control"
+                                        bind:value={target.options.iamClusterId}
+                                        placeholder={target.options.host}
+                                    >
+                                    <small class="form-text text-muted">
+                                        Falls back to the target host above if
+                                        left empty.
+                                    </small>
+                                </FormGroup>
+                                <FormGroup floating label="AWS region">
+                                    <input
+                                        class="form-control"
+                                        bind:value={target.options.iamRegion}
+                                        placeholder="us-east-1"
+                                    >
+                                </FormGroup>
+                            {/if}
+
+                            <FormGroup
+                                floating
+                                label="Database index (optional)"
+                            >
+                                <input
+                                    class="form-control"
+                                    type="number"
+                                    min="0"
+                                    max="255"
+                                    step="1"
+                                    bind:value={target.options.database}
+                                >
+                                <small class="form-text text-muted">
+                                    Runs <code>SELECT</code> to this numbered
+                                    database right after connecting. Leave empty
+                                    to stay on the target's default (0).
+                                </small>
+                            </FormGroup>
+
+                            <TlsConfiguration bind:value={target.options.tls} />
+                        {/if}
                     </Section>
 
                     <Section
@@ -547,6 +685,26 @@
                             a retryable response until then.
                         </small>
                     </Section>
+
+                    {#if target.options.kind === 'Redis'}
+                        <Section id="advanced" title="Advanced">
+                            <FormGroup floating label="Idle timeout">
+                                <input
+                                    class="form-control"
+                                    type="text"
+                                    placeholder="10m"
+                                    bind:value={target.options.idleTimeout}
+                                    title="Human-readable duration (e.g., '30m', '1h', '2h30m'). Default: 10m"
+                                >
+                                <small class="form-text text-muted">
+                                    How long an authenticated session can remain
+                                    idle before requiring re-authentication.
+                                    Examples: 30m, 1h, 2h30m. Leave empty for
+                                    default (10m).
+                                </small>
+                            </FormGroup>
+                        </Section>
+                    {/if}
 
                     {#if $serverInfo?.ticketSelfServiceEnabled}
                         <Section

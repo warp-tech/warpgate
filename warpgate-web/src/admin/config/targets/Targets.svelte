@@ -199,6 +199,9 @@
                         {#if target.options.kind === TargetKind.Rdp}
                             RDP
                         {/if}
+                        {#if target.options.kind === TargetKind.Redis}
+                            Redis
+                        {/if}
                     </small>
                 </a>
             {/snippet}
