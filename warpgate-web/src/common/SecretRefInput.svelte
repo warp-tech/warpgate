@@ -136,9 +136,7 @@
             key: draftKey,
         }),
     )
-    let complete = $derived(
-        Boolean(draftBackend && draftPath && draftKey),
-    )
+    let complete = $derived(Boolean(draftBackend && draftPath && draftKey))
     let sharedWith = $derived(
         (usage.find(u => u.reference === draft)?.usages ?? []).filter(
             u => !dequal(intendedUsage, u),
@@ -208,7 +206,7 @@
             backends = list
             backendsLoaded = true
             if (!draftBackend && list.length) {
-                draftBackend = list[0]!.name
+                draftBackend = list[0]?.name ?? ''
             }
         })
     }
@@ -284,7 +282,8 @@
                     No secret backends. Add one under
                     <a href="/@warpgate/admin#/config/secret-backends">
                         Config → Secret backends
-                    </a>.
+                    </a
+                    >.
                 </div>
             {/if}
         </FormGroup>

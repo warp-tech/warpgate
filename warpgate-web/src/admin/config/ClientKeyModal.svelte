@@ -27,7 +27,7 @@
     let validated = $state(false)
     let keySource = $state<'paste' | 'reference'>('paste')
 
-    function changeKeySource (source: string) {
+    function changeKeySource(source: string) {
         keySource = source === 'reference' ? 'reference' : 'paste'
         secretKey = ''
     }

@@ -10,9 +10,9 @@
     } from '@sveltestrap/sveltestrap'
     import type {
         BackendType,
+        SecretBackend,
         SecretBackendAuth,
         SecretBackendRequest,
-        SecretBackend,
     } from 'admin/lib/api'
 
     interface Props {
@@ -79,7 +79,10 @@
             namespace: namespace || undefined,
             auth: auth(),
             tlsSkipVerify,
-            allowedPaths: allowedPaths.split('\n').map(p => p.trim()).filter(p => p),
+            allowedPaths: allowedPaths
+                .split('\n')
+                .map(p => p.trim())
+                .filter(p => p),
         })
     }
 
@@ -98,7 +101,13 @@
     >
         <ModalBody>
             <FormGroup floating label="Name">
-                <Input type="text" required pattern="[A-Za-z0-9._\-]+" maxlength={64} bind:value={name} />
+                <Input
+                    type="text"
+                    required
+                    pattern="[A-Za-z0-9._\-]+"
+                    maxlength={64}
+                    bind:value={name}
+                />
             </FormGroup>
             <FormGroup floating label="Type">
                 <Input type="select" bind:value={backendType}>
@@ -107,7 +116,12 @@
                 </Input>
             </FormGroup>
             <FormGroup floating label="Address">
-                <Input type="url" required placeholder="https://vault.example.com:8200" bind:value={address} />
+                <Input
+                    type="url"
+                    required
+                    placeholder="https://vault.example.com:8200"
+                    bind:value={address}
+                />
             </FormGroup>
             <FormGroup floating label="Namespace (optional)">
                 <Input type="text" bind:value={namespace} />
@@ -122,14 +136,26 @@
             </FormGroup>
             {#if method === 'Token'}
                 <FormGroup floating label="Token">
-                    <Input type="password" autocomplete="off" required={!secretStored} placeholder={secretPlaceholder} bind:value={token} />
+                    <Input
+                        type="password"
+                        autocomplete="off"
+                        required={!secretStored}
+                        placeholder={secretPlaceholder}
+                        bind:value={token}
+                    />
                 </FormGroup>
             {:else if method === 'AppRole'}
                 <FormGroup floating label="Role ID">
                     <Input type="text" required bind:value={roleId} />
                 </FormGroup>
                 <FormGroup floating label="Secret ID">
-                    <Input type="password" autocomplete="off" required={!secretStored} placeholder={secretPlaceholder} bind:value={secretId} />
+                    <Input
+                        type="password"
+                        autocomplete="off"
+                        required={!secretStored}
+                        placeholder={secretPlaceholder}
+                        bind:value={secretId}
+                    />
                 </FormGroup>
                 <FormGroup floating label="Auth mount (default: approle)">
                     <Input type="text" bind:value={mount} />
@@ -143,16 +169,34 @@
                 </FormGroup>
             {/if}
 
-            <FormGroup floating label="Allowed KV path prefixes, one per line (empty: any)">
-                <Input type="textarea" style="height: 5rem" bind:value={allowedPaths} />
+            <FormGroup
+                floating
+                label="Allowed KV path prefixes, one per line (empty: any)"
+            >
+                <Input
+                    type="textarea"
+                    style="height: 5rem"
+                    bind:value={allowedPaths}
+                />
             </FormGroup>
-            <Input type="switch" label="Skip TLS certificate verification" bind:checked={tlsSkipVerify} />
+            <Input
+                type="switch"
+                label="Skip TLS certificate verification"
+                bind:checked={tlsSkipVerify}
+            />
         </ModalBody>
         <ModalFooter>
-            <Button type="submit" color="primary" class="modal-button" on:click={() => (validated = true)}>
+            <Button
+                type="submit"
+                color="primary"
+                class="modal-button"
+                on:click={() => (validated = true)}
+            >
                 Save
             </Button>
-            <Button class="modal-button" color="danger" on:click={_cancel}>Cancel</Button>
+            <Button class="modal-button" color="danger" on:click={_cancel}
+                >Cancel</Button
+            >
         </ModalFooter>
     </Form>
 </Modal>

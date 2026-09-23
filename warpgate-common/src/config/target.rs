@@ -563,11 +563,10 @@ pub fn redact_target_secrets(value: &mut serde_json::Value) {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
 
     use super::{
         DatabaseTargetAuth, DatabaseTargetIamRoleAuth, DatabaseTargetPasswordAuth, MaybeSecretRef,
-        PostgresProtocolVersion, RdpTargetCompression, RdpTlsSecurity, SSHTargetAuth,
+        PostgresProtocolVersion, RdpTargetCompression, RdpTlsSecurity, SSHTargetAuth, SecretRef,
         SshTargetIamRoleAuth, SshTargetPasswordAuth, SshTargetPublicKeyAuth, TargetHTTPOptions,
         TargetKubernetesOptions, TargetMySqlOptions, TargetOptions, TargetPostgresOptions,
         TargetRdpOptions, TargetSSHOptions, Tls,
@@ -582,21 +581,29 @@ mod tests {
         TargetOptions::Ssh(options)
     }
 
-    fn db_password_auth(password: &str) -> DatabaseTargetAuth {
-        DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth {
-            password: MaybeSecretRef::from_str(password).unwrap(),
-        })
+    fn reference() -> MaybeSecretRef {
+        SecretRef {
+            backend: "vault-prod".into(),
+            mount: "secret".into(),
+            path: "db".into(),
+            field: "password".into(),
+        }
+        .into()
+    }
+
+    fn db_password_auth(password: MaybeSecretRef) -> DatabaseTargetAuth {
+        DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth { password })
     }
 
     #[test]
     fn password_references_are_collected() {
         let ssh = ssh_options(SSHTargetAuth::Password(SshTargetPasswordAuth {
-            password: MaybeSecretRef::from_str(REFERENCE).unwrap(),
+            password: reference(),
         }));
         let mut mysql: TargetMySqlOptions = serde_json::from_str("{}").unwrap();
-        mysql.auth = db_password_auth(REFERENCE);
+        mysql.auth = db_password_auth(reference());
         let mut postgres: TargetPostgresOptions = serde_json::from_str("{}").unwrap();
-        postgres.auth = db_password_auth(REFERENCE);
+        postgres.auth = db_password_auth(reference());
 
         for options in [
             ssh,
@@ -618,10 +625,10 @@ mod tests {
         let mut mysql: TargetMySqlOptions = serde_json::from_str("{}").unwrap();
         mysql.auth = DatabaseTargetAuth::IamRole(DatabaseTargetIamRoleAuth::default());
         let mut postgres: TargetPostgresOptions = serde_json::from_str("{}").unwrap();
-        postgres.auth = db_password_auth("hunter2");
+        postgres.auth = db_password_auth(MaybeSecretRef::default());
         let cases = [
             ssh_options(SSHTargetAuth::Password(SshTargetPasswordAuth {
-                password: MaybeSecretRef::from_str("hunter2").unwrap(),
+                password: MaybeSecretRef::default(),
             })),
             ssh_options(SSHTargetAuth::PublicKey(SshTargetPublicKeyAuth::default())),
             ssh_options(SSHTargetAuth::IamRole(SshTargetIamRoleAuth::default())),

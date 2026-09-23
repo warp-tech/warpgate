@@ -73,7 +73,7 @@
         }),
         '/secret-backends': wrap({
             asyncComponent: () =>
-                import('./secret-backends/SecretBackends.svelte') as any,
+                import('./secret-backends/SecretBackends.svelte'),
         }),
         '/target-groups/create': wrap({
             asyncComponent: () =>

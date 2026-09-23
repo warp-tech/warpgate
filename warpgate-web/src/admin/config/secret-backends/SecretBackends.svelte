@@ -103,16 +103,16 @@
 {#key gen}
     <ItemList {load} showSearch={false}>
         {#snippet item(backend)}
-            {@const status = health[backend.id]}
+            {@const probe = health[backend.id]}
             <div class="list-group-item px-0">
                 <div class="d-flex align-items-center gap-2">
                     <strong>{backend.name}</strong>
                     <Badge color="secondary">{backend.backendType}</Badge>
-                    {#if status?.error}
-                        <Badge color="danger" title={status.error}
+                    {#if probe?.error}
+                        <Badge color="danger" title={probe.error}
                             >Unhealthy</Badge
                         >
-                    {:else if status}
+                    {:else if probe}
                         <Badge color="success">Healthy</Badge>
                     {/if}
                     <Button
@@ -155,8 +155,8 @@
                     {/if}
                     · {backend.auth.method}
                 </div>
-                {#if status?.error}
-                    <div class="text-danger small">{status.error}</div>
+                {#if probe?.error}
+                    <div class="text-danger small">{probe.error}</div>
                 {/if}
             </div>
         {/snippet}
