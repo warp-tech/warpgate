@@ -329,10 +329,11 @@ impl AuthStateStore {
                 {
                     error!(%error, "Failed to record a session approval request");
                 }
-                sink.cluster.notify_global(ClusterNotification::WebAuthRequested {
-                    session_id: id,
-                    user_id,
-                });
+                sink.cluster
+                    .notify_global(ClusterNotification::WebAuthRequested {
+                        session_id: id,
+                        user_id,
+                    });
             }
         });
 
