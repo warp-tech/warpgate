@@ -182,6 +182,10 @@ class ProcessManager:
                 "--rm",
                 "-p",
                 f"{port}:22",
+                # Lets forwarding tests reach servers run by the test itself.
+                # Docker Desktop provides this name anyway; Linux engines don't.
+                "--add-host",
+                "host.docker.internal:host-gateway",
                 "-v",
                 f"{data_dir}:{data_dir}",
                 "-v",
