@@ -3235,8 +3235,10 @@ mod tests {
         /// not clamp from above. Sharing it meant a silent target held the
         /// session, the ephemeral private key and a live certificate for a
         /// window measured in Vault's slowness — 55 seconds by default and
-        /// unbounded in principle. Driven on a paused clock, so it costs no
-        /// wall time and cannot go flaky on a loaded machine.
+        /// unbounded in principle. Scaled down to real milliseconds rather than
+        /// a paused clock — the workspace's tokio has no `test-util` — so it
+        /// would only flake if the runtime stalled for longer than the gap
+        /// between the bound and the target's delay.
         #[tokio::test]
         async fn a_target_that_never_answers_userauth_is_given_up_on() {
             use std::time::Duration;
