@@ -1,0 +1,50 @@
+# syntax=docker/dockerfile:1.7
+#
+# Toolchain-only image for reviewing the UI without installing Rust, Node or
+# Java on the host.
+#
+# This image deliberately contains NO source and builds nothing. The repository
+# is bind-mounted at /opt/warpgate at run time and the build happens inside the
+# container against named volumes for target/ and the cargo registry. That is
+# the whole point: an image rebuild is then needed only when the *toolchain*
+# changes, never when you edit a Svelte file.
+#
+# Why /opt/warpgate specifically, and why it must not change:
+#   warpgate-web embeds the frontend with rust-embed and `default-features =
+#   false`, i.e. without `debug-embed`. In a DEBUG build rust-embed resolves
+#   the asset folder at compile time and reads it from disk on every lookup,
+#   and warpgate-protocol-http serves via EmbeddedFilesEndpoint, which is a
+#   per-request lookup. So a debug binary compiled at /opt/warpgate reads
+#   /opt/warpgate/warpgate-web/dist live. Mount the repo anywhere else and the
+#   compiled-in path stops matching the mount, and you get 404s for every
+#   asset.
+#
+# See docker/docker-compose.dev.yml for the run configuration.
+
+FROM rust:1.97.1-bookworm@sha256:0e2bcaef56d041a486784e54104a81aebe0da44bd03019bd70bc0401e42e4a97
+
+ENV DEBIAN_FRONTEND=noninteractive
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# Node for the frontend, a JRE for the OpenAPI generator, just for the task
+# recipes — the same three the release image installs, for the same reasons.
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates-java nodejs default-jre-headless sqlite3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && cargo install --locked just@1.4.0
+
+WORKDIR /opt/warpgate
+
+# Keep cargo's registry and the build directory on volumes rather than in the
+# image, so they survive `docker compose down` and the second build is
+# incremental.
+ENV CARGO_HOME=/cargo
+ENV CARGO_TARGET_DIR=/opt/warpgate/target
+
+ENV WARPGATE_CONFIG=/data/warpgate.yaml
+
+# No ENTRYPOINT: compose drives this, and an interactive shell is the most
+# useful default when something needs poking at.
+CMD ["bash"]

@@ -27,19 +27,19 @@
 
 <style>
     section {
-        scroll-margin-top: 50px;
+        /* Clears the sticky top bar plus the section-tab strip */
+        scroll-margin-top: calc(var(--wg-topbar-height) + var(--wg-space-2xl));
     }
 
     .sectioned-form-section {
-        margin: 0 0 3rem;
-    }
-
-    .sectioned-form-section:last-child {
-        border-bottom: none;
+        margin: 0 0 var(--wg-space-3xl);
     }
 
     .sectioned-form-section h4 {
-        margin-top: 0;
-        margin-bottom: 1rem;
+        margin: 0 0 var(--wg-space-lg);
+        padding-bottom: var(--wg-space-sm);
+        border-bottom: var(--wg-border-width) solid var(--wg-border);
+        font: var(--wg-text-headline-md);
+        color: var(--wg-text);
     }
 </style>

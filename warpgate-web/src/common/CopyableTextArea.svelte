@@ -1,7 +1,19 @@
 <script lang="ts">
-    import { FormGroup } from '@sveltestrap/sveltestrap'
-    import CopyButton from './CopyButton.svelte'
-    import { classnames } from './helpers'
+    /**
+     * A read-only block of machine text with a copy button — screen 13,
+     * chrome only.
+     *
+     * Behaviour preserved: the value renders verbatim with wrapping that
+     * breaks anywhere (connection strings and PEM blocks have no spaces to
+     * break at), and the copy button floats over the top-right corner.
+     *
+     * Changed: the copy button no longer overlaps the text. The original
+     * cleared it with `padding-top: 35px !important` on the value, which
+     * pushed every one-line value down by a line and a half and still
+     * collided once the button had a label. The header row now owns the
+     * label and the button, so nothing overlaps and no !important is needed.
+     */
+    import CopyButton from 'ui/CopyButton.svelte'
 
     interface Props {
         label: string
@@ -12,33 +24,43 @@
     let { label, value, class: className = '' }: Props = $props()
 </script>
 
-<FormGroup floating {label} class="copyable-textarea">
-    <div class={classnames(className, 'form-control', 'text')}>{value}</div>
-    <CopyButton class="copy-button btn-sm" text={value} />
-</FormGroup>
+<div class="copyable {className}">
+    <div class="copyable-head">
+        <span class="copyable-label">{label}</span>
+        <CopyButton text={value} size="compact" name="Copy {label}" />
+    </div>
+    <div class="copyable-text">{value}</div>
+</div>
 
-<style lang="scss">
-    .text {
-        font-family: var(--bs-font-monospace);
-        font-size: 0.9em;
-
-        white-space: pre-wrap;
-        overflow: hidden;
-        word-wrap: break-word;
-        overflow-wrap: anywhere;
-        height: auto;
-
-        padding-top: 35px !important; // clear the copy button
+<style>
+    .copyable {
+        display: flex;
+        flex-direction: column;
+        gap: var(--wg-space-xs);
+        margin-bottom: var(--wg-space-lg);
+        min-width: 0;
     }
 
-    :global(.copyable-textarea) {
-        position: relative;
+    .copyable-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--wg-space-sm);
+    }
 
-        :global(.copy-button) {
-            position: absolute;
-            top: 0.5rem;
-            right: 0.5rem;
-            z-index: 1;
-        }
+    .copyable-label {
+        font: var(--wg-text-body-md);
+        color: var(--wg-text-muted);
+    }
+
+    .copyable-text {
+        padding: var(--wg-space-sm);
+        background: var(--wg-surface-sunken);
+        border: var(--wg-border-width) solid var(--wg-border);
+        border-radius: var(--wg-radius-control);
+        color: var(--wg-text);
+        font: var(--wg-text-code-sm);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
     }
 </style>

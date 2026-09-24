@@ -1,15 +1,19 @@
 <script lang="ts">
-    import {
-        Button,
-        Form,
-        FormGroup,
-        Input,
-        Modal,
-        ModalBody,
-        ModalFooter,
-    } from '@sveltestrap/sveltestrap'
-
+    /**
+     * Generate an SSH client key — restyled in place.
+     *
+     * Behaviour preserved: label required, the two key kinds with Ed25519 as
+     * the default, and save(label, kind).
+     *
+     * Like ClientKeyModal, the sveltestrap `on:open` seeding is replaced by
+     * seeding at construction — the caller mounts this behind {#if}.
+     */
     import { SSHClientKeyKind } from 'admin/lib/api'
+    import Button from 'ui/Button.svelte'
+    import Input from 'ui/Input.svelte'
+    import 'ui/layout.css'
+    import Modal from 'ui/Modal.svelte'
+    import Select from 'ui/Select.svelte'
 
     interface Props {
         isOpen: boolean
@@ -18,12 +22,10 @@
 
     let { isOpen = $bindable(true), save }: Props = $props()
 
-    let field: HTMLInputElement | undefined = $state()
     let label = $state('')
     let kind = $state<SSHClientKeyKind>(SSHClientKeyKind.Ed25519)
-    let validated = $state(false)
 
-    function _save() {
+    function commit() {
         if (!label) {
             return
         }
@@ -31,56 +33,46 @@
         save(label, kind)
     }
 
-    function _cancel() {
+    function cancel() {
         isOpen = false
     }
 </script>
 
 <Modal
-    toggle={_cancel}
-    {isOpen}
-    on:open={() => {
-        label = ''
-        kind = SSHClientKeyKind.Ed25519
-        field?.focus()
-    }}
+    bind:open={isOpen}
+    title="Generate a client key"
+    size="sm"
+    onclose={cancel}
 >
-    <Form
-        {validated}
-        on:submit={e => {
-            _save()
+    <form
+        id="wg-generate-key-form"
+        class="wg-field-stack"
+        onsubmit={e => {
             e.preventDefault()
+            commit()
         }}
     >
-        <ModalBody>
-            <FormGroup floating label="Label">
-                <Input
-                    bind:inner={field}
-                    type="text"
-                    required
-                    bind:value={label}
-                />
-            </FormGroup>
-            <FormGroup floating label="Type">
-                <Input type="select" bind:value={kind}>
-                    <option value={SSHClientKeyKind.Ed25519}>Ed25519</option>
-                    <option value={SSHClientKeyKind.Rsa}>RSA</option>
-                </Input>
-            </FormGroup>
-        </ModalBody>
-        <ModalFooter>
-            <Button
-                type="submit"
-                color="primary"
-                class="modal-button"
-                on:click={() => (validated = true)}
-            >
-                Save
-            </Button>
+        <Input label="Label" required autofocus bind:value={label} />
 
-            <Button class="modal-button" color="danger" on:click={_cancel}>
-                Cancel
-            </Button>
-        </ModalFooter>
-    </Form>
+        <Select
+            label="Type"
+            bind:value={kind}
+            options={[
+                { value: SSHClientKeyKind.Ed25519, label: 'Ed25519' },
+                { value: SSHClientKeyKind.Rsa, label: 'RSA' },
+            ]}
+        />
+    </form>
+
+    {#snippet footer()}
+        <Button onclick={cancel}>Cancel</Button>
+        <Button
+            variant="primary"
+            type="submit"
+            form="wg-generate-key-form"
+            disabled={!label}
+        >
+            Save
+        </Button>
+    {/snippet}
 </Modal>

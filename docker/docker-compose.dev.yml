@@ -1,0 +1,78 @@
+# Review environment: run Warpgate from source with no host toolchain.
+#
+# For just RUNNING Warpgate, use `docker compose up` from the repository root;
+# compose.yaml there builds a release image and needs no arguments. This file
+# is for the thing that is bad at: rebuilding the frontend over and over
+# without rebuilding an image.
+#
+# Stands alone — do not combine it with the root compose.yaml.
+#
+#   docker compose -f docker/docker-compose.dev.yml build       # once
+#   docker compose -f docker/docker-compose.dev.yml run --rm dev bootstrap
+#   docker compose -f docker/docker-compose.dev.yml up warpgate
+#
+# After that, rebuilding the frontend is a seconds-long operation that needs no
+# image rebuild and no container restart:
+#
+#   docker compose -f docker/docker-compose.dev.yml run --rm dev ui
+#
+# ...then refresh the browser. See the note in Dockerfile.dev for why that
+# works (debug rust-embed reads dist from disk per request).
+
+name: warpgate-dev
+
+services:
+  # One-shot toolchain container: builds, generates, sets up. Not long-running.
+  dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dev
+    image: warpgate-dev-toolchain
+    working_dir: /opt/warpgate
+    environment:
+      # Used by `bootstrap`; override on the command line for anything real.
+      WARPGATE_ADMIN_PASSWORD: ${WARPGATE_ADMIN_PASSWORD:-admin}
+      RUST_BACKTRACE: "1"
+    volumes:
+      - ..:/opt/warpgate
+      # These three MUST overlay the bind mount.
+      #   node_modules: the host tree is Windows-built; esbuild and rollup ship
+      #     platform-native binaries and a Windows node_modules is unusable on
+      #     Linux.
+      #   target, cargo: keeping them off the bind mount avoids writing a
+      #     multi-GB build directory back onto the host filesystem, which on
+      #     Windows bind mounts is also extremely slow.
+      - node_modules:/opt/warpgate/warpgate-web/node_modules
+      - target:/opt/warpgate/target
+      - cargo:/cargo
+      - data:/data
+    entrypoint: ["/opt/warpgate/docker/dev-entrypoint.sh"]
+
+  # Long-running gateway. Shares every volume with `dev`, so it runs whatever
+  # `dev` last built.
+  warpgate:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dev
+    image: warpgate-dev-toolchain
+    working_dir: /opt/warpgate
+    environment:
+      RUST_BACKTRACE: "1"
+    volumes:
+      - ..:/opt/warpgate
+      - node_modules:/opt/warpgate/warpgate-web/node_modules
+      - target:/opt/warpgate/target
+      - cargo:/cargo
+      - data:/data
+    ports:
+      - "8888:8888"
+      - "2222:2222"
+      - "33306:33306"
+    entrypoint: ["/opt/warpgate/docker/dev-entrypoint.sh"]
+    command: ["serve"]
+
+volumes:
+  node_modules:
+  target:
+  cargo:
+  data:

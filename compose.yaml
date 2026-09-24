@@ -1,0 +1,176 @@
+# Warpgate — one command, from a clean checkout:
+#
+#     docker compose up
+#
+# That builds the image from this working tree, runs first-time setup if there
+# is no config yet, and starts the gateway. Nothing else is required: no host
+# toolchain, no -f flags, no build args, no separate `setup` step.
+#
+#   admin UI   https://localhost:8888/@warpgate/admin
+#   portal     https://localhost:8888/@warpgate
+#   SSH        localhost:2222
+#   MySQL      localhost:33306
+#
+# The certificate is self-signed on first run, so the browser will warn once.
+#
+# ── First run ────────────────────────────────────────────────────────────────
+# If WARPGATE_ADMIN_PASSWORD is not set, a random one is generated and printed
+# to the log. It is not stored in plaintext anywhere, so copy it when you see
+# it. To choose your own instead, put it in a .env file beside this one — see
+# .env.example.
+#
+# Config and state live in ./data. Delete that directory to start over; keep it
+# and `docker compose up` will skip setup and just run.
+#
+# ── Deploying somewhere other than your laptop ───────────────────────────────
+# WARPGATE_EXTERNAL_HOST is unset by default, and that is the safe setting: it
+# leaves session cookies scoped to whatever host you browse to, so the gateway
+# works at localhost, at a hostname and at an IP without further thought.
+#
+# Set it when you use HTTP targets, whose URLs are built from it:
+#
+#     WARPGATE_EXTERNAL_HOST=gateway.example.com docker compose up -d
+#
+# Setting it also scopes session cookies to that host, so it must match the
+# address people actually type. Set to `localhost` while users reach the box at
+# 10.13.14.56, the browser drops every session cookie and sign-in silently does
+# nothing.
+#
+# It is read ONLY during first-time setup. Afterwards it lives in
+# data/warpgate.yaml and this variable is ignored — to change it later, edit
+# that file, or delete ./data to start over.
+#
+# ── Reviewing UI changes ─────────────────────────────────────────────────────
+# This file does a release build, so a Svelte edit means rebuilding the image.
+# For screen-by-screen review use docker/docker-compose.dev.yml instead, where
+# a frontend rebuild takes seconds and needs no restart.
+
+name: warpgate
+
+services:
+    warpgate:
+        build:
+            context: .
+            dockerfile: docker/Dockerfile
+            args:
+                # Fat LTO on the final binary needs more memory than a default
+                # Docker Desktop VM has (it takes half the host's RAM, so 7.6
+                # GB on a 16 GB machine) and the build is SIGKILLed partway
+                # through the last crate. This profile is defined in
+                # Cargo.toml, inherits `release` and only turns LTO off.
+                #
+                # For a full-LTO build, give the VM ~12 GB (Docker Desktop >
+                # Settings > Resources) and run:
+                #     CARGO_PROFILE=release docker compose build
+                CARGO_PROFILE: ${CARGO_PROFILE:-release-no-lto}
+        image: warpgate:local
+        ports:
+            - '8888:8888'
+            - '2222:2222'
+            - '33306:33306'
+        volumes:
+            - ./data:/data
+        environment:
+            # Deliberately EMPTY by default rather than `localhost`.
+            #
+            # external_host decides the session cookie's Domain. Defaulted to
+            # localhost and then reached at any other address, the cookie is
+            # scoped to `.localhost`, the browser discards it, every request is
+            # anonymous, and the sign-in page loads but never takes. Left
+            # empty, cookies are scoped to whatever host the request arrived
+            # on, which is correct everywhere. Set it once you know the public
+            # address — HTTP target URLs need it.
+            WARPGATE_EXTERNAL_HOST: ${WARPGATE_EXTERNAL_HOST:-}
+            # Empty means "generate one and print it".
+            WARPGATE_ADMIN_PASSWORD: ${WARPGATE_ADMIN_PASSWORD:-}
+        stdin_open: true
+        tty: true
+        restart: unless-stopped
+
+        # The image's entrypoint is `warpgate` itself, so `command:` can only
+        # pass it arguments — it cannot express "set up first, but only once".
+        # Overriding the entrypoint with a shell keeps that logic here instead
+        # of adding a wrapper script to the production image, which upstream
+        # does not have and which would then differ from the published one.
+        #
+        # The trailing "warpgate-entrypoint" is load-bearing. Docker appends
+        # the command to this array, and `sh -c SCRIPT foo` binds foo to $0,
+        # not $1 — so without a placeholder to absorb $0, `docker compose run
+        # warpgate setup` left "$#" at 0, the script never saw `setup`, and ran
+        # the gateway instead. With it, arguments start at $1 and the
+        # passthrough below forwards them to warpgate untouched.
+        #
+        # `$$` is an escaped `$`: a single one would be substituted by Compose
+        # before the container ever sees it.
+        entrypoint:
+            - /bin/sh
+            - -c
+            - |
+                set -e
+
+                # Docker creates a missing bind-mount source as root, while
+                # this image runs as uid 1000. On Docker Desktop the mount
+                # layer hides that; on a Linux host it does not, and the
+                # failure you get otherwise is a permission error from deep
+                # inside setup. Say the actual fix instead.
+                if ! touch /data/.writable 2>/dev/null; then
+                    echo "ERROR: /data is not writable by uid $$(id -u)." >&2
+                    echo "  On the host:  sudo chown -R $$(id -u):$$(id -g) ./data" >&2
+                    echo "  Or rebuild for your uid:" >&2
+                    echo "    docker compose build --build-arg USER_ID=\$$(id -u)" >&2
+                    exit 1
+                fi
+                rm -f /data/.writable
+
+                # Anything passed on the command line is a warpgate subcommand
+                # — `docker compose run warpgate setup`, `check`,
+                # `recover-access`, `client-keys`. Forward it and stop; the
+                # bootstrap below is only for the argument-less `up` path.
+                if [ "$$#" -gt 0 ]; then
+                    exec warpgate "$$@"
+                fi
+
+                if [ ! -f /data/warpgate.yaml ]; then
+                    if [ -z "$$WARPGATE_ADMIN_PASSWORD" ]; then
+                        # Generated rather than defaulted. A known password
+                        # baked into a compose file is fine right up until the
+                        # moment someone runs this on a reachable host, and
+                        # this is a gateway to other machines.
+                        WARPGATE_ADMIN_PASSWORD=$$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24)
+                        export WARPGATE_ADMIN_PASSWORD
+                        echo
+                        echo "=============================================="
+                        echo "  First run. Admin credentials:"
+                        echo
+                        echo "    username: admin"
+                        echo "    password: $$WARPGATE_ADMIN_PASSWORD"
+                        echo
+                        echo "  Stored only as a hash. Copy it now."
+                        echo "=============================================="
+                        echo
+                    fi
+
+                    if [ -n "$$WARPGATE_EXTERNAL_HOST" ]; then
+                        echo "external host: $$WARPGATE_EXTERNAL_HOST"
+                        echo "Session cookies are scoped to it, so reach the"
+                        echo "gateway at exactly that address or sign-in will"
+                        echo "appear to do nothing."
+                        set -- --external-host "$$WARPGATE_EXTERNAL_HOST"
+                    else
+                        echo "external host: not set. Cookies will be scoped"
+                        echo "to whatever host you browse to, which works at"
+                        echo "any address. Set WARPGATE_EXTERNAL_HOST if you"
+                        echo "use HTTP targets, whose URLs are built from it."
+                        set --
+                    fi
+
+                    warpgate unattended-setup \
+                        --data-path /data \
+                        --http-port 8888 \
+                        --ssh-port 2222 \
+                        --mysql-port 33306 \
+                        --record-sessions "$$@"
+                fi
+
+                exec warpgate run
+            - warpgate-entrypoint

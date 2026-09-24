@@ -1,10 +1,10 @@
 <script lang="ts">
-    import { Alert } from '@sveltestrap/sveltestrap'
     import { api, type Recording, RecordingKind } from 'admin/lib/api'
     import DesktopRecordingPlayer from 'admin/player/DesktopRecordingPlayer.svelte'
     import TerminalRecordingPlayer from 'admin/player/TerminalRecordingPlayer.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import { stringifyError } from 'common/errors'
+    import Callout from 'ui/Callout.svelte'
     import KubernetesRecording from './KubernetesRecording.svelte'
 
     interface Props {
@@ -45,7 +45,7 @@
 {/if}
 
 {#if error}
-    <Alert color="danger">{error}</Alert>
+    <Callout tone="danger" title="Something went wrong">{error}</Callout>
 {/if}
 
 {#if recording?.kind === RecordingKind.Traffic}

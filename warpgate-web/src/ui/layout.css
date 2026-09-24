@@ -1,0 +1,133 @@
+/*
+ * Shared layout utilities.
+ *
+ * Started as forms.css when the fork check found three byte-identical
+ * `.fields` blocks across the credential modals, and was renamed when the
+ * same check found the StatCard grid repeated across Tickets, Login
+ * protection and Overview. Same reasoning as markers.css: the second
+ * occurrence is the signal, not the fifth.
+ *
+ * Only layout lives here. Anything with a colour or a state belongs in a
+ * primitive, not in a stylesheet call sites can reach.
+ */
+
+/* Stacked fields in a dialog body or a form section. */
+.wg-field-stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--wg-space-lg);
+}
+
+/* Tighter variant for fields that read as one control, e.g. a label and its
+   textarea. */
+.wg-field-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--wg-space-xs);
+}
+
+/* A row of StatCards. Collapses to fewer columns rather than shrinking the
+   figures, which is why it is auto-fit with a floor rather than a fixed
+   column count. */
+.wg-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+    gap: var(--wg-space-md);
+}
+
+/* ── Page header ──────────────────────────────────────────────────────────
+   Title, optional lede, optional trailing actions. Consolidated when the fork
+   check found the same block in five migrated screens and every remaining one
+   needed it too. */
+.wg-page-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--wg-space-lg);
+    flex-wrap: wrap;
+    margin-bottom: var(--wg-space-xl);
+}
+
+.wg-page-head h1 {
+    margin: 0;
+    font: var(--wg-text-headline-lg);
+    overflow-wrap: anywhere;
+}
+
+.wg-page-lede {
+    margin: var(--wg-space-xs) 0 0;
+    color: var(--wg-text-muted);
+    font: var(--wg-text-body-md);
+    max-width: 70ch;
+}
+
+.wg-page-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--wg-space-sm);
+    flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+    .wg-page-head h1 {
+        font: var(--wg-text-headline-lg-mobile);
+    }
+}
+
+/* A list of rows with hairline separators — the shape ItemList and most of the
+   config screens render. */
+.wg-rows {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.wg-rows > li {
+    display: flex;
+    align-items: center;
+    gap: var(--wg-space-md);
+    padding: var(--wg-space-sm) 0;
+    border-bottom: var(--wg-border-width) solid var(--wg-border);
+    min-width: 0;
+}
+
+.wg-rows > li:last-child {
+    border-bottom: 0;
+}
+
+/* A row that is itself a link. */
+.wg-row-link {
+    display: flex;
+    align-items: center;
+    gap: var(--wg-space-md);
+    width: 100%;
+    min-width: 0;
+    padding: var(--wg-space-md);
+    margin: 0 calc(var(--wg-space-md) * -1);
+    border-radius: var(--wg-radius-control);
+    color: var(--wg-text);
+    text-decoration: none;
+}
+
+.wg-row-link:hover {
+    background: var(--wg-row-hover);
+}
+
+.wg-row-link:focus-visible {
+    outline: var(--wg-focus-ring);
+    outline-offset: calc(var(--wg-focus-ring-offset) * -1);
+}
+
+/* Constrains a settings page to a readable measure. */
+.wg-page-narrow {
+    max-width: 48rem;
+}
+
+/* Label for a group of controls that is not a single labelled field — emitted
+   where a sveltestrap FormGroup's floating label was unwrapped. */
+.wg-field-label {
+    display: block;
+    margin-bottom: var(--wg-space-xs);
+    font: var(--wg-text-body-md);
+    color: var(--wg-text-muted);
+}

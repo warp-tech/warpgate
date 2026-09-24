@@ -24,7 +24,8 @@
     }
 
     h2 {
-        font-family: 'Poppins';
+        font-family: var(--wg-font-sans);
+        font-weight: 600;
     }
 
     p {

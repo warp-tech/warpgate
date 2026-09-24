@@ -1,6 +1,5 @@
 <script lang="ts">
     import { faCompress, faExpand } from '@fortawesome/free-solid-svg-icons'
-    import { Button } from '@sveltestrap/sveltestrap'
     import ConnectingNotice from 'common/ConnectingNotice.svelte'
     import {
         applyDesktopFrame,
@@ -19,6 +18,7 @@
     import { onDestroy, onMount } from 'svelte'
     import Fa from 'svelte-fa'
     import { loadTheme } from 'theme'
+    import Button from 'ui/Button.svelte'
     import { api, ResponseError, type WebDesktopSessionInfo } from './lib/api'
     import {
         ConnectionState,
@@ -524,7 +524,7 @@
         >
             <Fa icon={isFullscreen ? faCompress : faExpand} fw />
         </button>
-        <Button color="danger" size="sm" onclick={disconnect}>
+        <Button variant="destructive" size="compact" onclick={disconnect}>
             Disconnect
         </Button>
     </div>

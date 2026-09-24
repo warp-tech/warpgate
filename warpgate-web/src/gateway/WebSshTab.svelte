@@ -1,4 +1,6 @@
 <script lang="ts" module>
+    import Button from 'ui/Button.svelte'
+    import Modal from 'ui/Modal.svelte'
     export const THEME = {
         foreground: '#cacaca',
         background: '#171717',
@@ -24,12 +26,6 @@
     }
 </script>
 <script lang="ts">
-    import {
-        Button,
-        Modal,
-        ModalBody,
-        ModalFooter,
-    } from '@sveltestrap/sveltestrap'
     import { FitAddon } from '@xterm/addon-fit'
     import { Unicode11Addon } from '@xterm/addon-unicode11'
     import { Terminal } from '@xterm/xterm'
@@ -337,26 +333,20 @@
     use:mountTerminal
 ></div>
 
-<Modal isOpen={zmodem.confirmPending} backdrop="static" keyboard={false}>
-    <ModalBody>
-        The remote side wants to start a ZMODEM file transfer. Accept?
-    </ModalBody>
-    <ModalFooter>
-        <Button
-            color="secondary"
-            class="modal-button"
-            onclick={() => zmodem.resolveConfirm(false)}
-        >
-            Reject
-        </Button>
-        <Button
-            color="primary"
-            class="modal-button"
-            onclick={() => zmodem.resolveConfirm(true)}
-        >
+<Modal
+    open={zmodem.confirmPending}
+    title="File transfer requested"
+    size="sm"
+    dismissable={false}
+>
+    The remote side wants to start a ZMODEM file transfer. Accept?
+
+    {#snippet footer()}
+        <Button onclick={() => zmodem.resolveConfirm(false)}>Reject</Button>
+        <Button variant="primary" onclick={() => zmodem.resolveConfirm(true)}>
             Accept
         </Button>
-    </ModalFooter>
+    {/snippet}
 </Modal>
 
 <style lang="scss">

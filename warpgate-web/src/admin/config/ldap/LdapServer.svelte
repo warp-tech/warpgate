@@ -1,5 +1,4 @@
 <script lang="ts">
-    import { FormGroup, Input } from '@sveltestrap/sveltestrap'
     import {
         api,
         type LdapServerResponse,
@@ -7,10 +6,12 @@
         type Tls,
         TlsMode,
     } from 'admin/lib/api'
-    import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
     import { push } from 'svelte-spa-router'
+    import Button from 'ui/Button.svelte'
+    import ConfirmDialog from 'ui/ConfirmDialog.svelte'
+    import Input from 'ui/Input.svelte'
     import { defaultLdapPortForTlsMode, testLdapConnection } from './common'
     import LdapConnectionFields from './LdapConnectionFields.svelte'
 
@@ -123,11 +124,9 @@
         }
     }
 
-    async function remove() {
-        if (!confirm('Are you sure you want to delete this LDAP server?')) {
-            return
-        }
+    let removing = $state(false)
 
+    async function confirmRemove() {
         try {
             await api.deleteLdapServer({ id: params.id })
             push('/config/ldap-servers')
@@ -152,13 +151,9 @@
         </div>
 
         <form onsubmit={(e) => { e.preventDefault(); save() }}>
-            <FormGroup floating label="Name">
-                <Input bind:value={name} required />
-            </FormGroup>
+            <Input label="Name" bind:value={name} required />
 
-            <FormGroup floating label="Description">
-                <Input bind:value={description} />
-            </FormGroup>
+            <Input label="Description" bind:value={description} />
 
             <LdapConnectionFields
                 bind:host
@@ -236,32 +231,42 @@
             {/if}
 
             <div class="d-flex gap-2 mt-5">
-                <AsyncButton
+                <Button
                     type="button"
                     class="btn btn-secondary"
                     click={testConnection}
                 >
                     Test Connection
-                </AsyncButton>
-                <AsyncButton
-                    type="button"
-                    class="btn btn-info"
-                    click={importUsers}
-                >
+                </Button>
+                <Button type="button" class="btn btn-info" click={importUsers}>
                     Import users
-                </AsyncButton>
+                </Button>
                 <div class="me-auto"></div>
-                <AsyncButton type="button" class="btn btn-primary" click={save}>
+                <Button type="button" class="btn btn-primary" click={save}>
                     Save
-                </AsyncButton>
-                <AsyncButton
+                </Button>
+                <Button
                     type="button"
-                    class="btn btn-danger"
-                    click={remove}
+                    variant="destructive"
+                    onclick={() => (removing = true)}
                 >
                     Remove
-                </AsyncButton>
+                </Button>
             </div>
         </form>
     </div>
 </Loadable>
+
+<ConfirmDialog
+    bind:open={removing}
+    title="Delete this LDAP server?"
+    confirmLabel="Delete server"
+    onconfirm={confirmRemove}
+    oncancel={() => (removing = false)}
+>
+    <p>
+        Users linked to this directory stop being able to sign in through it.
+        Their Warpgate accounts remain, but the credentials that came from the
+        directory — including SSH keys loaded from it — are no longer available.
+    </p>
+</ConfirmDialog>

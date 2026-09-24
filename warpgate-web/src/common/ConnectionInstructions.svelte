@@ -1,14 +1,6 @@
 <script lang="ts">
     import { faCertificate, faPlus } from '@fortawesome/free-solid-svg-icons'
-    import {
-        Alert,
-        Badge,
-        Button,
-        ListGroup,
-        ListGroupItem,
-        Tooltip,
-    } from '@sveltestrap/sveltestrap'
-    import CertificateCredentialModal from 'admin/CertificateCredentialModal.svelte'
+    import CertificateCredentialModal from 'admin/screens/user-detail/credentials/CertificateCredentialModal.svelte'
     import CollapsibleBlock from 'common/CollapsibleBlock.svelte'
     import CopyableTextArea from 'common/CopyableTextArea.svelte'
     import {
@@ -40,7 +32,11 @@
     } from 'gateway/lib/certificateStore'
     import { serverInfo } from 'gateway/lib/store'
     import Fa from 'svelte-fa'
-    import DelayedSpinner from './DelayedSpinner.svelte'
+    import Badge from 'ui/Badge.svelte'
+    import Button from 'ui/Button.svelte'
+    import Callout from 'ui/Callout.svelte'
+    import Spinner from 'ui/Spinner.svelte'
+    import Tooltip from 'ui/Tooltip.svelte'
     import InfoBox from './InfoBox.svelte'
 
     interface Props {
@@ -270,10 +266,10 @@
         </div>
     </CollapsibleBlock>
 
-    <Alert color="info" class="mt-3">
+    <Callout>
         Make sure you've set your client to require TLS and allowed cleartext
         password authentication.
-    </Alert>
+    </Callout>
 {/if}
 
 {#if targetKind === TargetKind.Postgres}
@@ -301,10 +297,10 @@
         </div>
     </CollapsibleBlock>
 
-    <Alert color="info" class="mt-3">
+    <Callout>
         Make sure you've set your client to require TLS and allowed cleartext
         password authentication.
-    </Alert>
+    </Callout>
 {/if}
 
 {#if targetKind === TargetKind.Kubernetes && ticketSecret}
@@ -384,71 +380,59 @@
                         <label class="form-label">Choose a certificate</label>
                     {/if}
                     {#if certLoading}
-                        <DelayedSpinner />
+                        <Spinner delay={1000} label="Loading certificates" />
                     {:else}
-                        <ListGroup flush class="mb-2">
+                        <ul class="cert-list">
                             {#each certificates as cert (cert.credential.id)}
-                                <ListGroupItem
-                                    tag="a"
-                                    href="#"
-                                    action
-                                    class="list-group-item list-group-item-action d-flex align-items-center gap-3"
-                                    active={cert.credential.id === selectedCertId}
-                                    onclick={e => {
-                                    e.preventDefault()
-                                    selectCertificate(cert.credential.id)
-                                }}
-                                >
-                                    <Fa fw icon={faCertificate} />
-                                    <div class="me-auto">
-                                        {cert.credential.label}
-                                    </div>
-                                    {#if cert.hasLocalKey}
-                                        <Badge
-                                            id="cert-status-badge-{cert.credential.id}"
-                                            color="success"
-                                        >
-                                            Key available
-                                        </Badge>
-                                    {:else}
-                                        <Badge
-                                            id="cert-status-badge-{cert.credential.id}"
-                                            color="warning"
-                                        >
-                                            No private key
-                                        </Badge>
-                                    {/if}
-                                    <Tooltip
-                                        target={`cert-status-badge-${cert.credential.id}`}
-                                        placement="top"
-                                        delay={500}
+                                <li>
+                                    <button
+                                        type="button"
+                                        class="cert-row"
+                                        class:cert-row-active={cert.credential
+                                            .id === selectedCertId}
+                                        aria-pressed={cert.credential.id ===
+                                            selectedCertId}
+                                        onclick={() =>
+                                            selectCertificate(
+                                                cert.credential.id,
+                                            )}
                                     >
-                                        {#if cert.hasLocalKey}
-                                            This certificate's private key is
-                                            stored locally in this browser and
-                                            can be used to generate a kubeconfig
-                                            with working credentials.
-                                        {:else}
-                                            This certificate's private key is
-                                            not stored locally in this browser.
-                                            You can still generate a kubeconfig,
-                                            but it will contain placeholders for
-                                            authentication and won't work until
-                                            you fill in the actual certificate
-                                            and key data.
-                                        {/if}
-                                    </Tooltip>
-                                </ListGroupItem>
+                                        <Fa fw icon={faCertificate} />
+                                        <div class="cert-label">
+                                            {cert.credential.label}
+                                        </div>
+                                        <Tooltip
+                                            placement="top"
+                                            delay={500}
+                                            text={cert.hasLocalKey
+                                            ? "This certificate's private key is stored locally in this browser and can be used to generate a kubeconfig with working credentials."
+                                            : "This certificate's private key is not stored locally in this browser. You can still generate a kubeconfig, but it will contain placeholders for authentication and won't work until you fill in the actual certificate and key data."}
+                                        >
+                                            <Badge
+                                                tone={cert.hasLocalKey
+                                                ? 'success'
+                                                : 'warning'}
+                                            >
+                                                {cert.hasLocalKey
+                                                ? 'Key available'
+                                                : 'No private key'}
+                                            </Badge>
+                                        </Tooltip>
+                                    </button>
+                                </li>
                             {/each}
-                        </ListGroup>
+                        </ul>
 
                         {#if $serverInfo?.ownCredentialManagementAllowed}
                             <Button
-                                color={certificates.length > 0 ? 'secondary' : 'primary'}
-                                class="d-flex w-100 text-center justify-content-center align-items-center gap-2 my-3"
+                                block
+                                variant={certificates.length > 0
+                                    ? 'secondary'
+                                    : 'primary'}
+                                class="issue-cert"
                                 onclick={() => {
-                            issuingCertificate = true
-                        }}
+                                    issuingCertificate = true
+                                }}
                             >
                                 <Fa fw icon={faPlus} />
                                 <div>
@@ -527,3 +511,56 @@
     <CopyableTextArea label="VNC endpoint" value={protocolEndpoint('vnc')} />
     <CopyableTextArea label="VNC username" value={commonSelectorUsername} />
 {/if}
+
+<style>
+    .cert-list {
+        list-style: none;
+        margin: 0 0 var(--wg-space-sm);
+        padding: 0;
+    }
+
+    /*
+     * The original rendered each row as <a href="#"> with sveltestrap's
+     * `action` styling and a preventDefault handler. It is a selection
+     * control, not a link: it goes nowhere, and as an anchor it announced as
+     * a link and offered a meaningless open-in-new-tab. It is a real button
+     * with aria-pressed now.
+     */
+    .cert-row {
+        display: flex;
+        align-items: center;
+        gap: var(--wg-space-md);
+        width: 100%;
+        padding: var(--wg-space-sm) var(--wg-space-md);
+        background: none;
+        border: 0;
+        border-bottom: var(--wg-border-width) solid var(--wg-border);
+        color: var(--wg-text);
+        font: var(--wg-text-body-md);
+        text-align: left;
+        cursor: pointer;
+    }
+
+    .cert-row:hover {
+        background: var(--wg-row-hover);
+    }
+
+    .cert-row:focus-visible {
+        outline: var(--wg-focus-ring);
+        outline-offset: calc(var(--wg-focus-ring-offset) * -1);
+    }
+
+    .cert-row-active {
+        background: var(--wg-row-selected);
+    }
+
+    .cert-label {
+        margin-right: auto;
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    :global(.issue-cert) {
+        margin: var(--wg-space-lg) 0;
+    }
+</style>

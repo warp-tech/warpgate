@@ -1,7 +1,20 @@
 <script lang="ts">
-    import { Badge } from '@sveltestrap/sveltestrap'
-    import NavListItem from 'common/NavListItem.svelte'
+    /**
+     * Pick a target protocol — restyled in place.
+     *
+     * Behaviour preserved: the same seven kinds in the same order, the same
+     * descriptions, the same three marked experimental, and the same
+     * /config/targets/create/<kind> destinations.
+     *
+     * common/NavListItem is dropped here rather than migrated: it is shared
+     * with two other old-UI screens and is not sveltestrap, so restyling it
+     * would churn them for no deletion benefit. This is the same call made on
+     * the portal profile hub.
+     */
     import { TargetKind } from 'gateway/lib/api'
+    import Badge from 'ui/Badge.svelte'
+    import 'ui/layout.css'
+    import { link } from 'svelte-spa-router'
 
     const kinds: {
         name: string
@@ -48,24 +61,57 @@
     ]
 </script>
 
-<div class="container-max-md">
-    <div class="page-summary-bar">
-        <h1>add a target</h1>
+<div class="wg-page-narrow">
+    <div class="wg-page-head">
+        <h1>Add a target</h1>
     </div>
 
-    <div class="narrow-page">
+    <ul class="wg-rows">
         {#each kinds as kind (kind.value)}
-            <NavListItem
-                title={kind.name}
-                description={kind.description}
-                href={`/config/targets/create/${kind.value}`}
-            >
-                {#snippet addonSnippet()}
-                    {#if kind.experimental}
-                        <Badge color="warning">Experimental</Badge>
-                    {/if}
-                {/snippet}
-            </NavListItem>
+            <li>
+                <a
+                    class="wg-row-link"
+                    href="/config/targets/create/{kind.value}"
+                    use:link
+                >
+                    <span class="kind-text">
+                        <span class="kind-name">
+                            <strong>{kind.name}</strong>
+                            {#if kind.experimental}
+                                <Badge tone="warning">Experimental</Badge>
+                            {/if}
+                        </span>
+                        <small>{kind.description}</small>
+                    </span>
+                    <span class="go" aria-hidden="true">→</span>
+                </a>
+            </li>
         {/each}
-    </div>
+    </ul>
 </div>
+
+<style>
+    .kind-text {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+        margin-right: auto;
+    }
+
+    .kind-name {
+        display: flex;
+        align-items: center;
+        gap: var(--wg-space-sm);
+    }
+
+    .kind-text small {
+        color: var(--wg-text-muted);
+        font: var(--wg-text-label-sm);
+    }
+
+    .go {
+        flex: none;
+        color: var(--wg-text-muted);
+    }
+</style>

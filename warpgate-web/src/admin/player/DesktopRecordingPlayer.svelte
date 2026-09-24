@@ -1,5 +1,4 @@
 <script lang="ts">
-    import { Spinner } from '@sveltestrap/sveltestrap'
     import type { Recording } from 'admin/lib/api'
     import {
         applyDesktopFrame,
@@ -14,6 +13,7 @@
         scancodeLabel,
     } from 'common/desktopInput'
     import { onDestroy, onMount } from 'svelte'
+    import Spinner from 'ui/Spinner.svelte'
     import PlayerToolbar from './PlayerToolbar.svelte'
     import { PlaybackController } from './playbackController'
     import type { Keyframe } from './rangeStream'
@@ -244,7 +244,9 @@
 
 <div class="root" bind:this={rootElement}>
     {#if loading}
-        <Spinner color="primary" />
+        <div class="loading">
+            <Spinner size={24} label="Loading recording" />
+        </div>
     {/if}
 
     <div class="stage-container" class:invisible={loading}>
@@ -379,11 +381,14 @@
         background: rgba(0, 0, 0, 0.7);
         color: #fff;
         font-size: 0.85rem;
-        font-family: var(--bs-font-monospace, monospace);
+        font-family: var(--wg-font-mono);
         white-space: nowrap;
     }
 
-    :global(.spinner-border) {
+    /* Was :global(.spinner-border) — sveltestrap's Spinner emitted that
+       class and ui/Spinner does not, so the rule had stopped matching and
+       the spinner was sitting in the top-left corner. */
+    .loading {
         position: absolute;
         left: 50%;
         top: 50%;

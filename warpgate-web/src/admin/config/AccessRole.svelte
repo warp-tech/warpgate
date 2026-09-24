@@ -1,12 +1,15 @@
 <script lang="ts">
-    import { Alert, FormGroup, Input } from '@sveltestrap/sveltestrap'
     import { api, type Role, type Target, type User } from 'admin/lib/api'
-    import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
     import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
     import Loadable from 'common/Loadable.svelte'
     import * as rx from 'rxjs'
     import { link, replace } from 'svelte-spa-router'
+    import Button from 'ui/Button.svelte'
+    import Callout from 'ui/Callout.svelte'
+    import ConfirmDialog from 'ui/ConfirmDialog.svelte'
+    import Input from 'ui/Input.svelte'
+    import Toggle from 'ui/Toggle.svelte'
     import { adminPermissions } from '../lib/store'
 
     interface Props {
@@ -68,12 +71,14 @@
         }
     }
 
-    async function remove() {
-        if (!role) return
-        if (confirm(`Delete role ${role.name}?`)) {
-            await api.deleteRole(role)
-            replace('/config/access-roles')
+    let removing = $state(false)
+
+    async function confirmRemove() {
+        if (!role) {
+            return
         }
+        await api.deleteRole(role)
+        replace('/config/access-roles')
     }
 </script>
 
@@ -87,29 +92,22 @@
                 </div>
             </div>
 
-            <FormGroup floating label="Name">
-                <Input bind:value={role.name} />
-            </FormGroup>
+            <Input label="Name" bind:value={role.name} />
 
-            <FormGroup floating label="Description">
-                <Input bind:value={role.description} />
-            </FormGroup>
+            <Input label="Description" bind:value={role.description} />
 
             <div class="mb-4">
-                <label class="d-flex align-items-center" for="isDefault">
-                    <Input
-                        id="isDefault"
-                        type="switch"
-                        bind:checked={role.isDefault}
-                    />
-                    <div>Automatically assign to all new users</div>
-                </label>
+                <Toggle
+                    id="isDefault"
+                    label="Automatically assign to all new users"
+                    bind:checked={role.isDefault}
+                />
             </div>
         {/snippet}
     </Loadable>
 
     {#if error}
-        <Alert color="danger">{error}</Alert>
+        <Callout tone="danger" title="Something went wrong">{error}</Callout>
     {/if}
 
     <div class="d-flex">
@@ -121,23 +119,23 @@
             Audit log
         </a>
 
-        <AsyncButton
-            color="primary"
+        <Button
+            variant="primary"
             disabled={!$adminPermissions.accessRolesEdit}
             class="ms-auto"
             click={update}
         >
             Update
-        </AsyncButton>
+        </Button>
 
-        <AsyncButton
+        <Button
             class="ms-2"
             disabled={!$adminPermissions.accessRolesDelete}
-            color="danger"
-            click={remove}
+            variant="destructive"
+            onclick={() => (removing = true)}
         >
             Remove
-        </AsyncButton>
+        </Button>
     </div>
 
     <h4 class="mt-5">Assigned users</h4>
@@ -162,7 +160,7 @@
             </a>
         {/snippet}
         {#snippet empty()}
-            <Alert color="info">This role has no users assigned to it</Alert>
+            <Callout>This role has no users assigned to it</Callout>
         {/snippet}
     </ItemList>
 
@@ -188,7 +186,23 @@
             </a>
         {/snippet}
         {#snippet empty()}
-            <Alert color="info">This role has no targets assigned to it</Alert>
+            <Callout>This role has no targets assigned to it</Callout>
         {/snippet}
     </ItemList>
 </div>
+
+<ConfirmDialog
+    bind:open={removing}
+    title="Delete {role?.name ?? 'this role'}?"
+    confirmLabel="Delete role"
+    confirmText={role?.name}
+    confirmTextLabel="role name"
+    onconfirm={confirmRemove}
+    oncancel={() => (removing = false)}
+>
+    <p>
+        Every user holding this role loses it, and every target that grants
+        access through it stops granting that access. Neither list is shown
+        here, so there is no way to see from this screen how many are affected.
+    </p>
+</ConfirmDialog>

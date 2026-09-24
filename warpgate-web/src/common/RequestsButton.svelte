@@ -1,13 +1,17 @@
 <script lang="ts">
-    import { faHand } from '@fortawesome/free-regular-svg-icons'
-    import { Button } from '@sveltestrap/sveltestrap'
+    /**
+     * "N user requests awaiting your action" — shown in both shells.
+     *
+     * Behaviour preserved: both permission gates, the combined session +
+     * ticket count, the watch that restarts when permissions change and tears
+     * the old one down, and the transient-failure rule that keeps the last
+     * known counts rather than flashing the indicator away.
+     */
     import { serverInfo } from 'gateway/lib/store'
-    import Fa from 'svelte-fa'
     import {
         loadPendingRequests,
         watchPendingRequests,
     } from './approvalRequests'
-    import { classnames } from './helpers'
 
     const { collapsed = false, class: className = '' } = $props()
 
@@ -17,14 +21,14 @@
     let sessionCount = $state(0)
     let ticketCount = $state(0)
 
-    let canSeeSessions = $derived(
+    const canSeeSessions = $derived(
         $serverInfo?.adminPermissions?.approveSessions ?? false,
     )
-    let canManageTickets = $derived(
+    const canManageTickets = $derived(
         $serverInfo?.adminPermissions?.ticketRequestsManage ?? false,
     )
-    let canSeeAny = $derived(canSeeSessions || canManageTickets)
-    let count = $derived(sessionCount + ticketCount)
+    const canSeeAny = $derived(canSeeSessions || canManageTickets)
+    const count = $derived(sessionCount + ticketCount)
 
     async function reload() {
         try {
@@ -57,13 +61,8 @@
 </script>
 
 {#if canSeeAny && count > 0}
-    <Button
-        href={PAGE_URL}
-        color="success"
-        size={collapsed ? 'sm' : undefined}
-        class={classnames("d-flex align-items-center gap-2", className)}
-    >
-        <Fa icon={faHand} />
+    <a class="requests {className}" class:collapsed href={PAGE_URL}>
+        <span class="marker" aria-hidden="true"></span>
         <span>
             {count}
             user request{count === 1 ? '' : 's'}
@@ -71,5 +70,47 @@
                 awaiting your action
             {/if}
         </span>
-    </Button>
+    </a>
 {/if}
+
+<style>
+    .requests {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--wg-space-sm);
+        padding: var(--wg-space-sm) var(--wg-space-md);
+        background: var(
+            --wg-tertiary-container,
+            var(--wg-surface-container-high)
+        );
+        border: var(--wg-border-width) solid var(--wg-border-strong);
+        border-radius: var(--wg-radius-control);
+        color: var(--wg-text);
+        font: var(--wg-text-label-md);
+        text-decoration: none;
+    }
+
+    .requests.collapsed {
+        padding: var(--wg-space-xs) var(--wg-space-sm);
+        font: var(--wg-text-label-sm);
+    }
+
+    .requests:hover {
+        background: var(--wg-surface-container-highest);
+    }
+
+    .requests:focus-visible {
+        outline: var(--wg-focus-ring);
+        outline-offset: var(--wg-focus-ring-offset);
+    }
+
+    /* Deliberately not a StatusMarker: this is a call to action, not a state,
+       and StatusMarker requires a label of its own. */
+    .marker {
+        flex: none;
+        width: var(--wg-marker-size);
+        height: var(--wg-marker-size);
+        border-radius: 50%;
+        background: var(--wg-tertiary);
+    }
+</style>

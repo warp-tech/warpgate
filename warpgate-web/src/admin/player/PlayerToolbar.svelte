@@ -6,7 +6,6 @@
         faPause,
         faPlay,
     } from '@fortawesome/free-solid-svg-icons'
-    import { Tooltip } from '@sveltestrap/sveltestrap'
     import formatDuration from 'format-duration'
     import Fa from 'svelte-fa'
 
@@ -70,13 +69,12 @@
                 type="button"
                 id="go-live-button"
                 class="btn btn-link text-danger d-flex align-items-center gap-2"
+                aria-label="Go live"
+                title="Go live"
                 on:click={onGoLive}
             >
                 <Fa icon={faFastForward} size="xs" />
             </button>
-            <Tooltip target="go-live-button" placement="top" container="body">
-                Go live
-            </Tooltip>
         {/if}
     {/if}
     <div class="seek">
@@ -90,6 +88,7 @@
         <input
             class="w-100"
             type="range"
+            aria-label="Seek"
             min="0"
             max="100"
             step="0.001"

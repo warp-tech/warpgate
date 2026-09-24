@@ -1,7 +1,18 @@
 <script lang="ts">
-    import { faPlus, faTrash } from '@fortawesome/free-solid-svg-icons'
-    import { Button, Input } from '@sveltestrap/sveltestrap'
-    import Fa from 'svelte-fa'
+    /**
+     * Allowed IP ranges (CIDR) for a user.
+     *
+     * Behaviour preserved: the same CIDR regex for v4 and v6, an empty value
+     * treated as valid (the field is optional per row), add/remove, and the
+     * explanatory note that an empty list allows all addresses.
+     *
+     * Changed: the per-row error was a `<small>` nudged up with a negative
+     * margin and tied to its field by proximity alone. ui/Input takes `error`
+     * and wires it to the input with aria-describedby, so a screen reader
+     * hears which row is wrong.
+     */
+    import Button from 'ui/Button.svelte'
+    import Input from 'ui/Input.svelte'
 
     interface Props {
         ranges: string[] | null | undefined
@@ -11,6 +22,7 @@
 
     const cidrRegex =
         /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$|^[0-9a-fA-F:]+\/\d{1,3}$/
+
     function isValidCidr(value: string | undefined | null): boolean {
         if (!value?.trim()) {
             return true
@@ -18,11 +30,14 @@
         return cidrRegex.test(value.trim())
     }
 
+    function errorFor(range: string | undefined): string | undefined {
+        return range?.trim() && !isValidCidr(range)
+            ? 'Not CIDR notation. Use 192.168.1.0/24, or 1.2.3.4/32 for one address.'
+            : undefined
+    }
+
     function addIpRange() {
-        if (!ranges) {
-            ranges = []
-        }
-        ranges = [...ranges, '']
+        ranges = [...(ranges ?? []), '']
     }
 
     function removeIpRange(index: number) {
@@ -33,54 +48,98 @@
     }
 </script>
 
-<div>
-    <!-- svelte-ignore a11y_label_has_associated_control -->
-    <label class="form-label">Allowed IP ranges (CIDR)</label>
+<div class="ranges">
+    <span class="group-label">Allowed IP ranges (CIDR)</span>
+
     {#if ranges?.length}
         {#each ranges as range, index (index)}
-            <div class="d-flex align-items-center mb-2 gap-2">
-                <Input
-                    placeholder="e.g. 192.168.1.0/24"
-                    value={range}
-                    on:input={(e) => {
-                        if (ranges) {
-                            ranges[index] = e.target.value
-                            ranges = [...ranges]
-                        }
-                    }}
-                    invalid={!!range?.trim() && !isValidCidr(range)}
-                />
+            <div class="row">
+                <div class="row-field">
+                    <Input
+                        label="IP range {index + 1}"
+                        labelHidden
+                        mono
+                        placeholder="e.g. 192.168.1.0/24"
+                        value={range}
+                        error={errorFor(range)}
+                        oninput={e => {
+                            if (ranges) {
+                                ranges[index] = (
+                                    e.target as HTMLInputElement
+                                ).value
+                                ranges = [...ranges]
+                            }
+                        }}
+                    />
+                </div>
                 <Button
-                    color="link"
-                    size="sm"
-                    on:click={() => removeIpRange(index)}
+                    variant="ghost"
+                    size="compact"
+                    label="Remove IP range {index + 1}"
+                    onclick={() => removeIpRange(index)}
                 >
-                    <Fa icon={faTrash} />
+                    <svg
+                        viewBox="0 0 16 16"
+                        width="14"
+                        height="14"
+                        aria-hidden="true"
+                    >
+                        <path
+                            d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.2a1 1 0 0 0 1 .8h3.8a1 1 0 0 0 1-.8l.6-8.2"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.4"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        />
+                    </svg>
                 </Button>
             </div>
-            {#if range?.trim() && !isValidCidr(range)}
-                <small
-                    class="form-text text-danger d-block mb-2"
-                    style="margin-top: -0.5rem"
-                >
-                    Invalid CIDR notation. Use a format like 192.168.1.0/24 or
-                    10.0.0.1/32.
-                </small>
-            {/if}
         {/each}
     {/if}
-    <Button
-        class="d-flex align-items-center gap-2"
-        color="secondary"
-        size="sm"
-        on:click={addIpRange}
-    >
-        <Fa icon={faPlus} class="me-1" />
-        <div>Add IP range</div>
-    </Button>
-    <small class="form-text text-muted d-block mt-2">
-        If set, only connections from these IP ranges will be allowed. Use CIDR
-        notation (e.g. 10.0.0.0/8, 192.168.1.0/24, or a single IP like
-        1.2.3.4/32). Leave empty to allow all IPs.
-    </small>
+
+    <div class="add">
+        <Button size="compact" onclick={addIpRange}>Add IP range</Button>
+    </div>
+
+    <p class="note">
+        If set, only connections from these ranges are allowed. Leave the list
+        empty to allow every address.
+    </p>
 </div>
+
+<style>
+    .ranges {
+        display: flex;
+        flex-direction: column;
+        gap: var(--wg-space-xs);
+    }
+
+    .group-label {
+        font: var(--wg-text-body-md);
+        color: var(--wg-text-muted);
+    }
+
+    .row {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--wg-space-sm);
+    }
+
+    .row-field {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .add {
+        display: flex;
+        margin-top: var(--wg-space-xs);
+    }
+
+    .note {
+        margin: var(--wg-space-xs) 0 0;
+        color: var(--wg-text-subtle);
+        font: var(--wg-text-label-sm);
+        max-width: 70ch;
+    }
+</style>

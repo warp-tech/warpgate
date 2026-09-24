@@ -1,56 +1,99 @@
 <script lang="ts">
-    import {
-        faFileContract,
-        faFlaskVial,
-    } from '@fortawesome/free-solid-svg-icons'
+    /**
+     * API tokens page — screen 14. Migrated in place.
+     *
+     * Behaviour preserved: the manager, the four external links to the user
+     * and admin API playgrounds and schemas (each still target="_blank"), and
+     * the X-Warpgate-Token header note.
+     *
+     * rel="noreferrer" added to the external links. They are same-origin so
+     * there is no window.opener risk, but the Referer they leak carries the
+     * portal URL, and these open the API playground — a page where a reader
+     * does not need to be told where the operator came from.
+     */
     import InfoBox from 'common/InfoBox.svelte'
-    import Fa from 'svelte-fa'
     import ApiTokenManager from './ApiTokenManager.svelte'
+
+    const API_LINKS = [
+        {
+            heading: 'User API',
+            links: [
+                { label: 'Playground', href: '/@warpgate/api/playground' },
+                { label: 'Schema', href: '/@warpgate/api/openapi.json' },
+            ],
+        },
+        {
+            heading: 'Admin API',
+            links: [
+                {
+                    label: 'Playground',
+                    href: '/@warpgate/admin/api/playground',
+                },
+                {
+                    label: 'Schema',
+                    href: '/@warpgate/admin/api/openapi.json',
+                },
+            ],
+        },
+    ]
 </script>
 
 <ApiTokenManager />
 
-<div class="row mt-5">
-    <div class="col">
-        <h4>User API</h4>
-        <a class="link" target="_blank" href="/@warpgate/api/playground">
-            <Fa icon={faFlaskVial} fw />
-            <span>Playground</span>
-        </a>
-        <a class="link" target="_blank" href="/@warpgate/api/openapi.json">
-            <Fa icon={faFileContract} fw />
-            <span>Schema</span>
-        </a>
-    </div>
-
-    <div class="col">
-        <h4>Admin API</h4>
-        <a class="link" target="_blank" href="/@warpgate/admin/api/playground">
-            <Fa icon={faFlaskVial} fw />
-            <span>Playground</span>
-        </a>
-        <a
-            class="link"
-            target="_blank"
-            href="/@warpgate/admin/api/openapi.json"
-        >
-            <Fa icon={faFileContract} fw />
-            <span>Schema</span>
-        </a>
-    </div>
+<div class="api-links">
+    {#each API_LINKS as section (section.heading)}
+        <div>
+            <h2>{section.heading}</h2>
+            <ul>
+                {#each section.links as l (l.href)}
+                    <li>
+                        <a href={l.href} target="_blank" rel="noreferrer">
+                            {l.label}
+                        </a>
+                    </li>
+                {/each}
+            </ul>
+        </div>
+    {/each}
 </div>
 
-<InfoBox class="mt-5">
-    Pass the token in the <code>X-Warpgate-Token</code> header
-</InfoBox>
+<InfoBox> Pass the token in the <code>X-Warpgate-Token</code> header </InfoBox>
 
-<style lang="scss">
-    .link {
+<style>
+    .api-links {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+        gap: var(--wg-space-xl);
+        margin-top: var(--wg-space-3xl);
+    }
+
+    h2 {
+        margin: 0 0 var(--wg-space-sm);
+        font: var(--wg-text-label-md);
+        color: var(--wg-text-muted);
+    }
+
+    ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
         display: flex;
-        align-items: center;
+        flex-direction: column;
+        gap: var(--wg-space-xs);
+    }
 
-        span {
-            margin-left: 0.25rem;
-        }
+    a {
+        color: var(--wg-primary);
+        font: var(--wg-text-body-md);
+    }
+
+    a:focus-visible {
+        outline: var(--wg-focus-ring);
+        outline-offset: var(--wg-focus-ring-offset);
+    }
+
+    code {
+        font: var(--wg-text-code-sm);
+        color: var(--wg-text);
     }
 </style>

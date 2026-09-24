@@ -39,3 +39,8 @@ node_modules
 
 rustc-ice-*.txt
 .zed
+design/
+# Fork: the redesign decision log is tracked. design/ is excluded above, so
+# a negation inside it cannot work; NOTES.md lives at the root instead.
+!/NOTES.md
+!/UPSTREAM-ISSUES.md

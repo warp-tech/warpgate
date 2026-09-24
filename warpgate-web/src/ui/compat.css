@@ -1,0 +1,870 @@
+/*
+ * Bootstrap-shaped markup, drawn with design tokens.
+ *
+ * The screens 15-23 sweep replaced sveltestrap COMPONENTS. It did not replace
+ * Bootstrap UTILITY CLASSES, and deleting Bootstrap took the CSS behind 299
+ * remaining class usages across 25 files with it — plus three classes the old
+ * theme SCSS defined itself: .container-max-md, .page-summary-bar and
+ * .modal-button. Those screens were rendering with browser-default inputs, no
+ * flex rows and no max width.
+ *
+ * This is a bridge, and it is deliberately written against the token layer
+ * rather than as a Bootstrap imitation. `.btn.btn-primary` here is the same
+ * object ui/Button draws; `.form-control` is the same shell ui/Input draws. So
+ * the affected screens look like the redesign NOW, and converting their markup
+ * to the primitives later is a cleanup with no visual change, rather than a
+ * second migration.
+ *
+ * Scope note: a Svelte <style> block is scoped to its component, so a `.btn`
+ * rule living in PlayerToolbar.svelte never reached the `.btn` in
+ * LdapServer.svelte. That is why this file is global CSS imported once from
+ * theme/index.ts, which both entry points already import.
+ *
+ * Only classes the markup actually uses are defined here, with one deliberate
+ * exception: the spacing scale is generated in full, because a gap in it fails
+ * silently. This is not a Bootstrap reimplementation and must not grow into
+ * one. DELETE THIS FILE once no markup references these classes.
+ */
+
+/* ── display and flexbox ─────────────────────────────────────────────── */
+.d-flex {
+    display: flex;
+}
+.d-block {
+    display: block;
+}
+.flex-column {
+    flex-direction: column;
+}
+.flex-grow-1 {
+    flex-grow: 1;
+}
+.flex-shrink-0 {
+    flex-shrink: 0;
+}
+.align-items-center {
+    align-items: center;
+}
+.align-items-stretch {
+    align-items: stretch;
+}
+.justify-content-between {
+    justify-content: space-between;
+}
+.justify-content-center {
+    justify-content: center;
+}
+.w-100 {
+    width: 100%;
+}
+.h-100 {
+    height: 100%;
+}
+.position-relative {
+    position: relative;
+}
+.position-absolute {
+    position: absolute;
+}
+.top-0 {
+    top: 0;
+}
+.start-0 {
+    left: 0;
+}
+
+/* ── spacing: Bootstrap's 0-5 steps, which land exactly on the token
+   scale (1=xs, 2=sm, 3=lg, 4=xl, 5=3xl) ───────────────────────────── */
+.m-0 {
+    margin-top: 0;
+    margin-right: 0;
+    margin-bottom: 0;
+    margin-left: 0;
+}
+.m-1 {
+    margin-top: var(--wg-space-xs);
+    margin-right: var(--wg-space-xs);
+    margin-bottom: var(--wg-space-xs);
+    margin-left: var(--wg-space-xs);
+}
+.m-2 {
+    margin-top: var(--wg-space-sm);
+    margin-right: var(--wg-space-sm);
+    margin-bottom: var(--wg-space-sm);
+    margin-left: var(--wg-space-sm);
+}
+.m-3 {
+    margin-top: var(--wg-space-lg);
+    margin-right: var(--wg-space-lg);
+    margin-bottom: var(--wg-space-lg);
+    margin-left: var(--wg-space-lg);
+}
+.m-4 {
+    margin-top: var(--wg-space-xl);
+    margin-right: var(--wg-space-xl);
+    margin-bottom: var(--wg-space-xl);
+    margin-left: var(--wg-space-xl);
+}
+.m-5 {
+    margin-top: var(--wg-space-3xl);
+    margin-right: var(--wg-space-3xl);
+    margin-bottom: var(--wg-space-3xl);
+    margin-left: var(--wg-space-3xl);
+}
+.mt-0 {
+    margin-top: 0;
+}
+.mt-1 {
+    margin-top: var(--wg-space-xs);
+}
+.mt-2 {
+    margin-top: var(--wg-space-sm);
+}
+.mt-3 {
+    margin-top: var(--wg-space-lg);
+}
+.mt-4 {
+    margin-top: var(--wg-space-xl);
+}
+.mt-5 {
+    margin-top: var(--wg-space-3xl);
+}
+.mb-0 {
+    margin-bottom: 0;
+}
+.mb-1 {
+    margin-bottom: var(--wg-space-xs);
+}
+.mb-2 {
+    margin-bottom: var(--wg-space-sm);
+}
+.mb-3 {
+    margin-bottom: var(--wg-space-lg);
+}
+.mb-4 {
+    margin-bottom: var(--wg-space-xl);
+}
+.mb-5 {
+    margin-bottom: var(--wg-space-3xl);
+}
+.ms-0 {
+    margin-left: 0;
+}
+.ms-1 {
+    margin-left: var(--wg-space-xs);
+}
+.ms-2 {
+    margin-left: var(--wg-space-sm);
+}
+.ms-3 {
+    margin-left: var(--wg-space-lg);
+}
+.ms-4 {
+    margin-left: var(--wg-space-xl);
+}
+.ms-5 {
+    margin-left: var(--wg-space-3xl);
+}
+.me-0 {
+    margin-right: 0;
+}
+.me-1 {
+    margin-right: var(--wg-space-xs);
+}
+.me-2 {
+    margin-right: var(--wg-space-sm);
+}
+.me-3 {
+    margin-right: var(--wg-space-lg);
+}
+.me-4 {
+    margin-right: var(--wg-space-xl);
+}
+.me-5 {
+    margin-right: var(--wg-space-3xl);
+}
+.mx-0 {
+    margin-left: 0;
+    margin-right: 0;
+}
+.mx-1 {
+    margin-left: var(--wg-space-xs);
+    margin-right: var(--wg-space-xs);
+}
+.mx-2 {
+    margin-left: var(--wg-space-sm);
+    margin-right: var(--wg-space-sm);
+}
+.mx-3 {
+    margin-left: var(--wg-space-lg);
+    margin-right: var(--wg-space-lg);
+}
+.mx-4 {
+    margin-left: var(--wg-space-xl);
+    margin-right: var(--wg-space-xl);
+}
+.mx-5 {
+    margin-left: var(--wg-space-3xl);
+    margin-right: var(--wg-space-3xl);
+}
+.my-0 {
+    margin-top: 0;
+    margin-bottom: 0;
+}
+.my-1 {
+    margin-top: var(--wg-space-xs);
+    margin-bottom: var(--wg-space-xs);
+}
+.my-2 {
+    margin-top: var(--wg-space-sm);
+    margin-bottom: var(--wg-space-sm);
+}
+.my-3 {
+    margin-top: var(--wg-space-lg);
+    margin-bottom: var(--wg-space-lg);
+}
+.my-4 {
+    margin-top: var(--wg-space-xl);
+    margin-bottom: var(--wg-space-xl);
+}
+.my-5 {
+    margin-top: var(--wg-space-3xl);
+    margin-bottom: var(--wg-space-3xl);
+}
+
+.p-0 {
+    padding-top: 0;
+    padding-right: 0;
+    padding-bottom: 0;
+    padding-left: 0;
+}
+.p-1 {
+    padding-top: var(--wg-space-xs);
+    padding-right: var(--wg-space-xs);
+    padding-bottom: var(--wg-space-xs);
+    padding-left: var(--wg-space-xs);
+}
+.p-2 {
+    padding-top: var(--wg-space-sm);
+    padding-right: var(--wg-space-sm);
+    padding-bottom: var(--wg-space-sm);
+    padding-left: var(--wg-space-sm);
+}
+.p-3 {
+    padding-top: var(--wg-space-lg);
+    padding-right: var(--wg-space-lg);
+    padding-bottom: var(--wg-space-lg);
+    padding-left: var(--wg-space-lg);
+}
+.p-4 {
+    padding-top: var(--wg-space-xl);
+    padding-right: var(--wg-space-xl);
+    padding-bottom: var(--wg-space-xl);
+    padding-left: var(--wg-space-xl);
+}
+.p-5 {
+    padding-top: var(--wg-space-3xl);
+    padding-right: var(--wg-space-3xl);
+    padding-bottom: var(--wg-space-3xl);
+    padding-left: var(--wg-space-3xl);
+}
+.pt-0 {
+    padding-top: 0;
+}
+.pt-1 {
+    padding-top: var(--wg-space-xs);
+}
+.pt-2 {
+    padding-top: var(--wg-space-sm);
+}
+.pt-3 {
+    padding-top: var(--wg-space-lg);
+}
+.pt-4 {
+    padding-top: var(--wg-space-xl);
+}
+.pt-5 {
+    padding-top: var(--wg-space-3xl);
+}
+.pb-0 {
+    padding-bottom: 0;
+}
+.pb-1 {
+    padding-bottom: var(--wg-space-xs);
+}
+.pb-2 {
+    padding-bottom: var(--wg-space-sm);
+}
+.pb-3 {
+    padding-bottom: var(--wg-space-lg);
+}
+.pb-4 {
+    padding-bottom: var(--wg-space-xl);
+}
+.pb-5 {
+    padding-bottom: var(--wg-space-3xl);
+}
+.ps-0 {
+    padding-left: 0;
+}
+.ps-1 {
+    padding-left: var(--wg-space-xs);
+}
+.ps-2 {
+    padding-left: var(--wg-space-sm);
+}
+.ps-3 {
+    padding-left: var(--wg-space-lg);
+}
+.ps-4 {
+    padding-left: var(--wg-space-xl);
+}
+.ps-5 {
+    padding-left: var(--wg-space-3xl);
+}
+.pe-0 {
+    padding-right: 0;
+}
+.pe-1 {
+    padding-right: var(--wg-space-xs);
+}
+.pe-2 {
+    padding-right: var(--wg-space-sm);
+}
+.pe-3 {
+    padding-right: var(--wg-space-lg);
+}
+.pe-4 {
+    padding-right: var(--wg-space-xl);
+}
+.pe-5 {
+    padding-right: var(--wg-space-3xl);
+}
+.px-0 {
+    padding-left: 0;
+    padding-right: 0;
+}
+.px-1 {
+    padding-left: var(--wg-space-xs);
+    padding-right: var(--wg-space-xs);
+}
+.px-2 {
+    padding-left: var(--wg-space-sm);
+    padding-right: var(--wg-space-sm);
+}
+.px-3 {
+    padding-left: var(--wg-space-lg);
+    padding-right: var(--wg-space-lg);
+}
+.px-4 {
+    padding-left: var(--wg-space-xl);
+    padding-right: var(--wg-space-xl);
+}
+.px-5 {
+    padding-left: var(--wg-space-3xl);
+    padding-right: var(--wg-space-3xl);
+}
+.py-0 {
+    padding-top: 0;
+    padding-bottom: 0;
+}
+.py-1 {
+    padding-top: var(--wg-space-xs);
+    padding-bottom: var(--wg-space-xs);
+}
+.py-2 {
+    padding-top: var(--wg-space-sm);
+    padding-bottom: var(--wg-space-sm);
+}
+.py-3 {
+    padding-top: var(--wg-space-lg);
+    padding-bottom: var(--wg-space-lg);
+}
+.py-4 {
+    padding-top: var(--wg-space-xl);
+    padding-bottom: var(--wg-space-xl);
+}
+.py-5 {
+    padding-top: var(--wg-space-3xl);
+    padding-bottom: var(--wg-space-3xl);
+}
+
+.m-auto {
+    margin-top: auto;
+    margin-right: auto;
+    margin-bottom: auto;
+    margin-left: auto;
+}
+.mt-auto {
+    margin-top: auto;
+}
+.mb-auto {
+    margin-bottom: auto;
+}
+.ms-auto {
+    margin-left: auto;
+}
+.me-auto {
+    margin-right: auto;
+}
+.mx-auto {
+    margin-left: auto;
+    margin-right: auto;
+}
+.my-auto {
+    margin-top: auto;
+    margin-bottom: auto;
+}
+
+/* gap; .g-N is the grid spelling of the same thing */
+.gap-0,
+.g-0 {
+    gap: 0;
+}
+.gap-1,
+.g-1 {
+    gap: var(--wg-space-xs);
+}
+.gap-2,
+.g-2 {
+    gap: var(--wg-space-sm);
+}
+.gap-3,
+.g-3 {
+    gap: var(--wg-space-lg);
+}
+.gap-4,
+.g-4 {
+    gap: var(--wg-space-xl);
+}
+.gap-5,
+.g-5 {
+    gap: var(--wg-space-3xl);
+}
+
+/* ── typography ──────────────────────────────────────────────────────── */
+.text-muted {
+    color: var(--wg-text-muted);
+}
+.text-danger {
+    color: var(--wg-error);
+}
+.text-success {
+    color: var(--wg-tertiary);
+}
+.text-light {
+    color: var(--wg-text);
+}
+.text-center {
+    text-align: center;
+}
+.text-start {
+    text-align: left;
+}
+.text-decoration-none {
+    text-decoration: none;
+}
+.small {
+    font: var(--wg-text-label-sm);
+}
+.h5 {
+    font: var(--wg-text-headline-md);
+    margin: 0;
+}
+
+/* ── page shells the deleted theme SCSS owned ────────────────────────── */
+.container-max-md {
+    width: 100%;
+    max-width: 48rem;
+    margin: 0 auto;
+}
+
+.page-summary-bar {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--wg-space-lg);
+    margin-bottom: var(--wg-space-xl);
+}
+
+.page-summary-bar h1 {
+    margin: 0;
+    font: var(--wg-text-headline-lg);
+}
+
+/* Dialog footers sized their buttons with this. */
+.modal-button {
+    min-width: 6rem;
+}
+
+/* Bootstrap's grid, reduced to what the remaining markup uses: a wrapping row
+   of equal columns. Every surviving use is a simple two-up split, so the
+   col-* widths are approximated rather than reimplemented. */
+.row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--wg-space-lg);
+}
+.col-6,
+.col-sm-6,
+.col-lg {
+    flex: 1 1 16rem;
+    min-width: 0;
+}
+.col-12 {
+    flex: 1 1 100%;
+    min-width: 0;
+}
+
+/* ── form controls: the shell ui/Input draws ─────────────────────────── */
+.form-control,
+.form-select {
+    width: 100%;
+    min-width: 0;
+    height: var(--wg-control-height);
+    padding: 0 var(--wg-space-sm);
+    background: var(--wg-surface-sunken);
+    border: var(--wg-border-width) solid var(--wg-border-strong);
+    border-radius: var(--wg-radius-control);
+    color: var(--wg-text);
+    font: var(--wg-text-body-md);
+}
+
+textarea.form-control {
+    height: auto;
+    padding: var(--wg-space-sm);
+    font: var(--wg-text-code-sm);
+    resize: vertical;
+}
+
+.form-control:focus-visible,
+.form-select:focus-visible {
+    outline: var(--wg-focus-ring);
+    outline-offset: var(--wg-focus-ring-offset);
+    border-color: var(--wg-primary);
+}
+
+.form-control::placeholder {
+    color: var(--wg-text-subtle);
+}
+
+.form-control:disabled,
+.form-select:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.form-label {
+    display: block;
+    margin-bottom: var(--wg-space-xs);
+    color: var(--wg-text-muted);
+    font: var(--wg-text-body-md);
+}
+
+.form-text {
+    display: block;
+    margin-top: var(--wg-space-xs);
+    color: var(--wg-text-subtle);
+    font: var(--wg-text-label-sm);
+}
+
+.invalid-feedback {
+    display: block;
+    margin-top: var(--wg-space-xs);
+    color: var(--wg-error);
+    font: var(--wg-text-label-sm);
+}
+
+.form-check {
+    display: flex;
+    align-items: center;
+    gap: var(--wg-space-sm);
+    min-height: var(--wg-control-height-compact);
+}
+
+.form-check-input {
+    flex: none;
+    width: 1rem;
+    height: 1rem;
+    margin: 0;
+    accent-color: var(--wg-primary);
+    cursor: pointer;
+}
+
+.form-check-input:focus-visible {
+    outline: var(--wg-focus-ring);
+    outline-offset: var(--wg-focus-ring-offset);
+}
+
+.form-check-label {
+    cursor: pointer;
+}
+
+/* .form-switch is the same input drawn as a toggle. Redrawing rather than
+   leaving it a checkbox keeps the LDAP server screen reading the way it did,
+   and the control stays a native checkbox underneath, so its keyboard and
+   assistive-tech behaviour is unchanged. */
+.form-switch .form-check-input {
+    position: relative;
+    width: 2rem;
+    height: 1.125rem;
+    appearance: none;
+    background: var(--wg-surface-container-highest);
+    border: var(--wg-border-width) solid var(--wg-border-strong);
+    border-radius: var(--wg-radius-full);
+    transition: background var(--wg-duration-fast) var(--wg-easing);
+}
+
+.form-switch .form-check-input::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 2px;
+    width: 0.8125rem;
+    height: 0.8125rem;
+    background: var(--wg-text-muted);
+    border-radius: var(--wg-radius-full);
+    transform: translateY(-50%);
+    transition:
+        transform var(--wg-duration-fast) var(--wg-easing),
+        background var(--wg-duration-fast) var(--wg-easing);
+}
+
+.form-switch .form-check-input:checked {
+    background: var(--wg-primary);
+    border-color: transparent;
+}
+
+.form-switch .form-check-input:checked::after {
+    background: var(--wg-on-primary);
+    transform: translate(0.8125rem, -50%);
+}
+
+/* ── buttons: the object ui/Button draws ─────────────────────────────── */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--wg-space-xs);
+    height: var(--wg-control-height);
+    padding: 0 var(--wg-space-md);
+    background: var(--wg-surface-container-high);
+    border: var(--wg-border-width) solid var(--wg-border-strong);
+    border-radius: var(--wg-radius-control);
+    color: var(--wg-text);
+    font: var(--wg-text-label-md);
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.btn:hover:not(:disabled) {
+    background: var(--wg-surface-container-highest);
+}
+
+.btn:focus-visible {
+    outline: var(--wg-focus-ring);
+    outline-offset: var(--wg-focus-ring-offset);
+}
+
+.btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.btn-sm {
+    height: var(--wg-control-height-compact);
+    padding: 0 var(--wg-space-sm);
+    font: var(--wg-text-label-sm);
+}
+
+.btn-primary {
+    background: var(--wg-primary);
+    border-color: transparent;
+    color: var(--wg-on-primary);
+}
+.btn-primary:hover:not(:disabled) {
+    background: var(--wg-primary);
+    filter: brightness(1.08);
+}
+
+/* Stated rather than left to inherit from .btn, so it does not depend on
+   which class the markup happens to list first. */
+.btn-secondary,
+.btn-info {
+    background: var(--wg-surface-container-high);
+}
+
+.btn-link {
+    height: auto;
+    padding: 0;
+    background: none;
+    border-color: transparent;
+    color: var(--wg-primary);
+}
+.btn-link:hover:not(:disabled) {
+    background: none;
+    text-decoration: underline;
+}
+
+/* ── lists ───────────────────────────────────────────────────────────── */
+.list-group {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    border: var(--wg-border-width) solid var(--wg-border);
+    border-radius: var(--wg-radius-panel);
+}
+
+/* Bootstrap's modifier for a group that sits flush in its container. */
+.list-group-flush {
+    border: 0;
+    border-radius: 0;
+}
+
+.list-group-item {
+    display: flex;
+    align-items: center;
+    gap: var(--wg-space-md);
+    min-width: 0;
+    padding: var(--wg-space-md);
+    border-bottom: var(--wg-border-width) solid var(--wg-border);
+    background: none;
+    color: var(--wg-text);
+    text-decoration: none;
+}
+
+.list-group-flush > .list-group-item {
+    padding-left: 0;
+    padding-right: 0;
+}
+.list-group-item:last-child {
+    border-bottom: 0;
+}
+
+.list-group-item-action:hover {
+    background: var(--wg-row-hover);
+}
+
+.list-group-item-action:focus-visible {
+    outline: var(--wg-focus-ring);
+    outline-offset: calc(var(--wg-focus-ring-offset) * -1);
+}
+
+/* ── badges ──────────────────────────────────────────────────────────── */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--wg-space-xs);
+    height: var(--wg-badge-height);
+    padding: 0 var(--wg-badge-padding-x);
+    background: var(--wg-surface-container);
+    border: var(--wg-border-width) solid var(--wg-border);
+    border-radius: var(--wg-radius-badge);
+    color: var(--wg-text);
+    font: var(--wg-text-label-sm);
+    white-space: nowrap;
+}
+
+.bg-secondary {
+    background: var(--wg-surface-container-high);
+}
+
+/* Tone variants on a badge. Border and ink rather than a filled ground, which
+   is how ui/Badge draws them — a log full of solid red blocks is unreadable. */
+.bg-danger {
+    border-color: var(--wg-error);
+    color: var(--wg-error);
+}
+
+.bg-warning {
+    border-color: var(--wg-secondary);
+    color: var(--wg-secondary);
+}
+
+/* ── alerts ──────────────────────────────────────────────────────────── */
+.alert {
+    padding: var(--wg-space-md) var(--wg-space-lg);
+    background: var(--wg-surface-container);
+    border: var(--wg-border-width) solid var(--wg-border-strong);
+    border-radius: var(--wg-radius-panel);
+    color: var(--wg-text);
+}
+.alert-danger {
+    border-color: var(--wg-error);
+    color: var(--wg-error);
+}
+.alert-success {
+    border-color: var(--wg-tertiary);
+    color: var(--wg-tertiary);
+}
+
+.card-body {
+    padding: var(--wg-space-lg);
+}
+
+/* ── nav pills, used by the connection-instructions tabs ─────────────── */
+.nav {
+    display: flex;
+    gap: var(--wg-space-xs);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.nav-item {
+    min-width: 0;
+}
+
+.nav-link {
+    display: inline-flex;
+    align-items: center;
+    padding: var(--wg-space-xs) var(--wg-space-sm);
+    border-radius: var(--wg-radius-control);
+    color: var(--wg-text-muted);
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.nav-link:hover {
+    background: var(--wg-surface-container-high);
+    color: var(--wg-text);
+}
+
+.nav-link:focus-visible {
+    outline: var(--wg-focus-ring);
+    outline-offset: var(--wg-focus-ring-offset);
+}
+
+.nav-pills .nav-link.active {
+    background: var(--wg-surface-container-highest);
+    color: var(--wg-text);
+}
+
+/* ── table ───────────────────────────────────────────────────────────── */
+.table {
+    width: 100%;
+    border-collapse: collapse;
+    font: var(--wg-text-body-md);
+}
+
+.table th,
+.table td {
+    padding: var(--wg-space-sm) var(--wg-space-md);
+    border-bottom: var(--wg-border-width) solid var(--wg-border);
+    text-align: left;
+    vertical-align: top;
+}
+
+.table th {
+    color: var(--wg-text-muted);
+    font: var(--wg-text-label-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .form-switch .form-check-input,
+    .form-switch .form-check-input::after {
+        transition: none;
+    }
+}

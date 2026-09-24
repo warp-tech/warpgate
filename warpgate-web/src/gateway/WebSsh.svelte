@@ -5,16 +5,6 @@
         faPlus,
         faTimes,
     } from '@fortawesome/free-solid-svg-icons'
-    import {
-        Button,
-        Dropdown,
-        DropdownItem,
-        DropdownMenu,
-        DropdownToggle,
-        Modal,
-        ModalBody,
-        ModalFooter,
-    } from '@sveltestrap/sveltestrap'
     import ConnectingNotice from 'common/ConnectingNotice.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import { stringifyError } from 'common/errors'
@@ -25,6 +15,9 @@
     import { SvelteMap } from 'svelte/reactivity'
     import Fa from 'svelte-fa'
     import { loadTheme } from 'theme'
+    import Button from 'ui/Button.svelte'
+    import Menu from 'ui/Menu.svelte'
+    import Modal from 'ui/Modal.svelte'
     import { api, ResponseError, type WebSshSessionInfo } from './lib/api'
     import {
         ConnectionState,
@@ -104,7 +97,6 @@
         fontSize = Math.max(FONT_SIZE_MIN, fontSize - FONT_SIZE_STEP)
     }
 
-    let menuOpen = $state(false)
     let showInstructions = $state(false)
 
     let ws = $state<ReconnectingWebSocket | undefined>()
@@ -395,111 +387,123 @@
             {/if}
 
             {#if ws?.state === ConnectionState.Connected}
-                <Button color="danger" onclick={disconnect}>Disconnect</Button>
+                <Button variant="destructive" onclick={disconnect}>
+                    Disconnect
+                </Button>
             {/if}
 
-            <Dropdown bind:isOpen={menuOpen}>
-                <DropdownToggle color="secondary" caret={false}>
-                    <Fa icon={faGear} />
-                </DropdownToggle>
-                <DropdownMenu end>
-                    <div
-                        class="dropdown-item disabled font-size-row d-flex align-items-center gap-2"
-                    >
-                        <button
-                            type="button"
-                            class="btn btn-sm btn-secondary"
-                            disabled={fontSize <= FONT_SIZE_MIN}
-                            onclick={() => { zoomOut(); menuOpen = true }}
-                            aria-label="Zoom out"
-                        >
-                            <Fa icon={faMinus} />
-                        </button>
-                        <span class="text-nowrap ms-auto me-auto">
-                            {fontSize}px
-                        </span>
-                        <button
-                            type="button"
-                            class="btn btn-sm btn-secondary"
-                            disabled={fontSize >= FONT_SIZE_MAX}
-                            onclick={() => { zoomIn(); menuOpen = true }}
-                            aria-label="Zoom in"
-                        >
-                            <Fa icon={faPlus} />
-                        </button>
-                    </div>
-                    {#if sessionInfo}
-                        <DropdownItem divider />
-                        <DropdownItem
-                            onclick={() => { showInstructions = true; menuOpen = false }}
-                        >
-                            Connect from your machine
-                        </DropdownItem>
-                    {/if}
-                </DropdownMenu>
-            </Dropdown>
+            <!--
+              The zoom stepper used to live inside the dropdown as a "disabled
+              dropdown item", which announced as an inert menu item containing
+              two buttons. It is a toolbar control, so it sits in the toolbar.
+            -->
+            <fieldset class="zoom">
+                <legend class="sr-only">Terminal font size</legend>
+                <Button
+                    variant="ghost"
+                    size="compact"
+                    label="Zoom out"
+                    disabled={fontSize <= FONT_SIZE_MIN}
+                    onclick={zoomOut}
+                >
+                    <Fa icon={faMinus} />
+                </Button>
+                <span class="zoom-value">{fontSize}px</span>
+                <Button
+                    variant="ghost"
+                    size="compact"
+                    label="Zoom in"
+                    disabled={fontSize >= FONT_SIZE_MAX}
+                    onclick={zoomIn}
+                >
+                    <Fa icon={faPlus} />
+                </Button>
+            </fieldset>
+
+            {#if sessionInfo}
+                <Menu
+                    label="Session options"
+                    align="end"
+                    groups={[
+                        {
+                            items: [
+                                {
+                                    id: 'instructions',
+                                    label: 'Connect from your machine',
+                                    onselect: () => {
+                                        showInstructions = true
+                                    },
+                                },
+                            ],
+                        },
+                    ]}
+                />
+            {/if}
         </div>
     {/if}
 </div>
 
 {#if sessionInfo}
     <Modal
-        isOpen={showInstructions}
-        toggle={() => showInstructions = false}
+        open={showInstructions}
+        title="Connect to {sessionInfo.targetName}"
         size="lg"
+        onclose={() => (showInstructions = false)}
     >
-        <ModalBody>
-            <ConnectionInstructions
-                targetName={sessionInfo.targetName}
-                targetKind={sessionInfo.targetKind}
-                username={$serverInfo?.username}
-            />
-        </ModalBody>
-        <ModalFooter>
-            <Button
-                color="secondary"
-                class="modal-button"
-                onclick={() => showInstructions = false}
-            >
-                Close
-            </Button>
-        </ModalFooter>
+        <ConnectionInstructions
+            targetName={sessionInfo.targetName}
+            targetKind={sessionInfo.targetKind}
+            username={$serverInfo?.username}
+        />
+
+        {#snippet footer()}
+            <Button onclick={() => (showInstructions = false)}>Close</Button>
+        {/snippet}
     </Modal>
 {/if}
 
 {#if pendingHostKey}
-    <Modal isOpen={true} backdrop="static" keyboard={false}>
-        <ModalBody>
-            <div class="mb-3">
-                There is currently no trusted {pendingHostKey.key_type} key for
-                the SSH server at {pendingHostKey.host}:{pendingHostKey.port}.
-                Trust this key?
-            </div>
-            <code>{pendingHostKey.key_type} {pendingHostKey.key_base64}</code>
-        </ModalBody>
-        <ModalFooter>
+    <Modal
+        open={true}
+        title="Trust this host key?"
+        size="md"
+        dismissable={false}
+    >
+        <p class="hostkey-lead">
+            There is no trusted {pendingHostKey.key_type} key for the SSH server
+            at {pendingHostKey.host}:{pendingHostKey.port}.
+        </p>
+        <p class="hostkey-lead">
+            Either this is the first time you have connected to it, or something
+            is intercepting the connection. Confirm the fingerprint below with
+            the host's administrator over a channel that does not go through
+            Warpgate before accepting it.
+        </p>
+        <code class="hostkey">
+            {pendingHostKey.key_type} {pendingHostKey.key_base64}
+        </code>
+
+        {#snippet footer()}
             <Button
-                color="danger"
-                class="modal-button"
+                variant="destructive"
                 onclick={() => {
-                send({ type: 'reject_host_key' })
-                pendingHostKey = null
-                disconnect()
-            }}
+                    send({ type: 'reject_host_key' })
+                    pendingHostKey = null
+                    disconnect()
+                }}
             >
                 Reject and disconnect
             </Button>
             <Button
-                color="primary"
-                class="modal-button"
+                variant="primary"
                 onclick={() => {
-                send({ type: 'accept_host_key' })
-                pendingHostKey = null
-            }}
+                    send({ type: 'accept_host_key' })
+                    pendingHostKey = null
+                }}
             >
                 Accept and connect
             </Button>
-        </ModalFooter>
+        {/snippet}
     </Modal>
 {/if}
 
@@ -540,14 +544,55 @@
         }
     }
 
-    .font-size-row {
-        padding: 0.25rem 1rem;
-        min-width: 220px;
-        pointer-events: none;
+    // The stepper left the dropdown, so the pointer-events dance that let
+    // buttons work inside a "disabled" dropdown item went with it.
+    .zoom {
+        margin: 0;
+        padding: 0;
+        border: 0;
+        display: flex;
+        align-items: center;
+        gap: var(--wg-space-xs);
+    }
 
-        button {
-            pointer-events: initial;
-        }
+    .hostkey-lead {
+        margin: 0 0 var(--wg-space-sm);
+        font: var(--wg-text-body-md);
+    }
+
+    .hostkey {
+        display: block;
+        margin-top: var(--wg-space-md);
+        padding: var(--wg-space-sm);
+        background: var(--wg-surface-sunken);
+        border: var(--wg-border-width) solid var(--wg-border);
+        border-radius: var(--wg-radius-sm);
+        color: var(--wg-text);
+        font: var(--wg-text-code-sm);
+        // One unbroken base64 run. Without this it overflows the dialog and
+        // the user cannot read the fingerprint they are being asked to check.
+        overflow-wrap: anywhere;
+    }
+
+    .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+        border: 0;
+    }
+
+    .zoom-value {
+        min-width: 3.5rem;
+        text-align: center;
+        color: var(--wg-text-muted);
+        font: var(--wg-text-label-sm);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
     }
 
 </style>

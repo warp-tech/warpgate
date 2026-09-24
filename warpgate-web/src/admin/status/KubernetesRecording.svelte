@@ -1,8 +1,8 @@
 <script lang="ts">
-    import { Badge } from '@sveltestrap/sveltestrap'
     import type { Recording } from 'admin/lib/api'
     import { onMount } from 'svelte'
     import { firstBy } from 'thenby'
+    import Badge from 'ui/Badge.svelte'
 
     interface Props {
         recording: Recording
@@ -86,17 +86,19 @@
         <div class="d-flex align-items-center gap-2">
             {#if item.responseStatus}
                 <Badge
-                    color={isSuccessStatus(item.responseStatus) ? 'success' : 'danger'}
+                    tone={isSuccessStatus(item.responseStatus)
+                        ? 'success'
+                        : 'danger'}
                 >
                     {item.responseStatus}
                 </Badge>
             {/if}
             {#if item.requestMethod === 'GET'}
-                <Badge color="success">
+                <Badge tone="success">
                     {item.requestMethod}
                 </Badge>
             {:else}
-                <Badge color="warning">
+                <Badge tone="warning">
                     {item.requestMethod}
                 </Badge>
             {/if}

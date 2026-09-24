@@ -1,19 +1,26 @@
 <script lang="ts">
-    import { Input, InputGroup } from '@sveltestrap/sveltestrap'
+    import Input from 'ui/Input.svelte'
+    import Select from 'ui/Select.svelte'
 
     type Props = {
         change?: CallableFunction
         value: number | undefined
         placeholder?: string
         allowEmpty?: boolean
-    } & Input['$$prop_def']
+        label?: string
+        disabled?: boolean
+        /** Callers label this field externally and point at it. */
+        id?: string
+    }
 
     let {
         value = $bindable(),
         change,
         placeholder,
         allowEmpty = true,
-        ...rest
+        label = 'Rate limit',
+        disabled = false,
+        id,
     }: Props = $props()
 
     // svelte-ignore state_referenced_locally
@@ -39,7 +46,13 @@
 
     // Internal state - these are completely separate from the external value
     let displayValue: number | undefined = $state()
-    let selectedUnit = $state(units[0])
+    // ui/Select is a real <select>, which carries strings. The original bound
+    // whole objects to <option value={unit}>, which only works because Svelte
+    // keeps a reference map.
+    let selectedUnitLabel: string = $state(units[0].label)
+    const selectedUnit = $derived(
+        units.find(u => u.label === selectedUnitLabel) ?? units[0],
+    )
     let lastExternalValue: number | undefined = $state()
 
     function isValidValue(v: number | undefined): boolean {
@@ -84,11 +97,12 @@
             lastExternalValue = value
             if (value !== undefined && value !== null) {
                 // Auto-select best unit using helper function
-                selectedUnit = getDisplayUnit(value)
-                displayValue = value / selectedUnit.value
+                const unit = getDisplayUnit(value)
+                selectedUnitLabel = unit.label
+                displayValue = value / unit.value
             } else {
                 displayValue = undefined
-                selectedUnit = units[0]
+                selectedUnitLabel = units[0].label
             }
         }
     })
@@ -115,27 +129,54 @@
     }
 </script>
 
-<InputGroup>
-    <Input
-        {...rest}
-        type="number"
-        min="0"
-        step="any"
-        bind:value={displayValue}
-        on:change={handleChange}
-        {placeholder}
-        invalid={!isValid}
-    />
-    <Input
-        type="select"
-        class="form-select"
-        feedback={feedbackMessage}
-        bind:value={selectedUnit}
-        onchange={handleChange}
-        style="max-width: 100px;"
-    >
-        {#each units as unit (unit.value)}
-            <option value={unit}>{unit.label}/s</option>
-        {/each}
-    </Input>
-</InputGroup>
+<div class="rate-limit">
+    <div class="rate-value">
+        <Input
+            {id}
+            {label}
+            labelHidden
+            type="number"
+            min="0"
+            inputmode="decimal"
+            {placeholder}
+            {disabled}
+            value={displayValue === undefined ? '' : String(displayValue)}
+            invalid={!isValid}
+            error={isValid ? undefined : feedbackMessage}
+            oninput={e => {
+                const raw = (e.target as HTMLInputElement).value
+                displayValue = raw === '' ? undefined : Number(raw)
+                handleChange()
+            }}
+        />
+    </div>
+    <div class="rate-unit">
+        <Select
+            label="Rate limit unit"
+            labelHidden
+            size="compact"
+            {disabled}
+            bind:value={selectedUnitLabel}
+            options={units.map(u => ({ value: u.label, label: `${u.label}/s` }))}
+            onchange={handleChange}
+        />
+    </div>
+</div>
+
+<style>
+    .rate-limit {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--wg-space-sm);
+    }
+
+    .rate-value {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .rate-unit {
+        flex: none;
+        width: 7rem;
+    }
+</style>

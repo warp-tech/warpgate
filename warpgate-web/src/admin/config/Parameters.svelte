@@ -1,5 +1,4 @@
 <script lang="ts">
-    import { Alert, Button, FormGroup, Input } from '@sveltestrap/sveltestrap'
     import AnalyticsConsentModal from 'admin/AnalyticsConsentModal.svelte'
     import {
         AnalyticsConsent,
@@ -16,7 +15,6 @@
     import Section from 'admin/lib/Section.svelte'
     import SectionedForm from 'admin/lib/SectionedForm.svelte'
     import Subsection from 'admin/lib/Subsection.svelte'
-    import AsyncButton from 'common/AsyncButton.svelte'
     import DurationInput from 'common/DurationInput.svelte'
     import { stringifyError } from 'common/errors'
     import InfoBox from 'common/InfoBox.svelte'
@@ -26,6 +24,11 @@
     import { api as gatewayApi } from 'gateway/lib/api'
     import { reloadServerInfo } from 'gateway/lib/store'
     import { link } from 'svelte-spa-router'
+    import Button from 'ui/Button.svelte'
+    import Callout from 'ui/Callout.svelte'
+    import Checkbox from 'ui/Checkbox.svelte'
+    import Input from 'ui/Input.svelte'
+    import Textarea from 'ui/Textarea.svelte'
 
     let parameters: ParameterValues | undefined = $state()
     let hasSsoProviders = $state(false)
@@ -175,12 +178,20 @@
         message="You have no permission to edit global parameters."
     >
         {#if updateError}
-            <Alert
-                color="danger"
-                dismissible
-                onclose={() => { updateError = undefined }}
-                >{updateError}</Alert
-            >
+            <div class="notice">
+                <Callout tone="danger" title="Could not save">
+                    {updateError}
+                    {#snippet actions()}
+                        <Button
+                            size="compact"
+                            variant="ghost"
+                            onclick={() => (updateError = undefined)}
+                        >
+                            Dismiss
+                        </Button>
+                    {/snippet}
+                </Callout>
+            </div>
         {/if}
         <Loadable promise={initPromise}>
             {#snippet children(parameters)}
@@ -193,31 +204,22 @@
                     >
                         <SectionedForm>
                             <Section id="credentials" title="Credentials">
-                                <label
-                                    for="allowOwnCredentialManagement"
-                                    class="d-flex align-items-center"
-                                >
-                                    <Input
-                                        id="allowOwnCredentialManagement"
-                                        class="mb-0 me-2"
-                                        type="switch"
-                                        bind:checked={parameters.allowOwnCredentialManagement}
-                                    />
-                                    <div>
-                                        Allow users to manage their own
-                                        credentials
-                                    </div>
-                                </label>
+                                <Checkbox
+                                    label="Allow users to manage their own credentials"
+                                    bind:checked={parameters.allowOwnCredentialManagement}
+                                />
                             </Section>
 
                             <Section
                                 id="password-policy"
                                 title="Password policy"
                             >
-                                <FormGroup
-                                    floating
-                                    label="Minimum length (0 = no requirement)"
-                                >
+                                <label class="wg-field-group">
+                                    <span class="wg-field-label"
+                                        >Minimum length (0 = no
+                                        requirement)</span
+                                    >
+
                                     <input
                                         type="number"
                                         min="0"
@@ -228,55 +230,23 @@
                                             parameters.passwordPolicy.minLength = Number.isNaN(v) ? 0 : Math.max(0, v)
                                         }}
                                     >
-                                </FormGroup>
-                                <label
-                                    for="requireUppercase"
-                                    class="d-flex align-items-center mb-2"
-                                >
-                                    <Input
-                                        id="requireUppercase"
-                                        class="mb-0 me-2"
-                                        type="switch"
-                                        bind:checked={parameters.passwordPolicy.requireUppercase}
-                                    />
-                                    <div>Require uppercase letter</div>
                                 </label>
-                                <label
-                                    for="requireLowercase"
-                                    class="d-flex align-items-center mb-2"
-                                >
-                                    <Input
-                                        id="requireLowercase"
-                                        class="mb-0 me-2"
-                                        type="switch"
-                                        bind:checked={parameters.passwordPolicy.requireLowercase}
-                                    />
-                                    <div>Require lowercase letter</div>
-                                </label>
-                                <label
-                                    for="requireDigits"
-                                    class="d-flex align-items-center mb-2"
-                                >
-                                    <Input
-                                        id="requireDigits"
-                                        class="mb-0 me-2"
-                                        type="switch"
-                                        bind:checked={parameters.passwordPolicy.requireDigits}
-                                    />
-                                    <div>Require digit</div>
-                                </label>
-                                <label
-                                    for="requireSpecial"
-                                    class="d-flex align-items-center"
-                                >
-                                    <Input
-                                        id="requireSpecial"
-                                        class="mb-0 me-2"
-                                        type="switch"
-                                        bind:checked={parameters.passwordPolicy.requireSpecial}
-                                    />
-                                    <div>Require special character</div>
-                                </label>
+                                <Checkbox
+                                    label="Require uppercase letter"
+                                    bind:checked={parameters.passwordPolicy.requireUppercase}
+                                />
+                                <Checkbox
+                                    label="Require lowercase letter"
+                                    bind:checked={parameters.passwordPolicy.requireLowercase}
+                                />
+                                <Checkbox
+                                    label="Require digit"
+                                    bind:checked={parameters.passwordPolicy.requireDigits}
+                                />
+                                <Checkbox
+                                    label="Require special character"
+                                    bind:checked={parameters.passwordPolicy.requireSpecial}
+                                />
                             </Section>
 
                             <Section id="traffic" title="Traffic">
@@ -293,45 +263,18 @@
                                 <Subsection
                                     title="Allowed authentication methods"
                                 >
-                                    <label
-                                        for="sshClientAuthPublickey"
-                                        class="d-flex align-items-center mb-2"
-                                    >
-                                        <Input
-                                            id="sshClientAuthPublickey"
-                                            class="mb-0 me-2"
-                                            type="switch"
-                                            bind:checked={parameters.sshClientAuthPublickey}
-                                        />
-                                        <div>Public key authentication</div>
-                                    </label>
-                                    <label
-                                        for="sshClientAuthPassword"
-                                        class="d-flex align-items-center mb-2"
-                                    >
-                                        <Input
-                                            id="sshClientAuthPassword"
-                                            class="mb-0 me-2"
-                                            type="switch"
-                                            bind:checked={parameters.sshClientAuthPassword}
-                                        />
-                                        <div>Password authentication</div>
-                                    </label>
-                                    <label
-                                        for="sshClientAuthKeyboardInteractive"
-                                        class="d-flex align-items-center"
-                                    >
-                                        <Input
-                                            id="sshClientAuthKeyboardInteractive"
-                                            class="mb-0 me-2"
-                                            type="switch"
-                                            bind:checked={parameters.sshClientAuthKeyboardInteractive}
-                                        />
-                                        <div>
-                                            Keyboard-interactive authentication
-                                            (OTP, 2FA prompts)
-                                        </div>
-                                    </label>
+                                    <Checkbox
+                                        label="Public key authentication"
+                                        bind:checked={parameters.sshClientAuthPublickey}
+                                    />
+                                    <Checkbox
+                                        label="Password authentication"
+                                        bind:checked={parameters.sshClientAuthPassword}
+                                    />
+                                    <Checkbox
+                                        label="Keyboard-interactive authentication (OTP, 2FA prompts)"
+                                        bind:checked={parameters.sshClientAuthKeyboardInteractive}
+                                    />
                                     <HelpText>
                                         Controls which authentication methods
                                         are offered to SSH clients. Disabling
@@ -341,10 +284,11 @@
                                 </Subsection>
 
                                 <Subsection title="Target host keys">
-                                    <FormGroup
-                                        floating
-                                        label="Unknown host key handling"
-                                    >
+                                    <label class="wg-field-group">
+                                        <span class="wg-field-label"
+                                            >Unknown host key handling</span
+                                        >
+
                                         <select
                                             id="sshHostKeyVerification"
                                             class="form-select"
@@ -364,25 +308,15 @@
                                                 Don't check host keys at all
                                             </option>
                                         </select>
-                                    </FormGroup>
+                                    </label>
                                 </Subsection>
 
                                 <Subsection title="Quirks">
                                     {#if parameters.recordingsEnable}
-                                        <label
-                                            for="recordScp"
-                                            class="d-flex align-items-center mt-2"
-                                        >
-                                            <Input
-                                                id="recordScp"
-                                                class="mb-0 me-2"
-                                                type="switch"
-                                                bind:checked={parameters.recordScp}
-                                            />
-                                            <div>
-                                                Record legacy SCP transfers
-                                            </div>
-                                        </label>
+                                        <Checkbox
+                                            label="Record legacy SCP transfers"
+                                            bind:checked={parameters.recordScp}
+                                        />
                                         <HelpText>
                                             Legacy SCP works over an exec
                                             channel and would be normally
@@ -399,18 +333,10 @@
                                 bodyTitle="Self-service tickets"
                                 title="Tickets"
                             >
-                                <label
-                                    for="ticketSelfServiceEnabled"
-                                    class="d-flex align-items-center mb-2"
-                                >
-                                    <Input
-                                        id="ticketSelfServiceEnabled"
-                                        class="mb-0 me-2"
-                                        type="switch"
-                                        bind:checked={parameters.ticketSelfServiceEnabled}
-                                    />
-                                    <div>Allow users to request tickets</div>
-                                </label>
+                                <Checkbox
+                                    label="Allow users to request tickets"
+                                    bind:checked={parameters.ticketSelfServiceEnabled}
+                                />
                                 <InfoBox class="mt-3 mb-3">
                                     When enabled, authenticated users can
                                     request user-tied, time-limited access
@@ -419,53 +345,20 @@
                                 </InfoBox>
 
                                 {#if parameters.ticketSelfServiceEnabled}
-                                    <label
-                                        for="ticketAutoApproveExistingAccess"
-                                        class="d-flex align-items-center mb-2"
-                                    >
-                                        <Input
-                                            id="ticketAutoApproveExistingAccess"
-                                            class="mb-0 me-2"
-                                            type="switch"
-                                            bind:checked={parameters.ticketAutoApproveExistingAccess}
-                                        />
-                                        <div>
-                                            Auto-approve when user already has
-                                            role-based access
-                                        </div>
-                                    </label>
+                                    <Checkbox
+                                        label="Auto-approve when user already has role-based access"
+                                        bind:checked={parameters.ticketAutoApproveExistingAccess}
+                                    />
 
-                                    <label
-                                        for="ticketRequireDescription"
-                                        class="d-flex align-items-center mb-2"
-                                    >
-                                        <Input
-                                            id="ticketRequireDescription"
-                                            class="mb-0 me-2"
-                                            type="switch"
-                                            bind:checked={parameters.ticketRequireDescription}
-                                        />
-                                        <div>
-                                            Require description on ticket
-                                            requests
-                                        </div>
-                                    </label>
+                                    <Checkbox
+                                        label="Require description on ticket requests"
+                                        bind:checked={parameters.ticketRequireDescription}
+                                    />
 
-                                    <label
-                                        for="ticketRequestShowAllTargets"
-                                        class="d-flex align-items-center mb-2"
-                                    >
-                                        <Input
-                                            id="ticketRequestShowAllTargets"
-                                            class="mb-0 me-2"
-                                            type="switch"
-                                            bind:checked={parameters.ticketRequestShowAllTargets}
-                                        />
-                                        <div>
-                                            Show all targets in ticket request
-                                            form
-                                        </div>
-                                    </label>
+                                    <Checkbox
+                                        label="Show all targets in ticket request form"
+                                        bind:checked={parameters.ticketRequestShowAllTargets}
+                                    />
                                     <HelpText>
                                         When disabled, users only see targets
                                         they already have role-based access to.
@@ -483,10 +376,12 @@
                                             2h30m.
                                         </HelpText>
 
-                                        <FormGroup
-                                            floating
-                                            label="Max uses per ticket (blank = unlimited)"
-                                        >
+                                        <label class="wg-field-group">
+                                            <span class="wg-field-label"
+                                                >Max uses per ticket (blank =
+                                                unlimited)</span
+                                            >
+
                                             <input
                                                 type="number"
                                                 min="1"
@@ -497,7 +392,7 @@
                                                     parameters.ticketMaxUses = Number.isNaN(v) ? undefined : v
                                                 }}
                                             >
-                                        </FormGroup>
+                                        </label>
                                     </Subsection>
                                 {/if}
                             </Section>
@@ -511,21 +406,10 @@
                             </Section>
 
                             <Section id="ui" title="UI">
-                                <label
-                                    for="webClientsEnabled"
-                                    class="d-flex align-items-center"
-                                >
-                                    <Input
-                                        id="webClientsEnabled"
-                                        class="mb-0 me-2"
-                                        type="switch"
-                                        bind:checked={parameters.webClientsEnabled}
-                                    />
-                                    <div>
-                                        Enable in-browser clients (SSH terminal,
-                                        RDP/VNC desktop)
-                                    </div>
-                                </label>
+                                <Checkbox
+                                    label="Enable in-browser clients (SSH terminal, RDP/VNC desktop)"
+                                    bind:checked={parameters.webClientsEnabled}
+                                />
                                 <HelpText>
                                     Lets users open SSH, RDP and VNC targets
                                     directly in the browser from the portal.
@@ -533,10 +417,11 @@
                                     instructions are shown.
                                 </HelpText>
 
-                                <FormGroup
-                                    floating
-                                    label="SSH target click action"
-                                >
+                                <label class="wg-field-group">
+                                    <span class="wg-field-label"
+                                        >SSH target click action</span
+                                    >
+
                                     <select
                                         id="targetClickAction"
                                         class="form-select"
@@ -550,9 +435,13 @@
                                             Show connection instructions
                                         </option>
                                     </select>
-                                </FormGroup>
+                                </label>
 
-                                <FormGroup floating label="Open targets in">
+                                <label class="wg-field-group">
+                                    <span class="wg-field-label"
+                                        >Open targets in</span
+                                    >
+
                                     <select
                                         id="openTargetsInNewTab"
                                         class="form-select"
@@ -572,20 +461,12 @@
                                             Always the same tab
                                         </option>
                                     </select>
-                                </FormGroup>
-
-                                <label
-                                    for="showSessionMenu"
-                                    class="d-flex align-items-center"
-                                >
-                                    <Input
-                                        id="showSessionMenu"
-                                        class="mb-0 me-2"
-                                        type="switch"
-                                        bind:checked={parameters.showSessionMenu}
-                                    />
-                                    <div>Show HTTP session menu</div>
                                 </label>
+
+                                <Checkbox
+                                    label="Show HTTP session menu"
+                                    bind:checked={parameters.showSessionMenu}
+                                />
                                 <HelpText>
                                     Warpgate can inject a session menu into HTTP
                                     sessions, allowing users to log out or
@@ -595,7 +476,11 @@
 
                             <Section id="login" title="Login">
                                 {#if hasSsoProviders}
-                                    <FormGroup floating label="Password login">
+                                    <label class="wg-field-group">
+                                        <span class="wg-field-label"
+                                            >Password login</span
+                                        >
+
                                         <select
                                             id="passwordLoginMode"
                                             class="form-select"
@@ -612,7 +497,7 @@
                                                 Disabled (SSO only)
                                             </option>
                                         </select>
-                                    </FormGroup>
+                                    </label>
                                     <HelpText>
                                         Minimized hides the username and
                                         password fields behind a link, with the
@@ -651,7 +536,7 @@
                                     cache approvals.
                                 </HelpText>
 
-                                <FormGroup>
+                                <div class="wg-field-group">
                                     <label class="mb-2" for="mfaEnforcement">
                                         MFA enforcement
                                     </label>
@@ -671,11 +556,9 @@
                                             a second factor)
                                         </option>
                                     </select>
-                                </FormGroup>
+                                </div>
 
-                                <Input
-                                    class="mb-0 me-2"
-                                    type="switch"
+                                <Checkbox
                                     label="Exempt SSO users from MFA enforcement"
                                     bind:checked={parameters.mfaPolicyExemptSsoUsers}
                                 />
@@ -684,17 +567,16 @@
                                     SSO provider
                                 </HelpText>
 
-                                <FormGroup>
-                                    <label class="mb-2" for="banner">
-                                        Login banner
-                                    </label>
-                                    <Input
+                                <div class="wg-field-group">
+                                    <Textarea
                                         id="banner"
-                                        type="textarea"
+                                        label="Login banner"
                                         rows={4}
+                                        mono={false}
+                                        spellcheck
                                         bind:value={parameters.banner}
                                     />
-                                </FormGroup>
+                                </div>
                                 <HelpText class="mt-3 mb-3">
                                     Optional message shown to users when they
                                     connect to a target: during SSH
@@ -739,18 +621,10 @@
                                 title="Login protection"
                             >
                                 <!-- Master toggle -->
-                                <label
-                                    for="loginProtectionEnabled"
-                                    class="d-flex align-items-center"
-                                >
-                                    <Input
-                                        id="loginProtectionEnabled"
-                                        class="mb-0 me-2"
-                                        type="switch"
-                                        bind:checked={parameters.loginProtectionEnabled}
-                                    />
-                                    <div>Enable brute-force protection</div>
-                                </label>
+                                <Checkbox
+                                    label="Enable brute-force protection"
+                                    bind:checked={parameters.loginProtectionEnabled}
+                                />
                                 <HelpText>
                                     Rate-limits IPs and locks accounts after
                                     repeated failed logins. When disabled, all
@@ -759,19 +633,21 @@
                                 </HelpText>
 
                                 {#if lpCapWarning}
-                                    <Alert color="warning" class="mb-2"
-                                        >{lpCapWarning}</Alert
-                                    >
+                                    <Callout tone="warning">
+                                        {lpCapWarning}
+                                    </Callout>
                                 {/if}
 
                                 {#if parameters.loginProtectionEnabled}
                                     <Subsection title="IP rate-limit">
                                         <div class="row g-2 mb-2">
                                             <div class="col-sm-6">
-                                                <FormGroup
-                                                    floating
-                                                    label="Max failures before IP block"
-                                                >
+                                                <label class="wg-field-group">
+                                                    <span class="wg-field-label"
+                                                        >Max failures before IP
+                                                        block</span
+                                                    >
+
                                                     <input
                                                         type="number"
                                                         min="1"
@@ -782,7 +658,7 @@
                                                         value={parameters.lpIpMaxAttempts}
                                                         onchange={e => { parameters.lpIpMaxAttempts = e.currentTarget.valueAsNumber }}
                                                     >
-                                                </FormGroup>
+                                                </label>
                                             </div>
                                             <div class="col-sm-6">
                                                 <DurationInput
@@ -799,10 +675,12 @@
                                                 />
                                             </div>
                                             <div class="col-6">
-                                                <FormGroup
-                                                    floating
-                                                    label="Backoff multiplier"
-                                                >
+                                                <label class="wg-field-group">
+                                                    <span class="wg-field-label"
+                                                        >Backoff
+                                                        multiplier</span
+                                                    >
+
                                                     <input
                                                         type="number"
                                                         min="1.0"
@@ -814,7 +692,7 @@
                                                         value={parameters.lpIpBlockDurationMultiplier}
                                                         onchange={e => { parameters.lpIpBlockDurationMultiplier = e.currentTarget.valueAsNumber }}
                                                     >
-                                                </FormGroup>
+                                                </label>
                                             </div>
                                             <div class="col-6">
                                                 <DurationInput
@@ -847,10 +725,15 @@
                                         <Subsection title="User lockout">
                                             <div class="row g-2 mb-2">
                                                 <div class="col-sm-6">
-                                                    <FormGroup
-                                                        floating
-                                                        label="Max failures before lockout"
+                                                    <label
+                                                        class="wg-field-group"
                                                     >
+                                                        <span
+                                                            class="wg-field-label"
+                                                            >Max failures before
+                                                            lockout</span
+                                                        >
+
                                                         <input
                                                             type="number"
                                                             min="1"
@@ -861,7 +744,7 @@
                                                             value={parameters.lpUserMaxAttempts}
                                                             onchange={e => { parameters.lpUserMaxAttempts = e.currentTarget.valueAsNumber }}
                                                         >
-                                                    </FormGroup>
+                                                    </label>
                                                 </div>
                                                 <div class="col-sm-6">
                                                     <DurationInput
@@ -871,21 +754,10 @@
                                                     />
                                                 </div>
                                             </div>
-                                            <label
-                                                for="lpUserAutoUnlock"
-                                                class="d-flex align-items-center mb-2"
-                                            >
-                                                <Input
-                                                    id="lpUserAutoUnlock"
-                                                    class="mb-0 me-2"
-                                                    type="switch"
-                                                    disabled={!parameters.loginProtectionEnabled}
-                                                    bind:checked={parameters.lpUserAutoUnlock}
-                                                />
-                                                <div>
-                                                    Auto-unlock after timeout
-                                                </div>
-                                            </label>
+                                            <Checkbox
+                                                label="Auto-unlock after timeout"
+                                                bind:checked={parameters.lpUserAutoUnlock}
+                                            />
                                             {#if parameters.lpUserAutoUnlock}
                                                 <DurationInput
                                                     label="Auto-unlock delay"
@@ -897,21 +769,10 @@
                                         </Subsection>
 
                                         <Subsection title="Lockout protection">
-                                            <label
-                                                for="lpUserExemptAdmins"
-                                                class="d-flex align-items-center mb-2"
-                                            >
-                                                <Input
-                                                    id="lpUserExemptAdmins"
-                                                    class="mb-0 me-2"
-                                                    type="switch"
-                                                    disabled={!parameters.loginProtectionEnabled}
-                                                    bind:checked={parameters.lpUserExemptAdmins}
-                                                />
-                                                <div>
-                                                    Exempt admins from lockout
-                                                </div>
-                                            </label>
+                                            <Checkbox
+                                                label="Exempt admins from lockout"
+                                                bind:checked={parameters.lpUserExemptAdmins}
+                                            />
                                             <HelpText class="mb-3">
                                                 Recommended: keeps an attacker
                                                 from locking out an admin
@@ -946,34 +807,16 @@
                             </Section>
 
                             <Section id="recordings" title="Session recordings">
-                                <label
-                                    for="recordingsEnable"
-                                    class="d-flex align-items-center mb-2"
-                                >
-                                    <Input
-                                        id="recordingsEnable"
-                                        class="mb-0 me-2"
-                                        type="switch"
-                                        bind:checked={parameters.recordingsEnable}
-                                    />
-                                    <div>Record sessions</div>
-                                </label>
+                                <Checkbox
+                                    label="Record sessions"
+                                    bind:checked={parameters.recordingsEnable}
+                                />
 
                                 {#if parameters.recordingsEnable}
-                                    <label
-                                        for="recordDesktopKeyboardInput"
-                                        class="d-flex align-items-center mb-2"
-                                    >
-                                        <Input
-                                            id="recordDesktopKeyboardInput"
-                                            class="mb-0 me-2"
-                                            type="switch"
-                                            bind:checked={parameters.recordDesktopKeyboardInput}
-                                        />
-                                        <div>
-                                            Record remote desktop keyboard input
-                                        </div>
-                                    </label>
+                                    <Checkbox
+                                        label="Record remote desktop keyboard input"
+                                        bind:checked={parameters.recordDesktopKeyboardInput}
+                                    />
                                     <HelpText>
                                         Disable if recording passwords typed in
                                         by users in various applications is a
@@ -981,7 +824,11 @@
                                     </HelpText>
                                 {/if}
 
-                                <FormGroup floating label="Storage backend">
+                                <label class="wg-field-group">
+                                    <span class="wg-field-label"
+                                        >Storage backend</span
+                                    >
+
                                     <select
                                         id="recordingsStorage"
                                         class="form-select"
@@ -993,7 +840,7 @@
                                             S3 / S3-compatible
                                         </option>
                                     </select>
-                                </FormGroup>
+                                </label>
 
                                 <HelpText>
                                     Changing the storage location applies to new
@@ -1003,29 +850,41 @@
 
                                 {#if parameters.recordingsStorage.kind === 'Disk'}
                                     {@const disk = parameters.recordingsStorage}
-                                    <FormGroup floating label="Recordings path">
+                                    <label class="wg-field-group">
+                                        <span class="wg-field-label"
+                                            >Recordings path</span
+                                        >
+
                                         <input
                                             type="text"
                                             class="form-control"
                                             bind:value={disk.path}
                                         >
-                                    </FormGroup>
+                                    </label>
                                 {:else if parameters.recordingsStorage.kind === 'S3'}
                                     {@const s3 = parameters.recordingsStorage}
-                                    <FormGroup floating label="Bucket">
+                                    <label class="wg-field-group">
+                                        <span class="wg-field-label"
+                                            >Bucket</span
+                                        >
+
                                         <input
                                             type="text"
                                             class="form-control"
                                             required
                                             bind:value={s3.bucket}
                                         >
-                                    </FormGroup>
+                                    </label>
                                     <HelpText>
                                         The bucket needs a CORS policy allowing
                                         this origin to issue GET requests with a
                                         Range header.
                                     </HelpText>
-                                    <FormGroup floating label="Region">
+                                    <label class="wg-field-group">
+                                        <span class="wg-field-label"
+                                            >Region</span
+                                        >
+
                                         <input
                                             type="text"
                                             class="form-control"
@@ -1033,11 +892,12 @@
                                             required
                                             bind:value={s3.region}
                                         >
-                                    </FormGroup>
-                                    <FormGroup
-                                        floating
-                                        label="Endpoint (blank = AWS)"
-                                    >
+                                    </label>
+                                    <label class="wg-field-group">
+                                        <span class="wg-field-label"
+                                            >Endpoint (blank = AWS)</span
+                                        >
+
                                         <input
                                             type="text"
                                             class="form-control"
@@ -1045,32 +905,32 @@
                                             value={s3.endpoint ?? ''}
                                             oninput={e => s3.endpoint = e.currentTarget.value || undefined}
                                         >
-                                    </FormGroup>
-                                    <FormGroup floating label="Key prefix">
+                                    </label>
+                                    <label class="wg-field-group">
+                                        <span class="wg-field-label"
+                                            >Key prefix</span
+                                        >
+
                                         <input
                                             type="text"
                                             class="form-control"
                                             bind:value={s3.prefix}
                                         >
-                                    </FormGroup>
-                                    <label
-                                        for="recordingsS3PathStyle"
-                                        class="d-flex align-items-center mb-2"
-                                    >
-                                        <Input
-                                            id="recordingsS3PathStyle"
-                                            class="mb-0 me-2"
-                                            type="switch"
-                                            bind:checked={s3.pathStyle}
-                                        />
-                                        <div>Path-style addressing</div>
                                     </label>
+                                    <Checkbox
+                                        label="Path-style addressing"
+                                        bind:checked={s3.pathStyle}
+                                    />
                                     <HelpText>
                                         Most S3-compatible services (e.g. MinIO,
                                         RustFS) require path-style addressing.
                                     </HelpText>
 
-                                    <FormGroup floating label="Credentials">
+                                    <label class="wg-field-group">
+                                        <span class="wg-field-label"
+                                            >Credentials</span
+                                        >
+
                                         <select
                                             id="recordingsS3CredentialMode"
                                             class="form-select"
@@ -1085,25 +945,27 @@
                                                 Access key
                                             </option>
                                         </select>
-                                    </FormGroup>
+                                    </label>
 
                                     {#if s3.credentials.mode === 'Static'}
                                         {@const creds = s3.credentials}
-                                        <FormGroup
-                                            floating
-                                            label="Access key ID"
-                                        >
+                                        <label class="wg-field-group">
+                                            <span class="wg-field-label"
+                                                >Access key ID</span
+                                            >
+
                                             <input
                                                 type="text"
                                                 class="form-control"
                                                 autocomplete="off"
                                                 bind:value={creds.accessKeyId}
                                             >
-                                        </FormGroup>
-                                        <FormGroup
-                                            floating
-                                            label="Secret access key"
-                                        >
+                                        </label>
+                                        <label class="wg-field-group">
+                                            <span class="wg-field-label"
+                                                >Secret access key</span
+                                            >
+
                                             <input
                                                 type="password"
                                                 class="form-control"
@@ -1111,25 +973,26 @@
                                                 placeholder="********"
                                                 bind:value={creds.secretAccessKey}
                                             >
-                                        </FormGroup>
+                                        </label>
                                     {/if}
 
-                                    <AsyncButton
+                                    <Button
                                         type="button"
-                                        color="secondary"
+                                        variant="secondary"
                                         click={testStorage}
                                     >
                                         Test connection
-                                    </AsyncButton>
+                                    </Button>
                                     {#if testResult}
-                                        <Alert
-                                            color={testResult.success ? 'success' : 'danger'}
-                                            class="mt-2 mb-0"
+                                        <Callout
+                                            tone={testResult.success
+                                                ? 'success'
+                                                : 'danger'}
                                         >
                                             {testResult.success
                                                 ? 'Connection successful'
                                                 : testResult.error}
-                                        </Alert>
+                                        </Callout>
                                     {/if}
                                 {/if}
                             </Section>
@@ -1145,7 +1008,7 @@
                                     </div>
                                     <Button
                                         class="ms-auto"
-                                        color="secondary"
+                                        variant="secondary"
                                         onclick={() => analyticsModalOpen = true}
                                     >
                                         Change
@@ -1155,14 +1018,14 @@
                         </SectionedForm>
 
                         <StickyActionBar>
-                            <AsyncButton
+                            <Button
                                 type="button"
                                 class="btn btn-primary"
                                 disabled={!formValid}
                                 click={save}
                             >
                                 Save
-                            </AsyncButton>
+                            </Button>
                         </StickyActionBar>
                     </form>
                 {/if}
@@ -1179,3 +1042,11 @@
         />
     {/if}
 </div>
+
+<style>
+    /* The save-error callout. This screen had no <style> block at all, which
+       is why the class resolved to nothing. */
+    .notice {
+        margin-bottom: var(--wg-space-lg);
+    }
+</style>

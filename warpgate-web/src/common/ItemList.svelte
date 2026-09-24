@@ -30,7 +30,6 @@
 </script>
 
 <script lang="ts" generics="T, G = unknown, GK = unknown">
-    import { Input } from '@sveltestrap/sveltestrap'
     import {
         combineLatest,
         debounceTime,
@@ -44,6 +43,7 @@
     } from 'rxjs'
     import { onDestroy, onMount, type Snippet } from 'svelte'
     import { observe } from 'svelte-observable'
+    import Input from 'ui/Input.svelte'
     import DelayedSpinner from './DelayedSpinner.svelte'
     import EmptyState from './EmptyState.svelte'
     import Pagination from './Pagination.svelte'
@@ -61,6 +61,21 @@
         empty?: Snippet<[]>
         groupHeader?: Snippet<[G, GroupState]>
         collapsedGroups?: GK[]
+        /**
+         * Wraps the rendered rows. Lets a caller supply real table markup
+         * (`<table><tbody>…`) in place of the default list-group div without
+         * duplicating any of the loading, search, grouping or pagination
+         * behaviour above. Receives the rows snippet and the loaded items, so
+         * a header outside the row loop can still reflect them.
+         * Defaults to the list-group div when omitted.
+         */
+        container?: Snippet<[Snippet, T[]]>
+        /**
+         * Replaces the built-in search field. Receives the current value and a
+         * setter, so a caller can render its own input without reaching into
+         * the debounce pipeline.
+         */
+        searchInput?: Snippet<[string, (_: string) => void]>
     }
 
     let {
@@ -76,6 +91,8 @@
         empty,
         groupHeader,
         collapsedGroups = $bindable([]),
+        container,
+        searchInput,
     }: Props = $props()
 
     let filter = $state('')
@@ -151,8 +168,28 @@
         // inside a collapsed group - without touching the persisted state.
         const hidden = filter ? new Set<GK>() : new Set(collapsedGroups)
 
+        const keys = [...new Set(entries.map(entry => entry.key))]
+
+        // One group is not a grouping. A lone "Ungrouped" header above a
+        // single card is hierarchy with nothing to organise: it draws the eye,
+        // implies siblings that do not exist, and makes a sparse list read as
+        // a broken one. Collapsing it would hide the only content behind a
+        // header the user cannot see, so `keys` is emptied too — that is what
+        // GroupControls.available reads, so "collapse all" correctly
+        // disappears rather than becoming a trap.
+        if (keys.length <= 1) {
+            return {
+                keys: [],
+                rows: entries.map(entry => ({
+                    ...entry,
+                    groupStart: false,
+                    collapsed: false,
+                })),
+            }
+        }
+
         return {
-            keys: [...new Set(entries.map(entry => entry.key))],
+            keys,
             rows: entries.map((entry, _index) => ({
                 ...entry,
                 groupStart:
@@ -203,11 +240,21 @@
     <div class="d-flex align-items-center mb-2" hidden={!loaded}>
         <!-- either filtering or not filtering and there are at least some items at all -->
         {#if showSearch && (filter || !!_items?.length)}
-            <Input
-                bind:value={filter}
-                placeholder="Search..."
-                class="flex-grow-1"
-            />
+            {#if searchInput}
+                {@render searchInput(filter, v => {
+                    filter = v
+                })}
+            {:else}
+                <Input
+                    label="Search"
+                    labelHidden
+                    type="search"
+                    size="compact"
+                    placeholder="Search…"
+                    class="item-list-search"
+                    bind:value={filter}
+                />
+            {/if}
         {/if}
         {@render header?.(_items, {
             available: _built.keys.length > 0 && !filter,
@@ -219,22 +266,29 @@
             },
         })}
     </div>
+    {#snippet rows()}
+        {#each _built.rows as _row (_row.item)}
+            {#if _row.groupStart && groupHeader && _row.group !== undefined && _row.key !== undefined}
+                {@const _key = _row.key}
+                {@render groupHeader(_row.group, {
+                    collapsed: _row.collapsed,
+                    collapsible: !filter,
+                    toggle: () => toggleGroup(_key, _built.keys),
+                })}
+            {/if}
+            {#if !_row.collapsed}
+                {@render item?.(_row.item)}
+            {/if}
+        {/each}
+    {/snippet}
     {#if _items}
-        <div class="list-group list-group-flush mb-3">
-            {#each _built.rows as _row (_row.item)}
-                {#if _row.groupStart && groupHeader && _row.group !== undefined && _row.key !== undefined}
-                    {@const _key = _row.key}
-                    {@render groupHeader(_row.group, {
-                        collapsed: _row.collapsed,
-                        collapsible: !filter,
-                        toggle: () => toggleGroup(_key, _built.keys),
-                    })}
-                {/if}
-                {#if !_row.collapsed}
-                    {@render item?.(_row.item)}
-                {/if}
-            {/each}
-        </div>
+        {#if container}
+            {@render container(rows, _items)}
+        {:else}
+            <div class="list-group list-group-flush mb-3">
+                {@render rows()}
+            </div>
+        {/if}
         {@render footer?.(_items)}
     {:else}
         <DelayedSpinner />
@@ -256,6 +310,12 @@
 {/await}
 
 <style lang="scss">
+    // ui/Input renders its own wrapper, so the flex-grow that used to sit on
+    // the sveltestrap Input has to target that wrapper instead.
+    :global(.item-list-search) {
+        flex-grow: 1;
+    }
+
     .list-group:empty {
         display: none;
     }
