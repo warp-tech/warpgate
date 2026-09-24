@@ -99,6 +99,11 @@ pub struct SsoProviderConfig {
     /// Keys: "http", "ssh", "mysql", "postgres"
     /// Values: list of credential kinds e.g. ["sso"], ["web"], []
     pub default_credential_policy: Option<serde_json::Value>,
+    /// Default `allowed_ip_ranges` (CIDR strings) applied to users auto-created by this
+    /// provider. Only applied at creation time — does not retroactively affect existing
+    /// users, same seeding semantics as `default_credential_policy` above.
+    #[serde(default)]
+    pub default_allowed_ip_ranges: Option<Vec<String>>,
     /// kubectl OIDC parameters for generating a kubelogin kubeconfig.
     #[serde(default)]
     pub kubernetes: Option<SsoProviderKubernetesConfig>,
