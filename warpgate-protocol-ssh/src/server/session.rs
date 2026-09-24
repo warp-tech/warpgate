@@ -54,7 +54,7 @@ use crate::server::target_menu::{MenuEvent, spawn_target_menu_loop};
 use crate::{
     ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCCommandReply,
     RCEvent, RCState, RemoteClient, ResolvedSshChainHost, ServerChannelId, SshClientError,
-    SshRecordingMetadata, X11Request, resolve_approved_ssh_chain,
+    SshRecordingMetadata, X11Request, client_error_message, resolve_approved_ssh_chain,
 };
 
 const EVENT_QUEUE_CAPACITY: usize = 128;
@@ -218,11 +218,20 @@ fn reject_with_allowed_auth_methods(allowed_auth_methods: MethodSet) -> russh::s
     }
 }
 
+/// What a terminal session is told when the connection to the target fails.
+///
+/// Named, like web-ssh's `shown_to_the_browser`, so a test has somewhere to
+/// stand: a call inside the event loop does not.
+fn shown_in_the_terminal(error: &ConnectionError) -> String {
+    format!("Target connection failed: {}", error.client_message())
+}
+
 #[cfg(test)]
 mod tests {
     use russh::{MethodKind, MethodSet};
+    use warpgate_common::WarpgateError;
 
-    use super::reject_with_allowed_auth_methods;
+    use super::{ConnectionError, reject_with_allowed_auth_methods, shown_in_the_terminal};
 
     #[test]
     fn rejected_public_key_auth_advertises_only_configured_methods() {
@@ -240,6 +249,28 @@ mod tests {
         assert_eq!(advertised_methods, configured_methods);
         assert!(!advertised_methods.contains(&MethodKind::Password));
         assert!(!advertised_methods.contains(&MethodKind::KeyboardInteractive));
+    }
+
+    /// The terminal is told a fixed phrase, never the error's own words.
+    ///
+    /// The `Warpgate` variant is the one this boundary exists for; asserting
+    /// the fixture carries the leak first stops it passing vacuously.
+    #[test]
+    fn the_pty_leg_shows_a_fixed_phrase_not_the_error() {
+        let leaky = ConnectionError::Warpgate(WarpgateError::Other(
+            "database error: SELECT secret FROM credentials".into(),
+        ));
+        assert!(leaky.to_string().contains("SELECT"));
+
+        let shown = shown_in_the_terminal(&leaky);
+        assert!(
+            !shown.contains("SELECT"),
+            "the raw error reached the terminal: {shown}"
+        );
+        assert!(
+            !shown.contains("database error"),
+            "the raw error reached the terminal: {shown}"
+        );
     }
 }
 
@@ -1311,13 +1342,20 @@ impl ServerSession {
                         );
                     }
                     error => {
-                        let _ = self.emit_pty_error(&format!("Target connection failed: {error}"));
+                        // The same boundary as the browser leg. The connect
+                        // path logs the error too, but from the client task,
+                        // whose span carries no username and no client IP —
+                        // this is the record that ties the failure to the
+                        // session that saw it.
+                        error!(?error, "Target connection failed");
+                        let _ = self.emit_pty_error(&shown_in_the_terminal(&error));
                     }
                 }
             }
             RCEvent::Error(e) => {
                 self.service_output.stop_progress();
-                let _ = self.emit_pty_error(&format!("Error: {e}"));
+                error!(error=?e, "Client session error");
+                let _ = self.emit_pty_error(&format!("Error: {}", client_error_message(&e)));
                 self.disconnect_server().await;
             }
             RCEvent::Output(channel, data) => {
@@ -2672,15 +2710,6 @@ impl ServerSession {
             for ch in channels {
                 let _ = self.channel_writer.close(handle.clone(), ch.0);
             }
-            // A channel close says nothing about the connection, so a dead
-            // target never gives the client a reason to let go of the socket
-            // (#2520). Queued behind the closes so the ordering holds.
-            let _ = self.channel_writer.disconnect(
-                handle,
-                russh::Disconnect::ByApplication,
-                String::new(),
-                String::new(),
-            );
         }
 
         // Bounded: a client whose window is full never lets the queue
@@ -2701,8 +2730,30 @@ impl ServerSession {
                 warn!("Client is not reading; closing its connection");
                 Duration::ZERO
             };
+            // A channel close says nothing about the connection, so a dead
+            // target never gives the client a reason to let go of the socket
+            // (#2520). It goes out here rather than queued behind the closes:
+            // a client handed the disconnect in the same read as the message
+            // acts on it first and exits without printing what it already
+            // holds, so the session's last words are lost -- which is the one
+            // thing this message exists to prevent. The grace above is what
+            // separates them, and a client that is not reading gets neither.
+            let disconnect = flushed.then(|| self.session_handle.clone()).flatten();
             tokio::spawn(async move {
                 tokio::time::sleep(delay).await;
+                if let Some(handle) = disconnect {
+                    // Bounded for the same reason the flush above is: a client
+                    // that has stopped reading must not hold the socket open.
+                    let _ = tokio::time::timeout(
+                        DISCONNECT_FLUSH_TIMEOUT,
+                        handle.disconnect(
+                            russh::Disconnect::ByApplication,
+                            String::new(),
+                            String::new(),
+                        ),
+                    )
+                    .await;
+                }
                 let _ = socket.shutdown(std::net::Shutdown::Both);
             });
         }

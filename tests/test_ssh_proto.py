@@ -626,12 +626,30 @@ class Test:
         user, ssh_target = setup_user_and_target(
             processes, shared_wg, wg_c_ed25519_pubkey
         )
+        # Point the target at a port nothing listens on, so the connection this
+        # test is named for actually fails. `"user:ssh-bad-domain@localhost"`
+        # used to sit in the argument list where `ssh` takes the remote command,
+        # not the destination, so it selected nothing and the session reached the
+        # reachable target from `setup_user_and_target` and succeeded.
+        with admin_client(f"https://localhost:{shared_wg.http_port}") as api:
+            options = ssh_target.options.actual_instance
+            options.port = alloc_port()
+            api.update_target(
+                ssh_target.id,
+                sdk.TargetDataRequest(
+                    name=ssh_target.name,
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
+                    options=sdk.TargetOptions(options),
+                ),
+            )
+
         ssh_client = processes.start_ssh_client(
             f"{user.username}:{ssh_target.name}@localhost",
             "-p",
             str(shared_wg.ssh_port),
             "-tt",
-            "user:ssh-bad-domain@localhost",
             "-i",
             "/dev/null",
             "-o",
@@ -639,7 +657,15 @@ class Test:
             password="123",
         )
 
+        # `communicate` before the assertion: `returncode` is `None` until the
+        # client exits, and `None != 0` is true, so this passed without ever
+        # waiting for the client -- and then asked nothing about what it was
+        # shown.
+        shown = ssh_client.communicate(timeout=60)[0].decode(errors="replace")
         assert ssh_client.returncode != 0
+        # The failure, not merely a line from Warpgate: the session banner
+        # carries the name on every connection, including a successful one.
+        assert "Target connection failed" in shown, repr(shown[-400:])
 
     def test_sftp(
         self,
