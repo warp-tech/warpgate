@@ -8,7 +8,7 @@ use rsasl::config::SASLConfig;
 use rsasl::prelude::{Mechname, SASLClient};
 use tokio::net::TcpStream;
 use tracing::{debug, info, warn};
-use warpgate_common::{TargetPostgresOptions, WarpgateError};
+use warpgate_common::{SecretResolver, TargetPostgresOptions, WarpgateError};
 use warpgate_core::AdmittedTarget;
 use warpgate_tls::{ClientTlsStream, TlsMode, configure_tls_connector};
 
@@ -59,6 +59,7 @@ impl PostgresClient {
     pub async fn connect(
         admitted: AdmittedTarget<TargetPostgresOptions>,
         options: ConnectionOptions,
+        secrets: &dyn SecretResolver,
     ) -> Result<Self, PostgresError> {
         let target = admitted.specific_target().options().clone();
         let stream = TcpStream::connect((target.host.clone(), target.port)).await?;
@@ -129,8 +130,8 @@ impl PostgresClient {
         let effective_password = match &target.auth {
             warpgate_common::DatabaseTargetAuth::Password(auth) => auth
                 .password
-                .reveal()
-                .map_err(WarpgateError::from)?
+                .resolve(secrets)
+                .await?
                 .expose_secret()
                 .clone(),
             warpgate_common::DatabaseTargetAuth::IamRole(_) => {

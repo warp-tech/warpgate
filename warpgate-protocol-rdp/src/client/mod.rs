@@ -8,6 +8,7 @@ mod input;
 mod logon;
 mod tls;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -36,7 +37,7 @@ use ironrdp_tokio::{FramedWrite as _, TokioFramed};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tracing::{debug, warn};
-use warpgate_common::{RdpTargetAuth, RdpTargetCompression, TargetRdpOptions};
+use warpgate_common::{RdpTargetAuth, RdpTargetCompression, SecretResolver, TargetRdpOptions};
 use warpgate_core::{DesktopEvent, DesktopInput, DesktopRect, DesktopState};
 
 pub(crate) use self::logon::LogonWatcher;
@@ -82,6 +83,7 @@ pub async fn run(
     input_rx: Receiver<DesktopInput>,
     mut abort_rx: UnboundedReceiver<()>,
     logon: LogonWatcher,
+    secrets: Arc<dyn SecretResolver>,
 ) -> Result<()> {
     event_tx
         .send(DesktopEvent::State(DesktopState::Connecting))
@@ -93,7 +95,7 @@ pub async fn run(
     // the same bounds the Display Control resize path enforces.
     let (width, height) =
         MonitorLayoutEntry::adjust_display_size(u32::from(width), u32::from(height));
-    let password = auth.password.reveal()?;
+    let password = auth.password.resolve(&*secrets).await?;
     let config = build_config(
         &options,
         password.expose_secret(),
