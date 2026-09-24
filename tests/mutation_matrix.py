@@ -291,6 +291,29 @@ MUTATIONS = [
         "        (SSHTargetAuth::Certificate(_), Some(per_call)) => AUTHENTICATION_TIMEOUT\n            .max(per_call * 0 + Duration::from_secs(0)),",
     ),
     (
+        # The order inside the budget. A secret reference is resolved before the
+        # target's deadline starts; moved back inside it — the shape the #2185
+        # merge produced — a backend that is slow but within every one of its
+        # own bounds fails the login with a timeout naming the target.
+        "connection: a secret backend is not charged to the target's budget",
+        "warpgate-protocol-ssh/src/client/mod.rs",
+        """    let prepared = prepare.await?;
+    let deadline = tokio::time::sleep(budget);
+    tokio::select! {
+        () = deadline => {
+            error!(host = ?host, budget = ?budget, "Authentication did not finish in time");
+            Err(ConnectionError::AuthenticationTimeout)
+        }
+        result = authenticate(prepared) => result,""",
+        """    let deadline = tokio::time::sleep(budget);
+    tokio::select! {
+        () = deadline => {
+            error!(host = ?host, budget = ?budget, "Authentication did not finish in time");
+            Err(ConnectionError::AuthenticationTimeout)
+        }
+        result = async { authenticate(prepare.await?).await } => result,""",
+    ),
+    (
         "connection: handshake deadline",
         "warpgate-protocol-ssh/src/client/mod.rs",
         "let handshake_deadline = tokio::time::sleep(HANDSHAKE_TIMEOUT);",
@@ -682,6 +705,9 @@ DISCRIMINATES = {
     "connection: authentication has its own budget": [
         "a_certificate_target_gets_a_budget_that_fits_its_vault_calls"
     ],
+    "connection: a secret backend is not charged to the target's budget": [
+        "a_slow_secret_backend_is_not_charged_to_the_target"
+    ],
     "vault: principal must be one harmless entry": ["test_principal_validation"],
     "vault: key ID must not carry control characters": ["test_key_id_validation"],
     # Same source line as the entry above, opposite half. `test_key_id_validation`
@@ -1056,6 +1082,7 @@ RECENT_GUARDS = frozenset({
     "connection: unreachable and untrusted do not read alike",
     "connection: the handshake deadline resumes after a host key answer",
     "error surfacing: internal error text never reaches a client message",
+    "connection: a secret backend is not charged to the target's budget",
 })
 
 

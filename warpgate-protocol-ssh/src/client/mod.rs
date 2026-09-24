@@ -22,6 +22,7 @@ use russh::client::{AuthResult, Handle, KeyboardInteractiveAuthResponse};
 use russh::keys::ssh_key::certificate::CertType;
 use russh::keys::{Algorithm, Certificate, PrivateKey, PrivateKeyWithHashAlg, PublicKey};
 use russh::{MethodKind, Preferred, Sig, kex, mac};
+use sea_orm::DatabaseConnection;
 use serde::Serialize;
 use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
@@ -33,8 +34,9 @@ use uuid::Uuid;
 use warpgate_aws::AwsError;
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{
-    MAX_CERTIFICATE_LIFETIME, SSHTargetAuth, SshCertificateCriticalOption, TargetOptionsVariant,
-    TargetSSHOptions, UserSessionId, WarpgateError,
+    MAX_CERTIFICATE_LIFETIME, SSHTargetAuth, Secret, SecretError, SecretResolver,
+    SshCertificateCriticalOption, SshTargetCertificateAuth, TargetOptionsVariant, TargetSSHOptions,
+    UserFacingReason, UserSessionId, WarpgateError,
 };
 use warpgate_common_http::auth::TOKEN_ATTRIBUTIONS;
 use warpgate_core::{AdmittedTarget, ConfigProvider, Services};
@@ -179,6 +181,74 @@ fn authentication_budget(auth: &SSHTargetAuth, vault_timeout: Option<Duration>) 
     }
 }
 
+/// A target's credential, obtained before its authentication deadline starts.
+///
+/// One variant per `SSHTargetAuth` arm, so the authentication step matches on
+/// what was prepared and cannot be handed a credential for a different method.
+enum PreparedAuth<'a> {
+    Password(Secret<String>),
+    PublicKey(Vec<PrivateKey>),
+    /// Nothing to prepare: the certificate is issued inside the budget, which
+    /// is sized for the issuer.
+    Certificate(&'a SshTargetCertificateAuth),
+    IamRole(Vec<PrivateKey>),
+}
+
+async fn prepare_auth<'a>(
+    auth: &'a SSHTargetAuth,
+    db: &DatabaseConnection,
+    secret_backend: &dyn SecretResolver,
+) -> Result<PreparedAuth<'a>, ConnectionError> {
+    Ok(match auth {
+        SSHTargetAuth::Password(auth) => PreparedAuth::Password(
+            auth.password
+                .resolve(secret_backend)
+                .await
+                .map_err(ConnectionError::from_preparation)?,
+        ),
+        SSHTargetAuth::PublicKey(auth) => PreparedAuth::PublicKey(
+            load_client_keys(db, auth.key_id, secret_backend)
+                .await
+                .map_err(ConnectionError::from_preparation)?,
+        ),
+        SSHTargetAuth::Certificate(auth) => PreparedAuth::Certificate(auth),
+        SSHTargetAuth::IamRole(_) => PreparedAuth::IamRole(
+            load_client_keys(db, None, secret_backend)
+                .await
+                .map_err(ConnectionError::from_preparation)?,
+        ),
+    })
+}
+
+/// Obtains the credential, then authenticates within `budget` — in that order.
+///
+/// Resolving a secret reference can log in to its backend on first use, read,
+/// and after a `403` log in again and read again, each request bounded by the
+/// backend at 15s. A backend that is slow but working therefore takes longer
+/// than the thirty seconds a target is given, and inside the deadline that
+/// failed the session with a timeout naming the target, which had not yet been
+/// asked anything. The backend's own bounds already make this step finite, so
+/// it gets no second, shorter one here.
+async fn prepare_then_authenticate<P, A>(
+    host: &str,
+    budget: Duration,
+    prepare: impl Future<Output = Result<P, ConnectionError>>,
+    authenticate: impl FnOnce(P) -> A,
+) -> Result<(), ConnectionError>
+where
+    A: Future<Output = Result<(), ConnectionError>>,
+{
+    let prepared = prepare.await?;
+    let deadline = tokio::time::sleep(budget);
+    tokio::select! {
+        () = deadline => {
+            error!(host = ?host, budget = ?budget, "Authentication did not finish in time");
+            Err(ConnectionError::AuthenticationTimeout)
+        }
+        result = authenticate(prepared) => result,
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
     #[error("Host key mismatch")]
@@ -271,11 +341,31 @@ pub enum ConnectionError {
     #[error("A jump host did not open the tunnel to the next hop in time")]
     TunnelOpenTimeout { host: String },
 
+    /// The target's credential could not be read from its secret backend.
+    ///
+    /// Its own variant because neither the target nor the issuer was involved,
+    /// and the catch-all it used to land in said only "Internal connection
+    /// error" — true, and no help in finding which system to look at.
+    ///
+    /// `{0:?}` because the backend's text can carry Vault's response verbatim,
+    /// and the admin host-key check logs this with `{:#}` rather than `{:?}`.
+    #[error("Could not obtain the target's credential from its secret backend: {0:?}")]
+    SecretBackend(SecretError),
+
     #[error(transparent)]
     Warpgate(#[from] WarpgateError),
 }
 
 impl ConnectionError {
+    /// Only a backend failure is named as one. A database error or a key that
+    /// does not decode is still Warpgate's own, and stays in the catch-all.
+    fn from_preparation(error: WarpgateError) -> Self {
+        match error {
+            WarpgateError::SecretBackend(error) => Self::SecretBackend(error),
+            other => Self::Warpgate(other),
+        }
+    }
+
     pub fn client_message(&self) -> String {
         match self {
             ConnectionError::Vault(e) => e.client_message().to_string(),
@@ -315,6 +405,13 @@ impl ConnectionError {
                 // missed here because this variant was added by a later fix.
                 format!("The jump host {host:?} did not open the tunnel to the next hop in time")
             }
+            // The backend's own user-facing reason, not its `Display`: that
+            // names the backend and the KV path, and a backend error carries
+            // Vault's response text. The reason is one of a fixed set.
+            Self::SecretBackend(e) => format!(
+                "Warpgate could not obtain the credential for this target from its secret backend: {}",
+                e.user_facing_reason()
+            ),
             // Split out from the protocol errors below, for the admin
             // host-key-check endpoint. Everywhere else this function's caller is
             // an unauthenticated party and one flat category is right; there the
@@ -1819,26 +1916,25 @@ impl Connector {
                         &ssh_options.auth,
                         self.services.vault.get().map(|v| v.timeout()),
                     );
-                    let authentication_deadline = tokio::time::sleep(budget);
-                    pin_mut!(authentication_deadline);
-
-                    tokio::select! {
-                        () = &mut authentication_deadline => {
-                            error!(
-                                host = ?ssh_options.host,
-                                budget = ?budget,
-                                "Authentication did not finish in time"
-                            );
-                            return Err(ConnectionError::AuthenticationTimeout);
-                        }
-                        result = self.authenticate_session(
-                            &mut session,
-                            &ssh_options.host,
-                            &ssh_options.username,
+                    prepare_then_authenticate(
+                        &ssh_options.host,
+                        budget,
+                        prepare_auth(
                             &ssh_options.auth,
-                            ssh_options.allow_insecure_algos
-                        ) => result?,
-                    }
+                            &self.services.db,
+                            &*self.services.secret_backends,
+                        ),
+                        |prepared| {
+                            self.authenticate_session(
+                                &mut session,
+                                &ssh_options.host,
+                                &ssh_options.username,
+                                prepared,
+                                ssh_options.allow_insecure_algos,
+                            )
+                        },
+                    )
+                    .await?;
 
                     return Ok(Some((session, event_rx)));
                 }
@@ -1894,17 +1990,13 @@ impl Connector {
         session: &mut Handle<ClientHandler>,
         host: &str,
         username: &str,
-        auth: &SSHTargetAuth,
+        prepared: PreparedAuth<'_>,
         allow_insecure_algos: bool,
     ) -> Result<(), ConnectionError> {
         let mut auth_result = false;
         let mut auth_error_msg: Option<String> = None;
-        match auth {
-            SSHTargetAuth::Password(auth) => {
-                let password = auth
-                    .password
-                    .resolve(&*self.services.secret_backends)
-                    .await?;
+        match prepared {
+            PreparedAuth::Password(password) => {
                 let response = bounded_userauth(
                     session.authenticate_password(username.to_string(), password.expose_secret()),
                 )
@@ -1920,14 +2012,8 @@ impl Connector {
                         Some("Password authentication was rejected by the SSH target".to_string());
                 }
             }
-            SSHTargetAuth::PublicKey(auth) => {
+            PreparedAuth::PublicKey(keys) => {
                 let best_hash = session.best_supported_rsa_hash().await?.flatten();
-                let keys = load_client_keys(
-                    &self.services.db,
-                    auth.key_id,
-                    &*self.services.secret_backends,
-                )
-                .await?;
                 if keys.is_empty() {
                     auth_error_msg = Some("No SSH client keys are configured".into());
                 }
@@ -1976,7 +2062,7 @@ impl Connector {
                         Some("Public key authentication was rejected by the SSH target".into());
                 }
             }
-            SSHTargetAuth::Certificate(auth) => {
+            PreparedAuth::Certificate(auth) => {
                 if let Some(vault) = self.services.vault.get() {
                     // The key exists only for this authentication attempt — nothing
                     // the target will ever trust again outlives this scope.
@@ -2090,19 +2176,12 @@ impl Connector {
                     ));
                 }
             }
-            SSHTargetAuth::IamRole(_) => {
+            PreparedAuth::IamRole(keys) => {
                 let instance_info = warpgate_aws::find_instance_by_ip(host).await?;
 
-                let key =
-                    load_client_keys(&self.services.db, None, &*self.services.secret_backends)
-                        .await?
-                        .into_iter()
-                        .next()
-                        .ok_or_else(|| {
-                            WarpgateError::InconsistentState(
-                                "No SSH client keys are configured".into(),
-                            )
-                        })?;
+                let key = keys.into_iter().next().ok_or_else(|| {
+                    WarpgateError::InconsistentState("No SSH client keys are configured".into())
+                })?;
 
                 let pub_key_str = key.public_key().to_openssh().map_err(russh::Error::from)?;
 
@@ -3177,6 +3256,145 @@ mod tests {
                     Err(ConnectionError::TargetAuthenticationTimeout)
                 ),
                 "a target that never answered was waited on past its own bound"
+            );
+        }
+
+        /// A password target whose password is a reference into a backend.
+        fn password_by_reference() -> warpgate_common::SSHTargetAuth {
+            use std::str::FromStr;
+
+            use warpgate_common::{MaybeSecretRef, SSHTargetAuth, SshTargetPasswordAuth};
+
+            SSHTargetAuth::Password(SshTargetPasswordAuth {
+                password: MaybeSecretRef::from_str("secret://kv/secret/ssh/prod#password").unwrap(),
+            })
+        }
+
+        /// A backend on the path #2185 allows when cold: log in, read, get a
+        /// `403`, log in again, read again. Four steps, each at half the budget —
+        /// the ratio of Vault's 15s per-request bound to the target's 30s — so
+        /// every step is within its own bound and the whole is not within the
+        /// target's.
+        struct SlowButWorking {
+            step: std::time::Duration,
+        }
+
+        #[async_trait::async_trait]
+        impl warpgate_common::SecretResolver for SlowButWorking {
+            async fn resolve(
+                &self,
+                _: &warpgate_common::SecretRef,
+            ) -> Result<warpgate_common::Secret<String>, warpgate_common::SecretError> {
+                for _ in 0..4 {
+                    tokio::time::sleep(self.step).await;
+                }
+                Ok(warpgate_common::Secret::new("from-the-backend".to_owned()))
+            }
+        }
+
+        /// Scaled down rather than on tokio's paused clock, for the reason
+        /// `bounded_userauth_within` gives. The margins are whole steps, so the
+        /// unfixed order fails here unless the runtime stalls for 100ms at
+        /// exactly the wrong moment.
+        #[tokio::test]
+        async fn a_slow_secret_backend_is_not_charged_to_the_target() {
+            use std::time::{Duration, Instant};
+
+            use sea_orm::DatabaseConnection;
+
+            use crate::client::{PreparedAuth, prepare_auth, prepare_then_authenticate};
+
+            let budget = Duration::from_millis(100);
+            let backend = SlowButWorking { step: budget / 2 };
+            let auth = password_by_reference();
+            let db = DatabaseConnection::default();
+
+            let started = Instant::now();
+            let result = prepare_then_authenticate(
+                "target",
+                budget,
+                prepare_auth(&auth, &db, &backend),
+                |prepared| async move {
+                    let PreparedAuth::Password(password) = prepared else {
+                        panic!("a password target was prepared as something else");
+                    };
+                    assert_eq!(password.expose_secret(), "from-the-backend");
+                    Ok(())
+                },
+            )
+            .await;
+
+            // Otherwise this passes with a backend that happens to be fast.
+            assert!(
+                started.elapsed() > budget,
+                "the backend finished inside the budget, so nothing was measured"
+            );
+            assert!(
+                result.is_ok(),
+                "a slow but working backend failed the login: {:?}",
+                result.map_err(|e| e.client_message())
+            );
+        }
+
+        #[tokio::test]
+        async fn a_failing_secret_backend_is_named_and_the_target_is_never_asked() {
+            use std::sync::atomic::{AtomicBool, Ordering};
+            use std::time::Duration;
+
+            use sea_orm::DatabaseConnection;
+
+            use crate::ConnectionError;
+            use crate::client::{prepare_auth, prepare_then_authenticate};
+
+            struct Refusing;
+
+            #[async_trait::async_trait]
+            impl warpgate_common::SecretResolver for Refusing {
+                async fn resolve(
+                    &self,
+                    _: &warpgate_common::SecretRef,
+                ) -> Result<warpgate_common::Secret<String>, warpgate_common::SecretError>
+                {
+                    Err(warpgate_common::SecretError::Backend(
+                        "KV v2 read secret/ssh/prod: permission denied\nforged".to_owned(),
+                    ))
+                }
+            }
+
+            let auth = password_by_reference();
+            let db = DatabaseConnection::default();
+            let target_asked = AtomicBool::new(false);
+
+            let error = prepare_then_authenticate(
+                "target",
+                Duration::from_secs(30),
+                prepare_auth(&auth, &db, &Refusing),
+                |_| async {
+                    target_asked.store(true, Ordering::SeqCst);
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap_err();
+
+            assert!(
+                !target_asked.load(Ordering::SeqCst),
+                "the target was asked anyway"
+            );
+            assert!(
+                matches!(error, ConnectionError::SecretBackend(_)),
+                "not reported as a secret backend failure: {error:?}"
+            );
+            // The log gets the detail, escaped: a newline in Vault's text must
+            // not start a record of its own.
+            assert!(
+                !error.to_string().contains('\n'),
+                "the backend's text reached the log unescaped: {error}"
+            );
+            assert_eq!(
+                error.client_message(),
+                "Warpgate could not obtain the credential for this target from its secret \
+                 backend: Secret backend error"
             );
         }
 
