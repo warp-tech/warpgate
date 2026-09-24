@@ -11,12 +11,14 @@ mod clipboard;
 mod server;
 mod session_handle;
 
+use std::sync::Arc;
+
 use anyhow::Context;
 use futures::future::BoxFuture;
 pub use server::bind_server;
 use tokio::sync::mpsc::{channel, unbounded_channel};
 use tracing::{Instrument, error, info_span};
-use warpgate_common::{ListenEndpoint, Protocol, TargetRdpOptions, WarpgateError};
+use warpgate_common::{ListenEndpoint, Protocol, SecretResolver, TargetRdpOptions, WarpgateError};
 use warpgate_core::{
     AdmittedTarget, DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopClientHandles, DesktopEvent,
     DesktopInput, DesktopState, LogonState, ProtocolServer, Services,
@@ -77,6 +79,7 @@ impl std::fmt::Debug for RdpProtocolServer {
 pub fn connect(
     admitted: AdmittedTarget<TargetRdpOptions>,
     size: (u16, u16),
+    secrets: Arc<dyn SecretResolver>,
 ) -> Result<DesktopClientHandles, WarpgateError> {
     let target_session_id = admitted.id();
     let (user_info, target) = admitted.into_approved().into_parts();
@@ -104,8 +107,16 @@ pub fn connect(
     let span = info_span!("RDP-client", host = %options.host, port = options.port);
     tokio::spawn(
         async move {
-            if let Err(error) =
-                client::run(options, size, event_tx.clone(), input_rx, abort_rx, logon).await
+            if let Err(error) = client::run(
+                options,
+                size,
+                event_tx.clone(),
+                input_rx,
+                abort_rx,
+                logon,
+                secrets,
+            )
+            .await
             {
                 // The full chain goes to the log; only the top-level cause
                 // reaches the viewer.

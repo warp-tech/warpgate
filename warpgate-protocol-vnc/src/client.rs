@@ -1,10 +1,12 @@
+use std::sync::Arc;
+
 use anyhow::Context;
 use bytes::Bytes;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{Receiver, UnboundedReceiver, channel, unbounded_channel};
 use tracing::{Instrument, debug, error, info_span, warn};
 use vnc::{ClientKeyEvent, PixelFormat, VncConnector, VncEncoding, VncEvent, X11Event};
-use warpgate_common::{TargetVncOptions, VncTargetAuth, WarpgateError};
+use warpgate_common::{SecretResolver, TargetVncOptions, VncTargetAuth, WarpgateError};
 use warpgate_core::{
     AdmittedTarget, DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopClientHandles, DesktopEvent,
     DesktopInput, DesktopRect, DesktopState, LogonState,
@@ -90,8 +92,9 @@ const PROXY_ENCODINGS: &[VncEncoding] = &[
 /// [`DesktopEvent`]/[`DesktopInput`] streams.
 pub fn connect(
     admitted: AdmittedTarget<TargetVncOptions>,
+    secrets: Arc<dyn SecretResolver>,
 ) -> Result<DesktopClientHandles, WarpgateError> {
-    spawn_approved_client(admitted, BROWSER_ENCODINGS)
+    spawn_approved_client(admitted, BROWSER_ENCODINGS, secrets)
 }
 
 /// Like [`connect`], but negotiates the encodings ([`PROXY_ENCODINGS`]) used by the
@@ -100,21 +103,24 @@ pub fn connect(
 /// toward the viewer, and optionally recorded.
 pub fn connect_for_proxy(
     admitted: AdmittedTarget<TargetVncOptions>,
+    secrets: Arc<dyn SecretResolver>,
 ) -> Result<DesktopClientHandles, WarpgateError> {
-    spawn_approved_client(admitted, PROXY_ENCODINGS)
+    spawn_approved_client(admitted, PROXY_ENCODINGS, secrets)
 }
 
 fn spawn_approved_client(
     admitted: AdmittedTarget<TargetVncOptions>,
     encodings: &'static [VncEncoding],
+    secrets: Arc<dyn SecretResolver>,
 ) -> Result<DesktopClientHandles, WarpgateError> {
     let options = admitted.specific_target().options().clone();
-    Ok(spawn_client(options, encodings))
+    Ok(spawn_client(options, encodings, secrets))
 }
 
 fn spawn_client(
     options: TargetVncOptions,
     encodings: &'static [VncEncoding],
+    secrets: Arc<dyn SecretResolver>,
 ) -> DesktopClientHandles {
     let (event_tx, event_rx) = channel::<DesktopEvent>(1024);
     let (input_tx, input_rx) = channel::<DesktopInput>(DESKTOP_INPUT_CHANNEL_CAPACITY);
@@ -123,7 +129,15 @@ fn spawn_client(
     let span = info_span!("VNC-client", host = %options.host, port = options.port);
     tokio::spawn(
         async move {
-            if let Err(error) = run(options, encodings, event_tx.clone(), input_rx, abort_rx).await
+            if let Err(error) = run(
+                options,
+                encodings,
+                event_tx.clone(),
+                input_rx,
+                abort_rx,
+                secrets,
+            )
+            .await
             {
                 // The full chain goes to the log; only the top-level cause
                 // reaches the viewer — see `DesktopEvent::backend_error`.
@@ -152,6 +166,7 @@ async fn run(
     event_tx: tokio::sync::mpsc::Sender<DesktopEvent>,
     mut input_rx: Receiver<DesktopInput>,
     mut abort_rx: UnboundedReceiver<()>,
+    secrets: Arc<dyn SecretResolver>,
 ) -> anyhow::Result<()> {
     event_tx
         .send(DesktopEvent::State(DesktopState::Connecting))
@@ -163,7 +178,12 @@ async fn run(
         .context("connecting to VNC target")?;
 
     let password = match &options.auth {
-        VncTargetAuth::Password(auth) => auth.password.reveal()?.expose_secret().clone(),
+        VncTargetAuth::Password(auth) => auth
+            .password
+            .resolve(&*secrets)
+            .await?
+            .expose_secret()
+            .clone(),
         VncTargetAuth::None(_) => String::new(),
     };
 

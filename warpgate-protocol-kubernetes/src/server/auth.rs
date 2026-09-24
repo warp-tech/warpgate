@@ -442,7 +442,7 @@ async fn user_for_username(services: &Services, username: &str) -> poem::Result<
 pub async fn create_authenticated_client(
     k8s_options: &TargetKubernetesOptions,
     _auth_user: Option<&String>,
-    _services: &Services,
+    services: &Services,
 ) -> anyhow::Result<reqwest::ClientBuilder> {
     debug!(
         server_url = ?k8s_options.cluster_url,
@@ -465,7 +465,10 @@ pub async fn create_authenticated_client(
                 reqwest::header::AUTHORIZATION,
                 reqwest::header::HeaderValue::from_str(&format!(
                     "Bearer {}",
-                    auth.token.reveal()?.expose_secret()
+                    auth.token
+                        .resolve(&*services.secret_backends)
+                        .await?
+                        .expose_secret()
                 ))
                 .context("setting Authorization header")?,
             );
@@ -475,7 +478,7 @@ pub async fn create_authenticated_client(
             // Expect PEM certificate and PEM private key in the auth config
             // Combine into a single PEM bundle for reqwest::Identity
             let cert_pem = auth.certificate.expose_secret();
-            let key_pem = auth.private_key.reveal()?;
+            let key_pem = auth.private_key.resolve(&*services.secret_backends).await?;
             let pem_bundle = format!(
                 "{}\n{}\n",
                 cert_pem.trim_end_matches('\n'),

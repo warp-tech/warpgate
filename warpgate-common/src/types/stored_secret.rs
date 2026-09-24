@@ -21,6 +21,11 @@ impl StoredSecret {
         Self(value)
     }
 
+    /// The value as stored: an encryption envelope or plaintext
+    pub fn stored_value(&self) -> &str {
+        self.0.expose_secret()
+    }
+
     /// Decrypted credential value
     pub fn reveal(&self) -> Result<Secret<String>, EncryptionError> {
         idempotent_maybe_decrypt(self.0.expose_secret()).map(Secret::new)

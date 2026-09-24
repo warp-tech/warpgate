@@ -282,10 +282,97 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         expected_statuses={200},
     ),
     AdminApiTestCase(
+        id="import_ssh_own_key_reference",
+        permission="config_edit",
+        call=lambda api, r: api.import_ssh_own_key_reference_with_http_info(
+            sdk.ImportSshClientKeyReferenceRequest(
+                label=f"key-{uuid4()}",
+                reference="secret://not-configured/secret/key#private_key",
+                is_default=False,
+            )
+        ),
+        expected_statuses={400},
+    ),
+    AdminApiTestCase(
+        id="get_secret_backends",
+        permission="config_edit",
+        call=lambda api, r: api.get_secret_backends_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_secret_backends_summary",
+        permission=None,
+        call=lambda api, r: api.get_secret_backends_summary_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_secret_reference_usage",
+        permission="targets_edit",
+        call=lambda api, r: api.get_secret_reference_usage_with_http_info(str(uuid4())),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="create_secret_backend",
+        permission="config_edit",
+        call=lambda api, r: api.create_secret_backend_with_http_info(
+            sdk.SecretBackendRequest(
+                name=f"vault-{uuid4().hex[:8]}",
+                backend_type="vault",
+                address="https://vault.invalid:8200",
+                auth=sdk.SecretBackendAuth(
+                    sdk.SecretBackendAuthVaultTokenAuth(method="Token", token="test")
+                ),
+            )
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="get_secret_backend",
+        permission=None,
+        call=lambda api, r: api.get_secret_backend_with_http_info(str(uuid4())),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="update_secret_backend",
+        permission="config_edit",
+        call=lambda api, r: api.update_secret_backend_with_http_info(
+            str(uuid4()),
+            sdk.SecretBackendRequest(
+                name="vault-missing",
+                backend_type="vault",
+                address="https://vault.invalid:8200",
+                auth=sdk.SecretBackendAuth(sdk.SecretBackendAuthVaultTokenAuth(method="Token", token="")),
+            ),
+        ),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="delete_secret_backend",
+        permission="config_edit",
+        call=lambda api, r: api.delete_secret_backend_with_http_info(str(uuid4())),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="check_secret_backend_health",
+        permission="config_edit",
+        call=lambda api, r: api.check_secret_backend_health_with_http_info(str(uuid4())),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="test_secret_resolve",
+        permission="targets_edit",
+        call=lambda api, r: api.test_secret_resolve_with_http_info(
+            sdk.TestResolveRequest(
+                reference="secret://not-configured/secret/x#password"
+            )
+        ),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
         id="import_ssh_own_key",
         permission="config_edit",
         call=lambda api, r: api.import_ssh_own_key_with_http_info(
-            sdk.ImportSSHClientKeyRequest(
+            sdk.ImportSshClientKeyRequest(
                 label=f"key-{uuid4()}",
                 secret_key=open("ssh-keys/id_ed25519").read(),
                 is_default=False,
