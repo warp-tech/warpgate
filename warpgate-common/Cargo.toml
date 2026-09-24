@@ -41,7 +41,7 @@ rustls.workspace = true
 rustls-native-certs = { version = "0.8", default-features = false }
 rustls-pki-types.workspace = true
 schemars.workspace = true
-sea-orm.workspace = true
+sea-orm = { workspace = true, features = ["with-json"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

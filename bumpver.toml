@@ -54,6 +54,9 @@ push = false
 "warpgate-tls/Cargo.toml" = [
     '^version = "{version}"'
 ]
+"warpgate-secrets-vault/Cargo.toml" = [
+    '^version = "{version}"'
+]
 "warpgate-sso/Cargo.toml" = [
     '^version = "{version}"'
 ]

@@ -1,10 +1,12 @@
 from uuid import uuid4
+import http.server
 import os
 import paramiko
 import requests
 import socket
 import subprocess
 import tempfile
+import threading
 import time
 import pytest
 from textwrap import dedent
@@ -224,6 +226,32 @@ class Test:
         shared_wg: WarpgateProcess,
         timeout,
     ):
+        # The destination is served by this test rather than a public site: a
+        # public HTTPS site answered with a redirect, which requests followed
+        # over a direct connection, so the asserted response never crossed
+        # the tunnel. The body spans several SSH packets and carries a per-run
+        # nonce, so only a complete forward reproduces it. Plain HTTP is
+        # enough — the byte stream is under test, not TLS.
+        nonce = uuid4().hex
+        body = nonce.encode() * 4096
+        served = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                served.append(self.path)
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        # All interfaces: the target container reaches the runner through the
+        # Docker host gateway, not through loopback.
+        server = http.server.ThreadingHTTPServer(("0.0.0.0", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+
         user, ssh_target = setup_user_and_target(
             processes, shared_wg, wg_c_ed25519_pubkey
         )
@@ -235,21 +263,30 @@ class Test:
             "-v",
             *common_args,
             "-L",
-            f"{local_port}:github.com:443",
+            f"{local_port}:host.docker.internal:{server.server_address[1]}",
             "-N",
             password="123",
         )
+        try:
+            time.sleep(10)
 
-        time.sleep(10)
+            wait_port(local_port, recv=False)
 
-        wait_port(local_port, recv=False)
-
-        s = requests.Session()
-        retries = requests.adapters.Retry(total=5, backoff_factor=1)
-        s.mount("https://", requests.adapters.HTTPAdapter(max_retries=retries))
-        response = s.get(f"https://localhost:{local_port}", timeout=timeout, verify=False)
-        assert response.status_code == 200
-        ssh_client.kill()
+            s = requests.Session()
+            retries = requests.adapters.Retry(total=5, backoff_factor=1)
+            s.mount("http://", requests.adapters.HTTPAdapter(max_retries=retries))
+            response = s.get(
+                f"http://localhost:{local_port}/{nonce}",
+                timeout=timeout,
+                allow_redirects=False,
+            )
+            assert response.status_code == 200
+            assert response.content == body
+            assert f"/{nonce}" in served
+        finally:
+            ssh_client.kill()
+            server.shutdown()
+            server.server_close()
 
     # https://github.com/warp-tech/warpgate/issues/2328
     def test_direct_tcpip_server_speaks_first(
