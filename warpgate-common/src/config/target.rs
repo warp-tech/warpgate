@@ -8,7 +8,7 @@ use warpgate_tls::TlsMode;
 use super::defaults::{
     _default_empty_string, _default_empty_vec, _default_mysql_port,
     _default_postgres_idle_timeout_str, _default_postgres_port, _default_rdp_port,
-    _default_ssh_port, _default_username, _default_vnc_port,
+    _default_ssh_port, _default_true, _default_username, _default_vnc_port,
 };
 use crate::encryption::EncryptionError;
 use crate::secrets::{MaybeSecretRef, SecretRef};
@@ -276,6 +276,13 @@ pub struct TargetRdpOptions {
     /// The stored credentials still pass network-level authentication (CredSSP).
     #[serde(default)]
     pub interactive_logon: bool,
+
+    /// Offer the RDP Graphics Pipeline (MS-RDPEGFX). Servers that dropped the legacy
+    /// bitmap paths, such as GNOME Remote Desktop and KDE KRDP, refuse clients without
+    /// it. Turn it off only if a server renders incorrectly with it.
+    #[serde(default = "_default_true")]
+    #[oai(default = "_default_true")]
+    pub graphics_pipeline: bool,
 
     // TLS compatibility/security profile used for the target-facing RDP connection.
     // Kept as a plain comment so OpenAPI emits a direct enum reference. A field

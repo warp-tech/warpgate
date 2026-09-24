@@ -109,3 +109,13 @@
     will significantly improve image quality, even if the client is connecting
     remotely.
 </HelpText>
+
+<Input
+    type="switch"
+    label="Graphics pipeline"
+    bind:checked={options.graphicsPipeline}
+/>
+<HelpText>
+    Required by GNOME Remote Desktop and KDE KRDP, which refuse clients without
+    it. Turn it off only if a server renders incorrectly with it.
+</HelpText>

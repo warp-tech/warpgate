@@ -1,0 +1,37 @@
+[package]
+name = "ironrdp-graphics"
+version = "0.9.0"
+readme = "README.md"
+description = "RDP image processing primitives"
+edition.workspace = true
+rust-version = "1.89"
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+doctest = false
+# test = false
+
+[dependencies]
+bit_field = "0.10"
+bitflags = "2.11"
+bitvec = "1.0"
+ironrdp-core = { path = "../ironrdp-core", version = "0.2" } # public
+ironrdp-pdu = { path = "../ironrdp-pdu", version = "0.9", features = ["std"] } # public
+byteorder = "1.5" # TODO: remove
+num-derive.workspace = true # TODO: remove
+num-traits.workspace = true # TODO: remove
+yuv = { version = "0.8", features = ["rdp"] }
+
+[dev-dependencies]
+bmp = "0.5"
+bytemuck = "1.24"
+expect-test.workspace = true
+
+[lints]
+workspace = true
+
