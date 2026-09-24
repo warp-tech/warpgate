@@ -13,10 +13,9 @@ use uuid::Uuid;
 use warpgate_common::encryption::idempotent_maybe_encrypt_secret;
 use warpgate_common::{
     AdminPermission, Role as RoleConfig, SSHTargetAuth, Target as TargetConfig, TargetOptions,
-    TargetSSHOptions, WarpgateError, map_target_secrets,
+    TargetSSHOptions, WarpgateError, map_stored_target_secrets,
 };
 use warpgate_common_http::errors::invalid_field;
-use warpgate_db_entities::Target::TargetKind;
 use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment, Ticket, TicketRequest};
 
 use super::AdminContext;
@@ -27,7 +26,7 @@ fn serialize_options_for_storage(
     options: TargetOptions,
 ) -> Result<serde_json::Value, WarpgateError> {
     let mut value = serde_json::to_value(options).map_err(WarpgateError::from)?;
-    map_target_secrets(&mut value, &mut idempotent_maybe_encrypt_secret)?;
+    map_stored_target_secrets(&mut value, &mut idempotent_maybe_encrypt_secret)?;
     Ok(value)
 }
 
@@ -392,16 +391,14 @@ impl DetailApi {
             .exec(db)
             .await?;
 
-        if target.kind == TargetKind::Ssh {
-            let options: TargetOptions = serde_json::from_value(target.options.clone())?;
-            if let TargetOptions::Ssh(ssh_options) = options {
-                use warpgate_db_entities::KnownHost;
-                KnownHost::Entity::delete_many()
-                    .filter(KnownHost::Column::Host.eq(&ssh_options.host))
-                    .filter(KnownHost::Column::Port.eq(i32::from(ssh_options.port)))
-                    .exec(db)
-                    .await?;
-            }
+        let options = serde_json::from_value::<TargetOptions>(target.options.clone())?;
+        if let TargetOptions::Ssh(ssh_options) = &options {
+            use warpgate_db_entities::KnownHost;
+            KnownHost::Entity::delete_many()
+                .filter(KnownHost::Column::Host.eq(&ssh_options.host))
+                .filter(KnownHost::Column::Port.eq(i32::from(ssh_options.port)))
+                .exec(db)
+                .await?;
         }
 
         target.delete(db).await?;

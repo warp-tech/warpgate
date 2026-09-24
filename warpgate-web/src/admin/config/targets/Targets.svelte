@@ -91,7 +91,7 @@
     }
 </script>
 
-<div class="container-max-md">
+<div>
     <div class="page-summary-bar">
         <h1>targets</h1>
         <div class="d-flex gap-2 ms-auto">

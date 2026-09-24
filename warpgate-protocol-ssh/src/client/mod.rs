@@ -1901,7 +1901,10 @@ impl Connector {
         let mut auth_error_msg: Option<String> = None;
         match auth {
             SSHTargetAuth::Password(auth) => {
-                let password = auth.password.reveal().map_err(WarpgateError::from)?;
+                let password = auth
+                    .password
+                    .resolve(&*self.services.secret_backends)
+                    .await?;
                 let response = bounded_userauth(
                     session.authenticate_password(username.to_string(), password.expose_secret()),
                 )
@@ -1919,7 +1922,12 @@ impl Connector {
             }
             SSHTargetAuth::PublicKey(auth) => {
                 let best_hash = session.best_supported_rsa_hash().await?.flatten();
-                let keys = load_client_keys(&self.services.db, auth.key_id).await?;
+                let keys = load_client_keys(
+                    &self.services.db,
+                    auth.key_id,
+                    &*self.services.secret_backends,
+                )
+                .await?;
                 if keys.is_empty() {
                     auth_error_msg = Some("No SSH client keys are configured".into());
                 }
@@ -2085,13 +2093,16 @@ impl Connector {
             SSHTargetAuth::IamRole(_) => {
                 let instance_info = warpgate_aws::find_instance_by_ip(host).await?;
 
-                let key = load_client_keys(&self.services.db, None)
-                    .await?
-                    .into_iter()
-                    .next()
-                    .ok_or_else(|| {
-                        WarpgateError::InconsistentState("No SSH client keys are configured".into())
-                    })?;
+                let key =
+                    load_client_keys(&self.services.db, None, &*self.services.secret_backends)
+                        .await?
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| {
+                            WarpgateError::InconsistentState(
+                                "No SSH client keys are configured".into(),
+                            )
+                        })?;
 
                 let pub_key_str = key.public_key().to_openssh().map_err(russh::Error::from)?;
 
@@ -3175,7 +3186,9 @@ mod tests {
         fn a_certificate_target_gets_a_budget_that_fits_its_vault_calls() {
             use std::time::Duration;
 
-            use warpgate_common::{SSHTargetAuth, SshTargetCertificateAuth, SshTargetPasswordAuth};
+            use warpgate_common::{
+                MaybeSecretRef, SSHTargetAuth, SshTargetCertificateAuth, SshTargetPasswordAuth,
+            };
 
             use crate::client::{AUTHENTICATION_TIMEOUT, authentication_budget};
 
@@ -3196,7 +3209,7 @@ mod tests {
 
             // Nothing to budget for when the target does not use an issuer.
             let password = SSHTargetAuth::Password(SshTargetPasswordAuth {
-                password: String::new().into(),
+                password: MaybeSecretRef::default(),
             });
             assert_eq!(
                 authentication_budget(&password, Some(Duration::from_secs(10))),

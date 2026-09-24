@@ -1298,7 +1298,7 @@ mod delivery {
     use warpgate_common::auth::{
         AuthResult, CredentialKind, CredentialPolicy, CredentialPolicyResponse,
     };
-    use warpgate_common::{GlobalParams, Secret, User, WarpgateConfig, WarpgateConfigStore};
+    use warpgate_common::{GlobalParams, User, WarpgateConfig, WarpgateConfigStore};
 
     use super::*;
     use crate::cluster::Cluster;
@@ -1329,6 +1329,7 @@ mod delivery {
         let params = GlobalParams::new(PathBuf::from("/warpgate.yaml"), false).unwrap();
         let rate_limiter_registry = Arc::new(Mutex::new(RateLimiterRegistry::new(db.clone())));
         let cluster = Arc::new(Cluster::new(db.clone(), 0).await.unwrap());
+        let secret_backends = Arc::new(crate::SecretBackendRegistry::new(db.clone()));
         Services {
             db: db.clone(),
             recordings: Arc::new(SessionRecordings::new(db.clone(), &params)),
@@ -1345,6 +1346,7 @@ mod delivery {
             global_params: Arc::new(params),
             listener_status: Default::default(),
             vault: crate::vault_cell::VaultCell::new(None),
+            secret_backends,
         }
     }
 

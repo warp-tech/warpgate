@@ -50,9 +50,7 @@ async fn spawn_supervisor(
         validate_tls(&params.tls)
             .await
             .with_context(|| format!("{name} listener: TLS setup failed"))?;
-        // Fail fast if the port can't be bound; the probe listeners drop here and
-        // the supervisor rebinds. ponytail: tiny drop→rebind window, fine at startup.
-        params.endpoint.tcp_listeners().await.with_context(|| {
+        params.endpoint.probe().with_context(|| {
             format!("{name} listener: cannot bind {}", params.endpoint.address())
         })?;
     }

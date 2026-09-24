@@ -24,8 +24,8 @@ use crate::login_protection::LoginProtectionService;
 use crate::rate_limiting::RateLimiterRegistry;
 use crate::recordings::SessionRecordings;
 use crate::{
-    AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, ListenerStatusRegistry, State,
-    VaultCell,
+    AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, ListenerStatusRegistry,
+    SecretBackendRegistry, State, VaultCell,
 };
 
 #[derive(Clone)]
@@ -45,6 +45,7 @@ pub struct Services {
     pub login_protection: Arc<LoginProtectionService>,
     pub global_params: Arc<GlobalParams>,
     pub listener_status: ListenerStatusRegistry,
+    pub secret_backends: Arc<SecretBackendRegistry>,
 }
 
 /// How often a node picks up self approvals decided elsewhere. One query per
@@ -155,6 +156,8 @@ impl Services {
             });
         }
 
+        let secret_backends = Arc::new(SecretBackendRegistry::new(db.clone()));
+
         let services = Self {
             db: db.clone(),
             recordings,
@@ -169,6 +172,7 @@ impl Services {
             login_protection,
             global_params: Arc::new(params),
             listener_status: Arc::default(),
+            secret_backends,
         };
 
         {
