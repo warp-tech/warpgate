@@ -1,5 +1,6 @@
 <script lang="ts">
-    import { FormGroup, Input } from '@sveltestrap/sveltestrap'
+    import { faPlus, faTrash } from '@fortawesome/free-solid-svg-icons'
+    import { Button, FormGroup, Input } from '@sveltestrap/sveltestrap'
     import {
         api,
         type LdapServerResponse,
@@ -10,6 +11,7 @@
     import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
+    import Fa from 'svelte-fa'
     import { push } from 'svelte-spa-router'
     import { defaultLdapPortForTlsMode, testLdapConnection } from './common'
     import LdapConnectionFields from './LdapConnectionFields.svelte'
@@ -114,6 +116,7 @@
                     usernameAttribute,
                     sshKeyAttribute,
                     uuidAttribute,
+                    baseDns,
                 },
             })
             await load()
@@ -174,19 +177,44 @@
                 passwordRequired={false}
             />
 
-            {#if baseDns.length > 0}
-                <div class="mt-4">
-                    <!-- svelte-ignore a11y_label_has_associated_control -->
-                    <label class="form-label">Base DNs (discovered)</label>
-                    <ul class="list-group">
-                        {#each baseDns as dn (dn)}
-                            <li class="list-group-item">
-                                <code>{dn}</code>
-                            </li>
-                        {/each}
-                    </ul>
-                </div>
-            {/if}
+            <div class="mt-4">
+                <!-- svelte-ignore a11y_label_has_associated_control -->
+                <label class="form-label">Base DNs</label>
+                {#each baseDns as dn, index (index)}
+                    <div class="d-flex align-items-center mb-2 gap-2">
+                        <Input
+                            placeholder="e.g. ou=Users,dc=example,dc=com"
+                            value={dn}
+                            on:input={(e) => {
+                                baseDns[index] = e.target.value
+                                baseDns = [...baseDns]
+                            }}
+                        />
+                        <Button
+                            color="link"
+                            size="sm"
+                            on:click={() => {
+                                baseDns = baseDns.filter((_, i) => i !== index)
+                            }}
+                        >
+                            <Fa icon={faTrash} />
+                        </Button>
+                    </div>
+                {/each}
+                <Button
+                    class="d-flex align-items-center gap-2"
+                    color="secondary"
+                    size="sm"
+                    on:click={() => { baseDns = [...baseDns, ''] }}
+                >
+                    <Fa icon={faPlus} class="me-1" />
+                    <div>Add base DN</div>
+                </Button>
+                <small class="form-text text-muted d-block mt-2">
+                    Search bases for user lookups. Leave the list empty to
+                    re-detect them from the server's RootDSE when saving.
+                </small>
+            </div>
 
             <!-- <div class="mt-4">
                 <div class="form-check form-switch">
