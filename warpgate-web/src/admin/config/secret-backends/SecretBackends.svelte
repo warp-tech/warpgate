@@ -12,11 +12,12 @@
     import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
     import { invalidateSecretBackends } from 'common/SecretRefInput.svelte'
     import { from, map, type Observable } from 'rxjs'
+    import { SvelteMap } from 'svelte/reactivity'
     import firstBy from 'thenby'
     import SecretBackendModal from './SecretBackendModal.svelte'
 
     let error: string | undefined = $state()
-    let health: Record<string, CheckHealthResponse> = $state({})
+    let health = new SvelteMap<string, CheckHealthResponse>()
     let modalOpen = $state(false)
     let editing: SecretBackend | undefined = $state()
     let gen = $state(0)
@@ -39,11 +40,14 @@
 
     async function checkHealth(backend: SecretBackend) {
         try {
-            health[backend.id] = await api.checkSecretBackendHealth({
-                id: backend.id,
-            })
+            health.set(
+                backend.id,
+                await api.checkSecretBackendHealth({
+                    id: backend.id,
+                }),
+            )
         } catch (e) {
-            health[backend.id] = { error: await stringifyError(e) }
+            health.set(backend.id, { error: await stringifyError(e) })
         }
     }
 
@@ -82,17 +86,23 @@
         })
     }
 
-    function remove(backend: SecretBackend) {
-        runAndInvalidate(() => api.deleteSecretBackend({ id: backend.id }))
+    async function remove(backend: SecretBackend) {
+        if (!confirm('Delete this secret backend?')) {
+            return
+        }
+        await runAndInvalidate(() =>
+            api.deleteSecretBackend({ id: backend.id }),
+        )
+        gen++
     }
 </script>
 
 <div class="page-summary-bar">
     <h1>Secret backends</h1>
     {#if $adminPermissions.configEdit}
-        <Button class="ms-auto" color="primary" onclick={openCreate}
-            >Add</Button
-        >
+        <Button class="ms-auto" color="primary" onclick={openCreate}>
+            Add a secret backend
+        </Button>
     {/if}
 </div>
 
@@ -103,36 +113,26 @@
 {#key gen}
     <ItemList {load} showSearch={false}>
         {#snippet item(backend)}
-            {@const probe = health[backend.id]}
+            {const probe = $derived(health.get(backend.id))}
             <div class="list-group-item px-0">
                 <div class="d-flex align-items-center gap-2">
                     <strong>{backend.name}</strong>
                     <Badge color="secondary">{backend.backendType}</Badge>
                     {#if probe?.error}
-                        <Badge color="danger" title={probe.error}
-                            >Unhealthy</Badge
-                        >
+                        <Badge color="danger" title={probe.error}>
+                            Unhealthy
+                        </Badge>
                     {:else if probe}
                         <Badge color="success">Healthy</Badge>
                     {/if}
-                    <Button
-                        class="ms-auto"
-                        color="link px-0"
-                        onclick={e => {
-                        e.preventDefault()
-                        checkHealth(backend)
-                    }}
-                    >
-                        Check health
-                    </Button>
                     {#if $adminPermissions.configEdit}
                         <Button
                             class="ms-3"
                             color="link px-0"
                             onclick={e => {
                             e.preventDefault()
-                            openEdit(backend)
-                        }}
+                                openEdit(backend)
+                            }}
                         >
                             Edit
                         </Button>
@@ -141,8 +141,8 @@
                             color="link px-0"
                             onclick={e => {
                             e.preventDefault()
-                            remove(backend)
-                        }}
+                                remove(backend)
+                            }}
                         >
                             Delete
                         </Button>
@@ -154,15 +154,16 @@
                         · namespace {backend.namespace}
                     {/if}
                     · {backend.auth.method}
+
+                    {#if probe?.error}
+                        <span class="text-danger">· {probe.error}</span>
+                    {/if}
                 </div>
-                {#if probe?.error}
-                    <div class="text-danger small">{probe.error}</div>
-                {/if}
             </div>
         {/snippet}
         {#snippet empty()}
             <EmptyState
-                title="No secret backends yet"
+                title="None yet"
                 hint="Secret backends let you reference passwords and private keys from Vault / OpenBao"
             />
         {/snippet}

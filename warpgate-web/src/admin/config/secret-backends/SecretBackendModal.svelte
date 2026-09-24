@@ -115,7 +115,8 @@
                     <option value="openbao">OpenBao</option>
                 </Input>
             </FormGroup>
-            <FormGroup floating label="Address">
+
+            <FormGroup floating label="Address" class="mt-4">
                 <Input
                     type="url"
                     required
@@ -123,11 +124,13 @@
                     bind:value={address}
                 />
             </FormGroup>
-            <FormGroup floating label="Namespace (optional)">
-                <Input type="text" bind:value={namespace} />
-            </FormGroup>
+            <Input
+                type="switch"
+                label="Skip TLS certificate verification"
+                bind:checked={tlsSkipVerify}
+            />
 
-            <FormGroup floating label="Authentication">
+            <FormGroup floating label="Authentication" class="mt-4">
                 <Input type="select" bind:value={method}>
                     <option value="Token">Token</option>
                     <option value="AppRole">AppRole</option>
@@ -169,9 +172,14 @@
                 </FormGroup>
             {/if}
 
+            <FormGroup floating label="Namespace (optional)" class="mt-4">
+                <Input type="text" bind:value={namespace} />
+            </FormGroup>
+
             <FormGroup
                 floating
                 label="Allowed KV path prefixes, one per line (empty: any)"
+                class="mt-3"
             >
                 <Input
                     type="textarea"
@@ -179,12 +187,8 @@
                     bind:value={allowedPaths}
                 />
             </FormGroup>
-            <Input
-                type="switch"
-                label="Skip TLS certificate verification"
-                bind:checked={tlsSkipVerify}
-            />
         </ModalBody>
+
         <ModalFooter>
             <Button
                 type="submit"
@@ -194,9 +198,9 @@
             >
                 Save
             </Button>
-            <Button class="modal-button" color="danger" on:click={_cancel}
-                >Cancel</Button
-            >
+            <Button class="modal-button" color="danger" on:click={_cancel}>
+                Cancel
+            </Button>
         </ModalFooter>
     </Form>
 </Modal>

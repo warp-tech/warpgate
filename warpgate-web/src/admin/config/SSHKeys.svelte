@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { Alert, Badge, Button } from '@sveltestrap/sveltestrap'
+    import { Alert, Badge, Button, Tooltip } from '@sveltestrap/sveltestrap'
     import {
         api,
         type SSHClientKey,
@@ -127,10 +127,11 @@
                         <Badge color="primary">Default</Badge>
                     {/if}
                     {#if key.secretBackend}
-                        <Badge
-                            color="info"
-                            title="Key material is read from this secret backend, not stored in Warpgate"
-                        >
+                        <Tooltip target="keyRow-{key.id}">
+                            Private key will be loaded from the secret backend
+                            on use
+                        </Tooltip>
+                        <Badge color="info" id="keyRow-{key.id}">
                             {key.secretBackend}
                         </Badge>
                     {/if}

@@ -71,6 +71,7 @@
     import { stringifyError } from 'common/errors'
     import { dequal } from 'dequal'
     import Fa from 'svelte-fa'
+    import { uuid } from './helpers'
 
     interface Props {
         // Undefined when the parent's auth block has no value yet, e.g. right after
@@ -89,6 +90,8 @@
         inlineLabel,
         intendedUsage,
     }: Props = $props()
+
+    const id = uuid()
 
     // svelte-ignore state_referenced_locally
     let refMode = $state(!inlineLabel || isSecretRef(value))
@@ -220,7 +223,13 @@
 
 <div class="d-flex align-items-center gap-3 flex-grow-1">
     {#if refMode}
+        {#if chosen}
+            <Tooltip target="SecretRefInput-value-{id}">
+                References an external secret
+            </Tooltip>
+        {/if}
         <Button
+            id="SecretRefInput-value-{id}"
             color="secondary"
             class="secret-ref-button d-flex align-items-center gap-2 mb-3"
             {disabled}
@@ -230,11 +239,13 @@
             {label}
         </Button>
         {#if inlineLabel}
-            <Tooltip target="enterDirectlyButton">Enter directly</Tooltip>
+            <Tooltip target="SecretRefInput-enterDirectlyButton-{id}">
+                Enter directly
+            </Tooltip>
             <Button
-                id="enterDirectlyButton"
+                id="SecretRefInput-enterDirectlyButton-{id}"
                 color="link"
-                class="px-0 text-nowrap mb-3"
+                class="px-1 text-nowrap mb-3 align-self-stretch"
                 {disabled}
                 onclick={() => switchMode(false)}
             >
@@ -269,7 +280,7 @@
 </div>
 
 <Modal isOpen={modalOpen} toggle={() => (modalOpen = false)}>
-    <ModalHeader>Secret</ModalHeader>
+    <ModalHeader>Secret reference</ModalHeader>
     <ModalBody>
         <FormGroup floating label="Backend">
             <select class="form-select" bind:value={draftBackend}>

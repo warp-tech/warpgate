@@ -69,6 +69,8 @@
         return allRoles
     }
 
+    const loadRolesPromise = loadRoles()
+
     async function update() {
         if (!target) return
         try {
@@ -433,7 +435,7 @@
                         title="Roles"
                         bodyTitle="Allow access for roles"
                     >
-                        <Loadable promise={loadRoles()}>
+                        <Loadable promise={loadRolesPromise}>
                             {#snippet children(roles)}
                                 <div class="list-group list-group-flush mb-3">
                                     {#each roles as role (role.id)}
