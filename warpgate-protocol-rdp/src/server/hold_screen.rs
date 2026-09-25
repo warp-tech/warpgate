@@ -345,6 +345,12 @@ mod hold_while_tests {
     ///
     /// The hold here never resolves, which is the case that matters: the drain
     /// has to happen *during* the wait, not after it.
+    ///
+    /// Completion is the drain itself, not a time budget. With the sender
+    /// dropped behind the queue, the disconnect is the last thing on the
+    /// channel, so the hold can only return once all 1000 events ahead of it
+    /// have been taken off. Stopping the pump after 200 ms and asking whether it
+    /// had finished measured the runner's speed, and failed on upstream's own CI.
     #[tokio::test]
     async fn viewer_input_does_not_pile_up_behind_the_hold() {
         let (tx, mut events) = unbounded_channel();
@@ -353,22 +359,29 @@ mod hold_while_tests {
         for _ in 0..1000 {
             tx.send(pointer()).unwrap();
         }
+        drop(tx);
 
         let held = std::future::pending::<()>();
-        assert!(
-            tokio::time::timeout(
-                Duration::from_millis(200),
-                hold_while(held, &mut events, &viewer(), &mut screen, || {
-                    HoldFrame::Connecting
-                }),
-            )
-            .await
-            .is_err(),
-            "the hold does not resolve, so the pump should still be waiting",
-        );
+        // A deadlock watchdog only: a working pump returns as soon as the queue
+        // is empty, however slow the machine.
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(60),
+            hold_while(held, &mut events, &viewer(), &mut screen, || {
+                HoldFrame::Connecting
+            }),
+        )
+        .await
+        .expect("the pump stopped draining before it reached the disconnect");
 
         assert!(
-            events.try_recv().is_err(),
+            outcome.unwrap().is_none(),
+            "the hold never resolves, so only the viewer's disconnect can end it",
+        );
+        assert!(
+            matches!(
+                events.try_recv(),
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected)
+            ),
             "every event sent during the hold must have been taken off the channel",
         );
     }
