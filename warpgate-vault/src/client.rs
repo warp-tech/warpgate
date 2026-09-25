@@ -1070,14 +1070,44 @@ mod tests {
         Ok(address)
     }
 
+    /// How much of the endless error body the client let the server write.
+    #[derive(Debug)]
+    enum Served {
+        /// The client went away after this many bytes.
+        Closed(u64),
+        /// The client was still taking bytes at `ENDLESS_BODY_LIMIT`.
+        StillReading(u64),
+    }
+
+    /// Far more than a reader that stops at the cap can ever let through, and
+    /// nothing a reader that drains the stream takes long to reach.
+    ///
+    /// Once the reader stops, what the server can still write is bounded by
+    /// buffers rather than by timing: rustls's and hyper's, plus both loopback
+    /// socket buffers, which macOS autotunes up to 4 MiB each
+    /// (`net.inet.tcp.auto{snd,rcv}bufmax`). That ceiling is about 8.5 MiB
+    /// against the 16 MiB here; 34 measured runs, some beside a build, stopped
+    /// between 0.59 and 1.87 MB.
+    const ENDLESS_BODY_LIMIT: u64 = 16 * 1024 * 1024;
+
     /// Answers the login endpoint normally and then streams an error body that
-    /// never ends — the shape of a hostile or broken endpoint.
-    async fn spawn_endless_error_server(login: String) -> String {
+    /// never ends — the shape of a hostile or broken endpoint — reporting how
+    /// much of it the client took.
+    ///
+    /// The count, not the clock, is what tells a reader that stops at the cap
+    /// from one that reads the stream to the end and truncates afterwards: both
+    /// return the same body, and elapsed time separated them only until the
+    /// machine running the test was slow enough.
+    async fn spawn_endless_error_server(
+        login: String,
+    ) -> (String, tokio::sync::oneshot::Receiver<Served>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = format!("https://{}", listener.local_addr().unwrap());
         let acceptor = test_tls_acceptor();
+        let (report, served) = tokio::sync::oneshot::channel();
 
         tokio::spawn(async move {
+            let mut report = Some(report);
             while let Ok((stream, _)) = listener.accept().await {
                 let Ok(mut socket) = acceptor.accept(stream).await else {
                     continue;
@@ -1097,19 +1127,32 @@ mod tests {
                         b"HTTP/1.1 500 Internal Server Error\r\nTransfer-Encoding: chunked\r\n\r\n",
                     )
                     .await;
-                // Paced, so a reader that waits for the end cannot finish
-                // before the request timeout no matter how fast the loopback is.
-                let chunk = format!("1000\r\n{}\r\n", "a".repeat(4096));
-                for _ in 0..1000 {
+                // Unpaced: backpressure alone decides how much gets through,
+                // and a failed write is the client closing the connection.
+                let chunk = format!("4000\r\n{}\r\n", "a".repeat(0x4000));
+                let mut bytes: u64 = 0;
+                let outcome = loop {
                     if socket.write_all(chunk.as_bytes()).await.is_err() {
-                        break;
+                        break Served::Closed(bytes);
                     }
-                    tokio::time::sleep(Duration::from_millis(250)).await;
+                    bytes += chunk.len() as u64;
+                    if bytes >= ENDLESS_BODY_LIMIT {
+                        break Served::StillReading(bytes);
+                    }
+                };
+                let still_reading = matches!(outcome, Served::StillReading(_));
+                if let Some(report) = report.take() {
+                    let _ = report.send(outcome);
+                }
+                if still_reading {
+                    // Held open rather than ended: a reader that waits for the
+                    // end must still be unable to finish.
+                    std::future::pending::<()>().await;
                 }
             }
         });
 
-        address
+        (address, served)
     }
 
     fn json_response(body: &str) -> String {
@@ -1377,7 +1420,7 @@ mod tests {
     async fn test_an_endless_error_body_is_not_buffered() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-        let vault = spawn_endless_error_server(json_response(
+        let (vault, mut served) = spawn_endless_error_server(json_response(
             r#"{"auth":{"client_token":"s.stub-token","lease_duration":3600}}"#,
         ))
         .await;
@@ -1387,37 +1430,68 @@ mod tests {
         std::fs::write(&secret_id_path, "secret-id").unwrap();
 
         let mut config = approle_config(vault, secret_id_path);
-        // The two outcomes this separates are "stopped at the cap" and "waited
-        // out the whole stream", so what matters is the distance between them,
-        // not either number. A minute against the twenty seconds below leaves
-        // room for a machine three times slower than the one that measured
-        // 7.6 seconds for the early stop.
+        // Long, so that a reader draining the stream is caught by the byte
+        // count below rather than rescued by the timeout ending the stream.
         config.timeout = Duration::from_secs(60);
         let client = VaultClient::new(config).unwrap();
 
-        let started = Instant::now();
-        let error = client
-            .sign_ssh_key("warpgate", "ssh-ed25519 AAAA", "root", "warpgate:alice")
-            .await
-            .unwrap_err();
-        let elapsed = started.elapsed();
+        let sign = async move {
+            let result = client
+                .sign_ssh_key("warpgate", "ssh-ed25519 AAAA", "root", "warpgate:alice")
+                .await;
+            // The count is final once the connection closes, and the client is
+            // the last thing that could keep it open.
+            drop(client);
+            result
+        };
+        tokio::pin!(sign);
+        // Only a watchdog, beyond the client's own timeout so that one reports
+        // first; no timing is asserted.
+        let (result, served) = tokio::time::timeout(Duration::from_secs(120), async {
+            tokio::select! {
+                result = &mut sign => {
+                    // Anything else never reached the error body, and the
+                    // server would wait for the watchdog with nothing to report.
+                    assert!(
+                        matches!(result, Err(VaultError::Api { .. })),
+                        "expected a bounded API error, got {result:?}"
+                    );
+                    (Some(result), served.await.unwrap())
+                }
+                // A draining reader is stopped here, not left to run into the
+                // timeout, which would end the stream and let it succeed.
+                served = &mut served => match served.unwrap() {
+                    closed @ Served::Closed(_) => (Some(sign.await), closed),
+                    still_reading @ Served::StillReading(_) => (None, still_reading),
+                },
+            }
+        })
+        .await
+        .expect("the endless error body hung the test");
 
-        match error {
+        let served = match served {
+            Served::Closed(bytes) => bytes,
+            Served::StillReading(bytes) => panic!(
+                "the client read {bytes} bytes of an error body capped at \
+                 {MAX_ERROR_BODY}, so it waited on the whole stream"
+            ),
+        };
+
+        match result.unwrap().unwrap_err() {
             VaultError::Api { status, body } => {
                 assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
                 assert!(body.len() <= MAX_ERROR_BODY + "... (truncated)".len());
                 // Both halves, deliberately: an upper bound alone is satisfied
                 // by a reader that returns nothing at all.
                 assert_eq!(body.len(), MAX_ERROR_BODY + "... (truncated)".len());
-                assert!(body.starts_with("aaaa"), "the body was not read: {body:?}");
+                assert!(
+                    body.starts_with("aaaa"),
+                    "the body was not read ({served} bytes served): {body:?}"
+                );
                 assert!(body.ends_with("... (truncated)"), "no truncation marker");
             }
             other => panic!("expected a bounded API error, got {other:?}"),
         }
-        assert!(
-            elapsed < Duration::from_secs(20),
-            "reading the error body waited on the whole stream ({elapsed:?})"
-        );
     }
 
     /// How the stub answers the signing request in the size-limit tests.
