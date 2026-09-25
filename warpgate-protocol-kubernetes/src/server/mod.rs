@@ -14,10 +14,12 @@ use warpgate_core::Services;
 use warpgate_tls::{SingleCertResolver, TlsCertificateAndPrivateKey};
 
 use crate::correlator::RequestCorrelator;
+use crate::server::client_cache::UpstreamClientCache;
 use crate::server::client_certs::{AcceptAnyClientCert, certificate_capturing_acceptor};
 use crate::server::handlers::handle_api_request;
 
 pub mod auth;
+mod client_cache;
 mod client_certs;
 mod handlers;
 
@@ -39,6 +41,7 @@ pub async fn bind_server(
         .with(CertificateExtractorMiddleware)
         .data(UnauthenticatedRequestContext::new(services.clone()).await)
         .data(correlator)
+        .data(Arc::new(UpstreamClientCache::default()))
         .around(render_errors);
 
     info!(?address, "Kubernetes protocol listening");

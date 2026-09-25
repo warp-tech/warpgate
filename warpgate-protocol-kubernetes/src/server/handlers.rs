@@ -29,6 +29,7 @@ use crate::recording::{start_recording_api, start_recording_exec};
 use crate::server::auth::{
     KubernetesIdentity, authenticate_kubernetes_user, create_authenticated_client,
 };
+use crate::server::client_cache::UpstreamClientCache;
 
 /// A client-supplied impersonation header (`Impersonate-User`,
 /// `Impersonate-Group`, `Impersonate-Uid`, `Impersonate-Extra-*`). These let a
@@ -104,6 +105,7 @@ pub async fn handle_api_request(
     req: &Request,
     body: Body,
     correlator: Data<&Arc<Mutex<RequestCorrelator>>>,
+    upstream_clients: Data<&Arc<UpstreamClientCache>>,
     ctx: Data<&UnauthenticatedRequestContext>,
 ) -> Result<Response, poem::Error> {
     debug!(
@@ -184,6 +186,7 @@ pub async fn handle_api_request(
                 req,
                 body,
                 admitted,
+                upstream_clients.0,
                 &api_path,
                 &audit_subject,
                 ctx.services(),
@@ -230,16 +233,22 @@ async fn _handle_normal_request_inner(
     req: &Request,
     body: Body,
     admitted: AdmittedSession,
+    upstream_clients: &UpstreamClientCache,
     api_path: &str,
     audit_subject: &KubernetesAuditSubject,
     services: &Services,
 ) -> Result<Response, WarpgateError> {
     let user_info = admitted.user_info();
     let k8s_options = admitted.options();
-    let client = create_authenticated_client(k8s_options, Some(&user_info.username), services)
-        .await?
-        .build()
-        .context("building reqwest client")?;
+    let target_id = admitted.target().id;
+    let client = upstream_clients
+        .get_or_build(target_id, k8s_options, || async {
+            create_authenticated_client(k8s_options, Some(&user_info.username), services)
+                .await?
+                .build()
+                .context("building reqwest client")
+        })
+        .await?;
 
     debug!(
         "Target Kubernetes options: cluster_url={}, auth={:?}",
@@ -357,6 +366,12 @@ async fn _handle_normal_request_inner(
 
     let status = response.status();
     let response_headers = response.headers().clone();
+
+    // The cached client's credential may have been rotated or expired upstream;
+    // build a fresh one for the next request.
+    if status == http::StatusCode::UNAUTHORIZED {
+        upstream_clients.evict(target_id);
+    }
 
     // Emitted after the response so a refused `kubectl debug` is audited as
     // clearly as an accepted one, and before the body is consumed so a failure
