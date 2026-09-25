@@ -59,7 +59,7 @@ impl Services {
         let Some(state_arc) = self.auth_state_store.lock().await.get(&row.session_id) else {
             // The state is gone (cleaned up or node is gone), mark consumed so
             // that it's not being picked up again
-            mark_consumed(&self.db, consumed()).await?;
+            mark_consumed(&self.db, consumed(), row.started).await?;
             return Ok(false);
         };
 
@@ -71,7 +71,7 @@ impl Services {
             // Verify that the decision still matches the original request exactly
             if row.target != subject.target_name || row.user_id != subject.user_info.id {
                 drop(state);
-                mark_consumed(&self.db, consumed()).await?;
+                mark_consumed(&self.db, consumed(), row.started).await?;
                 return Ok(false);
             }
 
@@ -81,7 +81,7 @@ impl Services {
                 AuthResult::Need(ref kinds) if kinds.contains(&CredentialKind::WebUserApproval)
             ) {
                 drop(state);
-                mark_consumed(&self.db, consumed()).await?;
+                mark_consumed(&self.db, consumed(), row.started).await?;
                 return Ok(false);
             }
 
@@ -99,7 +99,7 @@ impl Services {
             }
         }
 
-        mark_consumed(&self.db, consumed()).await?;
+        mark_consumed(&self.db, consumed(), row.started).await?;
         Ok(true)
     }
 }

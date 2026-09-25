@@ -71,6 +71,12 @@ pub(crate) async fn approval_is_remembered(
     let rows = SessionApprovalRequest::Entity::find()
         .filter(Column::Kind.eq(key.identity().kind()))
         .filter(Column::Status.eq(ApprovalRequestStatus::Approved))
+        // Admin: an approval is consumed only by the gate that read it for its
+        // session, so one that landed after the session stopped waiting — timed
+        // out, cancelled, or a close that failed — never becomes a standing
+        // grant. Expiry still runs from resolved_at; a late consume only
+        // shortens the window.
+        .filter(Column::ConsumedAt.is_not_null())
         .filter(Column::ResolvedAt.gte(cutoff))
         .filter(scope_matches)
         .all(db)
