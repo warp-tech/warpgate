@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.29.0-beta.1.1-1-g2f77f07b-modified"
+    "version": "v0.29.0-19-g263fa7ca-modified"
   },
   "servers": [
     {
@@ -1177,7 +1177,7 @@
           "content": {
             "application/json; charset=utf-8": {
               "schema": {
-                "$ref": "#/components/schemas/ImportSSHClientKeyRequest"
+                "$ref": "#/components/schemas/ImportSshClientKeyRequest"
               }
             }
           },
@@ -1279,6 +1279,61 @@
           }
         ],
         "operationId": "generate_ssh_own_key"
+      }
+    },
+    "/ssh/own-keys/reference": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportSshClientKeyReferenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSHClientKey"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "import_ssh_own_key_reference"
       }
     },
     "/ssh/own-keys/{id}": {
@@ -4525,6 +4580,400 @@
         ],
         "operationId": "revoke_certificate_credential"
       }
+    },
+    "/secret-backends": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SecretBackend"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_secret_backends"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/SecretBackendRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretBackend"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "create_secret_backend"
+      }
+    },
+    "/secret-backends/summary": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SecretBackendSummary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_secret_backends_summary"
+      }
+    },
+    "/secret-backends/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretBackend"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_secret_backend"
+      },
+      "put": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/SecretBackendRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretBackend"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "update_secret_backend"
+      },
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_secret_backend"
+      }
+    },
+    "/secret-backends/{id}/health": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckHealthResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "check_secret_backend_health"
+      }
+    },
+    "/secret-backends/resolve-test": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/TestResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "The reference resolved; the value itself is never returned"
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The path is outside the backend's allowed prefixes",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such backend, secret or field",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The backend could not be reached or refused the request",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "test_secret_resolve"
+      }
+    },
+    "/secret-backends/{id}/usage": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SecretReferenceUsage"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_secret_reference_usage"
+      }
     }
   },
   "components": {
@@ -4820,6 +5269,13 @@
         "type": "object",
         "title": "AutoCredentials"
       },
+      "BackendType": {
+        "type": "string",
+        "enum": [
+          "vault",
+          "openbao"
+        ]
+      },
       "BlockedIpInfo": {
         "type": "object",
         "title": "BlockedIpInfo",
@@ -4863,6 +5319,15 @@
           "Light",
           "Dark"
         ]
+      },
+      "CheckHealthResponse": {
+        "type": "object",
+        "title": "CheckHealthResponse",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
       },
       "CheckSshHostKeyRequest": {
         "type": "object",
@@ -5293,9 +5758,32 @@
           }
         }
       },
-      "ImportSSHClientKeyRequest": {
+      "ImportSshClientKeyReferenceRequest": {
         "type": "object",
-        "title": "ImportSSHClientKeyRequest",
+        "title": "ImportSshClientKeyReferenceRequest",
+        "required": [
+          "label",
+          "reference",
+          "is_default"
+        ],
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "reference": {
+            "type": "string",
+            "description": "A `secret://backend/mount/path#field` reference; the field must resolve to\na private key in OpenSSH or PKCS#8 PEM format.",
+            "maxLength": 1024
+          },
+          "is_default": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ImportSshClientKeyRequest": {
+        "type": "object",
+        "title": "ImportSshClientKeyRequest",
         "required": [
           "label",
           "secret_key",
@@ -6617,6 +7105,9 @@
           },
           "is_default": {
             "type": "boolean"
+          },
+          "secret_backend": {
+            "type": "string"
           }
         }
       },
@@ -6744,6 +7235,325 @@
             "$ref": "#/components/schemas/SshTargetPublicKeyAuth"
           }
         ]
+      },
+      "SecretBackend": {
+        "type": "object",
+        "title": "SecretBackend",
+        "required": [
+          "id",
+          "name",
+          "backend_type",
+          "address",
+          "auth",
+          "tls_skip_verify",
+          "allowed_paths"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "backend_type": {
+            "$ref": "#/components/schemas/BackendType"
+          },
+          "address": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "auth": {
+            "$ref": "#/components/schemas/SecretBackendAuth"
+          },
+          "tls_skip_verify": {
+            "type": "boolean"
+          },
+          "allowed_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "SecretBackendAuth": {
+        "type": "object",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/SecretBackendAuth_VaultTokenAuth"
+          },
+          {
+            "$ref": "#/components/schemas/SecretBackendAuth_VaultAppRoleAuth"
+          },
+          {
+            "$ref": "#/components/schemas/SecretBackendAuth_VaultKubernetesAuth"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "method",
+          "mapping": {
+            "Token": "#/components/schemas/SecretBackendAuth_VaultTokenAuth",
+            "AppRole": "#/components/schemas/SecretBackendAuth_VaultAppRoleAuth",
+            "Kubernetes": "#/components/schemas/SecretBackendAuth_VaultKubernetesAuth"
+          }
+        }
+      },
+      "SecretBackendAuth_VaultAppRoleAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "method"
+            ],
+            "properties": {
+              "method": {
+                "type": "string",
+                "enum": [
+                  "AppRole"
+                ],
+                "example": "AppRole"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/VaultAppRoleAuth"
+          }
+        ]
+      },
+      "SecretBackendAuth_VaultKubernetesAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "method"
+            ],
+            "properties": {
+              "method": {
+                "type": "string",
+                "enum": [
+                  "Kubernetes"
+                ],
+                "example": "Kubernetes"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/VaultKubernetesAuth"
+          }
+        ]
+      },
+      "SecretBackendAuth_VaultTokenAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "method"
+            ],
+            "properties": {
+              "method": {
+                "type": "string",
+                "enum": [
+                  "Token"
+                ],
+                "example": "Token"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/VaultTokenAuth"
+          }
+        ]
+      },
+      "SecretBackendRequest": {
+        "type": "object",
+        "title": "SecretBackendRequest",
+        "required": [
+          "name",
+          "backend_type",
+          "address",
+          "auth"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._-]+$"
+          },
+          "backend_type": {
+            "$ref": "#/components/schemas/BackendType"
+          },
+          "address": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 1
+          },
+          "namespace": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1
+          },
+          "auth": {
+            "$ref": "#/components/schemas/SecretBackendAuth"
+          },
+          "tls_skip_verify": {
+            "type": "boolean",
+            "default": false
+          },
+          "allowed_paths": {
+            "type": "array",
+            "description": "KV path prefixes (`mount/path`), matched on whole segments",
+            "default": [],
+            "items": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "maxItems": 256
+          }
+        }
+      },
+      "SecretBackendSummary": {
+        "type": "object",
+        "title": "SecretBackendSummary",
+        "required": [
+          "id",
+          "name",
+          "backend_type"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "backend_type": {
+            "$ref": "#/components/schemas/BackendType"
+          }
+        }
+      },
+      "SecretReferenceUsage": {
+        "type": "object",
+        "title": "SecretReferenceUsage",
+        "required": [
+          "reference",
+          "backend",
+          "usages"
+        ],
+        "properties": {
+          "reference": {
+            "type": "string"
+          },
+          "backend": {
+            "type": "string"
+          },
+          "usages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SecretReferenceUsageInstance"
+            }
+          }
+        }
+      },
+      "SecretReferenceUsageInstance": {
+        "type": "object",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/SecretReferenceUsageInstance_SecretReferenceUsageTarget"
+          },
+          {
+            "$ref": "#/components/schemas/SecretReferenceUsageInstance_SecretReferenceUsageSshClientKey"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "Target": "#/components/schemas/SecretReferenceUsageInstance_SecretReferenceUsageTarget",
+            "SshClientKey": "#/components/schemas/SecretReferenceUsageInstance_SecretReferenceUsageSshClientKey"
+          }
+        }
+      },
+      "SecretReferenceUsageInstance_SecretReferenceUsageSshClientKey": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "SshClientKey"
+                ],
+                "example": "SshClientKey"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/SecretReferenceUsageSshClientKey"
+          }
+        ]
+      },
+      "SecretReferenceUsageInstance_SecretReferenceUsageTarget": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Target"
+                ],
+                "example": "Target"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/SecretReferenceUsageTarget"
+          }
+        ]
+      },
+      "SecretReferenceUsageSshClientKey": {
+        "type": "object",
+        "title": "SecretReferenceUsageSshClientKey",
+        "required": [
+          "id",
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
+      "SecretReferenceUsageTarget": {
+        "type": "object",
+        "title": "SecretReferenceUsageTarget",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
       },
       "SecurityStatus": {
         "type": "object",
@@ -7582,6 +8392,19 @@
           }
         }
       },
+      "TestResolveRequest": {
+        "type": "object",
+        "title": "TestResolveRequest",
+        "required": [
+          "reference"
+        ],
+        "properties": {
+          "reference": {
+            "type": "string",
+            "maxLength": 1024
+          }
+        }
+      },
       "Ticket": {
         "type": "object",
         "title": "Ticket",
@@ -8122,6 +8945,64 @@
             "items": {
               "$ref": "#/components/schemas/SessionApprovalRequestSnapshot"
             }
+          }
+        }
+      },
+      "VaultAppRoleAuth": {
+        "type": "object",
+        "title": "VaultAppRoleAuth",
+        "required": [
+          "role_id",
+          "secret_id"
+        ],
+        "properties": {
+          "role_id": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1
+          },
+          "secret_id": {
+            "type": "string",
+            "description": "Blank in responses; blank in an update, keeps the stored secret ID"
+          },
+          "mount": {
+            "type": "string",
+            "description": "Auth mount; `null` uses `approle`",
+            "maxLength": 255,
+            "minLength": 1
+          }
+        }
+      },
+      "VaultKubernetesAuth": {
+        "type": "object",
+        "title": "VaultKubernetesAuth",
+        "required": [
+          "role"
+        ],
+        "properties": {
+          "role": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1
+          },
+          "mount": {
+            "type": "string",
+            "description": "Auth mount; `null` uses `kubernetes`",
+            "maxLength": 255,
+            "minLength": 1
+          }
+        }
+      },
+      "VaultTokenAuth": {
+        "type": "object",
+        "title": "VaultTokenAuth",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "Blank in responses; blank in an update, keeps the stored token"
           }
         }
       },

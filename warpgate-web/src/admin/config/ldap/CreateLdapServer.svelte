@@ -90,7 +90,7 @@
     }
 </script>
 
-<div class="container-max-md">
+<div>
     {#if error}
         <Alert color="danger">{error}</Alert>
     {/if}

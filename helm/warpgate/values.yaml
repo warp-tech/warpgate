@@ -1,13 +1,13 @@
 # Number of replicas for the Warpgate deployment.
-# For more than one replica, use an external PostgreSQL/MySQL database and
-# shared recording storage. Do not increase above 1 when using SQLite or local
-# disk-only recording storage.
+# For more than one replica, use the bundled PostgreSQL below or an external
+# PostgreSQL/MySQL database, plus shared recording storage. Do not increase
+# above 1 when using SQLite or local disk-only recording storage.
 replicaCount: 1
 
 image:
   repository: ghcr.io/warp-tech/warpgate
   pullPolicy: IfNotPresent
-  tag: "0.29.0-beta.2"
+  tag: "0.29.1"
 
 # References to Kubernetes secrets for pulling images (if using a private registry)
 imagePullSecrets: []
@@ -112,6 +112,39 @@ data:
       #   requests:
       #     storage: 1Gi
 
+# Bundled single-instance PostgreSQL, so that several Warpgate replicas share
+# one database without an external one. Its password is generated on install
+# and kept across upgrades. Ignored when setup.databaseUrl is set.
+#
+# This is a plain StatefulSet with no replication or backups - point
+# setup.databaseUrl at a managed database if you need those.
+#
+# `helm uninstall` keeps the data PVC and the password Secret; delete both by
+# hand to start from an empty database.
+postgresql:
+  enabled: false
+
+  # Where the database password comes from, as <secret-name>/<key>. Left empty,
+  # the chart generates one on install and keeps it. Set it when rendering with
+  # `helm template` (Argo CD and the like): without a cluster to read the live
+  # Secret back from, a generated password differs on every render, and the
+  # database only ever accepts the one it was initialised with. Those setups
+  # should also set tls_cert_secret, for the same reason.
+  passwordSecret: ""
+
+  image:
+    repository: postgres
+    tag: "17-alpine"
+    pullPolicy: IfNotPresent
+
+  storage:
+    size: 8Gi
+    className: "" # empty = the cluster's default StorageClass
+
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+
 # Automatic Warpgate setup
 # Ref: https://warpgate.null.page/getting-started/#setup
 setup:
@@ -130,7 +163,7 @@ setup:
   # Config options (overridden if overrides_config is used)
   disableIpV6: false
   recordSessions: true
-  databaseUrl: "" # Optional: PostgreSQL connection string
+  databaseUrl: "" # Optional: external PostgreSQL/MySQL connection string
 
   # Ports to expose. Set to 0 or false to disable protocol.
   ssh: 2222

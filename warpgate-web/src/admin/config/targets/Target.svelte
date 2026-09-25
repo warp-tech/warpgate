@@ -20,10 +20,11 @@
     import { adminPermissions } from 'admin/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
-    import { humantimeDuration } from 'common/duration'
+    import DurationInput from 'common/DurationInput.svelte'
     import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
+    import SecretRefInput from 'common/SecretRefInput.svelte'
     import StickyActionBar from 'common/StickyActionBar.svelte'
     import { TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
@@ -67,6 +68,8 @@
         roleIsAllowed = Object.fromEntries(allowedRoles.map(r => [r.id, true]))
         return allRoles
     }
+
+    const loadRolesPromise = loadRoles()
 
     async function update() {
         if (!target) return
@@ -244,16 +247,25 @@
                         {#if target.options.kind === 'Ssh'}
                             <TargetSshOptions
                                 id={target.id}
+                                name={target.name}
                                 options={target.options}
                             />
                         {/if}
 
                         {#if target.options.kind === 'Vnc'}
-                            <TargetVncOptions bind:options={target.options} />
+                            <TargetVncOptions
+                                id={target.id}
+                                name={target.name}
+                                bind:options={target.options}
+                            />
                         {/if}
 
                         {#if target.options.kind === 'Rdp'}
-                            <TargetRdpOptions bind:options={target.options} />
+                            <TargetRdpOptions
+                                id={target.id}
+                                name={target.name}
+                                bind:options={target.options}
+                            />
                         {/if}
 
                         {#if target.options.kind === 'Http'}
@@ -340,14 +352,16 @@
                             </div>
 
                             {#if target.options.auth?.kind === 'Password'}
-                                <FormGroup floating label="Password">
-                                    <input
-                                        class="form-control"
-                                        type="password"
-                                        autocomplete="off"
-                                        bind:value={target.options.auth.password}
-                                    >
-                                </FormGroup>
+                                <SecretRefInput
+                                    bind:value={target.options.auth.password}
+                                    inlineLabel="Password"
+                                    disabled={!$adminPermissions.targetsEdit}
+                                    intendedUsage={{
+                                        kind: 'Target',
+                                        id: target.id,
+                                        name: target.name,
+                                    }}
+                                />
                             {/if}
 
                             <TlsConfiguration bind:value={target.options.tls} />
@@ -400,14 +414,16 @@
                             {/if}
 
                             {#if target.options.auth.kind === 'Token'}
-                                <FormGroup floating label="Bearer Token">
-                                    <input
-                                        class="form-control"
-                                        type="password"
-                                        autocomplete="off"
-                                        bind:value={target.options.auth.token}
-                                    >
-                                </FormGroup>
+                                <SecretRefInput
+                                    bind:value={target.options.auth.token}
+                                    inlineLabel="Bearer Token"
+                                    disabled={!$adminPermissions.targetsEdit}
+                                    intendedUsage={{
+                                        kind: 'Target',
+                                        id: target.id,
+                                        name: target.name,
+                                    }}
+                                />
                             {/if}
 
                             <TlsConfiguration bind:value={target.options.tls} />
@@ -419,7 +435,7 @@
                         title="Roles"
                         bodyTitle="Allow access for roles"
                     >
-                        <Loadable promise={loadRoles()}>
+                        <Loadable promise={loadRolesPromise}>
                             {#snippet children(roles)}
                                 <div class="list-group list-group-flush mb-3">
                                     {#each roles as role (role.id)}
@@ -589,21 +605,16 @@
                                 <div>Always require admin approval</div>
                             </label>
 
-                            <FormGroup
-                                floating
+                            <DurationInput
                                 label="Max self-service ticket duration"
-                            >
-                                <input
-                                    class="form-control"
-                                    type="text"
-                                    placeholder="Use global default"
-                                    use:humantimeDuration={{ seconds: target.ticketMaxDurationSeconds, onChange: v => { target.ticketMaxDurationSeconds = v; update() } }}
-                                >
-                                <small class="form-text text-muted">
-                                    Examples: 30m, 8h, 1d. Leave empty to use
-                                    the global default.
-                                </small>
-                            </FormGroup>
+                                seconds={target.ticketMaxDurationSeconds}
+                                onChange={v => { target.ticketMaxDurationSeconds = v; update() }}
+                                class="mb-1"
+                            />
+                            <small class="form-text text-muted mb-3 d-block">
+                                Examples: 30m, 8h, 1d. Leave empty to use the
+                                global default.
+                            </small>
 
                             <FormGroup floating label="Max uses per ticket">
                                 <input
