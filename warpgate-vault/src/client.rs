@@ -1013,8 +1013,18 @@ mod tests {
             // `get_or_init` makes the install happen exactly once.
             let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
             let cert = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_owned()]).unwrap();
-            let dir = std::env::temp_dir().join("warpgate-vault-test-tls");
-            std::fs::create_dir_all(&dir).unwrap();
+            // One directory per process. The name used to be fixed, and each
+            // process writes its own random certificate there, so two test
+            // runs at once — another worktree, a mutation run — replaced each
+            // other's trust root and failed their handshakes with "certificate
+            // is not trusted". Kept rather than removed because a static is
+            // never dropped: the cost is one small certificate per run left in
+            // the system temp directory.
+            let dir = tempfile::Builder::new()
+                .prefix("warpgate-vault-test-tls-")
+                .tempdir()
+                .unwrap()
+                .keep();
             let bundle = dir.join("ca.pem");
             std::fs::write(&bundle, cert.cert.pem()).unwrap();
             (
