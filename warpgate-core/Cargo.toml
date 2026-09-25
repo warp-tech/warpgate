@@ -53,6 +53,7 @@ warpgate-ldap = { path = "../warpgate-ldap" }
 warpgate-secrets-vault = { path = "../warpgate-secrets-vault" }
 warpgate-sso = { path = "../warpgate-sso", default-features = false }
 warpgate-tls = { path = "../warpgate-tls" }
+warpgate-vault = { path = "../warpgate-vault" }
 webpki = { version = "0.22", default-features = false }
 zune-jpeg.workspace = true
 

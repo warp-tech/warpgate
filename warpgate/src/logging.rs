@@ -32,7 +32,31 @@ pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) -> Result<
 
     let offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
 
-    let env_filter = Arc::new(EnvFilter::from_default_env());
+    // The AWS SDK logs the credentials it resolved — including the access key ID —
+    // at INFO. That is never worth having in Warpgate's log, so it is filtered out
+    // regardless of what RUST_LOG asks for; a target-specific directive outranks a
+    // broad one like `debug`.
+    //
+    // Four crates, not one. `aws_config` was silenced and the crates underneath it
+    // were not, which is the same half-applied shape as fixing one call site of a
+    // sanitiser: `aws_smithy_runtime` redacts headers but prints response bodies
+    // verbatim through the SDK's `Debug`, so at `RUST_LOG=trace` an IMDS or
+    // container credential response — secret key and session token included —
+    // lands in the log file. Reachable only at trace, which is the setting an
+    // operator turns on precisely when a session will not connect, and the output
+    // most likely to be pasted into an issue.
+    let env_filter = Arc::new(
+        [
+            "aws_config",
+            "aws_smithy_runtime",
+            "aws_smithy_runtime_api",
+            "aws_credential_types",
+        ]
+        .into_iter()
+        .try_fold(EnvFilter::from_default_env(), |filter, crate_name| {
+            Ok::<_, anyhow::Error>(filter.add_directive(format!("{crate_name}=warn").parse()?))
+        })?,
+    );
     let enable_colors = console::user_attended();
 
     // Determine effective log format (CLI overrides config)

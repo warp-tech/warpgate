@@ -9,6 +9,7 @@ mod error;
 mod rds;
 mod region;
 mod s3;
+mod sts_identity;
 
 pub use ec2::{Ec2InstanceInfo, find_instance_by_ip, is_running_on_ec2, send_ssh_public_key};
 pub use eks::{EksClusterInfo, find_eks_cluster_by_url, generate_eks_token};
@@ -19,6 +20,7 @@ pub use s3::{
     AutoCredentials, S3Credentials, S3MultipartUpload, S3Storage, S3StorageConfig,
     StaticCredentials,
 };
+pub use sts_identity::{StsIdentityRequest, sign_sts_identity_request};
 
 /// Cached EC2 detection result
 static EC2_DETECTION: OnceCell<bool> = OnceCell::const_new();
