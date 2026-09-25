@@ -544,6 +544,7 @@ mod tests {
                 path_style: true,
                 prefix: "p/".into(),
                 credentials: S3Credentials::Auto(AutoCredentials {}),
+                scratch_path: Some("/var/lib/warpgate/recordings-scratch".into()),
             }),
             RecordingsStorageConfig::S3(S3StorageConfig {
                 bucket: "b".into(),
@@ -555,6 +556,7 @@ mod tests {
                     access_key_id: "AKIA".into(),
                     secret_access_key: Some("secret".into()),
                 }),
+                scratch_path: None,
             }),
         ] {
             let json = serde_json::to_string(&config).unwrap();
@@ -563,5 +565,23 @@ mod tests {
                 config,
             );
         }
+    }
+
+    #[test]
+    fn s3_config_without_scratch_path_still_loads() {
+        let config: RecordingsStorageConfig = serde_json::from_value(serde_json::json!({
+            "kind": "S3",
+            "bucket": "b",
+            "region": "us-east-1",
+            "endpoint": null,
+            "path_style": false,
+            "prefix": "",
+            "credentials": {"mode": "Auto"},
+        }))
+        .unwrap();
+        let RecordingsStorageConfig::S3(s3) = config else {
+            panic!("expected S3");
+        };
+        assert_eq!(s3.scratch_path, None);
     }
 }

@@ -146,7 +146,7 @@ impl Storage {
                 Backend::Disk
             }
             RecordingsStorageConfig::S3(s3) => {
-                local_root.push(S3_SCRATCH_SUBDIR);
+                local_root.push(s3.scratch_path.as_deref().unwrap_or(S3_SCRATCH_SUBDIR));
                 Backend::S3(S3Storage::new(&s3).await?)
             }
         };
