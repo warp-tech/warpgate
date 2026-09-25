@@ -17,6 +17,6 @@ image-rdp-server:
 	cd images/rdp-server && docker build -t warpgate-e2e-rdp-server .
 
 pull-images:
-	docker pull quay.io/minio/minio || true
+	docker pull cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 || true
 
 all: image-ssh-server image-mysql-server image-mariadb-server image-postgres-server image-vnc-server image-rdp-server pull-images
