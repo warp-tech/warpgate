@@ -8781,43 +8781,64 @@
           "http": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/CredentialKind"
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/CredentialKind"
+              }
             }
           },
           "kubernetes": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/CredentialKind"
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/CredentialKind"
+              }
             }
           },
           "ssh": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/CredentialKind"
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/CredentialKind"
+              }
             }
           },
           "mysql": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/CredentialKind"
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/CredentialKind"
+              }
             }
           },
           "postgres": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/CredentialKind"
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/CredentialKind"
+              }
             }
           },
           "vnc": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/CredentialKind"
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/CredentialKind"
+              }
             }
           },
           "rdp": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/CredentialKind"
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/CredentialKind"
+              }
             }
           }
         }

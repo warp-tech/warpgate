@@ -32,8 +32,10 @@ class Test:
                     username=user.username,
                     credential_policy=sdk.UserRequireCredentialsPolicy(
                         postgres=[
-                            sdk.CredentialKind.PASSWORD,
-                            sdk.CredentialKind.WEBUSERAPPROVAL,
+                            [
+                                sdk.CredentialKind.PASSWORD,
+                                sdk.CredentialKind.WEBUSERAPPROVAL,
+                            ],
                         ],
                     ),
                 ),
