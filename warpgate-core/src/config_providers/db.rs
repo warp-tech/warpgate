@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use data_encoding::BASE64;
-use sea_orm::sea_query::{Expr, Func, Query};
+use sea_orm::sea_query::{Expr, Func, IntoIden, Query};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection,
     EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
@@ -32,7 +32,6 @@ pub struct DatabaseConfigProvider {
 /// Joins active (non-revoked, non-expired) user role assignments to target
 /// role assignments; callers add the authorization predicates and selection.
 fn active_role_assignment_query() -> sea_orm::sea_query::SelectStatement {
-    let now = OffsetDateTime::now_utc();
     Query::select()
         .from(entities::UserRoleAssignment::Entity)
         .inner_join(
@@ -46,25 +45,9 @@ fn active_role_assignment_query() -> sea_orm::sea_query::SelectStatement {
                 entities::TargetRoleAssignment::Column::RoleId,
             )),
         )
-        .and_where(
-            Expr::col((
-                entities::UserRoleAssignment::Entity,
-                entities::UserRoleAssignment::Column::RevokedAt,
-            ))
-            .is_null(),
-        )
-        .and_where(
-            Expr::col((
-                entities::UserRoleAssignment::Entity,
-                entities::UserRoleAssignment::Column::ExpiresAt,
-            ))
-            .is_null()
-            .or(Expr::col((
-                entities::UserRoleAssignment::Entity,
-                entities::UserRoleAssignment::Column::ExpiresAt,
-            ))
-            .gt(now)),
-        )
+        .cond_where(entities::UserRoleAssignment::Entity::active_condition(
+            entities::UserRoleAssignment::Entity.into_iden(),
+        ))
         .to_owned()
 }
 
@@ -1184,7 +1167,7 @@ mod tests {
     /// What production actually compares: the digest the approval row carries,
     /// not the struct. A field missing from the encoding is invisible to `==`.
     fn identity_digest(credential: StoredCredential) -> String {
-        StoredCredentials::new(vec![credential]).unwrap().digest()
+        StoredCredentials::new(vec![credential]).digest()
     }
 
     fn offered_key(key: &str) -> AuthCredential {

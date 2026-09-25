@@ -8,6 +8,7 @@
         type TargetOptionsTargetSSHOptions,
     } from 'admin/lib/api'
     import { adminPermissions } from 'admin/lib/store'
+    import SecretRefInput from 'common/SecretRefInput.svelte'
     import { TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import { untrack } from 'svelte'
@@ -16,10 +17,11 @@
 
     interface Props {
         id: string
+        name: string
         options: TargetOptionsTargetSSHOptions
     }
 
-    let { id, options }: Props = $props()
+    let { id, name, options }: Props = $props()
 
     let hostKeyCheckInvalidated = $state(false)
     let sshTargets = $state<Target[]>([])
@@ -173,14 +175,18 @@
         </a>
     {/if}
     {#if options.auth.kind === 'Password'}
-        <FormGroup floating label="Password" class="w-100 ms-3">
-            <input
-                class="form-control"
-                type="password"
-                autocomplete="off"
+        <div class="w-100 ms-3 d-flex align-items-center">
+            <SecretRefInput
                 bind:value={options.auth.password}
-            >
-        </FormGroup>
+                inlineLabel="Password"
+                disabled={!$adminPermissions.targetsEdit}
+                intendedUsage={{
+                    kind: 'Target',
+                    id,
+                    name
+                }}
+            />
+        </div>
     {/if}
 </div>
 

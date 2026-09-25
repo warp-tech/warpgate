@@ -143,7 +143,7 @@
 </script>
 
 <Loadable promise={load()}>
-    <div class="container-max-md">
+    <div>
         <div class="page-summary-bar">
             <div>
                 <h1>{name}</h1>
