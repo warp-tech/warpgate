@@ -7076,6 +7076,10 @@
           },
           "credentials": {
             "$ref": "#/components/schemas/S3Credentials"
+          },
+          "scratch_path": {
+            "type": "string",
+            "description": "Local directory buffering recordings before upload, resolved against the\nconfig file's directory unless absolute. Defaults to `data/recordings-scratch`."
           }
         }
       },
