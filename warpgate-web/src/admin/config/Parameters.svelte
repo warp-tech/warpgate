@@ -1066,10 +1066,10 @@
                                         >
                                     </FormGroup>
                                     <HelpText>
-                                        Recordings are buffered here before upload.
-                                        Relative paths resolve against the config
-                                        file's directory, which the Warpgate user
-                                        must be able to write to.
+                                        Recordings are buffered here before
+                                        upload. Relative paths resolve against
+                                        the config file's directory, which the
+                                        Warpgate user must be able to write to.
                                     </HelpText>
                                     <label
                                         for="recordingsS3PathStyle"
