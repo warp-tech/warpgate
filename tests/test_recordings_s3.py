@@ -21,7 +21,7 @@ BUCKET = "warpgate-recordings"
 @pytest.fixture(scope="session")
 def minio(processes: ProcessManager):
     port = processes.start_minio(MINIO_USER, MINIO_PASSWORD)
-    wait_port(port, recv=False)
+    wait_port(port, recv=False, timeout=120)
     endpoint = f"http://localhost:{port}"
     s3 = boto3.client(
         "s3",

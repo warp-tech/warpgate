@@ -326,7 +326,9 @@ class ProcessManager:
                 f"MINIO_ROOT_USER={user}",
                 "-e",
                 f"MINIO_ROOT_PASSWORD={password}",
-                "quay.io/minio/minio",
+                # MinIO left Docker Hub and then Quay; Chainguard only tags
+                # `latest`, so pin the digest to keep runs reproducible.
+                "cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1",
                 "server",
                 "/data",
             ]
