@@ -194,6 +194,10 @@ impl<M: Sheddable> WebSession<M> {
 pub trait ManagedSession: Send + Sync + 'static {
     fn id(&self) -> UserSessionId;
     fn user_id(&self) -> Uuid;
+    /// Whether the session has been torn down (admin close, backend disconnect, …) but not yet
+    /// removed from the manager. A dead session must read the same as absent: it must not be
+    /// reattachable, even during the window before it's reaped.
+    fn is_dead(&self) -> bool;
     /// Invoked when the manager drops this session (abort the backend; mark dead if needed).
     fn on_removed(&self);
 }
@@ -299,6 +303,17 @@ impl<S: ManagedSession> ClientManager<S> {
         SessionAccess::Granted(session)
     }
 
+    /// Like [`Self::access`], but a session that's been closed (admin close, backend
+    /// disconnect, …) and not yet reaped reads as absent, same as one that was never found.
+    /// Attaching to a session must not resurrect a session that's already torn down, even
+    /// during the window before the manager actually removes it.
+    pub async fn access_live(&self, id: UserSessionId, user_id: Uuid) -> SessionAccess<S> {
+        match self.access(id, user_id).await {
+            SessionAccess::Granted(session) if session.is_dead() => SessionAccess::NotFound,
+            other => other,
+        }
+    }
+
     /// Claim a future session slot for user
     pub async fn reserve_slot(
         &self,
@@ -335,5 +350,100 @@ impl<S: ManagedSession> ClientManager<S> {
         if let Some(session) = self.sessions.lock().await.remove(&id) {
             session.on_removed();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use uuid::Uuid;
+
+    use super::*;
+
+    struct FakeSession {
+        id: UserSessionId,
+        user_id: Uuid,
+        dead: AtomicBool,
+    }
+
+    impl ManagedSession for FakeSession {
+        fn id(&self) -> UserSessionId {
+            self.id
+        }
+
+        fn user_id(&self) -> Uuid {
+            self.user_id
+        }
+
+        fn is_dead(&self) -> bool {
+            self.dead.load(Ordering::Relaxed)
+        }
+
+        fn on_removed(&self) {}
+    }
+
+    impl FakeSession {
+        fn close(&self) {
+            self.dead.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// `WebSshClientManager`'s abort handler calls `session.abort()` then
+    /// `session.close()` -- the latter only flips the liveness flag, it does not
+    /// remove the session from the manager. Removal happens later and separately
+    /// (the backend event loop's `Done` handling, or the disconnect grace timer),
+    /// so there is a real window where a session is dead but still registered.
+    ///
+    /// That window is what `ClientManager::access_live()` exists for: without it,
+    /// `access()` alone would still report `Granted` for an aborted session and let
+    /// it be reattached. A Python end-to-end test can't hit this window
+    /// deterministically -- delivery of the admin close is asynchronous, and by the
+    /// time it could check, the session may already have been fully removed (giving
+    /// a 404 for "not found" instead, which doesn't exercise this guard at all).
+    /// This unit test constructs the window directly and deterministically instead,
+    /// against the production `access_live()` the endpoints actually call.
+    #[tokio::test]
+    async fn a_dead_but_still_registered_session_is_rejected() {
+        let manager = ClientManager::<FakeSession>::new();
+        let user_id = Uuid::new_v4();
+        let session = Arc::new(FakeSession {
+            id: UserSessionId(Uuid::new_v4()),
+            user_id,
+            dead: AtomicBool::new(false),
+        });
+        let id = session.id();
+        manager.insert(session.clone()).await;
+
+        // Sanity check: a live, registered session is accepted.
+        assert!(matches!(
+            manager.access_live(id, user_id).await,
+            SessionAccess::Granted(_)
+        ));
+
+        // Mark it dead without removing it, exactly like the abort handler's
+        // `session.close()` (removal is a separate step it doesn't take).
+        session.close();
+
+        assert!(
+            matches!(manager.access(id, user_id).await, SessionAccess::Granted(_)),
+            "closing a session must not remove it from the manager, otherwise this \
+             test isn't reproducing the dead-but-registered window"
+        );
+        assert!(
+            matches!(
+                manager.access_live(id, user_id).await,
+                SessionAccess::NotFound
+            ),
+            "a dead session must be rejected even while still registered"
+        );
+
+        // Once it's actually removed (event loop exit / grace-timer sweep), the
+        // same guard still refuses it, now via the `NotFound` branch instead.
+        manager.remove_session(id).await;
+        assert!(matches!(
+            manager.access_live(id, user_id).await,
+            SessionAccess::NotFound
+        ));
     }
 }
