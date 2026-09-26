@@ -9616,7 +9616,7 @@ dependencies = [
  "futures",
  "mongo_common",
  "mongowire",
- "rustls 0.23.43",
+ "rustls 0.23.45",
  "thiserror 2.0.20",
  "tokio",
  "tokio-rustls 0.26.4",

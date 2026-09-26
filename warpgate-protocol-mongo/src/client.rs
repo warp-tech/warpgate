@@ -5,7 +5,7 @@ use mongo_common::auth::scram::{ScramClient, ScramMechanism};
 use mongo_common::bson::{Binary, BinarySubtype};
 use tokio::net::TcpStream;
 use tracing::{debug, info};
-use warpgate_common::{DatabaseTargetAuth, TargetMongoOptions, WarpgateError};
+use warpgate_common::{DatabaseTargetAuth, SecretResolver, TargetMongoOptions};
 use warpgate_core::AdmittedTarget;
 use warpgate_tls::{MaybeTlsStream, TlsMode, configure_tls_connector};
 use wirebson::{Bson, Document};
@@ -24,7 +24,10 @@ pub struct MongoClient {
 }
 
 impl MongoClient {
-    pub async fn connect(approved: AdmittedTarget<TargetMongoOptions>) -> Result<Self, MongoError> {
+    pub async fn connect(
+        approved: AdmittedTarget<TargetMongoOptions>,
+        secrets: &dyn SecretResolver,
+    ) -> Result<Self, MongoError> {
         let target = approved.specific_target().options().clone();
         let stream = TcpStream::connect((target.host.clone(), target.port)).await?;
         stream.set_nodelay(true)?;
@@ -55,7 +58,7 @@ impl MongoClient {
             stream: MongoStream::new(maybe),
             request_id: 0,
         };
-        client.authenticate(&target).await?;
+        client.authenticate(&target, secrets).await?;
         Ok(client)
     }
 
@@ -74,12 +77,16 @@ impl MongoClient {
     /// Authenticates against the target with SCRAM-SHA-256 — the standard
     /// mechanism every MongoDB 4.0+ server accepts, with or without TLS —
     /// using the credentials stored on the target.
-    async fn authenticate(&mut self, target: &TargetMongoOptions) -> Result<(), MongoError> {
+    async fn authenticate(
+        &mut self,
+        target: &TargetMongoOptions,
+        secrets: &dyn SecretResolver,
+    ) -> Result<(), MongoError> {
         let password = match &target.auth {
             DatabaseTargetAuth::Password(auth) => auth
                 .password
-                .reveal()
-                .map_err(WarpgateError::from)?
+                .resolve(secrets)
+                .await?
                 .expose_secret()
                 .clone(),
             DatabaseTargetAuth::IamRole(_) => {

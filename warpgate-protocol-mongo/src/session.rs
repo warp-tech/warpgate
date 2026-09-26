@@ -417,7 +417,8 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MongoSession<S> {
         mut self,
         admitted: AdmittedTarget<TargetMongoOptions>,
     ) -> Result<(), MongoError> {
-        let mut client = match MongoClient::connect(admitted).await {
+        let mut client = match MongoClient::connect(admitted, &*self.services.secret_backends).await
+        {
             Ok(client) => client,
             Err(error) => {
                 error!(%error, "Target connection failed");

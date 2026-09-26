@@ -135,7 +135,6 @@ export function makeExampleMongoDBCommand(opt: ConnectionOptions): string {
     let cmd = shellEscape([
         'mongosh',
         `mongodb://${protocolHost(opt, 'mongo')}:${protocolPortString(opt, 'mongo')}/`,
-        '--tls',
         '--authenticationDatabase',
         'admin',
         '--authenticationMechanism',
