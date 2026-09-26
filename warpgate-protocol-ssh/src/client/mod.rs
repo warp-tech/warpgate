@@ -4,7 +4,7 @@ mod error;
 mod handler;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
-use std::net::ToSocketAddrs;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{fmt, io};
@@ -20,6 +20,7 @@ use russh::client::{AuthResult, Handle, KeyboardInteractiveAuthResponse};
 use russh::keys::{PrivateKeyWithHashAlg, PublicKey};
 use russh::{MethodKind, Preferred, Sig, kex, mac};
 use serde::Serialize;
+use tokio::net::TcpStream;
 use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
 };
@@ -663,6 +664,14 @@ impl RemoteClient {
     }
 }
 
+/// Connects to the first of `addrs` that accepts a TCP connection, trying
+/// each in turn -- the same behavior `tokio::net::TcpStream::connect` gives
+/// for a list of addresses, but factored out so the fallback can be tested
+/// deterministically.
+async fn connect_to_first_reachable(addrs: &[SocketAddr]) -> io::Result<TcpStream> {
+    TcpStream::connect(addrs).await
+}
+
 impl Connector {
     async fn build_ssh_config(&self, ssh_options: &TargetSSHOptions) -> Arc<russh::client::Config> {
         let algos = if ssh_options.allow_insecure_algos {
@@ -760,12 +769,22 @@ impl Connector {
 
         let config = self.build_ssh_config(&first).await;
         let address_str = format!("{}:{}", first.host, first.port);
-        let address = address_str
+        // Every resolved address, not just the first: `localhost` commonly
+        // resolves to `::1` ahead of `127.0.0.1`, and a target listening only
+        // on IPv4 must still be reachable. The connect tries each in turn.
+        let addresses = address_str
             .to_socket_addrs()
             .map_err(ConnectionError::Io)
-            .and_then(|mut x| x.next().ok_or(ConnectionError::Resolve))
+            .map(Iterator::collect::<Vec<_>>)
+            .and_then(|x| {
+                if x.is_empty() {
+                    Err(ConnectionError::Resolve)
+                } else {
+                    Ok(x)
+                }
+            })
             .inspect_err(|e| error!(?e, address=%address_str, "Cannot resolve address"))?;
-        info!(?address, username = %first.username, "Connecting");
+        info!(?addresses, username = %first.username, "Connecting");
         let (event_tx, event_rx) = unbounded_channel();
         let handler = ClientHandler {
             ssh_options: first.clone(),
@@ -773,7 +792,20 @@ impl Connector {
             services: self.services.clone(),
             session_id: self.id,
         };
-        let fut = russh::client::connect(config, address, handler);
+        let fut = async move {
+            // Mirror russh::client::connect's own mapping (russh::Error::IO -> our
+            // ConnectionError::Ssh) so a TCP dial failure still reaches callers as the
+            // same error variant it always did -- only the address selection changed.
+            let stream = connect_to_first_reachable(&addresses)
+                .await
+                .map_err(|e| ClientHandlerError::Ssh(russh::Error::IO(e)))?;
+            if config.nodelay
+                && let Err(e) = stream.set_nodelay(true)
+            {
+                warn!(?e, "set_nodelay() failed");
+            }
+            russh::client::connect_stream(config, stream, handler).await
+        };
         let (mut session, mut active_rx) = self
             .wait_for_connection(&first, fut, event_rx, false)
             .boxed()
@@ -1269,9 +1301,32 @@ impl Drop for RemoteClient {
 mod tests {
     use std::collections::HashMap;
 
+    use tokio::net::TcpListener;
     use uuid::Uuid;
 
-    use super::resolve_chain_ids;
+    use super::{connect_to_first_reachable, resolve_chain_ids};
+
+    /// The first resolved address may be unreachable (e.g. a target that
+    /// only listens on one of the addresses `localhost` resolves to); the
+    /// connect must fall back to a later address rather than failing outright.
+    #[tokio::test]
+    async fn connect_to_first_reachable_skips_unreachable_address() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let good_addr = listener.local_addr().unwrap();
+
+        // Port 0 is never a valid connection target, so the OS refuses the connect
+        // immediately and deterministically on its own -- no listener to bind, hold
+        // open, or race another process for. (A bind-but-don't-listen socket was
+        // tried here first, but the OS doesn't always answer it with an immediate
+        // refusal -- e.g. macOS lets the SYN time out instead, taking several
+        // seconds before the fallback kicks in.)
+        let dead_addr = "127.0.0.1:0".parse().unwrap();
+
+        let stream = connect_to_first_reachable(&[dead_addr, good_addr])
+            .await
+            .expect("should fall back to the second, reachable address");
+        assert_eq!(stream.peer_addr().unwrap(), good_addr);
+    }
 
     #[test]
     fn resolve_chain_ids_returns_ordered_chain() {
