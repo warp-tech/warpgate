@@ -1,6 +1,7 @@
 use bytes::{Bytes, BytesMut};
-use mysql_common::proto::codec::error::PacketCodecError;
+use mysql_common::constants::DEFAULT_MAX_ALLOWED_PACKET;
 use mysql_common::proto::codec::PacketCodec;
+use mysql_common::proto::codec::error::PacketCodecError;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::trace;
 use warpgate_database_protocols::io::Encode;
@@ -80,11 +81,24 @@ where
         self.codec.reset_seq_id();
     }
 
+    /// Raises the codec's packet-size ceiling to the value negotiated in the
+    /// handshake, never below MySQL's default. Without this the proxy keeps the
+    /// 4 MiB `PacketCodec` default and aborts mid-stream on any larger packet
+    /// (a wide row, a large BLOB) even though both peers agreed on more.
+    pub fn set_max_packet_size(&mut self, negotiated: u32) {
+        self.codec.max_allowed_packet = effective_max_packet(negotiated);
+    }
+
     pub async fn upgrade(
         mut self,
         config: <S as UpgradableStream<TS>>::UpgradeConfig,
     ) -> Result<Self, MaybeTlsStreamError> {
-        self.stream = self.stream.upgrade(config).await?;
+        // Any data already read off the socket past the last decoded packet
+        // is the beginning of the TLS handshake (e.g. clients are allowed
+        // to send their ClientHello right behind the SSLRequest packet) and
+        // has to be replayed into the TLS layer (#1421).
+        let leftover = std::mem::take(&mut self.inbound_buffer).freeze();
+        self.stream = self.stream.upgrade(config, leftover).await?;
         Ok(self)
     }
 
@@ -94,4 +108,8 @@ where
             MaybeTlsStream::Raw(_) | MaybeTlsStream::Upgrading => false,
         }
     }
+}
+
+fn effective_max_packet(negotiated: u32) -> usize {
+    (negotiated as usize).max(DEFAULT_MAX_ALLOWED_PACKET)
 }

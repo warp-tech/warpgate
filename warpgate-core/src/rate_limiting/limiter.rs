@@ -1,8 +1,8 @@
 use std::fmt::Debug;
 use std::num::{NonZero, NonZeroU32};
 
-use governor::clock::{Clock, QuantaClock, QuantaInstant};
 use governor::Quota;
+use governor::clock::{Clock, QuantaClock, QuantaInstant};
 use warpgate_common::WarpgateError;
 
 use super::shared_limiter::SharedWarpgateRateLimiter;

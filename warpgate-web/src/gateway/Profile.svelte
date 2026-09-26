@@ -1,10 +1,12 @@
 <script lang="ts">
-    import { serverInfo } from 'gateway/lib/store'
     import NavListItem from 'common/NavListItem.svelte'
+    import { serverInfo } from 'gateway/lib/store'
 </script>
 
 <div class="page-summary-bar">
-    <h1>{$serverInfo!.username}</h1>
+    {#if $serverInfo}
+        <h1>{$serverInfo.username}</h1>
+    {/if}
 </div>
 
 <NavListItem
@@ -21,4 +23,12 @@
             href="/profile/credentials"
         />
     {/if}
+{/if}
+
+{#if $serverInfo?.ticketSelfServiceEnabled}
+    <NavListItem
+        title="Ticket requests"
+        description="Request and manage self-service access tickets"
+        href="/ticket-requests"
+    />
 {/if}

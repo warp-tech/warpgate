@@ -1,11 +1,13 @@
-use russh::client::{Msg, Session};
-use russh::keys::{PublicKey, PublicKeyBase64};
 use russh::Channel;
+use russh::client::{ChannelOpenHandle, Msg, Session};
+use russh::keys::{PublicKey, PublicKeyBase64, PublicKeyOrCertificate};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tracing::*;
-use warpgate_common::{SessionId, TargetSSHOptions};
+use warpgate_common::{TargetSSHOptions, UserSessionId};
 use warpgate_core::Services;
+use warpgate_db_entities::Parameters;
+use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
 
 use crate::known_hosts::{KnownHostValidationResult, KnownHosts};
 use crate::{ConnectionError, ForwardedStreamlocalParams, ForwardedTcpIpParams};
@@ -25,7 +27,7 @@ pub struct ClientHandler {
     pub ssh_options: TargetSSHOptions,
     pub event_tx: UnboundedSender<ClientHandlerEvent>,
     pub services: Services,
-    pub session_id: SessionId,
+    pub session_id: UserSessionId,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -45,19 +47,34 @@ impl russh::client::Handler for ClientHandler {
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &PublicKey,
+        server_public_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
+        let server_public_key = server_public_key.public_key();
         let known_hosts = KnownHosts::new(&self.services.db);
         self.event_tx
             .send(ClientHandlerEvent::HostKeyReceived(
                 server_public_key.clone(),
             ))
             .map_err(|_| ClientHandlerError::ConnectionError(ConnectionError::Internal))?;
+
+        let mode = Parameters::Entity::get(&self.services.db)
+            .await
+            .map_err(|error| {
+                error!(?error, session=%self.session_id, "Failed to read the host key verification mode");
+                ClientHandlerError::Internal
+            })?
+            .ssh_host_key_verification;
+
+        if mode == SshHostKeyVerificationMode::Ignore {
+            debug!(session=%self.session_id, "Not checking the host key (verification is disabled)");
+            return Ok(true);
+        }
+
         match known_hosts
             .validate(
                 &self.ssh_options.host,
                 self.ssh_options.port,
-                server_public_key,
+                &server_public_key,
             )
             .await
         {
@@ -92,7 +109,7 @@ impl russh::client::Handler for ClientHandler {
                         .trust(
                             &self.ssh_options.host,
                             self.ssh_options.port,
-                            server_public_key,
+                            &server_public_key,
                         )
                         .await
                     {
@@ -117,10 +134,12 @@ impl russh::client::Handler for ClientHandler {
         connected_port: u32,
         originator_address: &str,
         originator_port: u32,
+        reply: ChannelOpenHandle,
         __session: &mut Session,
     ) -> Result<(), Self::Error> {
         let connected_address = connected_address.to_string();
         let originator_address = originator_address.to_string();
+        reply.accept().await;
         let _ = self.event_tx.send(ClientHandlerEvent::ForwardedTcpIp(
             channel,
             ForwardedTcpIpParams {
@@ -138,9 +157,11 @@ impl russh::client::Handler for ClientHandler {
         channel: Channel<Msg>,
         originator_address: &str,
         originator_port: u32,
+        reply: ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         let originator_address = originator_address.to_string();
+        reply.accept().await;
         let _ = self.event_tx.send(ClientHandlerEvent::X11(
             channel,
             originator_address,
@@ -153,9 +174,11 @@ impl russh::client::Handler for ClientHandler {
         &mut self,
         channel: Channel<Msg>,
         socket_path: &str,
+        reply: ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         let socket_path = socket_path.to_string();
+        reply.accept().await;
         let _ = self.event_tx.send(ClientHandlerEvent::ForwardedStreamlocal(
             channel,
             ForwardedStreamlocalParams { socket_path },
@@ -166,8 +189,10 @@ impl russh::client::Handler for ClientHandler {
     async fn server_channel_open_agent_forward(
         &mut self,
         channel: Channel<Msg>,
+        reply: ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
+        reply.accept().await;
         let _ = self
             .event_tx
             .send(ClientHandlerEvent::ForwardedAgent(channel));

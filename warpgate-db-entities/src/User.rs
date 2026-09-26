@@ -2,8 +2,9 @@ use std::str::FromStr;
 
 use ipnet::IpNet;
 use poem_openapi::Object;
-use sea_orm::entity::prelude::*;
 use sea_orm::Set;
+use sea_orm::entity::prelude::*;
+use sea_orm::sea_query::{Func, IntoCondition};
 use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{User, UserDetails, WarpgateError};
@@ -19,6 +20,7 @@ use crate::{
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    #[sea_orm(unique)]
     pub username: String,
     pub credential_policy: serde_json::Value,
     #[sea_orm(column_type = "Text")]
@@ -37,7 +39,14 @@ impl Related<super::Role::Entity> for Entity {
     }
 
     fn via() -> Option<RelationDef> {
-        Some(super::UserRoleAssignment::Relation::User.def().rev())
+        Some(
+            super::UserRoleAssignment::Relation::User
+                .def()
+                .rev()
+                .on_condition(|_user, assignment| {
+                    super::UserRoleAssignment::Entity::active_condition(assignment)
+                }),
+        )
     }
 }
 
@@ -135,6 +144,12 @@ impl RelationTrait for Relation {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl Entity {
+    pub fn username_eq_ci(username: &str) -> impl IntoCondition {
+        Expr::expr(Func::lower(Expr::col(Column::Username))).eq(username.to_lowercase())
+    }
+}
 
 impl TryFrom<Model> for User {
     type Error = WarpgateError;

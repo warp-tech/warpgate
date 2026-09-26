@@ -1,26 +1,25 @@
 <script lang="ts">
     import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
-    import Fa from 'svelte-fa'
-    import { link } from 'svelte-spa-router'
-    import active from 'svelte-spa-router/active'
-    import { classnames } from './sveltestrap-s5-ports/_sveltestrapUtils'
     import type { Snippet } from 'svelte'
+    import Fa from 'svelte-fa'
+    import { link, router } from 'svelte-spa-router'
+    import { classnames } from './helpers'
 
     interface Props {
-        class?: string,
-        title?: string,
-        titleSnippet?: Snippet<[]>,
-        description?: string,
-        descriptionSnippet?: Snippet<[]>,
-        addonSnippet?: Snippet<[]>,
-        href: string,
-        small?: boolean,
+        class?: string
+        title?: string
+        titleSnippet?: Snippet<[]>
+        description?: string
+        descriptionSnippet?: Snippet<[]>
+        addonSnippet?: Snippet<[]>
+        href: string
+        small?: boolean
     }
 
     let {
         title,
         titleSnippet,
-        'class': className,
+        class: className,
         description,
         descriptionSnippet,
         addonSnippet,
@@ -28,19 +27,18 @@
         small,
     }: Props = $props()
 
-    let classes = $derived(classnames(
-        className,
-        'link',
-        small ? 'sm' : false,
-    ))
+    let active = $derived(router.loc.location === href)
+    let classes = $derived(
+        classnames(
+            className,
+            'link',
+            small ? 'sm' : false,
+            active ? 'active' : false,
+        ),
+    )
 </script>
 
-<a
-    class={classes}
-    href={href}
-    use:link
-    use:active
->
+<a class={classes} {href} use:link>
     <div class="text">
         <div class="title">
             {#if titleSnippet}
@@ -62,7 +60,6 @@
         <Fa class="icon" icon={faArrowRight} />
     </div>
 </a>
-
 
 <style lang="scss">
     a {

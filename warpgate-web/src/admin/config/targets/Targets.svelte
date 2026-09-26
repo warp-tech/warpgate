@@ -1,116 +1,135 @@
 <script lang="ts">
-    import { Observable, from, map } from 'rxjs'
-    import { compare as naturalCompareFactory } from 'natural-orderby'
-    import { type Target, type TargetGroup, api } from 'admin/lib/api'
-    import { adminPermissions } from '../../lib/store'
-    import ItemList, { type LoadOptions, type PaginatedResponse } from 'common/ItemList.svelte'
-    import { link } from 'svelte-spa-router'
-    import { TargetKind } from 'gateway/lib/api'
+    import {
+        Alert,
+        Dropdown,
+        DropdownItem,
+        DropdownMenu,
+        DropdownToggle,
+    } from '@sveltestrap/sveltestrap'
+    import { api, type Target, type TargetGroup } from 'admin/lib/api'
+    import { autosave } from 'common/autosave'
+    import CollapsibleGroupHeader from 'common/CollapsibleGroupHeader.svelte'
     import EmptyState from 'common/EmptyState.svelte'
-    import { onMount } from 'svelte'
-    import { Dropdown, DropdownToggle, DropdownMenu, DropdownItem } from '@sveltestrap/sveltestrap'
-    import GroupColorCircle from 'common/GroupColorCircle.svelte'
     import { stringifyError } from 'common/errors'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import GroupColorIcon from 'common/GroupColorIcon.svelte'
+    import { resolveGroup } from 'common/groups'
+    import ItemList, {
+        type LoadOptions,
+        type PaginatedResponse,
+    } from 'common/ItemList.svelte'
+    import ListOverflowMenu from 'common/ListOverflowMenu.svelte'
+    import { TargetKind } from 'gateway/lib/api'
+    import { compare as naturalCompareFactory } from 'natural-orderby'
+    import { from, map, type Observable } from 'rxjs'
+    import { link } from 'svelte-spa-router'
     import { firstBy } from 'thenby'
+    import { adminPermissions } from '../../lib/store'
 
-    let error: string|undefined = $state()
+    let error: string | undefined = $state()
     let groups: TargetGroup[] = $state([])
-    let selectedGroup: TargetGroup|undefined = $state()
+    let selectedGroup: TargetGroup | undefined = $state()
 
-    onMount(async () => {
-        try {
+    const [collapsedGroups] = autosave<string[]>(
+        'admin-target-list:collapsed-groups',
+        [],
+    )
+
+    const groupsPromise = api
+        .listTargetGroups()
+        .then(result => {
             const natural = naturalCompareFactory()
-
-            groups = (await api.listTargetGroups()).sort((a, b) =>
-                natural(
-                    a.name.toLowerCase(),
-                    b.name.toLowerCase()
-                )
+            groups = result.sort((a, b) =>
+                natural(a.name.toLowerCase(), b.name.toLowerCase()),
             )
-        } catch (err) {
+        })
+        .catch(async err => {
             error = await stringifyError(err)
-        }
-    })
+            groups = []
+        })
 
     function getTargets(
-        options: LoadOptions
+        options: LoadOptions,
     ): Observable<PaginatedResponse<Target>> {
         return from(
-            api.getTargets({
-                search: options.search,
-                groupId: selectedGroup?.id,
-            })
+            Promise.all([
+                groupsPromise,
+                api.getTargets({
+                    search: options.search,
+                    groupId: selectedGroup?.id,
+                }),
+            ]),
         ).pipe(
-            map(targets => {
-                if (options.search) {
-                    return targets
-                }
-
+            map(([_, targets]) => {
                 const natural = naturalCompareFactory()
+                const groupName = (target: Target) =>
+                    (
+                        groups.find(g => g.id === target.groupId)?.name ?? ''
+                    ).toLowerCase()
 
                 return targets.sort(
                     firstBy((x: Target) => !x.groupId)
                         // Natural sort between groups
-                        .thenBy(
-                            (a: Target, b: Target) =>
-                                natural(
-                                    (groups.find(g => g.id === a.groupId)?.name ?? '').toLowerCase(),
-                                    (groups.find(g => g.id === b.groupId)?.name ?? '').toLowerCase()
-                                )
+                        .thenBy((a: Target, b: Target) =>
+                            natural(groupName(a), groupName(b)),
                         )
                         // Natural sort within a group
-                        .thenBy(
-                            (a, b) =>
-                                natural(
-                                    a.name.toLowerCase(),
-                                    b.name.toLowerCase()
-                                )
-                        )
+                        .thenBy((a, b) =>
+                            natural(a.name.toLowerCase(), b.name.toLowerCase()),
+                        ),
                 )
             }),
             map(targets => ({
                 items: targets,
                 offset: 0,
                 total: targets.length,
-            }))
+            })),
         )
+    }
+
+    function groupInfoFromTarget(target: Target) {
+        return resolveGroup(groups.find(g => g.id === target.groupId))
     }
 </script>
 
-<div class="container-max-md">
+<div>
     <div class="page-summary-bar">
         <h1>targets</h1>
         <div class="d-flex gap-2 ms-auto">
             {#if groups.length > 0}
-            <Dropdown>
-                <DropdownToggle caret>
-                    {selectedGroup?.name ?? 'All groups'}
-                </DropdownToggle>
-                <DropdownMenu>
-                    <DropdownItem onclick={() => {
-                        selectedGroup = undefined
-                    }}>
-                        All groups
-                    </DropdownItem>
-                    {#each groups as group (group.id)}
-                        <DropdownItem onclick={() => {
-                            selectedGroup = group
-                        }} class="d-flex align-items-center gap-2">
-                            {#if group.color}
-                                <GroupColorCircle color={group.color} />
-                            {/if}
-                            {group.name}
+                <Dropdown>
+                    <DropdownToggle caret>
+                        {selectedGroup?.name ?? 'All groups'}
+                    </DropdownToggle>
+                    <DropdownMenu>
+                        <DropdownItem
+                            onclick={() => {
+                                selectedGroup = undefined
+                            }}
+                        >
+                            All groups
                         </DropdownItem>
-                    {/each}
-                </DropdownMenu>
-            </Dropdown>
+                        {#each groups as group (group.id)}
+                            <DropdownItem
+                                onclick={() => {
+                                    selectedGroup = group
+                                }}
+                                class="d-flex align-items-center gap-2"
+                            >
+                                {#if group.color}
+                                    <GroupColorIcon color={group.color} />
+                                {/if}
+                                {group.name}
+                            </DropdownItem>
+                        {/each}
+                    </DropdownMenu>
+                </Dropdown>
             {/if}
             <a
                 class="btn btn-primary"
                 href="/config/targets/create"
                 class:disabled={!$adminPermissions.targetsCreate}
-                use:link>
+                use:link
+            >
                 Add a target
             </a>
         </div>
@@ -121,57 +140,69 @@
     {/if}
 
     {#key selectedGroup}
-    <ItemList load={getTargets} showSearch={true}>
-        {#snippet empty()}
-            <EmptyState
-                title="No targets yet"
-                hint="Targets are destinations on the internal network that your users will connect to"
-            />
-        {/snippet}
-        {#snippet item(target)}
-            <a
-                class="list-group-item list-group-item-action"
-                href="/config/targets/{target.id}"
-                use:link>
-                <div class="me-auto">
-                    <div class="d-flex align-items-center gap-2">
-                        {#if target.groupId}
-                            {@const group = groups.find(g => g.id === target.groupId)}
-                            {#if group}
-                                {#if group.color}
-                                    <GroupColorCircle color={group.color} />
-                                {/if}
-                                <small class="text-muted">{group.name}</small>
-                            {/if}
+        <ItemList
+            load={getTargets}
+            showSearch={true}
+            groupObject={groupInfoFromTarget}
+            groupKey={group => group.id}
+            bind:collapsedGroups={$collapsedGroups}
+        >
+            {#snippet header(_items, groupControls)}
+                <ListOverflowMenu {groupControls} />
+            {/snippet}
+            {#snippet empty()}
+                <EmptyState
+                    title="No targets yet"
+                    hint="Targets are destinations on the internal network that your users will connect to"
+                />
+            {/snippet}
+            {#snippet groupHeader(group, state)}
+                <CollapsibleGroupHeader {group} {state} />
+            {/snippet}
+            {#snippet item(target)}
+                <a
+                    class="list-group-item list-group-item-action"
+                    href="/config/targets/{target.id}"
+                    use:link
+                >
+                    <div class="me-auto">
+                        <div class="d-flex align-items-center gap-2">
+                            <strong>
+                                {target.name}
+                            </strong>
+                        </div>
+                        {#if target.description}
+                            <small class="d-block text-muted"
+                                >{target.description}</small
+                            >
                         {/if}
-                        <strong>
-                            {target.name}
-                        </strong>
                     </div>
-                    {#if target.description}
-                        <small class="d-block text-muted">{target.description}</small>
-                    {/if}
-                </div>
-                <small class="text-muted ms-auto">
-                    {#if target.options.kind === TargetKind.Http}
-                        HTTP
-                    {/if}
-                    {#if target.options.kind === TargetKind.MySql}
-                        MySQL
-                    {/if}
-                    {#if target.options.kind === TargetKind.Postgres}
-                        PostgreSQL
-                    {/if}
-                    {#if target.options.kind === TargetKind.Ssh}
-                        SSH
-                    {/if}
-                    {#if target.options.kind === TargetKind.Kubernetes}
-                        Kubernetes
-                    {/if}
-                </small>
-            </a>
-        {/snippet}
-    </ItemList>
+                    <small class="text-muted ms-auto">
+                        {#if target.options.kind === TargetKind.Http}
+                            HTTP
+                        {/if}
+                        {#if target.options.kind === TargetKind.MySql}
+                            MySQL
+                        {/if}
+                        {#if target.options.kind === TargetKind.Postgres}
+                            PostgreSQL
+                        {/if}
+                        {#if target.options.kind === TargetKind.Ssh}
+                            SSH
+                        {/if}
+                        {#if target.options.kind === TargetKind.Kubernetes}
+                            Kubernetes
+                        {/if}
+                        {#if target.options.kind === TargetKind.Vnc}
+                            VNC
+                        {/if}
+                        {#if target.options.kind === TargetKind.Rdp}
+                            RDP
+                        {/if}
+                    </small>
+                </a>
+            {/snippet}
+        </ItemList>
     {/key}
 </div>
 

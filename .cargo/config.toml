@@ -2,7 +2,15 @@
 [target.'cfg(all())']
 rustflags = [
     "--cfg", "tokio_unstable",
+    "-Zthreads=8",
     "-Zremap-cwd-prefix=/reproducible-cwd",
     "--remap-path-prefix=$HOME=/reproducible-home",
     "--remap-path-prefix=$PWD=/reproducible-pwd",
 ]
+
+[unstable]
+profile-hint-mostly-unused = true
+cargo-lints = true
+
+[lints.cargo]
+implicit-features = "warn"

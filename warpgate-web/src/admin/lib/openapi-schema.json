@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.22.0-beta.6-6-gfde9e530-modified"
+    "version": "v0.29.0-19-g263fa7ca-modified"
   },
   "servers": [
     {
@@ -73,7 +73,7 @@
             "content": {
               "application/json; charset=utf-8": {
                 "schema": {
-                  "$ref": "#/components/schemas/PaginatedResponse_SessionSnapshot"
+                  "$ref": "#/components/schemas/PaginatedResponse_UserSessionSnapshot"
                 }
               }
             }
@@ -101,6 +101,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterTokenSecurityScheme": []
           }
         ],
         "operationId": "close_all_sessions"
@@ -127,7 +130,7 @@
             "content": {
               "application/json; charset=utf-8": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionSnapshot"
+                  "$ref": "#/components/schemas/UserSessionSnapshot"
                 }
               }
             }
@@ -217,6 +220,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterTokenSecurityScheme": []
           }
         ],
         "operationId": "close_session"
@@ -258,50 +264,12 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterTokenSecurityScheme": []
           }
         ],
         "operationId": "get_recording"
-      }
-    },
-    "/recordings/{id}/kubernetes": {
-      "get": {
-        "parameters": [
-          {
-            "name": "id",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "in": "path",
-            "required": true,
-            "deprecated": false,
-            "explode": true
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/KubernetesRecordingItem"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "TokenSecurityScheme": []
-          },
-          {
-            "CookieSecurityScheme": []
-          }
-        ],
-        "operationId": "get_kubernetes_recording"
       }
     },
     "/roles": {
@@ -888,6 +856,9 @@
               }
             }
           },
+          "401": {
+            "description": ""
+          },
           "400": {
             "description": "",
             "content": {
@@ -945,6 +916,138 @@
           }
         ],
         "operationId": "delete_ticket"
+      }
+    },
+    "/ticket-requests": {
+      "get": {
+        "parameters": [
+          {
+            "name": "status",
+            "schema": {
+              "$ref": "#/components/schemas/TicketRequestStatus"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TicketRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_ticket_requests"
+      }
+    },
+    "/ticket-requests/{id}/approve": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketRequest"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "approve_ticket_request"
+      }
+    },
+    "/ticket-requests/{id}/deny": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/DenyTicketRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketRequest"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "deny_ticket_request"
       }
     },
     "/ssh/known-hosts": {
@@ -1052,7 +1155,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/SSHKey"
+                    "$ref": "#/components/schemas/SSHClientKey"
                   }
                 }
               }
@@ -1068,6 +1171,262 @@
           }
         ],
         "operationId": "get_ssh_own_keys"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportSshClientKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSHClientKey"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "import_ssh_own_key"
+      }
+    },
+    "/ssh/own-keys/generate": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateSSHClientKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSHClientKey"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "generate_ssh_own_key"
+      }
+    },
+    "/ssh/own-keys/reference": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportSshClientKeyReferenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSHClientKey"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "import_ssh_own_key_reference"
+      }
+    },
+    "/ssh/own-keys/{id}": {
+      "put": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSSHClientKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSHClientKey"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "update_ssh_own_key"
+      },
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_ssh_own_key"
       }
     },
     "/logs": {
@@ -1289,6 +1648,16 @@
           },
           "400": {
             "description": ""
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "404": {
             "description": ""
@@ -1675,6 +2044,16 @@
           "400": {
             "description": ""
           },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "404": {
             "description": ""
           }
@@ -1880,6 +2259,16 @@
               }
             }
           },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "404": {
             "description": ""
           }
@@ -1922,6 +2311,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterTokenSecurityScheme": []
           }
         ],
         "operationId": "delete_user"
@@ -2507,6 +2899,19 @@
           },
           "404": {
             "description": ""
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PasswordPolicyViolation"
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -3549,6 +3954,78 @@
         "operationId": "update_parameters"
       }
     },
+    "/parameters/analytics-preview": {
+      "get": {
+        "parameters": [
+          {
+            "name": "normal",
+            "schema": {
+              "type": "boolean"
+            },
+            "in": "query",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyticsPreview"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_analytics_preview"
+      }
+    },
+    "/parameters/recordings-storage/test": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordingsStorageConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestRecordingsStorageResult"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "test_recordings_storage"
+      }
+    },
     "/ssh/check-host-key": {
       "post": {
         "requestBody": {
@@ -3592,6 +4069,321 @@
           }
         ],
         "operationId": "check_ssh_host_key"
+      }
+    },
+    "/login-protection/blocked-ips": {
+      "get": {
+        "summary": "List all currently blocked IPs.",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BlockedIpInfo"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "list_blocked_ips"
+      },
+      "delete": {
+        "summary": "Unblock an IP address.",
+        "description": "The IP is taken from the request body (rather than a path segment or\nquery parameter) to avoid encoding ambiguity with IPv6 addresses.",
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/UnblockIpRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "unblock_ip"
+      }
+    },
+    "/login-protection/locked-users": {
+      "get": {
+        "summary": "List all currently locked user accounts.",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LockedUserInfo"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "list_locked_users"
+      }
+    },
+    "/login-protection/locked-users/{username}": {
+      "delete": {
+        "summary": "Unlock a user account by username.",
+        "parameters": [
+          {
+            "name": "username",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "unlock_user"
+      }
+    },
+    "/login-protection/status": {
+      "get": {
+        "summary": "Get security status summary (blocked IPs, locked users, failure counts).",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecurityStatus"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_security_status"
+      }
+    },
+    "/network/listeners": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ListenerStatus"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_listener_states"
+      }
+    },
+    "/network/ip-echo": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpEchoInfo"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_ip_echo"
+      }
+    },
+    "/session-approvals": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SessionApprovalItem"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_session_approvals"
+      }
+    },
+    "/session-approvals/{id}/approve": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "approve_session"
+      }
+    },
+    "/session-approvals/{id}/reject": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "reject_session"
       }
     },
     "/users/{user_id}/credentials/certificates": {
@@ -3788,6 +4580,400 @@
         ],
         "operationId": "revoke_certificate_credential"
       }
+    },
+    "/secret-backends": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SecretBackend"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_secret_backends"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/SecretBackendRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretBackend"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "create_secret_backend"
+      }
+    },
+    "/secret-backends/summary": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SecretBackendSummary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_secret_backends_summary"
+      }
+    },
+    "/secret-backends/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretBackend"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_secret_backend"
+      },
+      "put": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/SecretBackendRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretBackend"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "update_secret_backend"
+      },
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_secret_backend"
+      }
+    },
+    "/secret-backends/{id}/health": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckHealthResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "check_secret_backend_health"
+      }
+    },
+    "/secret-backends/resolve-test": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/TestResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "The reference resolved; the value itself is never returned"
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The path is outside the backend's allowed prefixes",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such backend, secret or field",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The backend could not be reached or refused the request",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "test_secret_resolve"
+      }
+    },
+    "/secret-backends/{id}/usage": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SecretReferenceUsage"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_secret_reference_usage"
+      }
     }
   },
   "components": {
@@ -3848,11 +5034,13 @@
           "access_roles_assign",
           "sessions_view",
           "sessions_terminate",
+          "approve_sessions",
           "recordings_view",
           "tickets_create",
           "tickets_delete",
           "config_edit",
-          "admin_roles_manage"
+          "admin_roles_manage",
+          "ticket_requests_manage"
         ],
         "properties": {
           "id": {
@@ -3901,6 +5089,9 @@
           "sessions_terminate": {
             "type": "boolean"
           },
+          "approve_sessions": {
+            "type": "boolean"
+          },
           "recordings_view": {
             "type": "boolean"
           },
@@ -3914,6 +5105,9 @@
             "type": "boolean"
           },
           "admin_roles_manage": {
+            "type": "boolean"
+          },
+          "ticket_requests_manage": {
             "type": "boolean"
           }
         }
@@ -3935,11 +5129,13 @@
           "access_roles_assign",
           "sessions_view",
           "sessions_terminate",
+          "approve_sessions",
           "recordings_view",
           "tickets_create",
           "tickets_delete",
           "config_edit",
-          "admin_roles_manage"
+          "admin_roles_manage",
+          "ticket_requests_manage"
         ],
         "properties": {
           "name": {
@@ -3984,6 +5180,9 @@
           "sessions_terminate": {
             "type": "boolean"
           },
+          "approve_sessions": {
+            "type": "boolean"
+          },
           "recordings_view": {
             "type": "boolean"
           },
@@ -3998,6 +5197,113 @@
           },
           "admin_roles_manage": {
             "type": "boolean"
+          },
+          "ticket_requests_manage": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AnalyticsConsent": {
+        "type": "string",
+        "description": "Whether the instance reports anonymous usage analytics, and at which\npayload level. `Undecided` triggers the one-time opt-in prompt in the admin\nUI; the instance never reports until the choice is made.",
+        "enum": [
+          "Undecided",
+          "Off",
+          "On"
+        ]
+      },
+      "AnalyticsPreview": {
+        "type": "object",
+        "title": "AnalyticsPreview",
+        "required": [
+          "url",
+          "payload"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The target URL the report would be POSTed to."
+          },
+          "payload": {
+            "type": "string",
+            "description": "Pretty-printed JSON request body that would be sent."
+          }
+        }
+      },
+      "ApprovalRequestStatus": {
+        "type": "string",
+        "enum": [
+          "Pending",
+          "Approved",
+          "Rejected",
+          "TimedOut",
+          "Abandoned"
+        ]
+      },
+      "ApprovalScope": {
+        "type": "string",
+        "description": "\"Remember decision\" scope for approvals",
+        "enum": [
+          "Once",
+          "Target",
+          "AllTargets"
+        ]
+      },
+      "ApproveSessionRequest": {
+        "type": "object",
+        "title": "ApproveSessionRequest",
+        "required": [
+          "scope",
+          "target"
+        ],
+        "properties": {
+          "scope": {
+            "$ref": "#/components/schemas/ApprovalScope"
+          },
+          "target": {
+            "type": "string"
+          }
+        }
+      },
+      "AutoCredentials": {
+        "type": "object",
+        "title": "AutoCredentials"
+      },
+      "BackendType": {
+        "type": "string",
+        "enum": [
+          "vault",
+          "openbao"
+        ]
+      },
+      "BlockedIpInfo": {
+        "type": "object",
+        "title": "BlockedIpInfo",
+        "required": [
+          "ip_address",
+          "blocked_at",
+          "expires_at",
+          "block_count",
+          "reason"
+        ],
+        "properties": {
+          "ip_address": {
+            "type": "string"
+          },
+          "blocked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "block_count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "reason": {
+            "type": "string"
           }
         }
       },
@@ -4014,20 +5320,25 @@
           "Dark"
         ]
       },
+      "CheckHealthResponse": {
+        "type": "object",
+        "title": "CheckHealthResponse",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
       "CheckSshHostKeyRequest": {
         "type": "object",
         "title": "CheckSshHostKeyRequest",
         "required": [
-          "host",
-          "port"
+          "target_id"
         ],
         "properties": {
-          "host": {
-            "type": "string"
-          },
-          "port": {
-            "type": "integer",
-            "format": "uint16"
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -4260,6 +5571,15 @@
           }
         }
       },
+      "DenyTicketRequestBody": {
+        "type": "object",
+        "title": "DenyTicketRequestBody",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
       "ExistingCertificateCredential": {
         "type": "object",
         "title": "ExistingCertificateCredential",
@@ -4364,6 +5684,22 @@
           }
         }
       },
+      "GenerateSSHClientKeyRequest": {
+        "type": "object",
+        "title": "GenerateSSHClientKeyRequest",
+        "required": [
+          "label",
+          "kind"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SSHClientKeyKind"
+          }
+        }
+      },
       "GetLogsRequest": {
         "type": "object",
         "title": "GetLogsRequest",
@@ -4422,6 +5758,73 @@
           }
         }
       },
+      "ImportSshClientKeyReferenceRequest": {
+        "type": "object",
+        "title": "ImportSshClientKeyReferenceRequest",
+        "required": [
+          "label",
+          "reference",
+          "is_default"
+        ],
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "reference": {
+            "type": "string",
+            "description": "A `secret://backend/mount/path#field` reference; the field must resolve to\na private key in OpenSSH or PKCS#8 PEM format.",
+            "maxLength": 1024
+          },
+          "is_default": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ImportSshClientKeyRequest": {
+        "type": "object",
+        "title": "ImportSshClientKeyRequest",
+        "required": [
+          "label",
+          "secret_key",
+          "is_default"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "secret_key": {
+            "type": "string",
+            "description": "Private key in OpenSSH or PKCS#8 PEM format, without a passphrase"
+          },
+          "is_default": {
+            "type": "boolean"
+          }
+        }
+      },
+      "IpEchoInfo": {
+        "type": "object",
+        "title": "IpEchoInfo",
+        "required": [
+          "trust_x_forwarded_headers"
+        ],
+        "properties": {
+          "peer_ip": {
+            "type": "string",
+            "description": "The peer IP of the connection as the server sees it."
+          },
+          "x_forwarded_for": {
+            "type": "string"
+          },
+          "trust_x_forwarded_headers": {
+            "type": "boolean"
+          },
+          "client_ip": {
+            "type": "string",
+            "description": "The client IP after applying the X-Forwarded-For trust setting."
+          }
+        }
+      },
       "IssueCertificateCredentialRequest": {
         "type": "object",
         "title": "IssueCertificateCredentialRequest",
@@ -4452,35 +5855,6 @@
           "certificate_pem": {
             "type": "string"
           }
-        }
-      },
-      "KubernetesRecordingItem": {
-        "type": "object",
-        "title": "KubernetesRecordingItem",
-        "required": [
-          "timestamp",
-          "request_method",
-          "request_path",
-          "request_body",
-          "response_body"
-        ],
-        "properties": {
-          "timestamp": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "request_method": {
-            "type": "string"
-          },
-          "request_path": {
-            "type": "string"
-          },
-          "request_body": {},
-          "response_status": {
-            "type": "integer",
-            "format": "uint16"
-          },
-          "response_body": {}
         }
       },
       "KubernetesTargetAuth": {
@@ -4708,6 +6082,70 @@
           "SamAccountName"
         ]
       },
+      "ListenerState": {
+        "type": "string",
+        "enum": [
+          "Disabled",
+          "Listening",
+          "BindFailed"
+        ]
+      },
+      "ListenerStatus": {
+        "type": "object",
+        "title": "ListenerStatus",
+        "required": [
+          "name",
+          "state",
+          "address",
+          "certificates"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ListenerState"
+          },
+          "address": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "certificates": {
+            "type": "array",
+            "description": "The first certificate is the primary one; the rest are SNI certificates.",
+            "items": {
+              "$ref": "#/components/schemas/TlsCertificateInfo"
+            }
+          }
+        }
+      },
+      "LockedUserInfo": {
+        "type": "object",
+        "title": "LockedUserInfo",
+        "required": [
+          "username",
+          "locked_at",
+          "reason"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "locked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
       "LogEntry": {
         "type": "object",
         "title": "LogEntry",
@@ -4752,6 +6190,14 @@
             "type": "string"
           }
         }
+      },
+      "MfaEnforcement": {
+        "type": "string",
+        "enum": [
+          "Off",
+          "Enroll",
+          "Require"
+        ]
       },
       "NewOtpCredential": {
         "type": "object",
@@ -4812,9 +6258,19 @@
           }
         }
       },
-      "PaginatedResponse_SessionSnapshot": {
+      "OpenTargetsInNewTabMode": {
+        "type": "string",
+        "description": "How the portal decides whether targets open in a new browser tab.",
+        "enum": [
+          "DefaultOn",
+          "DefaultOff",
+          "ForcedOn",
+          "ForcedOff"
+        ]
+      },
+      "PaginatedResponse_UserSessionSnapshot": {
         "type": "object",
-        "title": "PaginatedResponse_SessionSnapshot",
+        "title": "PaginatedResponse_UserSessionSnapshot",
         "required": [
           "items",
           "offset",
@@ -4824,7 +6280,7 @@
           "items": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/SessionSnapshot"
+              "$ref": "#/components/schemas/UserSessionSnapshot"
             }
           },
           "offset": {
@@ -4840,16 +6296,14 @@
       "ParameterUpdate": {
         "type": "object",
         "title": "ParameterUpdate",
-        "required": [
-          "allow_own_credential_management"
-        ],
         "properties": {
           "allow_own_credential_management": {
             "type": "boolean"
           },
           "rate_limit_bytes_per_second": {
             "type": "integer",
-            "format": "uint32"
+            "format": "uint32",
+            "minimum": 1.0
           },
           "ssh_client_auth_publickey": {
             "type": "boolean"
@@ -4860,11 +6314,162 @@
           "ssh_client_auth_keyboard_interactive": {
             "type": "boolean"
           },
-          "minimize_password_login": {
+          "ssh_host_key_verification": {
+            "$ref": "#/components/schemas/SshHostKeyVerificationMode"
+          },
+          "password_login_mode": {
+            "$ref": "#/components/schemas/PasswordLoginMode"
+          },
+          "mfa_enforcement": {
+            "$ref": "#/components/schemas/MfaEnforcement"
+          },
+          "mfa_policy_exempt_sso_users": {
             "type": "boolean"
+          },
+          "default_credential_policy": {
+            "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
+          },
+          "ticket_self_service_enabled": {
+            "type": "boolean"
+          },
+          "ticket_auto_approve_existing_access": {
+            "type": "boolean"
+          },
+          "ticket_max_duration_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1.0
+          },
+          "ticket_max_uses": {
+            "type": "integer",
+            "format": "int16",
+            "minimum": 1.0
+          },
+          "ticket_require_description": {
+            "type": "boolean"
+          },
+          "ticket_request_show_all_targets": {
+            "type": "boolean"
+          },
+          "target_click_action": {
+            "$ref": "#/components/schemas/TargetClickAction"
+          },
+          "open_targets_in_new_tab": {
+            "$ref": "#/components/schemas/OpenTargetsInNewTabMode"
           },
           "show_session_menu": {
             "type": "boolean"
+          },
+          "password_policy": {
+            "$ref": "#/components/schemas/PasswordPolicy"
+          },
+          "max_api_token_duration_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1.0
+          },
+          "record_scp": {
+            "type": "boolean"
+          },
+          "record_desktop_keyboard_input": {
+            "type": "boolean"
+          },
+          "login_protection_enabled": {
+            "type": "boolean"
+          },
+          "login_protection_retention_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1.0
+          },
+          "lp_ip_max_attempts": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1.0
+          },
+          "lp_ip_time_window_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1.0
+          },
+          "lp_ip_base_block_duration_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1.0
+          },
+          "lp_ip_block_duration_multiplier": {
+            "type": "number",
+            "format": "double",
+            "minimum": 1.0
+          },
+          "lp_ip_max_block_duration_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1.0
+          },
+          "lp_ip_cooldown_reset_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1.0
+          },
+          "lp_user_max_attempts": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1.0
+          },
+          "lp_user_time_window_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1.0
+          },
+          "lp_user_auto_unlock": {
+            "type": "boolean"
+          },
+          "lp_user_lockout_duration_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1.0
+          },
+          "lp_user_exempt_admins": {
+            "type": "boolean"
+          },
+          "banner": {
+            "type": "string"
+          },
+          "web_clients_enabled": {
+            "type": "boolean"
+          },
+          "web_auth_max_age_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1.0
+          },
+          "web_approval_grace_period_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1.0
+          },
+          "admin_approval_timeout_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1.0
+          },
+          "admin_approval_grace_period_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1.0
+          },
+          "analytics_consent": {
+            "$ref": "#/components/schemas/AnalyticsConsent"
+          },
+          "analytics_normal": {
+            "type": "boolean"
+          },
+          "recordings_enable": {
+            "type": "boolean"
+          },
+          "recordings_storage": {
+            "$ref": "#/components/schemas/RecordingsStorageConfig"
           }
         }
       },
@@ -4876,8 +6481,40 @@
           "ssh_client_auth_publickey",
           "ssh_client_auth_password",
           "ssh_client_auth_keyboard_interactive",
-          "minimize_password_login",
-          "show_session_menu"
+          "ssh_host_key_verification",
+          "password_login_mode",
+          "mfa_enforcement",
+          "mfa_policy_exempt_sso_users",
+          "default_credential_policy",
+          "ticket_self_service_enabled",
+          "ticket_auto_approve_existing_access",
+          "ticket_require_description",
+          "ticket_request_show_all_targets",
+          "target_click_action",
+          "open_targets_in_new_tab",
+          "show_session_menu",
+          "password_policy",
+          "record_scp",
+          "record_desktop_keyboard_input",
+          "login_protection_enabled",
+          "login_protection_retention_seconds",
+          "lp_ip_max_attempts",
+          "lp_ip_time_window_seconds",
+          "lp_ip_base_block_duration_seconds",
+          "lp_ip_block_duration_multiplier",
+          "lp_ip_max_block_duration_seconds",
+          "lp_ip_cooldown_reset_seconds",
+          "lp_user_max_attempts",
+          "lp_user_time_window_seconds",
+          "lp_user_auto_unlock",
+          "lp_user_lockout_duration_seconds",
+          "lp_user_exempt_admins",
+          "banner",
+          "web_clients_enabled",
+          "analytics_consent",
+          "analytics_normal",
+          "recordings_enable",
+          "recordings_storage"
         ],
         "properties": {
           "allow_own_credential_management": {
@@ -4896,13 +6533,268 @@
           "ssh_client_auth_keyboard_interactive": {
             "type": "boolean"
           },
-          "minimize_password_login": {
+          "ssh_host_key_verification": {
+            "$ref": "#/components/schemas/SshHostKeyVerificationMode"
+          },
+          "password_login_mode": {
+            "$ref": "#/components/schemas/PasswordLoginMode"
+          },
+          "mfa_enforcement": {
+            "$ref": "#/components/schemas/MfaEnforcement"
+          },
+          "mfa_policy_exempt_sso_users": {
             "type": "boolean"
+          },
+          "default_credential_policy": {
+            "$ref": "#/components/schemas/UserRequireCredentialsPolicy"
+          },
+          "ticket_self_service_enabled": {
+            "type": "boolean"
+          },
+          "ticket_auto_approve_existing_access": {
+            "type": "boolean"
+          },
+          "ticket_max_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ticket_max_uses": {
+            "type": "integer",
+            "format": "int16"
+          },
+          "ticket_require_description": {
+            "type": "boolean"
+          },
+          "ticket_request_show_all_targets": {
+            "type": "boolean"
+          },
+          "target_click_action": {
+            "$ref": "#/components/schemas/TargetClickAction"
+          },
+          "open_targets_in_new_tab": {
+            "$ref": "#/components/schemas/OpenTargetsInNewTabMode"
           },
           "show_session_menu": {
             "type": "boolean"
+          },
+          "password_policy": {
+            "$ref": "#/components/schemas/PasswordPolicy"
+          },
+          "max_api_token_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "record_scp": {
+            "type": "boolean"
+          },
+          "record_desktop_keyboard_input": {
+            "type": "boolean"
+          },
+          "login_protection_enabled": {
+            "type": "boolean"
+          },
+          "login_protection_retention_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_max_attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_time_window_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_base_block_duration_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_block_duration_multiplier": {
+            "type": "number",
+            "format": "double"
+          },
+          "lp_ip_max_block_duration_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_ip_cooldown_reset_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_max_attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_time_window_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_auto_unlock": {
+            "type": "boolean"
+          },
+          "lp_user_lockout_duration_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lp_user_exempt_admins": {
+            "type": "boolean"
+          },
+          "banner": {
+            "type": "string"
+          },
+          "web_clients_enabled": {
+            "type": "boolean"
+          },
+          "web_auth_max_age_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "web_approval_grace_period_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "admin_approval_timeout_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "admin_approval_grace_period_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "analytics_consent": {
+            "$ref": "#/components/schemas/AnalyticsConsent"
+          },
+          "analytics_normal": {
+            "type": "boolean"
+          },
+          "recordings_enable": {
+            "type": "boolean"
+          },
+          "recordings_storage": {
+            "$ref": "#/components/schemas/RecordingsStorageConfig"
           }
         }
+      },
+      "PasswordLoginMode": {
+        "type": "string",
+        "description": "How the password login form is presented on the gateway login page.",
+        "enum": [
+          "Enabled",
+          "Minimized",
+          "Disabled"
+        ]
+      },
+      "PasswordPolicy": {
+        "type": "object",
+        "title": "PasswordPolicy",
+        "description": "Rules that a password must satisfy.",
+        "required": [
+          "min_length",
+          "require_uppercase",
+          "require_lowercase",
+          "require_digits",
+          "require_special"
+        ],
+        "properties": {
+          "min_length": {
+            "type": "integer",
+            "format": "uint32",
+            "description": "Minimum number of characters (0 = no requirement)."
+          },
+          "require_uppercase": {
+            "type": "boolean"
+          },
+          "require_lowercase": {
+            "type": "boolean"
+          },
+          "require_digits": {
+            "type": "boolean"
+          },
+          "require_special": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PasswordPolicyViolation": {
+        "type": "string",
+        "description": "A single rule that was violated.",
+        "enum": [
+          "TooShort",
+          "MissingUppercase",
+          "MissingLowercase",
+          "MissingDigit",
+          "MissingSpecial"
+        ]
+      },
+      "PostgresProtocolVersion": {
+        "type": "string",
+        "enum": [
+          "3.0",
+          "3.2"
+        ]
+      },
+      "RdpTargetAuth": {
+        "type": "object",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/RdpTargetAuth_RdpTargetPasswordAuth"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "Password": "#/components/schemas/RdpTargetAuth_RdpTargetPasswordAuth"
+          }
+        }
+      },
+      "RdpTargetAuth_RdpTargetPasswordAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Password"
+                ],
+                "example": "Password"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/RdpTargetPasswordAuth"
+          }
+        ]
+      },
+      "RdpTargetCompression": {
+        "type": "string",
+        "enum": [
+          "remotefx",
+          "lossless"
+        ]
+      },
+      "RdpTargetPasswordAuth": {
+        "type": "object",
+        "title": "RdpTargetPasswordAuth",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
+          }
+        }
+      },
+      "RdpTlsSecurity": {
+        "type": "string",
+        "enum": [
+          "Tls12",
+          "Tls12WithLegacyCiphers",
+          "Tls10Unsafe"
+        ]
       },
       "Recording": {
         "type": "object",
@@ -4913,7 +6805,8 @@
           "started",
           "session_id",
           "kind",
-          "metadata"
+          "metadata",
+          "generation"
         ],
         "properties": {
           "id": {
@@ -4940,6 +6833,11 @@
           },
           "metadata": {
             "type": "string"
+          },
+          "generation": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Storage layout: 1 = single legacy file, 2 = folder (`data.ndjson`, plus an\n`index.ndjson` for desktop recordings), 3 = folder with an `index.ndjson` for\nterminal recordings too. Defaults to 1 for rows created before the folder layout."
           }
         }
       },
@@ -4948,8 +6846,98 @@
         "enum": [
           "Terminal",
           "Traffic",
-          "Kubernetes"
+          "Kubernetes",
+          "Desktop"
         ]
+      },
+      "RecordingsDiskConfig": {
+        "type": "object",
+        "title": "RecordingsDiskConfig",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        }
+      },
+      "RecordingsStorageConfig": {
+        "type": "object",
+        "description": "Where session recordings are stored, and everything that backend needs.\nServes as both the stored (serde) and admin-API (poem-openapi)\nrepresentation, so only valid field combinations can exist (e.g. no S3\nsettings while on disk).",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/RecordingsStorageConfig_RecordingsDiskConfig"
+          },
+          {
+            "$ref": "#/components/schemas/RecordingsStorageConfig_S3StorageConfig"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "Disk": "#/components/schemas/RecordingsStorageConfig_RecordingsDiskConfig",
+            "S3": "#/components/schemas/RecordingsStorageConfig_S3StorageConfig"
+          }
+        }
+      },
+      "RecordingsStorageConfig_RecordingsDiskConfig": {
+        "description": "Where session recordings are stored, and everything that backend needs.\nServes as both the stored (serde) and admin-API (poem-openapi)\nrepresentation, so only valid field combinations can exist (e.g. no S3\nsettings while on disk).",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Disk"
+                ],
+                "example": "Disk"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/RecordingsDiskConfig"
+          }
+        ]
+      },
+      "RecordingsStorageConfig_S3StorageConfig": {
+        "description": "Where session recordings are stored, and everything that backend needs.\nServes as both the stored (serde) and admin-API (poem-openapi)\nrepresentation, so only valid field combinations can exist (e.g. no S3\nsettings while on disk).",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "S3"
+                ],
+                "example": "S3"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/S3StorageConfig"
+          }
+        ]
+      },
+      "RejectSessionRequest": {
+        "type": "object",
+        "title": "RejectSessionRequest",
+        "required": [
+          "target"
+        ],
+        "properties": {
+          "target": {
+            "type": "string"
+          }
+        }
       },
       "Role": {
         "type": "object",
@@ -4957,7 +6945,8 @@
         "required": [
           "id",
           "name",
-          "description"
+          "description",
+          "is_default"
         ],
         "properties": {
           "id": {
@@ -4969,6 +6958,9 @@
           },
           "description": {
             "type": "string"
+          },
+          "is_default": {
+            "type": "boolean"
           }
         }
       },
@@ -4984,24 +6976,147 @@
           },
           "description": {
             "type": "string"
+          },
+          "is_default": {
+            "type": "boolean"
           }
         }
       },
-      "SSHKey": {
+      "S3Credentials": {
         "type": "object",
-        "title": "SSHKey",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/S3Credentials_AutoCredentials"
+          },
+          {
+            "$ref": "#/components/schemas/S3Credentials_StaticCredentials"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "mode",
+          "mapping": {
+            "Auto": "#/components/schemas/S3Credentials_AutoCredentials",
+            "Static": "#/components/schemas/S3Credentials_StaticCredentials"
+          }
+        }
+      },
+      "S3Credentials_AutoCredentials": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "Auto"
+                ],
+                "example": "Auto"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/AutoCredentials"
+          }
+        ]
+      },
+      "S3Credentials_StaticCredentials": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "Static"
+                ],
+                "example": "Static"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/StaticCredentials"
+          }
+        ]
+      },
+      "S3StorageConfig": {
+        "type": "object",
+        "title": "S3StorageConfig",
+        "description": "Everything needed to reach an S3 (or S3-compatible) bucket. Serves as both\nthe stored (serde) and admin-API (poem-openapi) representation.",
         "required": [
-          "kind",
-          "public_key_base64"
+          "bucket",
+          "region",
+          "path_style",
+          "prefix",
+          "credentials"
         ],
         "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "Custom endpoint for S3-compatible services (e.g. MinIO); `None` = AWS."
+          },
+          "path_style": {
+            "type": "boolean",
+            "description": "Path-style addressing (`host/bucket/key`), required by most\nS3-compatible services."
+          },
+          "prefix": {
+            "type": "string",
+            "description": "Key prefix prepended to every object path."
+          },
+          "credentials": {
+            "$ref": "#/components/schemas/S3Credentials"
+          }
+        }
+      },
+      "SSHClientKey": {
+        "type": "object",
+        "title": "SSHClientKey",
+        "required": [
+          "id",
+          "label",
+          "kind",
+          "public_key",
+          "is_default"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          },
           "kind": {
             "type": "string"
           },
-          "public_key_base64": {
+          "public_key": {
+            "type": "string"
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "secret_backend": {
             "type": "string"
           }
         }
+      },
+      "SSHClientKeyKind": {
+        "type": "string",
+        "enum": [
+          "Ed25519",
+          "Rsa"
+        ]
       },
       "SSHKnownHost": {
         "type": "object",
@@ -5121,41 +7236,429 @@
           }
         ]
       },
-      "SessionSnapshot": {
+      "SecretBackend": {
         "type": "object",
-        "title": "SessionSnapshot",
+        "title": "SecretBackend",
         "required": [
           "id",
-          "started",
-          "protocol"
+          "name",
+          "backend_type",
+          "address",
+          "auth",
+          "tls_skip_verify",
+          "allowed_paths"
         ],
         "properties": {
           "id": {
             "type": "string",
             "format": "uuid"
           },
+          "name": {
+            "type": "string"
+          },
+          "backend_type": {
+            "$ref": "#/components/schemas/BackendType"
+          },
+          "address": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "auth": {
+            "$ref": "#/components/schemas/SecretBackendAuth"
+          },
+          "tls_skip_verify": {
+            "type": "boolean"
+          },
+          "allowed_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "SecretBackendAuth": {
+        "type": "object",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/SecretBackendAuth_VaultTokenAuth"
+          },
+          {
+            "$ref": "#/components/schemas/SecretBackendAuth_VaultAppRoleAuth"
+          },
+          {
+            "$ref": "#/components/schemas/SecretBackendAuth_VaultKubernetesAuth"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "method",
+          "mapping": {
+            "Token": "#/components/schemas/SecretBackendAuth_VaultTokenAuth",
+            "AppRole": "#/components/schemas/SecretBackendAuth_VaultAppRoleAuth",
+            "Kubernetes": "#/components/schemas/SecretBackendAuth_VaultKubernetesAuth"
+          }
+        }
+      },
+      "SecretBackendAuth_VaultAppRoleAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "method"
+            ],
+            "properties": {
+              "method": {
+                "type": "string",
+                "enum": [
+                  "AppRole"
+                ],
+                "example": "AppRole"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/VaultAppRoleAuth"
+          }
+        ]
+      },
+      "SecretBackendAuth_VaultKubernetesAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "method"
+            ],
+            "properties": {
+              "method": {
+                "type": "string",
+                "enum": [
+                  "Kubernetes"
+                ],
+                "example": "Kubernetes"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/VaultKubernetesAuth"
+          }
+        ]
+      },
+      "SecretBackendAuth_VaultTokenAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "method"
+            ],
+            "properties": {
+              "method": {
+                "type": "string",
+                "enum": [
+                  "Token"
+                ],
+                "example": "Token"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/VaultTokenAuth"
+          }
+        ]
+      },
+      "SecretBackendRequest": {
+        "type": "object",
+        "title": "SecretBackendRequest",
+        "required": [
+          "name",
+          "backend_type",
+          "address",
+          "auth"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._-]+$"
+          },
+          "backend_type": {
+            "$ref": "#/components/schemas/BackendType"
+          },
+          "address": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 1
+          },
+          "namespace": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1
+          },
+          "auth": {
+            "$ref": "#/components/schemas/SecretBackendAuth"
+          },
+          "tls_skip_verify": {
+            "type": "boolean",
+            "default": false
+          },
+          "allowed_paths": {
+            "type": "array",
+            "description": "KV path prefixes (`mount/path`), matched on whole segments",
+            "default": [],
+            "items": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "maxItems": 256
+          }
+        }
+      },
+      "SecretBackendSummary": {
+        "type": "object",
+        "title": "SecretBackendSummary",
+        "required": [
+          "id",
+          "name",
+          "backend_type"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "backend_type": {
+            "$ref": "#/components/schemas/BackendType"
+          }
+        }
+      },
+      "SecretReferenceUsage": {
+        "type": "object",
+        "title": "SecretReferenceUsage",
+        "required": [
+          "reference",
+          "backend",
+          "usages"
+        ],
+        "properties": {
+          "reference": {
+            "type": "string"
+          },
+          "backend": {
+            "type": "string"
+          },
+          "usages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SecretReferenceUsageInstance"
+            }
+          }
+        }
+      },
+      "SecretReferenceUsageInstance": {
+        "type": "object",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/SecretReferenceUsageInstance_SecretReferenceUsageTarget"
+          },
+          {
+            "$ref": "#/components/schemas/SecretReferenceUsageInstance_SecretReferenceUsageSshClientKey"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "Target": "#/components/schemas/SecretReferenceUsageInstance_SecretReferenceUsageTarget",
+            "SshClientKey": "#/components/schemas/SecretReferenceUsageInstance_SecretReferenceUsageSshClientKey"
+          }
+        }
+      },
+      "SecretReferenceUsageInstance_SecretReferenceUsageSshClientKey": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "SshClientKey"
+                ],
+                "example": "SshClientKey"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/SecretReferenceUsageSshClientKey"
+          }
+        ]
+      },
+      "SecretReferenceUsageInstance_SecretReferenceUsageTarget": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Target"
+                ],
+                "example": "Target"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/SecretReferenceUsageTarget"
+          }
+        ]
+      },
+      "SecretReferenceUsageSshClientKey": {
+        "type": "object",
+        "title": "SecretReferenceUsageSshClientKey",
+        "required": [
+          "id",
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
+      "SecretReferenceUsageTarget": {
+        "type": "object",
+        "title": "SecretReferenceUsageTarget",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "SecurityStatus": {
+        "type": "object",
+        "title": "SecurityStatus",
+        "required": [
+          "blocked_ip_count",
+          "locked_user_count",
+          "failed_attempts_last_hour",
+          "failed_attempts_last_24h"
+        ],
+        "properties": {
+          "blocked_ip_count": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "locked_user_count": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "failed_attempts_last_hour": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "failed_attempts_last_24h": {
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
+      },
+      "SessionApprovalItem": {
+        "type": "object",
+        "title": "SessionApprovalItem",
+        "required": [
+          "id",
+          "protocol",
+          "username",
+          "target",
+          "started"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
           "username": {
             "type": "string"
           },
           "target": {
-            "$ref": "#/components/schemas/Target"
+            "type": "string"
           },
           "started": {
             "type": "string",
             "format": "date-time"
           },
-          "ended": {
-            "type": "string",
-            "format": "date-time"
+          "caching_grace_seconds": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "SessionApprovalRequestSnapshot": {
+        "type": "object",
+        "title": "SessionApprovalRequestSnapshot",
+        "required": [
+          "target",
+          "status"
+        ],
+        "properties": {
+          "resolved_by_username": {
+            "type": "string"
           },
-          "ticket_id": {
+          "resolved_by_user_id": {
             "type": "string",
             "format": "uuid"
           },
-          "protocol": {
+          "resolved_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target": {
             "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ApprovalRequestStatus"
           }
         }
+      },
+      "SshHostKeyVerificationMode": {
+        "type": "string",
+        "description": "What to do when a target's SSH host key isn't in the known hosts list.",
+        "enum": [
+          "Prompt",
+          "AutoAccept",
+          "AutoReject",
+          "Ignore"
+        ]
       },
       "SshTargetIamRoleAuth": {
         "type": "object",
@@ -5175,7 +7678,30 @@
       },
       "SshTargetPublicKeyAuth": {
         "type": "object",
-        "title": "SshTargetPublicKeyAuth"
+        "title": "SshTargetPublicKeyAuth",
+        "properties": {
+          "key_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Specific stored client key to authenticate with; `None` uses the keys\nmarked default."
+          }
+        }
+      },
+      "StaticCredentials": {
+        "type": "object",
+        "title": "StaticCredentials",
+        "required": [
+          "access_key_id"
+        ],
+        "properties": {
+          "access_key_id": {
+            "type": "string"
+          },
+          "secret_access_key": {
+            "type": "string",
+            "description": "`None` on the admin API means \"keep the stored secret\" (it's never sent\nout); always `Some` in a stored config."
+          }
+        }
       },
       "Target": {
         "type": "object",
@@ -5185,7 +7711,10 @@
           "name",
           "description",
           "allow_roles",
-          "options"
+          "options",
+          "ticket_requests_disabled",
+          "ticket_require_approval",
+          "require_approval"
         ],
         "properties": {
           "id": {
@@ -5214,15 +7743,42 @@
           "group_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "ticket_max_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ticket_requests_disabled": {
+            "type": "boolean"
+          },
+          "ticket_require_approval": {
+            "type": "boolean"
+          },
+          "require_approval": {
+            "type": "boolean"
+          },
+          "ticket_max_uses": {
+            "type": "integer",
+            "format": "int16"
           }
         }
+      },
+      "TargetClickAction": {
+        "type": "string",
+        "enum": [
+          "Connect",
+          "ShowInstructions"
+        ]
       },
       "TargetDataRequest": {
         "type": "object",
         "title": "TargetDataRequest",
         "required": [
           "name",
-          "options"
+          "options",
+          "ticket_requests_disabled",
+          "ticket_require_approval",
+          "require_approval"
         ],
         "properties": {
           "name": {
@@ -5241,6 +7797,24 @@
           "group_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "ticket_max_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ticket_requests_disabled": {
+            "type": "boolean",
+            "description": "Required on every write, so that saving a target without mentioning a\ngate is refused rather than quietly taking it off."
+          },
+          "ticket_require_approval": {
+            "type": "boolean"
+          },
+          "require_approval": {
+            "type": "boolean"
+          },
+          "ticket_max_uses": {
+            "type": "integer",
+            "format": "int16"
           }
         }
       },
@@ -5291,7 +7865,8 @@
         "title": "TargetHTTPOptions",
         "required": [
           "url",
-          "tls"
+          "tls",
+          "headers"
         ],
         "properties": {
           "url": {
@@ -5338,6 +7913,7 @@
           "host",
           "port",
           "username",
+          "auth",
           "tls"
         ],
         "properties": {
@@ -5353,11 +7929,6 @@
           },
           "auth": {
             "$ref": "#/components/schemas/DatabaseTargetAuth"
-          },
-          "password": {
-            "type": "string",
-            "description": "Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.",
-            "deprecated": true
           },
           "tls": {
             "$ref": "#/components/schemas/Tls"
@@ -5384,6 +7955,12 @@
           },
           {
             "$ref": "#/components/schemas/TargetOptions_TargetPostgresOptions"
+          },
+          {
+            "$ref": "#/components/schemas/TargetOptions_TargetVncOptions"
+          },
+          {
+            "$ref": "#/components/schemas/TargetOptions_TargetRdpOptions"
           }
         ],
         "discriminator": {
@@ -5393,7 +7970,9 @@
             "Http": "#/components/schemas/TargetOptions_TargetHTTPOptions",
             "Kubernetes": "#/components/schemas/TargetOptions_TargetKubernetesOptions",
             "MySql": "#/components/schemas/TargetOptions_TargetMySqlOptions",
-            "Postgres": "#/components/schemas/TargetOptions_TargetPostgresOptions"
+            "Postgres": "#/components/schemas/TargetOptions_TargetPostgresOptions",
+            "Vnc": "#/components/schemas/TargetOptions_TargetVncOptions",
+            "Rdp": "#/components/schemas/TargetOptions_TargetRdpOptions"
           }
         }
       },
@@ -5485,6 +8064,28 @@
           }
         ]
       },
+      "TargetOptions_TargetRdpOptions": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Rdp"
+                ],
+                "example": "Rdp"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/TargetRdpOptions"
+          }
+        ]
+      },
       "TargetOptions_TargetSSHOptions": {
         "allOf": [
           {
@@ -5507,6 +8108,28 @@
           }
         ]
       },
+      "TargetOptions_TargetVncOptions": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Vnc"
+                ],
+                "example": "Vnc"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/TargetVncOptions"
+          }
+        ]
+      },
       "TargetPostgresOptions": {
         "type": "object",
         "title": "TargetPostgresOptions",
@@ -5514,7 +8137,9 @@
           "host",
           "port",
           "username",
-          "tls"
+          "auth",
+          "tls",
+          "protocol_version"
         ],
         "properties": {
           "host": {
@@ -5530,11 +8155,6 @@
           "auth": {
             "$ref": "#/components/schemas/DatabaseTargetAuth"
           },
-          "password": {
-            "type": "string",
-            "description": "Deprecated: use `auth` instead. Kept for backward compatibility with old configs/API clients.",
-            "deprecated": true
-          },
           "tls": {
             "$ref": "#/components/schemas/Tls"
           },
@@ -5543,6 +8163,55 @@
           },
           "default_database_name": {
             "type": "string"
+          },
+          "protocol_version": {
+            "$ref": "#/components/schemas/PostgresProtocolVersion"
+          }
+        }
+      },
+      "TargetRdpOptions": {
+        "type": "object",
+        "title": "TargetRdpOptions",
+        "required": [
+          "host",
+          "port",
+          "username",
+          "auth",
+          "verify_tls",
+          "compression",
+          "interactive_logon",
+          "tls_security"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "username": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "auth": {
+            "$ref": "#/components/schemas/RdpTargetAuth"
+          },
+          "verify_tls": {
+            "type": "boolean",
+            "description": "Verify the RDP server's TLS certificate against the system root store.\nRDP servers commonly use self-signed certificates, so this is off by default."
+          },
+          "compression": {
+            "$ref": "#/components/schemas/RdpTargetCompression"
+          },
+          "interactive_logon": {
+            "type": "boolean",
+            "description": "Show the target's own sign-in screen instead of logging on automatically.\nThe stored credentials still pass network-level authentication (CredSSP)."
+          },
+          "tls_security": {
+            "$ref": "#/components/schemas/RdpTlsSecurity"
           }
         }
       },
@@ -5553,6 +8222,7 @@
           "host",
           "port",
           "username",
+          "allow_insecure_algos",
           "auth"
         ],
         "properties": {
@@ -5571,6 +8241,82 @@
           },
           "auth": {
             "$ref": "#/components/schemas/SSHTargetAuth"
+          },
+          "jump_host": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "TargetSessionSnapshot": {
+        "type": "object",
+        "title": "TargetSessionSnapshot",
+        "required": [
+          "id",
+          "target_id",
+          "started"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target": {
+            "description": "`None` only when the stored snapshot fails to parse.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Target"
+              },
+              {
+                "description": "`None` only when the stored snapshot fails to parse."
+              }
+            ]
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "started": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ended": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ticket_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "node_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The node serving this target connection; `None` for shared (HTTP)\ntarget sessions, which are access records any node serves."
+          },
+          "node_hostname": {
+            "type": "string",
+            "description": "Hostname of the serving node, while registered."
+          }
+        }
+      },
+      "TargetVncOptions": {
+        "type": "object",
+        "title": "TargetVncOptions",
+        "required": [
+          "host",
+          "port",
+          "auth"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16"
+          },
+          "auth": {
+            "$ref": "#/components/schemas/VncTargetAuth"
           }
         }
       },
@@ -5629,6 +8375,36 @@
           }
         }
       },
+      "TestRecordingsStorageResult": {
+        "type": "object",
+        "title": "TestRecordingsStorageResult",
+        "required": [
+          "success"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Whether the backend accepted a write/delete round-trip."
+          },
+          "error": {
+            "type": "string",
+            "description": "The failure message when `success` is false."
+          }
+        }
+      },
+      "TestResolveRequest": {
+        "type": "object",
+        "title": "TestResolveRequest",
+        "required": [
+          "reference"
+        ],
+        "properties": {
+          "reference": {
+            "type": "string",
+            "maxLength": 1024
+          }
+        }
+      },
       "Ticket": {
         "type": "object",
         "title": "Ticket",
@@ -5639,6 +8415,7 @@
           "description",
           "target_id",
           "target",
+          "self_service",
           "created"
         ],
         "properties": {
@@ -5667,6 +8444,9 @@
             "type": "integer",
             "format": "int16"
           },
+          "self_service": {
+            "type": "boolean"
+          },
           "expiry": {
             "type": "string",
             "format": "date-time"
@@ -5693,6 +8473,81 @@
           }
         }
       },
+      "TicketRequest": {
+        "type": "object",
+        "title": "TicketRequest",
+        "description": "ticket request with resolved username and target name",
+        "required": [
+          "id",
+          "user_id",
+          "target_id",
+          "description",
+          "status",
+          "created"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string",
+            "description": "Empty if the user has been deleted"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target_name": {
+            "type": "string",
+            "description": "Empty if the target has been deleted"
+          },
+          "requested_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TicketRequestStatus"
+          },
+          "resolved_by_user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "resolved_by_username": {
+            "type": "string"
+          },
+          "ticket_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resolved_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deny_reason": {
+            "type": "string"
+          }
+        }
+      },
+      "TicketRequestStatus": {
+        "type": "string",
+        "enum": [
+          "Pending",
+          "Approved",
+          "Denied"
+        ]
+      },
       "Tls": {
         "type": "object",
         "title": "Tls",
@@ -5709,6 +8564,26 @@
           }
         }
       },
+      "TlsCertificateInfo": {
+        "type": "object",
+        "title": "TlsCertificateInfo",
+        "required": [
+          "domains"
+        ],
+        "properties": {
+          "domains": {
+            "type": "array",
+            "description": "SAN DNS/IP names and the CN of the leaf certificate.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expiry": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "TlsMode": {
         "type": "string",
         "enum": [
@@ -5716,6 +8591,19 @@
           "Preferred",
           "Required"
         ]
+      },
+      "UnblockIpRequest": {
+        "type": "object",
+        "title": "UnblockIpRequest",
+        "required": [
+          "ip"
+        ],
+        "properties": {
+          "ip": {
+            "type": "string",
+            "description": "IP address to unblock (IPv4 or IPv6)."
+          }
+        }
       },
       "UpdateCertificateCredential": {
         "type": "object",
@@ -5789,6 +8677,22 @@
           },
           "uuid_attribute": {
             "type": "string"
+          }
+        }
+      },
+      "UpdateSSHClientKeyRequest": {
+        "type": "object",
+        "title": "UpdateSSHClientKeyRequest",
+        "required": [
+          "label",
+          "is_default"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "is_default": {
+            "type": "boolean"
           }
         }
       },
@@ -5903,6 +8807,18 @@
             "items": {
               "$ref": "#/components/schemas/CredentialKind"
             }
+          },
+          "vnc": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "rdp": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
           }
         }
       },
@@ -5950,9 +8866,211 @@
             "description": "Whether this assignment is currently active (not expired, not revoked)"
           }
         }
+      },
+      "UserSessionSnapshot": {
+        "type": "object",
+        "title": "UserSessionSnapshot",
+        "required": [
+          "id",
+          "started",
+          "protocol",
+          "remote_address",
+          "target_sessions",
+          "admin_approvals"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "started": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ended": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "node_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The node this session's lifetime is bound to; `None` for shared\nsessions, which any node serves."
+          },
+          "node_hostname": {
+            "type": "string",
+            "description": "Hostname of the bound node, while registered."
+          },
+          "remote_address": {
+            "type": "string"
+          },
+          "target_sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TargetSessionSnapshot"
+            }
+          },
+          "admin_approvals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionApprovalRequestSnapshot"
+            }
+          }
+        }
+      },
+      "VaultAppRoleAuth": {
+        "type": "object",
+        "title": "VaultAppRoleAuth",
+        "required": [
+          "role_id",
+          "secret_id"
+        ],
+        "properties": {
+          "role_id": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1
+          },
+          "secret_id": {
+            "type": "string",
+            "description": "Blank in responses; blank in an update, keeps the stored secret ID"
+          },
+          "mount": {
+            "type": "string",
+            "description": "Auth mount; `null` uses `approle`",
+            "maxLength": 255,
+            "minLength": 1
+          }
+        }
+      },
+      "VaultKubernetesAuth": {
+        "type": "object",
+        "title": "VaultKubernetesAuth",
+        "required": [
+          "role"
+        ],
+        "properties": {
+          "role": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1
+          },
+          "mount": {
+            "type": "string",
+            "description": "Auth mount; `null` uses `kubernetes`",
+            "maxLength": 255,
+            "minLength": 1
+          }
+        }
+      },
+      "VaultTokenAuth": {
+        "type": "object",
+        "title": "VaultTokenAuth",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "Blank in responses; blank in an update, keeps the stored token"
+          }
+        }
+      },
+      "VncTargetAuth": {
+        "type": "object",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/VncTargetAuth_VncTargetNoneAuth"
+          },
+          {
+            "$ref": "#/components/schemas/VncTargetAuth_VncTargetPasswordAuth"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "None": "#/components/schemas/VncTargetAuth_VncTargetNoneAuth",
+            "Password": "#/components/schemas/VncTargetAuth_VncTargetPasswordAuth"
+          }
+        }
+      },
+      "VncTargetAuth_VncTargetNoneAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "None"
+                ],
+                "example": "None"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/VncTargetNoneAuth"
+          }
+        ]
+      },
+      "VncTargetAuth_VncTargetPasswordAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Password"
+                ],
+                "example": "Password"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/VncTargetPasswordAuth"
+          }
+        ]
+      },
+      "VncTargetNoneAuth": {
+        "type": "object",
+        "title": "VncTargetNoneAuth"
+      },
+      "VncTargetPasswordAuth": {
+        "type": "object",
+        "title": "VncTargetPasswordAuth",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
+          }
+        }
       }
     },
     "securitySchemes": {
+      "ClusterTokenSecurityScheme": {
+        "type": "apiKey",
+        "description": "Peer-to-peer cluster token.",
+        "name": "X-Warpgate-Cluster-Token",
+        "in": "header"
+      },
       "CookieSecurityScheme": {
         "type": "apiKey",
         "name": "warpgate-http-session",

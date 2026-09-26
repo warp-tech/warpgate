@@ -1,6 +1,11 @@
 import html
+import json
 import re
+import socket
 import requests
+import pytest
+from contextlib import contextmanager
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from uuid import uuid4
 
 from .api_client import admin_client, sdk
@@ -12,6 +17,23 @@ from .util import alloc_port, wait_port
 DEFAULT_OIDC_SCOPES = ["openid", "email", "profile", "preferred_username"]
 
 
+@contextmanager
+def _resolve_hosts_to_localhost(*hosts):
+    original_getaddrinfo = socket.getaddrinfo
+    resolved_hosts = set(hosts)
+
+    def getaddrinfo(host, *args, **kwargs):
+        if host in resolved_hosts:
+            return original_getaddrinfo("127.0.0.1", *args, **kwargs)
+        return original_getaddrinfo(host, *args, **kwargs)
+
+    socket.getaddrinfo = getaddrinfo
+    try:
+        yield
+    finally:
+        socket.getaddrinfo = original_getaddrinfo
+
+
 def _make_sso_provider_config(
     oidc_port,
     *,
@@ -19,6 +41,9 @@ def _make_sso_provider_config(
     role_mappings=None,
     admin_role_mappings=None,
     extra_scopes=None,
+    return_url_domain=None,
+    roles_claim=None,
+    admin_roles_claim=None,
 ):
     """Build an ``sso_providers`` entry for warpgate config."""
     scopes = list(DEFAULT_OIDC_SCOPES)
@@ -35,37 +60,47 @@ def _make_sso_provider_config(
         provider["role_mappings"] = role_mappings
     if admin_role_mappings is not None:
         provider["admin_role_mappings"] = admin_role_mappings
-    return {
+    if roles_claim is not None:
+        provider["roles_claim"] = roles_claim
+    if admin_roles_claim is not None:
+        provider["admin_roles_claim"] = admin_roles_claim
+    sso_entry = {
         "name": "test-oidc",
         "label": "OIDC Test",
         "provider": provider,
         "auto_create_users": auto_create_users,
     }
+    if return_url_domain is not None:
+        sso_entry["return_url_domain"] = return_url_domain
+    return sso_entry
 
 
-def _start_wg_with_oidc(processes, wg_http_port, oidc_port, **sso_kwargs):
+def _start_wg_with_oidc(processes, wg_http_port, oidc_port, *, external_host="127.0.0.1", **sso_kwargs):
     """Start a warpgate instance wired to the OIDC mock."""
     sso_config = _make_sso_provider_config(oidc_port, **sso_kwargs)
+    config_patch = {"sso_providers": [sso_config], "external_host": external_host}
     wg = processes.start_wg(
         http_port=wg_http_port,
-        config_patch={
-            "external_host": "127.0.0.1",
-            "sso_providers": [sso_config],
-        },
+        config_patch=config_patch,
     )
     wait_port(wg.http_port, for_process=wg.process, recv=False)
     return wg
 
 
-def _create_echo_target(api, echo_server_port, role_id):
+def _create_echo_target(api, echo_server_port, role_id, *, external_host=None):
     """Create an HTTP echo target and grant a role access."""
     target = api.create_target(
         sdk.TargetDataRequest(
             name=f"echo-{uuid4()}",
+            require_approval=False,
+            ticket_requests_disabled=False,
+            ticket_require_approval=False,
             options=sdk.TargetOptions(
                 sdk.TargetOptionsTargetHTTPOptions(
                     kind="Http",
+                    headers={},
                     url=f"http://localhost:{echo_server_port}",
+                    external_host=external_host,
                     tls=sdk.Tls(
                         mode=sdk.TlsMode.DISABLED,
                         verify=False,
@@ -78,46 +113,43 @@ def _create_echo_target(api, echo_server_port, role_id):
     return target
 
 
-def _do_oidc_login(wg_url, oidc_port, *, username="User1", password="pwd"):
-    """Drive the full OIDC authorization-code flow against the mock.
+def _session_cookie_domains(session):
+    domains = set()
+    for domain, paths in session.cookies._cookies.items():
+        for cookies_by_name in paths.values():
+            if "warpgate-http-session" in cookies_by_name:
+                domains.add(domain)
+    return domains
 
-    Returns ``(wg_session, redirect_url)`` where *wg_session* carries the
-    authenticated cookies and *redirect_url* is warpgate's SSO-return URL
-    (already followed).
-    """
-    from urllib.parse import urlparse, parse_qs
 
-    wg_session = requests.Session()
-    wg_session.verify = False
-
-    # Initiate SSO
-    resp = wg_session.get(f"{wg_url}/@warpgate/api/sso/providers/test-oidc/start")
-    assert resp.status_code == 200
-    auth_url = resp.json()["url"]
-
-    # Follow to OIDC mock login page
+def _complete_oidc_login(
+    wg_session, oidc_port, auth_url, *, username="User1", password="pwd"
+):
     oidc_session = requests.Session()
+    oidc_session.verify = False
     resp = oidc_session.get(auth_url)
     assert resp.status_code == 200
     login_page_url = resp.url
     login_html = resp.text
 
-    # Extract anti-forgery token (attribute order may vary)
+    # Extract anti-forgery token
+    # These are oidc mock specific
     token_match = re.search(
-        r'name="__RequestVerificationToken"[^>]*value="([^"]*)"',
+        r'name="__RequestVerificationToken"[^>]*value="([^\"]*)"',
         login_html,
     )
-    if not token_match:
-        token_match = re.search(
-            r'value="([^"]*)"[^>]*name="__RequestVerificationToken"',
-            login_html,
-        )
-    assert token_match, "Could not find __RequestVerificationToken in login form"
+    assert token_match, (
+        f"Could not find __RequestVerificationToken in login form: {login_html[:500]}"
+    )
     verification_token = html.unescape(token_match.group(1))
 
-    # The OIDC mock may use "Input.ReturnUrl" (Duende IdentityServer
-    # convention) or plain "ReturnUrl".  Try both, then fall back to URL.
-    return_url = None
+    action = login_page_url
+    m = re.search(r'<form[^>]*action=["\']([^"\']+)["\']', login_html, re.I)
+    if m:
+        action = m.group(1)
+        if action.startswith("/"):
+            action = f"http://localhost:{oidc_port}{action}"
+
     m = re.search(
         r'name="Input.ReturnUrl"[^>]*value="([^"]*)"',
         login_html,
@@ -125,20 +157,13 @@ def _do_oidc_login(wg_url, oidc_port, *, username="User1", password="pwd"):
     assert m, "Could not find ReturnUrl in login form"
     return_url = html.unescape(m.group(1))
 
-    # Detect whether the mock uses the "Input." field-name prefix
-    uses_input_prefix = 'name="Input.' in login_html
-
-    def _field(name):
-        return f"Input.{name}" if uses_input_prefix else name
-
-    # Submit credentials
     resp = oidc_session.post(
         login_page_url,
         data={
-            _field("Username"): username,
-            _field("Password"): password,
-            _field("Button") if uses_input_prefix else "button": "login",
-            _field("ReturnUrl"): return_url,
+            "Input.Username": username,
+            "Input.Password": password,
+            "Input.Button": "login",
+            "Input.ReturnUrl": return_url,
             "__RequestVerificationToken": verification_token,
         },
         allow_redirects=False,
@@ -147,7 +172,7 @@ def _do_oidc_login(wg_url, oidc_port, *, username="User1", password="pwd"):
     # Chase redirects until we land back at warpgate's SSO return endpoint
     redirect_url = None
     for _ in range(15):
-        if resp.status_code not in (301, 302, 303, 307, 308):
+        if resp.status_code // 100 != 3:
             break
         location = resp.headers["Location"]
         if location.startswith("/"):
@@ -162,20 +187,41 @@ def _do_oidc_login(wg_url, oidc_port, *, username="User1", password="pwd"):
     )
     assert "code=" in redirect_url, "Redirect URL missing authorization code"
 
-    # The OIDC redirect_uri uses 127.0.0.1 but we started the SSO flow on
-    # wg_url (localhost).  Rewrite so the session cookies (set for localhost)
-    # are sent with this request.
-    parsed_redirect = urlparse(redirect_url)
-    parsed_wg = urlparse(wg_url)
-    redirect_url = redirect_url.replace(
-        f"{parsed_redirect.scheme}://{parsed_redirect.netloc}",
-        f"{parsed_wg.scheme}://{parsed_wg.netloc}",
-        1,
+    return wg_session, redirect_url
+
+
+def _do_oidc_login(wg_url, oidc_port, *, username="User1", password="pwd"):
+    """Drive the full OIDC authorization-code flow against the mock.
+
+    Returns ``(wg_session, redirect_url)`` where *wg_session* carries the
+    authenticated cookies and *redirect_url* is warpgate's SSO-return URL
+    (already followed).
+    """
+
+    wg_session, redirect_url = _follow_oidc_login_redirects(
+        wg_url, oidc_port, username=username, password=password
     )
 
-    # Complete the SSO flow on warpgate
     resp = wg_session.get(redirect_url, allow_redirects=False)
     return wg_session, resp
+
+
+def _follow_oidc_login_redirects(
+    wg_url, oidc_port, *, username="User1", password="pwd"
+):
+    """Drive the full OIDC authorization-code flow against the mock
+    and return the final Warpgate return URL without actually requesting it"""
+
+    wg_session = requests.Session()
+    wg_session.verify = False
+
+    # Initiate SSO
+    resp = wg_session.get(f"{wg_url}/@warpgate/api/sso/providers/test-oidc/start")
+    assert resp.status_code == 200
+    auth_url = resp.json()["url"]
+    return _complete_oidc_login(
+        wg_session, oidc_port, auth_url, username=username, password=password
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +231,244 @@ def _do_oidc_login(wg_url, oidc_port, *, username="User1", password="pwd"):
 
 class TestHTTPUserAuthOIDC:
     """Tests the full OIDC authorization code flow using a mock OIDC provider."""
+
+    @pytest.mark.parametrize(
+        "case",
+        [
+            # Login at external_host: SSO return URL pinned to external_host.
+            dict(
+                login_host="warpgate.acme.inc",
+                return_url_domain="external_host",
+                expected_return_host="warpgate.acme.inc",
+            ),
+            # Login at a subdomain with ExternalHost: return URL is still external_host.
+            dict(
+                login_host="target.warpgate.acme.inc",
+                return_url_domain="external_host",
+                expected_return_host="warpgate.acme.inc",
+            ),
+            # Login at a subdomain with HostHeader: return URL follows the request host.
+            dict(
+                login_host="target.warpgate.acme.inc",
+                return_url_domain="host_header",
+                expected_return_host="target.warpgate.acme.inc",
+            ),
+        ],
+    )
+    def test_oidc_cross_domain_cookie_and_return_url_domain(
+        self,
+        echo_server_port,
+        processes: ProcessManager,
+        case,
+    ):
+        login_host = case["login_host"]
+        return_url_domain = case["return_url_domain"]
+        expected_return_host = case["expected_return_host"]
+        wg_http_port = alloc_port()
+        redirect_uris = [
+            f"https://{login_host}:{wg_http_port}/@warpgate/api/sso/return",
+            f"https://{expected_return_host}:{wg_http_port}/@warpgate/api/sso/return",
+        ]
+        oidc_port = processes.start_oidc_server(
+            wg_http_port,
+            redirect_uris=redirect_uris,
+        )
+        wg = _start_wg_with_oidc(
+            processes,
+            wg_http_port,
+            oidc_port,
+            external_host="warpgate.acme.inc",
+            return_url_domain=return_url_domain,
+        )
+        wg_url = f"https://{login_host}:{wg.http_port}"
+        target_url = f"https://target.warpgate.acme.inc:{wg.http_port}"
+
+        with _resolve_hosts_to_localhost(
+            "warpgate.acme.inc",
+            "target.warpgate.acme.inc",
+        ):
+            with admin_client(wg_url) as api:
+                role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
+                target = _create_echo_target(
+                    api,
+                    echo_server_port,
+                    role.id,
+                    external_host="target.warpgate.acme.inc",
+                )
+                user = api.create_user(
+                    sdk.CreateUserRequest(username=f"user-{uuid4()}")
+                )
+                api.create_sso_credential(
+                    user.id,
+                    sdk.NewSsoCredential(
+                        email="sam.tailor@gmail.com",
+                        provider="test-oidc",
+                    ),
+                )
+                api.add_user_role(user.id, role.id)
+
+            session = requests.Session()
+            session.verify = False
+            start_resp = session.get(
+                f"{wg_url}/@warpgate/api/sso/providers/test-oidc/start"
+            )
+            assert start_resp.status_code == 200, (
+                f"Failed to start SSO: {start_resp.status_code} {start_resp.text[:500]}"
+            )
+
+            auth_url = start_resp.json()["url"]
+            redirect_uri = parse_qs(urlparse(auth_url).query)["redirect_uri"][0]
+            assert urlparse(redirect_uri).hostname == expected_return_host
+
+            _, redirect_url = _complete_oidc_login(session, oidc_port, auth_url)
+            callback_resp = session.get(redirect_url, allow_redirects=False)
+            assert callback_resp.status_code in (302, 307)
+            assert callback_resp.headers["Location"] == f"{wg_url}/@warpgate#/login"
+
+            target_resp = session.get(
+                f"{target_url}/some/path?warpgate-target={target.name}",
+                allow_redirects=False,
+            )
+            assert target_resp.status_code // 100 == 2
+            assert target_resp.json()["path"] == "/some/path"
+
+    @pytest.mark.parametrize(
+        "case",
+        [
+            # Login at external_host: cookie Domain=.warpgate.acme.inc so all subdomains inherit it.
+            dict(
+                login_host="warpgate.acme.inc",
+                return_url_domain="external_host",
+                expect_start_ok=True,
+                cross_check_host="sub.warpgate.acme.inc",
+                expect_cross_access=True,
+            ),
+            # Login at a subdomain: cookie Domain=.warpgate.acme.inc, valid at parent too.
+            dict(
+                login_host="sub.warpgate.acme.inc",
+                return_url_domain="host_header",
+                expect_start_ok=True,
+                cross_check_host="warpgate.acme.inc",
+                expect_cross_access=True,
+            ),
+            # Unrelated domain + external_host: IdP callback would reach external_host while
+            # session lives on not-sub-domain.acme.inc — rejected early with HTTP 400.
+            dict(
+                login_host="not-sub-domain.acme.inc",
+                return_url_domain="external_host",
+                expect_start_ok=False,
+                cross_check_host=None,
+                expect_cross_access=False,
+            ),
+            # Unrelated domain + host_header: SSO completes, but session is scoped to
+            # not-sub-domain.acme.inc only — not visible from warpgate.acme.inc.
+            dict(
+                login_host="not-sub-domain.acme.inc",
+                return_url_domain="host_header",
+                expect_start_ok=True,
+                cross_check_host="warpgate.acme.inc",
+                expect_cross_access=False,
+            ),
+        ],
+    )
+    def test_oidc_cookie_domain_flows(
+        self,
+        echo_server_port,
+        processes: ProcessManager,
+        case,
+    ):
+        login_host = case["login_host"]
+        return_url_domain = case["return_url_domain"]
+        expect_start_ok = case["expect_start_ok"]
+        cross_check_host = case["cross_check_host"]
+        expect_cross_access = case["expect_cross_access"]
+        wg_http_port = alloc_port()
+        redirect_uris = [
+            f"https://warpgate.acme.inc:{wg_http_port}/@warpgate/api/sso/return",
+            f"https://sub.warpgate.acme.inc:{wg_http_port}/@warpgate/api/sso/return",
+            f"https://not-sub-domain.acme.inc:{wg_http_port}/@warpgate/api/sso/return",
+        ]
+        oidc_port = processes.start_oidc_server(
+            wg_http_port,
+            redirect_uris=redirect_uris,
+        )
+        wg = _start_wg_with_oidc(
+            processes,
+            wg_http_port,
+            oidc_port,
+            external_host="warpgate.acme.inc",
+            return_url_domain=return_url_domain,
+        )
+
+        all_hosts = {
+            "warpgate.acme.inc",
+            "sub.warpgate.acme.inc",
+            "not-sub-domain.acme.inc",
+        }
+        wg_url = f"https://{login_host}:{wg.http_port}"
+        external_host_url = f"https://warpgate.acme.inc:{wg.http_port}"
+
+        with _resolve_hosts_to_localhost(*all_hosts):
+            with admin_client(external_host_url) as api:
+                role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
+                # Echo target has no external_host restriction so it is
+                # reachable from any host via ?warpgate-target=.
+                echo_target = _create_echo_target(api, echo_server_port, role.id)
+                user = api.create_user(
+                    sdk.CreateUserRequest(username=f"user-{uuid4()}")
+                )
+                api.create_sso_credential(
+                    user.id,
+                    sdk.NewSsoCredential(
+                        email="sam.tailor@gmail.com",
+                        provider="test-oidc",
+                    ),
+                )
+                api.add_user_role(user.id, role.id)
+
+            session = requests.Session()
+            session.verify = False
+
+            start_resp = session.get(
+                f"{wg_url}/@warpgate/api/sso/providers/test-oidc/start"
+            )
+
+            if not expect_start_ok:
+                # Incompatible domain: external_host ≠ login_host and no
+                # subdomain relationship while return_url_domain=external_host.
+                assert start_resp.status_code == 400
+                return
+
+            assert start_resp.status_code == 200
+            auth_url = start_resp.json()["url"]
+
+            _, redirect_url = _complete_oidc_login(session, oidc_port, auth_url)
+            callback_resp = session.get(redirect_url, allow_redirects=False)
+            assert callback_resp.status_code in (302, 307)
+
+            # Verify the session cookie domain covers login_host.
+            cookie_domains = _session_cookie_domains(session)
+            assert cookie_domains, (
+                "Expected at least one domain with the session cookie"
+            )
+
+            # Access the echo target from cross_check_host using the session
+            assert cross_check_host is not None
+            cross_url = f"https://{cross_check_host}:{wg.http_port}"
+            cross_resp = session.get(
+                f"{cross_url}/probe?warpgate-target={echo_target.name}",
+                allow_redirects=False,
+            )
+            if expect_cross_access:
+                assert cross_resp.status_code // 100 == 2, (
+                    f"Expected authenticated access from {cross_check_host} "
+                    f"(login was at {login_host}), got {cross_resp.status_code}"
+                )
+            else:
+                assert cross_resp.status_code // 100 != 2, (
+                    f"Expected session NOT to be shared with {cross_check_host} "
+                    f"(login was at {login_host}), but got {cross_resp.status_code}"
+                )
 
     def test_oidc_auth_flow(
         self,
@@ -228,6 +512,54 @@ class TestHTTPUserAuthOIDC:
         )
         assert resp.status_code // 100 == 2
         assert resp.json()["path"] == "/some/path"
+
+    def test_oidc_auth_rejects_invalid_state(
+        self,
+        echo_server_port,
+        processes: ProcessManager,
+    ):
+        wg_http_port = alloc_port()
+        oidc_port = processes.start_oidc_server(wg_http_port)
+        wg = _start_wg_with_oidc(processes, wg_http_port, oidc_port)
+        wg_url = f"https://127.0.0.1:{wg.http_port}"
+
+        with admin_client(wg_url) as api:
+            role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
+            user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
+            api.create_sso_credential(
+                user.id,
+                sdk.NewSsoCredential(
+                    email="sam.tailor@gmail.com",
+                    provider="test-oidc",
+                ),
+            )
+            api.add_user_role(user.id, role.id)
+            _create_echo_target(api, echo_server_port, role.id)
+
+        wg_session, redirect_url = _follow_oidc_login_redirects(
+            wg_url,
+            oidc_port,
+            username="User1",
+            password="pwd",
+        )
+
+        parsed = urlparse(redirect_url)
+        params = parse_qs(parsed.query)
+        params["state"] = ["invalid-state"]
+        redirect_url = urlunparse(
+            (
+                parsed.scheme,
+                parsed.netloc,
+                parsed.path,
+                parsed.params,
+                urlencode(params, doseq=True),
+                parsed.fragment,
+            )
+        )
+
+        resp = wg_session.get(redirect_url, allow_redirects=False)
+        assert resp.status_code in (302, 307)
+        assert "login_error" in resp.headers.get("Location", "")
 
     def test_oidc_auth_wrong_credentials(
         self,
@@ -653,3 +985,215 @@ class TestHTTPUserAuthOIDC:
             active_role_names = {r.name for r in user_roles if r.is_active}
             assert "role-keep" in active_role_names
             assert "role-remove" not in active_role_names
+
+
+# ---------------------------------------------------------------------------
+# `groups_claim`: source group memberships from a configurable OIDC claim
+# (e.g. the standard-ish `groups` claim) and map them to roles via
+# role_mappings / admin_role_mappings. Group names are generic placeholders.
+# ---------------------------------------------------------------------------
+
+def _user_with_group_claims(entries):
+    """Build a single OIDC mock user whose `groups` claim is built from
+    *entries* (a list of ``{"Value":..., "ValueType":...}`` dicts)."""
+    claims = [
+        {"Type": "name", "Value": "Sam Tailor", "ValueType": "string"},
+        {"Type": "email", "Value": "sam.tailor@gmail.com", "ValueType": "string"},
+        {"Type": "preferred_username", "Value": "sam_tailor", "ValueType": "string"},
+    ]
+    for e in entries:
+        claims.append({"Type": "groups", **e})
+    return [
+        {"SubjectId": "1", "Username": "User1", "Password": "pwd", "Claims": claims}
+    ]
+
+
+def _str_groups(*names):
+    """Emit each group name as a repeated string-valued `groups` claim
+    (the OIDC mock's representation of an array of strings)."""
+    return [{"Value": n, "ValueType": "string"} for n in names]
+
+
+def _json_groups(value):
+    """Emit a single JSON-valued `groups` claim (array of strings/objects)."""
+    return [{"Value": json.dumps(value), "ValueType": "json"}]
+
+
+def _run_roles_claim_test(
+    processes,
+    group_entries,
+    *,
+    role_mappings=None,
+    admin_role_mappings=None,
+    pre_create_roles=(),
+):
+    """Drive a full OIDC login with a configurable `groups` claim and return
+    ``(access_role_names, admin_role_names)`` for the auto-created user."""
+    wg_http_port = alloc_port()
+    oidc_port = processes.start_oidc_server(
+        wg_http_port,
+        extra_scopes=["groups"],
+        users_override=_user_with_group_claims(group_entries),
+        extra_identity_resources=[{"Name": "groups", "ClaimTypes": ["groups"]}],
+    )
+    wg = _start_wg_with_oidc(
+        processes,
+        wg_http_port,
+        oidc_port,
+        auto_create_users=True,
+        roles_claim="groups",
+        admin_roles_claim="groups",
+        role_mappings=role_mappings,
+        admin_role_mappings=admin_role_mappings,
+        extra_scopes=["groups"],
+    )
+    wg_url = f"https://127.0.0.1:{wg.http_port}"
+
+    with admin_client(wg_url) as api:
+        for rn in pre_create_roles:
+            api.create_role(sdk.RoleDataRequest(name=rn))
+
+    _, resp = _do_oidc_login(wg_url, oidc_port)
+    assert resp.status_code in (302, 307), (
+        f"Expected redirect after login, got {resp.status_code}: {resp.text[:300]}"
+    )
+
+    with admin_client(wg_url) as api:
+        user = next(u for u in api.get_users() if u.username == "sam_tailor")
+        access = sorted(r.name for r in api.get_user_roles(user.id))
+        admin = sorted(r.name for r in api.get_user_admin_roles(user.id))
+    return access, admin
+
+
+class TestHTTPUserAuthOIDCGroupsClaim:
+    """Group memberships sourced from a configurable `groups` claim and mapped
+    to access/admin roles via role_mappings / admin_role_mappings."""
+
+    def test_access_role_mapping(self, echo_server_port, processes: ProcessManager):
+        access, admin = _run_roles_claim_test(
+            processes,
+            _str_groups("grp-ssh"),
+            role_mappings={"grp-ssh": "ssh-access-role"},
+            pre_create_roles=["ssh-access-role"],
+        )
+        assert access == ["ssh-access-role"]
+        assert admin == []
+
+    def test_admin_role_mapping(self, echo_server_port, processes: ProcessManager):
+        # "warpgate:admin" is warpgate's built-in admin role (always present).
+        access, admin = _run_roles_claim_test(
+            processes,
+            _str_groups("grp-admin"),
+            admin_role_mappings={"grp-admin": "warpgate:admin"},
+        )
+        assert access == []
+        assert "warpgate:admin" in admin
+
+    def test_combined_access_and_admin(
+        self, echo_server_port, processes: ProcessManager
+    ):
+        access, admin = _run_roles_claim_test(
+            processes,
+            _str_groups("grp-admin", "grp-ssh"),
+            role_mappings={"grp-ssh": "ssh-access-role"},
+            admin_role_mappings={"grp-admin": "warpgate:admin"},
+            pre_create_roles=["ssh-access-role"],
+        )
+        assert access == ["ssh-access-role"]
+        assert "warpgate:admin" in admin
+
+    def test_group_name_with_spaces(
+        self, echo_server_port, processes: ProcessManager
+    ):
+        access, admin = _run_roles_claim_test(
+            processes,
+            _str_groups("remote ssh users"),
+            role_mappings={"remote ssh users": "ssh-access-role"},
+            pre_create_roles=["ssh-access-role"],
+        )
+        assert access == ["ssh-access-role"]
+
+    def test_duplicate_group_names_dedup(
+        self, echo_server_port, processes: ProcessManager
+    ):
+        access, admin = _run_roles_claim_test(
+            processes,
+            _str_groups("grp-ssh", "grp-ssh"),
+            role_mappings={"grp-ssh": "ssh-access-role"},
+            pre_create_roles=["ssh-access-role"],
+        )
+        # role assigned exactly once despite the duplicate group
+        assert access == ["ssh-access-role"]
+
+    def test_multiple_groups_some_unmapped(
+        self, echo_server_port, processes: ProcessManager
+    ):
+        access, admin = _run_roles_claim_test(
+            processes,
+            _str_groups("grp-ssh", "grp-admin", "grp-extra", "grp-noise"),
+            role_mappings={"grp-ssh": "ssh-access-role"},
+            admin_role_mappings={"grp-admin": "warpgate:admin"},
+            pre_create_roles=["ssh-access-role"],
+        )
+        assert access == ["ssh-access-role"]
+        assert "warpgate:admin" in admin
+
+    def test_mapping_by_group_id_object(
+        self, echo_server_port, processes: ProcessManager
+    ):
+        # SCIM-style object array; map on the stable `value` (id), not the name.
+        access, admin = _run_roles_claim_test(
+            processes,
+            _json_groups([{"value": "id-ssh", "display": "grp-ssh"}]),
+            role_mappings={"id-ssh": "ssh-access-role"},
+            pre_create_roles=["ssh-access-role"],
+        )
+        assert access == ["ssh-access-role"]
+
+    def test_mapping_by_id_and_name_mixed(
+        self, echo_server_port, processes: ProcessManager
+    ):
+        access, admin = _run_roles_claim_test(
+            processes,
+            _json_groups(
+                [
+                    {"value": "id-ssh", "display": "grp-ssh"},
+                    {"value": "id-admin", "display": "grp-admin"},
+                ]
+            ),
+            role_mappings={"id-ssh": "ssh-access-role"},  # by id
+            admin_role_mappings={"grp-admin": "warpgate:admin"},  # by name
+            pre_create_roles=["ssh-access-role"],
+        )
+        assert access == ["ssh-access-role"]
+        assert "warpgate:admin" in admin
+
+    def test_complex_objects_cross_dedup_and_spaces(
+        self, echo_server_port, processes: ProcessManager
+    ):
+        # value/display collisions across entries, a value with a space, and a
+        # string entry equal to another entry's display. Flattened set is:
+        #   bla, bla2, dis1, dis2, val 3, val1, val2
+        access, admin = _run_roles_claim_test(
+            processes,
+            _json_groups(
+                [
+                    "bla",
+                    {"value": "val1", "display": "dis1"},
+                    {"value": "val2", "display": "dis1"},
+                    {"value": "val1", "display": "dis2"},
+                    "bla2",
+                    {"value": "val 3", "display": "bla2"},
+                ]
+            ),
+            # map several flattened keys; "dis1" (shared display) and "bla2"
+            # (string + display) must each yield their role exactly once.
+            role_mappings={
+                "dis1": "ssh-access-role",
+                "val 3": "spaced-role",
+            },
+            admin_role_mappings={"bla2": "warpgate:admin"},
+            pre_create_roles=["ssh-access-role", "spaced-role"],
+        )
+        assert access == ["spaced-role", "ssh-access-role"]
+        assert "warpgate:admin" in admin

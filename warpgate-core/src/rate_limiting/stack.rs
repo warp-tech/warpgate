@@ -1,12 +1,13 @@
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use super::swappable_cell::SwappableLimiterCellHandle;
 use super::RateLimitedStream;
+use super::swappable_cell::SwappableLimiterCellHandle;
 
 /// Three [RateLimitedStream]s in a trenchcoat, one with a global limiter,
 /// one with a user limiter and one with a target limiter, wrapping each other.
 /// The handle lets you swap out the limiters in each of them remotely.
 /// Created via [stack_rate_limiters].
+#[derive(Clone)]
 pub struct RateLimiterStackHandle {
     pub user: SwappableLimiterCellHandle,
     pub target: SwappableLimiterCellHandle,

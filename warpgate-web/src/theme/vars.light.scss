@@ -19,7 +19,8 @@ $teal:    #20c997 !default;
 $cyan:    #0e6b7e !default;
 
 // $primary: $blue;
-$secondary: #506579;
+$secondary: #737055;
+$body-tertiary-bg: #fbf4e9;
 
 $btn-disabled-color: #969696;
 
@@ -39,7 +40,7 @@ $link-underline-color: rgba($body-color, 0.25);
 $link-hover-underline-color: $body-color;
 
 
-$form-check-input-width: 1.3em;
+$form-check-input-width: 1.2em;
 $form-switch-width: 2.5em;
 $form-switch-padding-start:       3em;
 
@@ -59,3 +60,8 @@ $success-text-emphasis:   shade-color($success, 10%);
 $info-text-emphasis:      shade-color($info, 10%);
 $warning-text-emphasis:   shade-color($warning, 10%);
 $danger-text-emphasis:    shade-color($danger, 10%);
+
+$nav-pills-link-active-color: $body-color;
+
+$code-color: #5175a1;
+$code-bg: #e9f0f8;

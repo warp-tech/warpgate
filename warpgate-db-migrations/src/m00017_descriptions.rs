@@ -9,6 +9,7 @@ impl MigrationName for Migration {
     }
 }
 
+use crate::helpers::string_default_value;
 use crate::m00007_targets_and_roles::target;
 use crate::m00008_users::user;
 
@@ -36,16 +37,19 @@ pub mod role {
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        let backend = manager.get_database_backend();
+
+        let description_col = ColumnDef::new(Alias::new("description"))
+            .text()
+            .not_null()
+            .default(string_default_value(backend, ""))
+            .to_owned();
+
         manager
             .alter_table(
                 Table::alter()
                     .table(user::Entity)
-                    .add_column(
-                        ColumnDef::new(Alias::new("description"))
-                            .text()
-                            .not_null()
-                            .default(""),
-                    )
+                    .add_column(description_col.clone())
                     .to_owned(),
             )
             .await?;
@@ -53,12 +57,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(role::Entity)
-                    .add_column(
-                        ColumnDef::new(Alias::new("description"))
-                            .text()
-                            .not_null()
-                            .default(""),
-                    )
+                    .add_column(description_col.clone())
                     .to_owned(),
             )
             .await?;
@@ -66,12 +65,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(target::Entity)
-                    .add_column(
-                        ColumnDef::new(Alias::new("description"))
-                            .text()
-                            .not_null()
-                            .default(""),
-                    )
+                    .add_column(description_col)
                     .to_owned(),
             )
             .await?;

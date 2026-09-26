@@ -1,0 +1,137 @@
+diff -ru ironrdp-connector-0.10.0/src/connection.rs base/src/connection.rs
+--- ironrdp-connector-0.10.0/src/connection.rs	2006-07-24 03:21:28.000000000 +0200
++++ base/src/connection.rs	2026-09-14 17:44:17.818847210 +0200
+@@ -752,7 +752,9 @@
+     user_channel_id: u16,
+     output: &mut WriteBuf,
+ ) -> ConnectorResult<Written> {
+-    use ironrdp_pdu::rdp::autodetect::{AutoDetectRequest, AutoDetectResponse, AutoDetectRspPdu};
++    use ironrdp_pdu::rdp::autodetect::{
++        AutoDetectRequest, AutoDetectResponse, AutoDetectRspPdu, BW_RESULTS_CONNECT_TIME,
++    };
+ 
+     match request {
+         AutoDetectRequest::RttRequest { sequence_number, .. } => {
+@@ -760,14 +762,34 @@
+             let written = encode_send_data_request(user_channel_id, message_channel_id, &response, output)?;
+             Written::from_size(written)
+         }
+-        // Only RTT is answered at connect time. A connect-time Bandwidth Measure
+-        // Stop ([MS-RDPBCGR] 2.2.14.1.4) is defined to warrant a Bandwidth Measure
+-        // Results reply, and the Network Characteristics Result is informational.
+-        // We deliberately send neither: connect-time auto-detect is informational
+-        // and the server proceeds to licensing whether or not it receives them, so
+-        // skipping them does not stall the sequence. Full connect-time bandwidth
+-        // measurement (replying to Bandwidth Measure Stop with Bandwidth Measure
+-        // Results) is left for a follow-up.
++        // A connect-time Bandwidth Measure Stop ([MS-RDPBCGR] 2.2.14.1.4) warrants a
++        // Bandwidth Measure Results reply ([MS-RDPBCGR] 2.2.14.2.2). This reply must
++        // be sent: FreeRDP-based servers (for example GNOME Remote Desktop) block in
++        // their AWAIT_BW_RESULT state until they receive it and never proceed to
++        // licensing without it, so omitting it stalls the whole connection. We do not
++        // run a stateful connect-time measurement, so we report the payload the
++        // server handed us over a nominal interval; the figure is an informational
++        // QoS hint and the server proceeds on receipt. A precise measurement (timing
++        // the Start/Payload/Stop window) can refine the reported bandwidth later.
++        AutoDetectRequest::BandwidthMeasureStop {
++            sequence_number,
++            payload,
++            ..
++        } => {
++            let byte_count = payload
++                .as_ref()
++                .map_or(0, |p| u32::try_from(p.len()).unwrap_or(u32::MAX));
++            let response = AutoDetectRspPdu::new(AutoDetectResponse::BandwidthMeasureResults {
++                sequence_number,
++                response_type: BW_RESULTS_CONNECT_TIME,
++                time_delta_ms: 1,
++                byte_count,
++            });
++            let written = encode_send_data_request(user_channel_id, message_channel_id, &response, output)?;
++            Written::from_size(written)
++        }
++        // Bandwidth Measure Start and Payload carry no client reply, and the Network
++        // Characteristics Result is informational; nothing to send for those.
+         _ => Ok(Written::Nothing),
+     }
+ }
+diff -ru ironrdp-connector-0.10.0/src/connection_activation.rs base/src/connection_activation.rs
+--- ironrdp-connector-0.10.0/src/connection_activation.rs	2006-07-24 03:21:28.000000000 +0200
++++ base/src/connection_activation.rs	2026-09-14 17:44:17.819327794 +0200
+@@ -163,6 +163,38 @@
+                 {
+                     server_demand_active.pdu.capability_sets
+                 } else {
++                    // Instead of reactivating after a Deactivate-All, a server may end the
++                    // session (MS-RDPBCGR §1.3.1.3) by sending a Set Error Info PDU carrying the
++                    // disconnect reason. FreeRDP-based servers such as GNOME Remote Desktop do
++                    // this, for example when the backend screencast session cannot be created.
++                    // Surface that reason so the disconnect is explained rather than reported as
++                    // an unexpected PDU.
++                    if let rdp::headers::ShareControlPdu::Data(rdp::headers::ShareDataHeader {
++                        share_data_pdu:
++                            rdp::headers::ShareDataPdu::ServerSetErrorInfo(rdp::server_error_info::ServerSetErrorInfoPdu(
++                                error_info,
++                            )),
++                        ..
++                    }) = share_control_ctx.pdu
++                    {
++                        // ERRINFO_NONE is informational (it clears a previously reported error),
++                        // not a disconnect. Skip it and keep waiting for the Demand Active PDU,
++                        // matching how the connection finalization sequence treats it.
++                        if let rdp::server_error_info::ErrorInfo::ProtocolIndependentCode(
++                            rdp::server_error_info::ProtocolIndependentCode::None,
++                        ) = error_info
++                        {
++                            self.state = ConnectionActivationState::CapabilitiesExchange;
++                            return Ok(Written::Nothing);
++                        }
++
++                        return Err(reason_err!(
++                            "ConnectionActivation::CapabilitiesExchange",
++                            "server ended the session with error info: {}",
++                            error_info.description()
++                        ));
++                    }
++
+                     return Err(reason_err!(
+                         "ConnectionActivation::CapabilitiesExchange",
+                         "unexpected Share Control PDU during capabilities exchange: got {} (expected Server Demand Active PDU)",
+diff -ru ironrdp-connector-0.10.0/src/credssp.rs base/src/credssp.rs
+--- ironrdp-connector-0.10.0/src/credssp.rs	2006-07-24 03:21:28.000000000 +0200
++++ base/src/credssp.rs	2026-09-10 23:17:00.795332731 +0200
+@@ -98,6 +98,7 @@
+         server_name: ServerName,
+         server_public_key: Vec<u8>,
+         kerberos_config: Option<KerberosConfig>,
++        credentialless: bool,
+     ) -> ConnectorResult<(Self, credssp::TsRequest)> {
+         let credentials: sspi::Credentials = match &credentials {
+             Credentials::UsernamePassword { username, password } => {
+@@ -158,7 +159,11 @@
+         let client = CredSspClient::new(
+             server_public_key,
+             credentials,
+-            credssp::CredSspMode::WithCredentials,
++            if credentialless {
++                credssp::CredSspMode::CredentialLess
++            } else {
++                credssp::CredSspMode::WithCredentials
++            },
+             client_mode,
+             service_principal_name,
+         )
+diff -ru ironrdp-connector-0.10.0/src/lib.rs base/src/lib.rs
+--- ironrdp-connector-0.10.0/src/lib.rs	2006-07-24 03:21:28.000000000 +0200
++++ base/src/lib.rs	2026-09-10 23:17:00.795568105 +0200
+@@ -224,6 +224,10 @@
+     pub request_data: Option<NegoRequestData>,
+     /// If true, the INFO_AUTOLOGON flag is set in the [`ClientInfoPdu`](ironrdp_pdu::rdp::ClientInfoPdu)
+     pub autologon: bool,
++    /// If true, CredSSP delegates no credentials to the server (empty TSPasswordCreds):
++    /// NLA still authenticates the connection, but the server is left with nothing to log
++    /// the session on with and presents its own logon UI instead.
++    pub credssp_credentialless: bool,
+     /// If true, the INFO_NOAUDIOPLAYBACK flag is set in the [`ClientInfoPdu`](ironrdp_pdu::rdp::ClientInfoPdu)
+     pub enable_audio_playback: bool,
+     pub performance_flags: PerformanceFlags,

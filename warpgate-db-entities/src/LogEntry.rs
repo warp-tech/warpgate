@@ -11,6 +11,7 @@ use uuid::Uuid;
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    #[sea_orm(column_type = "Text")]
     pub text: String,
     pub target: String,
     pub values: JsonValue,

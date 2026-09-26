@@ -1,25 +1,32 @@
 [package]
-edition = "2021"
-license = "Apache-2.0"
 name = "warpgate-sso"
-version = "0.22.0-beta.6"
+version = "0.29.1"
+edition = "2024"
+license = "Apache-2.0"
 publish = false
 
 [dependencies]
 bytes.workspace = true
-thiserror.workspace = true
-tokio.workspace = true
-tracing.workspace = true
+data-encoding.workspace = true
+form_urlencoded = "1.2"
+jsonwebtoken = { version = "10", default-features = false, features = [
+    "use_pem",
+    "aws_lc_rs",
+] }
 openidconnect = { version = "4.0", default-features = false, features = [
     "reqwest",
     "accept-string-booleans",
 ] }
-yup-oauth2 = "12"
-reqwest_12.workspace = true
-reqwest_12.features = ["json"]
+reqwest_12 = { workspace = true, features = ["json"] }
+schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-jsonwebtoken = { version = "9", default-features = false, features = ["use_pem"] }
-data-encoding.workspace = true
-futures.workspace = true
-schemars.workspace = true
+subtle.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+yup-oauth2 = { version = "12", default-features = false, features = [
+    "service-account",
+    "hyper-rustls",
+    "ring",
+] }

@@ -1,13 +1,13 @@
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 
 use sea_orm::query::JsonValue;
 use sea_orm::{ActiveModelTrait, DatabaseConnection};
 use time::OffsetDateTime;
-use tokio::sync::Mutex;
-use tracing::{error, Subscriber};
-use tracing_subscriber::registry::LookupSpan;
+use tracing::{Subscriber, error};
 use tracing_subscriber::Layer;
+use tracing_subscriber::registry::LookupSpan;
 use uuid::Uuid;
+pub use warpgate_common::helpers::logging::format_related_ids;
 use warpgate_db_entities::LogEntry;
 
 use super::layer::ValuesLogLayer;
@@ -22,15 +22,15 @@ where
 {
     let _ = LOG_SENDER.set(tokio::sync::broadcast::channel(1024).0);
     ValuesLogLayer::new(|values, target| {
-        if let Some(sender) = LOG_SENDER.get() {
-            if let Some(entry) = values_to_log_entry_data(values, target) {
-                let _ = sender.send(entry);
-            }
+        if let Some(sender) = LOG_SENDER.get()
+            && let Some(entry) = values_to_log_entry_data(values, target)
+        {
+            let _ = sender.send(entry);
         }
     })
 }
 
-pub fn install_database_logger(database: Arc<Mutex<DatabaseConnection>>) {
+pub fn install_database_logger(database: DatabaseConnection) {
     tokio::spawn(async move {
         #[allow(clippy::expect_used)]
         let mut receiver = LOG_SENDER
@@ -41,24 +41,13 @@ pub fn install_database_logger(database: Arc<Mutex<DatabaseConnection>>) {
             match receiver.recv().await {
                 Err(_) => break,
                 Ok(log_entry) => {
-                    let database = database.lock().await;
-                    if let Err(error) = log_entry.insert(&*database).await {
+                    if let Err(error) = log_entry.insert(&database).await {
                         error!(?error, "Failed to store log entry");
                     }
                 }
             }
         }
     });
-}
-
-pub fn format_related_ids(ids: &[Uuid]) -> String {
-    let mut result = String::new();
-    for id in ids {
-        result.push('$');
-        result.push_str(&id.to_string());
-    }
-    result.push('$');
-    result
 }
 
 fn values_to_log_entry_data(
@@ -68,7 +57,9 @@ fn values_to_log_entry_data(
     use sea_orm::ActiveValue::Set;
 
     let session_id = (*values).remove("session");
-    let username = (*values).remove("session_username");
+    let username = (*values)
+        .remove("session_username")
+        .or_else(|| (*values).get("username").cloned());
     let related_users = (*values).remove("related_users");
     let related_access_roles = (*values).remove("related_access_roles");
     let related_admin_roles = (*values).remove("related_admin_roles");

@@ -1,0 +1,4 @@
+# Runtime files — never commit
+data/
+.warpgate.pid
+warpgate.log

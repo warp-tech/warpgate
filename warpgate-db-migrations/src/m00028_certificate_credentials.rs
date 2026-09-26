@@ -1,6 +1,6 @@
+use sea_orm::Schema;
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::ForeignKeyAction;
-use sea_orm::Schema;
 use sea_orm_migration::prelude::*;
 use serde::Serialize;
 use time::OffsetDateTime;

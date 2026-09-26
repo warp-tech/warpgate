@@ -1,6 +1,6 @@
 <script lang="ts">
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
-    import { adminPermissions, type AdminPermissionKey } from './store'
+    import { Alert } from '@sveltestrap/sveltestrap'
+    import { type AdminPermissionKey, adminPermissions } from './store'
 
     /**
      * Render children only if the given admin permission is granted.

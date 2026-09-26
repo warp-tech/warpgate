@@ -1,15 +1,9 @@
-import { defineConfig } from 'vite'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
-import tsconfigPaths from 'vite-tsconfig-paths'
-import { checker } from 'vite-plugin-checker'
+import { defineConfig } from 'vite'
 
 // https://vitejs.dev/config/
 export default defineConfig({
-    plugins: [
-        svelte(),
-        tsconfigPaths(),
-        // checker({ typescript: true }),
-    ],
+    plugins: [svelte()],
     base: '/@warpgate',
     build: {
         sourcemap: true,
@@ -29,5 +23,8 @@ export default defineConfig({
                 embed: 'src/embed/index.ts',
             },
         },
+    },
+    resolve: {
+        tsconfigPaths: true,
     },
 })

@@ -1,13 +1,23 @@
 import * as admin from 'admin/lib/api'
 import * as gw from 'gateway/lib/api'
 
-// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-export async function stringifyError (err: any): Promise<string> {
+// The status an API error carried, for callers that can say something better
+// than the response body about a particular one.
+export function errorStatus(err: unknown): number | undefined {
+    return (err as { response?: Response } | undefined)?.response?.status
+}
+
+export async function stringifyError(err: unknown): Promise<string> {
     if (err instanceof gw.ResponseError) {
         return gw.stringifyError(err)
     }
     if (err instanceof admin.ResponseError) {
         return admin.stringifyError(err)
     }
-    return err.toString()
+    // A message thrown deliberately is already written for the reader; the
+    // `Error:` prefix `String()` adds is noise.
+    if (err instanceof Error) {
+        return err.message
+    }
+    return String(err)
 }

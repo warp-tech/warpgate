@@ -1,18 +1,22 @@
 use anyhow::Context;
+use poem::Request;
 use poem::session::Session;
 use poem::web::Data;
-use poem::Request;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::{ColumnTrait, EntityTrait, ModelTrait, QueryFilter};
+use sea_orm::{EntityTrait, IntoActiveModel, Set};
 use serde::Serialize;
 use warpgate_common::version::warpgate_version;
+use warpgate_common::{AdminPermission, AdminPermissionSet, warnings};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
-use warpgate_common_http::{AuthenticatedRequestContext, SessionAuthorization};
+use warpgate_common_http::ext::construct_external_url;
+use warpgate_common_http::{
+    AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
+};
 use warpgate_core::ConfigProvider;
-use warpgate_db_entities::{AdminRole, LdapServer, Parameters, User};
+use warpgate_db_entities::{LdapServer, Parameters};
 
-use crate::common::{is_user_admin, SessionExt};
+use crate::common::{SessionExt, is_user_admin};
 
 pub struct Api;
 
@@ -23,6 +27,8 @@ pub struct PortsInfo {
     mysql: Option<u16>,
     postgres: Option<u16>,
     kubernetes: Option<u16>,
+    vnc: Option<u16>,
+    rdp: Option<u16>,
 }
 
 #[derive(Serialize, Object)]
@@ -32,17 +38,20 @@ pub struct ExternalHostsInfo {
     mysql: Option<String>,
     postgres: Option<String>,
     kubernetes: Option<String>,
+    vnc: Option<String>,
+    rdp: Option<String>,
 }
 
 #[derive(Serialize, Object, Debug)]
 pub struct SetupState {
     has_targets: bool,
     has_users: bool,
+    tutorial_dismissed: bool,
 }
 
 impl SetupState {
     pub const fn completed(&self) -> bool {
-        self.has_targets && self.has_users
+        self.tutorial_dismissed || (self.has_targets && self.has_users)
     }
 }
 
@@ -63,6 +72,7 @@ pub struct AdminPermissions {
 
     sessions_view: bool,
     sessions_terminate: bool,
+    approve_sessions: bool,
 
     recordings_view: bool,
 
@@ -71,6 +81,33 @@ pub struct AdminPermissions {
 
     config_edit: bool,
     admin_roles_manage: bool,
+    ticket_requests_manage: bool,
+}
+
+impl From<AdminPermissionSet> for AdminPermissions {
+    fn from(set: AdminPermissionSet) -> Self {
+        Self {
+            targets_create: set.contains(AdminPermission::TargetsCreate),
+            targets_edit: set.contains(AdminPermission::TargetsEdit),
+            targets_delete: set.contains(AdminPermission::TargetsDelete),
+            users_create: set.contains(AdminPermission::UsersCreate),
+            users_edit: set.contains(AdminPermission::UsersEdit),
+            users_delete: set.contains(AdminPermission::UsersDelete),
+            access_roles_create: set.contains(AdminPermission::AccessRolesCreate),
+            access_roles_edit: set.contains(AdminPermission::AccessRolesEdit),
+            access_roles_delete: set.contains(AdminPermission::AccessRolesDelete),
+            access_roles_assign: set.contains(AdminPermission::AccessRolesAssign),
+            sessions_view: set.contains(AdminPermission::SessionsView),
+            sessions_terminate: set.contains(AdminPermission::SessionsTerminate),
+            approve_sessions: set.contains(AdminPermission::ApproveSessions),
+            recordings_view: set.contains(AdminPermission::RecordingsView),
+            tickets_create: set.contains(AdminPermission::TicketsCreate),
+            tickets_delete: set.contains(AdminPermission::TicketsDelete),
+            config_edit: set.contains(AdminPermission::ConfigEdit),
+            admin_roles_manage: set.contains(AdminPermission::AdminRolesManage),
+            ticket_requests_manage: set.contains(AdminPermission::TicketRequestsManage),
+        }
+    }
 }
 
 #[derive(Serialize, Object)]
@@ -81,20 +118,44 @@ pub struct Info {
     external_host: Option<String>,
     external_hosts: Option<ExternalHostsInfo>,
     ports: PortsInfo,
-    minimize_password_login: bool,
+    password_login_mode: Parameters::PasswordLoginMode,
     authorized_via_ticket: bool,
     authorized_via_sso_with_single_logout: bool,
     own_credential_management_allowed: bool,
+    ticket_self_service_enabled: bool,
+    ticket_max_duration_seconds: Option<i64>,
+    ticket_max_uses: Option<i16>,
+    ticket_require_description: bool,
+    ticket_request_show_all_targets: bool,
+    target_click_action: Parameters::TargetClickAction,
+    open_targets_in_new_tab: Parameters::OpenTargetsInNewTabMode,
+    max_api_token_duration_seconds: Option<i64>,
+    web_clients_enabled: bool,
     has_ldap: bool,
+    needs_mfa_setup: bool,
+    otp_setup_enforced: bool,
     setup_state: Option<SetupState>,
     admin_permissions: Option<AdminPermissions>,
     running_on_ec2: Option<bool>,
+    should_prompt_analytics: bool,
+    /// Login banner, shown to unauthenticated visitors too. Empty when unset.
+    banner: String,
+    show_session_menu: bool,
+    config_warnings: Option<Vec<String>>,
 }
 
 #[derive(ApiResponse)]
 enum InstanceInfoResponse {
     #[oai(status = 200)]
     Ok(Json<Info>),
+}
+
+#[derive(ApiResponse)]
+enum DismissTutorialResponse {
+    #[oai(status = 201)]
+    Done,
+    #[oai(status = 403)]
+    Forbidden,
 }
 
 #[OpenApi]
@@ -108,22 +169,18 @@ impl Api {
         auth_ctx: Option<Data<&AuthenticatedRequestContext>>,
     ) -> poem::Result<InstanceInfoResponse> {
         let config = ctx.services().config.lock().await;
-        let external_host = config
-            .construct_external_url(Some(req), None)
+        let external_host = construct_external_url(Some(req), &config, None)
+            .await
             .ok()
             .as_ref()
             .and_then(url::Url::host)
             .map(|x| x.to_string());
 
-        let parameters = {
-            Parameters::Entity::get(&*ctx.services().db.lock().await)
-                .await
-                .context("loading parameters")?
-        };
+        let parameters = ctx.parameters().await?;
 
         let setup_state = {
             let (users, targets) = {
-                let mut p = ctx.services().config_provider.lock().await;
+                let p = &ctx.services().config_provider;
                 let users = p.list_users().await?;
                 let targets = p.list_targets().await?;
                 (users, targets)
@@ -135,21 +192,41 @@ impl Api {
             };
             if user_is_admin {
                 let state = SetupState {
-                    has_targets: targets.len() > 1,
+                    has_targets: !targets.is_empty(),
                     has_users: users.len() > 1,
+                    tutorial_dismissed: parameters.tutorial_dismissed,
                 };
-                if state.completed() {
-                    None
-                } else {
-                    Some(state)
-                }
+                if state.completed() { None } else { Some(state) }
             } else {
                 None
             }
         };
 
+        let live_user_id = auth_ctx.as_ref().and_then(|auth_ctx| match &auth_ctx.auth {
+            RequestAuthorization::Session(SessionAuthorization::User { user_id, .. }) => {
+                Some(*user_id)
+            }
+            _ => None,
+        });
+        let (needs_mfa_setup, otp_setup_enforced) = match live_user_id {
+            Some(user_id) if parameters.mfa_enforcement != Parameters::MfaEnforcement::Off => {
+                let enforced = ctx
+                    .services()
+                    .effective_mfa_enforcement(parameters, user_id)
+                    .await?
+                    != Parameters::MfaEnforcement::Off;
+                let needs_setup = enforced
+                    && ctx
+                        .services()
+                        .mfa_setup_required(parameters, user_id)
+                        .await?;
+                (needs_setup, enforced)
+            }
+            _ => (false, false),
+        };
+
         let has_ldap = LdapServer::Entity::find()
-            .one(&*ctx.services().db.lock().await)
+            .one(&ctx.services().db)
             .await
             .context("loading LDAP servers")?
             .is_some();
@@ -188,64 +265,52 @@ impl Api {
                     .external_host
                     .clone()
                     .or_else(|| fallback_host.clone()),
+                vnc: config
+                    .store
+                    .vnc
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
+                rdp: config
+                    .store
+                    .rdp
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
             })
         } else {
             None
         };
 
-        // compute admin permissions (only if authenticated)
-        let admin_permissions = if let Some(ctx) = &auth_ctx {
-            if let Some(username) = ctx.auth.username() {
-                let db = ctx.services().db.lock().await;
-                let perms = {
-                    let mut combined = AdminPermissions::default();
-                    if let Some(user) = User::Entity::find()
-                        .filter(User::Column::Username.eq(username))
-                        .one(&*db)
-                        .await
-                        .context("loading user")?
-                    {
-                        let roles: Vec<AdminRole::Model> = user
-                            .find_related(AdminRole::Entity)
-                            .all(&*db)
-                            .await
-                            .context("loading roles")?;
-                        for r in roles {
-                            combined.targets_create |= r.targets_create;
-                            combined.targets_edit |= r.targets_edit;
-                            combined.targets_delete |= r.targets_delete;
-                            combined.users_create |= r.users_create;
-                            combined.users_edit |= r.users_edit;
-                            combined.users_delete |= r.users_delete;
-                            combined.access_roles_create |= r.access_roles_create;
-                            combined.access_roles_edit |= r.access_roles_edit;
-                            combined.access_roles_delete |= r.access_roles_delete;
-                            combined.access_roles_assign |= r.access_roles_assign;
-                            combined.sessions_view |= r.sessions_view;
-                            combined.sessions_terminate |= r.sessions_terminate;
-                            combined.recordings_view |= r.recordings_view;
-                            combined.tickets_create |= r.tickets_create;
-                            combined.tickets_delete |= r.tickets_delete;
-                            combined.config_edit |= r.config_edit;
-                            combined.admin_roles_manage |= r.admin_roles_manage;
-                        }
-                    }
-                    combined
-                };
-                Some(perms)
-            } else {
-                None
-            }
-        } else {
-            None
+        // Admin permissions for the UI, from the one shared loader (only if authenticated).
+        let admin_permissions = match &auth_ctx {
+            Some(ctx) => Some(AdminPermissions::from(
+                warpgate_admin::api::admin_permission_set(ctx).await?,
+            )),
+            None => None,
+        };
+
+        let can_edit_config = admin_permissions.as_ref().is_some_and(|p| p.config_edit);
+
+        let should_prompt_analytics = {
+            let instance_older_than_a_week = time::OffsetDateTime::now_utc()
+                - parameters.instance_created_at
+                >= time::Duration::weeks(1);
+
+            can_edit_config
+                && parameters.analytics_consent == Parameters::AnalyticsConsent::Undecided
+                && setup_state.is_none()
+                && instance_older_than_a_week
         };
 
         Ok(InstanceInfoResponse::Ok(Json(Info {
             version: auth_ctx.is_some().then(|| warpgate_version().to_string()),
-            username: session.get_username(),
+            username: auth_ctx
+                .as_ref()
+                .and_then(|auth_ctx| auth_ctx.auth.username().map(ToString::to_string)),
             selected_target: session.get_target_name(),
             external_host,
-            minimize_password_login: parameters.minimize_password_login,
+            password_login_mode: parameters.password_login_mode,
             authorized_via_ticket: matches!(
                 session.get_auth(),
                 Some(SessionAuthorization::Ticket { .. })
@@ -277,6 +342,16 @@ impl Api {
                     } else {
                         None
                     },
+                    vnc: if config.store.vnc.enable {
+                        Some(config.store.vnc.external_port())
+                    } else {
+                        None
+                    },
+                    rdp: if config.store.rdp.enable {
+                        Some(config.store.rdp.external_port())
+                    } else {
+                        None
+                    },
                 }
             } else {
                 PortsInfo {
@@ -285,9 +360,22 @@ impl Api {
                     mysql: None,
                     postgres: None,
                     kubernetes: None,
+                    vnc: None,
+                    rdp: None,
                 }
             },
             own_credential_management_allowed: parameters.allow_own_credential_management,
+            ticket_self_service_enabled: parameters.ticket_self_service_enabled,
+            ticket_max_duration_seconds: parameters.ticket_max_duration_seconds,
+            ticket_max_uses: parameters.ticket_max_uses,
+            ticket_require_description: parameters.ticket_require_description,
+            ticket_request_show_all_targets: parameters.ticket_request_show_all_targets,
+            target_click_action: parameters.target_click_action,
+            open_targets_in_new_tab: parameters.open_targets_in_new_tab,
+            max_api_token_duration_seconds: parameters.max_api_token_duration_seconds,
+            web_clients_enabled: parameters.web_clients_enabled,
+            needs_mfa_setup,
+            otp_setup_enforced,
             setup_state,
             has_ldap: auth_ctx.is_some() && has_ldap,
             admin_permissions,
@@ -296,6 +384,46 @@ impl Api {
             } else {
                 None
             },
+            should_prompt_analytics,
+            banner: parameters.banner.clone(),
+            show_session_menu: parameters.show_session_menu,
+            config_warnings: can_edit_config.then(warnings),
         })))
+    }
+
+    #[oai(
+        path = "/dismiss-tutorial",
+        method = "post",
+        operation_id = "dismiss_tutorial"
+    )]
+    async fn api_dismiss_tutorial(
+        &self,
+        ctx: Data<&UnauthenticatedRequestContext>,
+        auth_ctx: Option<Data<&AuthenticatedRequestContext>>,
+    ) -> poem::Result<DismissTutorialResponse> {
+        // Dismissing the tutorial writes a global parameter, so gate it on `ConfigEdit`
+        // specifically rather than "any admin role".
+        let can_dismiss = if let Some(ctx) = &auth_ctx {
+            warpgate_admin::api::admin_permission_set(ctx)
+                .await
+                .map_err(poem::error::InternalServerError)?
+                .contains(AdminPermission::ConfigEdit)
+        } else {
+            false
+        };
+
+        if !can_dismiss {
+            return Ok(DismissTutorialResponse::Forbidden);
+        }
+
+        let db = &ctx.services().db;
+        let mut parameters = ctx.parameters().await?.clone().into_active_model();
+        parameters.tutorial_dismissed = Set(true);
+        Parameters::Entity::update(parameters)
+            .exec(db)
+            .await
+            .context("updating parameters")?;
+
+        Ok(DismissTutorialResponse::Done)
     }
 }

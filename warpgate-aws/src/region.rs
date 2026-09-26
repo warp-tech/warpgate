@@ -10,13 +10,13 @@ pub fn parse_eks_region(url: &str) -> Option<String> {
     // e.g. ABCD1234.gr7.us-east-1.eks.amazonaws.com
     let parts: Vec<&str> = host.split('.').collect();
     // Find "eks" and "amazonaws" in the parts
-    if let Some(eks_pos) = parts.iter().position(|&p| p == "eks") {
-        if eks_pos >= 1 {
-            #[allow(clippy::indexing_slicing)] // known index
-            let region = parts[eks_pos - 1];
-            if region.contains('-') {
-                return Some(region.to_string());
-            }
+    if let Some(eks_pos) = parts.iter().position(|&p| p == "eks")
+        && eks_pos >= 1
+    {
+        #[allow(clippy::indexing_slicing)] // known index
+        let region = parts[eks_pos - 1];
+        if region.contains('-') {
+            return Some(region.to_string());
         }
     }
     None
@@ -30,13 +30,13 @@ pub fn parse_eks_region(url: &str) -> Option<String> {
 pub fn parse_rds_region(host: &str) -> Option<String> {
     let parts: Vec<&str> = host.split('.').collect();
     // Find "rds" and "amazonaws" in the parts
-    if let Some(rds_pos) = parts.iter().position(|&p| p == "rds") {
-        if rds_pos >= 1 {
-            #[allow(clippy::indexing_slicing)] // known index
-            let region = parts[rds_pos - 1];
-            if region.contains('-') {
-                return Some(region.to_string());
-            }
+    if let Some(rds_pos) = parts.iter().position(|&p| p == "rds")
+        && rds_pos >= 1
+    {
+        #[allow(clippy::indexing_slicing)] // known index
+        let region = parts[rds_pos - 1];
+        if region.contains('-') {
+            return Some(region.to_string());
         }
     }
     None

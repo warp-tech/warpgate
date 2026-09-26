@@ -4,18 +4,22 @@ on: [pull_request]
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check-schema-compatibility:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout PR branch
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
 
       - name: Install just
         run: |
-          cargo install just
+          cargo install --locked just@1.4.0
 
       - name: Install npm dependencies
         run: |
@@ -27,15 +31,15 @@ jobs:
           just openapi-all
 
       - name: Checkout main branch to compare
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: main
           path: main-branch
 
       - name: Check admin API
         run: |
-          docker run --rm -t -v $(pwd):/specs:ro tufin/oasdiff breaking -f githubactions --fail-on WARN /specs/main-branch/warpgate-web/src/admin/lib/openapi-schema.json /specs/warpgate-web/src/admin/lib/openapi-schema.json
+          docker run --rm -t -v $(pwd):/specs:ro tufin/oasdiff breaking -f githubactions --fail-on WARN --severity-levels /specs/oasdiff-severity.txt /specs/main-branch/warpgate-web/src/admin/lib/openapi-schema.json /specs/warpgate-web/src/admin/lib/openapi-schema.json
 
       - name: Check gateway API
         run: |
-          docker run --rm -t -v $(pwd):/specs:ro tufin/oasdiff breaking -f githubactions --fail-on WARN /specs/main-branch/warpgate-web/src/gateway/lib/openapi-schema.json /specs/warpgate-web/src/gateway/lib/openapi-schema.json
+          docker run --rm -t -v $(pwd):/specs:ro tufin/oasdiff breaking -f githubactions --fail-on WARN --severity-levels /specs/oasdiff-severity.txt /specs/main-branch/warpgate-web/src/gateway/lib/openapi-schema.json /specs/warpgate-web/src/gateway/lib/openapi-schema.json

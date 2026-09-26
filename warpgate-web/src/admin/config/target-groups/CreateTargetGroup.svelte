@@ -1,19 +1,18 @@
 <script lang="ts">
+    import { Alert, FormGroup, Input, Label } from '@sveltestrap/sveltestrap'
     import { api, type BootstrapThemeColor } from 'admin/lib/api'
-    import { link, replace } from 'svelte-spa-router'
-    import { FormGroup, Input, Label } from '@sveltestrap/sveltestrap'
-    import { stringifyError } from 'common/errors'
-    import GroupColorCircle from 'common/GroupColorCircle.svelte'
-    import { VALID_CHOICES } from './common'
     import AsyncButton from 'common/AsyncButton.svelte'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import { stringifyError } from 'common/errors'
+    import GroupColorIcon from 'common/GroupColorIcon.svelte'
+    import { link, replace } from 'svelte-spa-router'
+    import { VALID_CHOICES } from './common'
 
     let name = $state('')
     let description = $state('')
     let color = $state<BootstrapThemeColor | ''>('')
     let error: string | undefined = $state()
 
-    async function save () {
+    async function save() {
         if (!name.trim()) {
             error = 'Name is required'
             return
@@ -47,26 +46,20 @@
         <Alert color="danger">{error}</Alert>
     {/if}
 
-    <form onsubmit={e => {
+    <form
+        onsubmit={e => {
         e.preventDefault()
         save()
-    }}>
+    }}
+    >
         <FormGroup>
             <Label for="name">Name</Label>
-            <Input
-                id="name"
-                bind:value={name}
-                required
-            />
+            <Input id="name" bind:value={name} required />
         </FormGroup>
 
         <FormGroup>
             <Label for="description">Description</Label>
-            <Input
-                id="description"
-                type="textarea"
-                bind:value={description}
-            />
+            <Input id="description" type="textarea" bind:value={description} />
         </FormGroup>
 
         <FormGroup>
@@ -86,7 +79,7 @@
                         }}
                         title={value || 'None'}
                     >
-                        <GroupColorCircle color={value} />
+                        <GroupColorIcon color={value} />
                         <span>{value || 'None'}</span>
                     </button>
                 {/each}

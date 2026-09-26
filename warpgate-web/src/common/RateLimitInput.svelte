@@ -26,7 +26,12 @@
     const maxBytes = 4 * 1000 * 1000 * 1000 // actually 4 GiB (u32) but here 4GB for nicer display
 
     // Unit conversion constants
-    const units = [
+    interface Unit {
+        label: string
+        value: number
+        suffix: string
+    }
+    const units: [Unit, Unit, Unit] = [
         { label: 'KB', value: 1000, suffix: 'kilobytes' },
         { label: 'MB', value: 1000 * 1000, suffix: 'megabytes' },
         { label: 'GB', value: 1000 * 1000 * 1000, suffix: 'gigabytes' },
@@ -34,10 +39,10 @@
 
     // Internal state - these are completely separate from the external value
     let displayValue: number | undefined = $state()
-    let selectedUnit = $state(units[0]!)
+    let selectedUnit = $state(units[0])
     let lastExternalValue: number | undefined = $state()
 
-    function isValidValue (v: number | undefined): boolean {
+    function isValidValue(v: number | undefined): boolean {
         if (v === undefined) {
             return allowEmpty
         }
@@ -64,12 +69,12 @@
     // Helper function to get best display unit for a byte value
     function getDisplayUnit(bytes: number) {
         for (let i = units.length - 1; i >= 0; i--) {
-            const unit = units[i]!
-            if (bytes >= unit.value) {
+            const unit = units[i]
+            if (unit && bytes >= unit.value) {
                 return unit
             }
         }
-        return units[0]!
+        return units[0]
     }
 
     // Initialize display when external value changes (not internal changes)
@@ -83,7 +88,7 @@
                 displayValue = value / selectedUnit.value
             } else {
                 displayValue = undefined
-                selectedUnit = units[0]!
+                selectedUnit = units[0]
             }
         }
     })
@@ -100,7 +105,7 @@
         maybeUpdateValue(toBytes())
     }
 
-    function maybeUpdateValue (v: number | undefined) {
+    function maybeUpdateValue(v: number | undefined) {
         if (!isValidValue(v)) {
             return
         }

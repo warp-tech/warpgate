@@ -32,3 +32,10 @@ cdx.xml
 *.cdx.xml
 
 node_modules
+
+.github
+/*.md
+.env
+
+rustc-ice-*.txt
+.zed

@@ -3,37 +3,72 @@
 
 version: 2
 updates:
-  - package-ecosystem: "cargo"
+  - package-ecosystem: cargo
     directory: "/"
     labels: ["type/deps"]
-    #open-pull-requests-limit: 25
+    cooldown:
+      default-days: 5
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
     schedule:
-      interval: "daily"
+      interval: weekly
     groups:
-      version-bumps:
+      rust-updates:
         applies-to: version-updates
         update-types:
           - minor
           - patch
-  - package-ecosystem: "npm"
+  - package-ecosystem: npm
     directory: "/warpgate-web"
     labels: ["type/deps"]
-    #open-pull-requests-limit: 25
+    cooldown:
+      default-days: 5
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
     groups:
-      version-bumps:
+      npm-updates:
         applies-to: version-updates
         update-types:
           - minor
           - patch
     schedule:
-      interval: "daily"
+      interval: weekly
 
   - package-ecosystem: github-actions
     directory: /
+    labels: ["type/deps"]
     schedule:
-      interval: daily
+      interval: weekly
+    groups:
+      actions-updates:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: docker
     directory: /docker
+    labels: ["type/deps"]
     schedule:
-      interval: daily
+      interval: weekly
+
+  - package-ecosystem: pip
+    directory: /tests
+    labels: ["type/deps"]
+    exclude-paths:
+      - api_sdk
+    cooldown:
+      default-days: 5
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
+    schedule:
+      interval: weekly
+    groups:
+      pip-updates:
+        applies-to: version-updates
+        update-types:
+          - patch
+          - minor

@@ -1,0 +1,23 @@
+# Target services only — warpgate runs natively via start.sh
+# (avoids 30-min Docker build; start.sh uses the already-built debug binary)
+version: "3.8"
+
+services:
+  ssh-target:
+    image: lscr.io/linuxserver/openssh-server:latest
+    container_name: wg-ssh-target
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+      - PASSWORD_ACCESS=true
+      - USER_NAME=sshtestuser
+      - USER_PASSWORD=sshtestpassword
+      - DOCKER_MODS=linuxserver/mods:openssh-server-openssh-client
+    ports:
+      - "2223:2222"
+    restart: unless-stopped
+
+networks:
+  default:
+    name: wg-test-net

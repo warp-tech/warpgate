@@ -1,6 +1,8 @@
 use poem_openapi::Object;
-use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
+use sea_orm::entity::prelude::*;
+use sea_orm::sea_query::IntoIden;
+use sea_orm::Condition;
 use serde::Serialize;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -9,9 +11,9 @@ use uuid::Uuid;
 #[sea_orm(table_name = "user_roles")]
 #[oai(rename = "UserRoleAssignment")]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = true)]
-    pub id: i32,
+    #[sea_orm(primary_key, auto_increment = false)]
     pub user_id: Uuid,
+    #[sea_orm(primary_key, auto_increment = false)]
     pub role_id: Uuid,
     /// When this role assignment was granted
     pub granted_at: Option<OffsetDateTime>,
@@ -32,13 +34,21 @@ impl Model {
 }
 
 impl Entity {
+    /// Matches assignments that are neither revoked nor past their expiry.
+    /// `table` qualifies the columns so this also holds for joined or aliased
+    /// uses of `user_roles`.
+    pub fn active_condition(table: DynIden) -> Condition {
+        Condition::all()
+            .add(Expr::col((table.clone(), Column::RevokedAt)).is_null())
+            .add(
+                Expr::col((table.clone(), Column::ExpiresAt))
+                    .is_null()
+                    .or(Expr::col((table, Column::ExpiresAt)).gt(OffsetDateTime::now_utc())),
+            )
+    }
+
     pub fn find_active() -> Select<Self> {
-        Self::find().filter(
-            Column::ExpiresAt
-                .is_null()
-                .or(Column::ExpiresAt.gt(OffsetDateTime::now_utc()))
-                .and(Column::RevokedAt.is_null()),
-        )
+        Self::find().filter(Self::active_condition(Entity.into_iden()))
     }
 
     pub async fn idempotent_grant(
@@ -72,7 +82,6 @@ impl Entity {
                 granted_at: Set(Some(now)),
                 expires_at: Set(expires_at),
                 revoked_at: Set(None),
-                ..Default::default()
             };
             values.insert(db).await?
         })
@@ -101,3 +110,26 @@ impl RelationTrait for Relation {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+#[cfg(test)]
+mod tests {
+    use sea_orm::{DbBackend, QueryTrait, Related};
+
+    /// Traversing users <-> roles must not surface revoked or expired grants,
+    /// or the admin UI would disagree with what authorization allows.
+    #[test]
+    fn related_queries_exclude_inactive_assignments() {
+        let queries = [
+            <crate::Role::Entity as Related<crate::User::Entity>>::find_related()
+                .build(DbBackend::Sqlite)
+                .to_string(),
+            <crate::User::Entity as Related<crate::Role::Entity>>::find_related()
+                .build(DbBackend::Sqlite)
+                .to_string(),
+        ];
+        for sql in queries {
+            assert!(sql.contains(r#""user_roles"."revoked_at" IS NULL"#), "{sql}");
+            assert!(sql.contains(r#""user_roles"."expires_at" IS NULL"#), "{sql}");
+        }
+    }
+}

@@ -9,6 +9,8 @@ use crate::types::Secret;
 pub type OtpExposedSecretKey = Vec<u8>;
 pub type OtpSecretKey = Secret<OtpExposedSecretKey>;
 
+pub const OTP_DIGITS: usize = 6;
+
 pub fn generate_key() -> OtpSecretKey {
     Secret::new(get_crypto_rng().random::<[u8; 32]>().into())
 }
@@ -21,7 +23,7 @@ pub fn generate_setup_url(key: &OtpSecretKey, label: &str) -> Secret<String> {
 fn get_totp(key: &OtpSecretKey, label: Option<&str>) -> TOTP {
     TOTP {
         algorithm: Algorithm::SHA1,
-        digits: 6,
+        digits: OTP_DIGITS,
         skew: 1,
         step: 30,
         secret: key.expose_secret().clone(),

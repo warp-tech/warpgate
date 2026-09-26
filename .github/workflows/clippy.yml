@@ -4,20 +4,30 @@ on: [pull_request]
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   clippy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout PR branch
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
 
       - name: Install deps
         run: |
           rustup component add clippy
-          cargo install just
+          cargo install --locked just@1.4.0
           cargo install --locked cargo-cranky@0.3.0
+
+      # Built first so warpgate-protocol-rdp's embedded-helper code paths are linted.
+      # warpgate-web embeds ./dist via RustEmbed, which needs the folder to exist
+      # at compile time. The lint job doesn't ship assets, so an empty dir is enough.
+      - name: Stub web assets for RustEmbed
+        run: mkdir -p warpgate-web/dist
 
       - name: Clippy
         run: |

@@ -1,6 +1,6 @@
 use sea_orm_migration::prelude::*;
 
-use super::m00021_ldap_server::ldap_server;
+use super::m00020_ldap_server::ldap_server;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -12,7 +12,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(ldap_server::Entity)
-                    .add_column_if_not_exists(
+                    .add_column(
                         ColumnDef::new(Alias::new("uuid_attribute"))
                             .string()
                             .not_null()

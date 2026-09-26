@@ -19,13 +19,13 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sudo sh -s -- -y
           echo "/root/.cargo/bin" >> $GITHUB_PATH
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           submodules: recursive
 
       - name: Install tools
         run: |
-          sudo env "PATH=$PATH" cargo install --locked just
+          sudo env "PATH=$PATH" cargo install --locked just@1.4.0
 
       - name: Reprotest
         run: |

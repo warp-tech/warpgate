@@ -1,19 +1,33 @@
 use std::fmt::Debug;
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
+use std::time::Duration;
 
-use futures::stream::{iter, FuturesUnordered};
+use futures::stream::{FuturesUnordered, iter};
 use futures::{Stream, StreamExt, TryStreamExt};
 use poem::listener::Listener;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tokio_stream::wrappers::TcpListenerStream;
+use tracing::warn;
 
 use crate::WarpgateError;
 
-#[derive(Clone, JsonSchema)]
+#[derive(Clone, PartialEq, Eq, JsonSchema)]
 pub struct ListenEndpoint(SocketAddr);
+
+/// bind() a probe listener without actually listening and accepting
+/// (avoids wait_port() race)
+fn reserve(addr: SocketAddr) -> std::io::Result<TcpSocket> {
+    let socket = if addr.is_ipv4() {
+        TcpSocket::new_v4()?
+    } else {
+        TcpSocket::new_v6()?
+    };
+    socket.bind(addr)?;
+    Ok(socket)
+}
 
 impl ListenEndpoint {
     pub const fn address(&self) -> SocketAddr {
@@ -26,18 +40,27 @@ impl ListenEndpoint {
         if self.0.ip() == Ipv6Addr::UNSPECIFIED {
             let addr6 = SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), self.0.port());
             let addr4 = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), self.0.port());
-            let listener6 = std::net::TcpListener::bind(addr6)?;
-            let listener4 = std::net::TcpListener::bind(addr4);
-            let result = match listener4 {
+            let socket6 = reserve(addr6)?;
+            let socket4 = reserve(addr4);
+            let result = match socket4 {
                 Ok(_) => vec![addr4, addr6],
                 Err(e) if e.kind() == ErrorKind::AddrInUse => vec![addr6],
                 Err(e) => return Err(WarpgateError::Io(e)),
             };
-            drop(listener6);
+            drop(socket6);
             Ok(result)
         } else {
             Ok(vec![self.0])
         }
+    }
+
+    pub fn probe(&self) -> Result<(), WarpgateError> {
+        let _reserved = self
+            .addresses_to_listen_on()?
+            .into_iter()
+            .map(reserve)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(())
     }
 
     pub async fn tcp_listeners(&self) -> Result<Vec<TcpListener>, WarpgateError> {
@@ -67,14 +90,27 @@ impl ListenEndpoint {
 
     pub async fn tcp_accept_stream(
         &self,
-    ) -> Result<impl Stream<Item = std::io::Result<TcpStream>>, WarpgateError> {
+    ) -> Result<impl Stream<Item = TcpStream> + Unpin + Send + 'static, WarpgateError> {
         Ok(iter(
             self.tcp_listeners()
                 .await?
                 .into_iter()
                 .map(TcpListenerStream::new),
         )
-        .flatten_unordered(None))
+        .flatten_unordered(None)
+        .filter_map(|result| async {
+            match result {
+                Ok(stream) => Some(stream),
+                Err(error) => {
+                    // #1962 - accept errors as transient (e.g. EMFILE)
+                    // and don't kill the listener
+                    warn!(%error, "Failed to accept connection");
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    None
+                }
+            }
+        })
+        .boxed())
     }
 
     pub const fn port(&self) -> u16 {

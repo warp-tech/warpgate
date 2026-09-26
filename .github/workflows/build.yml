@@ -4,6 +4,10 @@ permissions:
 
 on: [push, pull_request]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     strategy:
@@ -19,16 +23,6 @@ jobs:
             os: ubuntu-22.04-arm # older image for glibc compatibility
             cyclonedx-build: cyclonedx-linux-arm64
             cargo-cross: false
-          - arch: x86_64-macos
-            target: x86_64-apple-darwin
-            os: macos-latest
-            cyclonedx-build: cyclonedx-osx-x64
-            cargo-cross: false
-          - arch: arm64-macos
-            target: aarch64-apple-darwin
-            os: macos-latest
-            cyclonedx-build: cyclonedx-osx-arm64
-            cargo-cross: true
       fail-fast: false
 
     name: Build (${{ matrix.arch }})
@@ -45,28 +39,26 @@ jobs:
           sudo apt update
           sudo apt install -y libssl-dev pkg-config
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           submodules: recursive
 
-      - uses: rlespinasse/github-slug-action@9e7def61550737ba68c62d34a32dd31792e3f429
+      - uses: rlespinasse/github-slug-action@0e3299190dac9a700da92a90de4556116ea965ed
 
-      - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af
-        with:
-          target: ${{ matrix.target }}
-          override: true
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
           key: "build"
 
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24
 
       - name: Install tools
         run: |
-          cargo install --locked just
+          cargo install --locked just@1.4.0
           cargo install --locked cargo-cyclonedx@^0.5
           rm -rf ~/.cargo/registry
 
@@ -116,7 +108,7 @@ jobs:
         run: ./cyclonedx merge --input-files cdx/* --input-format xml --output-format xml > cdx.xml
 
       - name: Attest build
-        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           subject-path: target/${{ matrix.target }}/release/warpgate
@@ -139,12 +131,29 @@ jobs:
           mv target/${{ matrix.target }}/release/warpgate dist/warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}
           mv cdx.xml dist/warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}.cdx.xml
 
+      # Updating a release with generate_release_notes appends a fresh copy of the
+      # generated notes to whatever body is already there, so only ask for them
+      # while the release has none - otherwise every arch of every rerun grows
+      # the notes and buries any hand-written ones.
+      - name: Check for existing release notes
+        id: release_notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          body=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null || true)
+          if [ -z "$body" ]; then
+            echo "generate=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "generate=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Upload release
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           draft: true
-          generate_release_notes: true
+          generate_release_notes: ${{ steps.release_notes.outputs.generate == 'true' }}
           files: dist/*
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -158,13 +167,13 @@ jobs:
           sudo apt update
           sudo apt install --no-install-recommends -y libssl-dev pkg-config
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           submodules: recursive
 
       - name: Install tools
         run: |
-          cargo install --locked just
+          cargo install --locked just@1.4.0
 
       - name: Ensure there are no changes in config schema
         run: |

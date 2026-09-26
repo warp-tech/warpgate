@@ -1,9 +1,8 @@
-use sea_orm::entity::prelude::*;
 use sea_orm::Schema;
+use sea_orm::entity::prelude::*;
 use sea_orm_migration::prelude::*;
 
 pub mod certificate_revocation {
-    use sea_orm::entity::prelude::*;
     use serde::Serialize;
     use time::OffsetDateTime;
     use uuid::Uuid;

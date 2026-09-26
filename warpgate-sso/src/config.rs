@@ -54,12 +54,43 @@ impl Display for SsoProviderReturnUrlPrefix {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, JsonSchema)]
+pub enum SsoReturnUrlDomainPreference {
+    #[default]
+    #[serde(rename = "external_host")]
+    ExternalHost,
+    #[serde(rename = "host_header")]
+    HostHeader,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SsoProviderKubernetesConfig {
+    /// Public OIDC client id used by kubectl (kubelogin). Must be listed in the
+    /// provider's `additional_trusted_audiences`.
+    pub client_id: String,
+    /// Extra scopes for kubelogin. Defaults to openid/email/profile when unset.
+    pub scopes: Option<Vec<String>>,
+    /// Optional client secret (only for confidential kubectl clients).
+    pub client_secret: Option<String>,
+}
+
+impl SsoProviderKubernetesConfig {
+    /// kubelogin scopes, falling back to the OIDC defaults when unset.
+    pub fn scopes_or_default(&self) -> Vec<String> {
+        self.scopes
+            .clone()
+            .unwrap_or_else(|| ["openid", "email", "profile"].map(String::from).to_vec())
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SsoProviderConfig {
     pub name: String,
     pub label: Option<String>,
     pub provider: SsoInternalProviderConfig,
     pub return_domain_whitelist: Option<Vec<String>>,
+    #[serde(default)]
+    pub return_url_domain: SsoReturnUrlDomainPreference,
     #[serde(default)]
     pub return_url_prefix: SsoProviderReturnUrlPrefix,
     #[serde(default)]
@@ -68,6 +99,9 @@ pub struct SsoProviderConfig {
     /// Keys: "http", "ssh", "mysql", "postgres"
     /// Values: list of credential kinds e.g. ["sso"], ["web"], []
     pub default_credential_policy: Option<serde_json::Value>,
+    /// kubectl OIDC parameters for generating a kubelogin kubeconfig.
+    #[serde(default)]
+    pub kubernetes: Option<SsoProviderKubernetesConfig>,
 }
 
 impl SsoProviderConfig {
@@ -126,6 +160,11 @@ pub enum SsoInternalProviderConfig {
         scopes: Vec<String>,
         role_mappings: Option<HashMap<String, RoleMapping>>,
         admin_role_mappings: Option<HashMap<String, RoleMapping>>,
+        /// OIDC claim to read group memberships from (e.g. "groups").
+        /// Its values are mapped to roles via role_mappings / admin_role_mappings.
+        /// When unset, the warpgate_roles / warpgate_admin_roles claims are used.
+        roles_claim: Option<String>,
+        admin_roles_claim: Option<String>,
         additional_trusted_audiences: Option<Vec<String>>,
         #[serde(default)]
         trust_unknown_audiences: bool,
@@ -301,6 +340,26 @@ impl SsoInternalProviderConfig {
             } => admin_role_mappings.clone(),
             _ => None,
         }
+    }
+
+    #[inline]
+    pub fn roles_claim(&self) -> &str {
+        match self {
+            Self::Custom { roles_claim, .. } => roles_claim.as_deref(),
+            _ => None,
+        }
+        .unwrap_or("warpgate_roles")
+    }
+
+    #[inline]
+    pub fn admin_roles_claim(&self) -> &str {
+        match self {
+            Self::Custom {
+                admin_roles_claim, ..
+            } => admin_roles_claim.as_deref(),
+            _ => None,
+        }
+        .unwrap_or("warpgate_admin_roles")
     }
 
     #[inline]

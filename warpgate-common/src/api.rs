@@ -1,5 +1,5 @@
-use poem_openapi::auth::ApiKey;
 use poem_openapi::SecurityScheme;
+use poem_openapi::auth::ApiKey;
 
 #[derive(SecurityScheme)]
 #[oai(ty = "api_key", key_name = "X-Warpgate-Token", key_in = "header")]

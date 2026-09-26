@@ -8,39 +8,90 @@ use rustls::ServerConfig;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, trace, warn};
-use uuid::Uuid;
-use warpgate_common::auth::{
-    AuthCredential, AuthResult, AuthSelector, AuthStateUserInfo, CredentialKind,
-};
+use url::Url;
+use warpgate_common::auth::AuthSelector;
 use warpgate_common::helpers::rng::get_crypto_rng;
-use warpgate_common::{Secret, TargetMySqlOptions, TargetOptions};
+use warpgate_common::{Protocol, Secret, TargetMySqlOptions, UserSessionId};
+use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::{
-    authorize_ticket, consume_ticket, ConfigProvider, Services, WarpgateServerHandle,
+    AdmittedTarget, ApprovedTarget, AuthOkPermit, DbAuthTransport, Services, WarpgateServerHandle,
+    run_db_authorization,
 };
 use warpgate_database_protocols::io::{BufExt, Decode};
+use warpgate_database_protocols::mysql::protocol::Capabilities;
 use warpgate_database_protocols::mysql::protocol::auth::AuthPlugin;
 use warpgate_database_protocols::mysql::protocol::connect::{
     AuthSwitchRequest, Handshake, HandshakeResponse,
 };
 use warpgate_database_protocols::mysql::protocol::response::{ErrPacket, OkPacket, Status};
 use warpgate_database_protocols::mysql::protocol::text::Query;
-use warpgate_database_protocols::mysql::protocol::Capabilities;
+use warpgate_tls::ServerTlsStream;
 
 use crate::client::{ConnectionOptions, MySqlClient};
 use crate::error::MySqlError;
+use crate::relay::{Relayed, ResponseRelay};
 use crate::stream::MySqlStream;
 
 pub struct MySqlSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
-    stream: MySqlStream<S, tokio_rustls::server::TlsStream<S>>,
+    stream: MySqlStream<S, ServerTlsStream<S>>,
     capabilities: Capabilities,
     challenge: [u8; 20],
     username: Option<String>,
     database: Option<String>,
     tls_config: Arc<ServerConfig>,
     server_handle: Arc<Mutex<WarpgateServerHandle>>,
-    id: Uuid,
+    id: UserSessionId,
     services: Services,
     remote_address: SocketAddr,
+    /// MySQL carries the password in the handshake, so the shared auth flow can
+    /// only be handed it — never prompted for it a second time.
+    handshake_password: Option<Secret<String>>,
+}
+
+impl<S: AsyncRead + AsyncWrite + Send + Unpin> DbAuthTransport for MySqlSession<S> {
+    type Error = MySqlError;
+
+    const PROTOCOL: Protocol = crate::common::PROTOCOL_NAME;
+    const SUPPORTS_WEB_APPROVAL: bool = false;
+
+    /// The password arrived in the handshake. There is no second prompt in the
+    /// MySQL protocol, so a repeat request denies the login.
+    async fn prompt_password(&mut self) -> Result<Option<Secret<String>>, MySqlError> {
+        Ok(self.handshake_password.take())
+    }
+
+    async fn send_auth_ok(&mut self, _permit: AuthOkPermit) -> Result<(), MySqlError> {
+        self.stream.push(
+            &OkPacket {
+                affected_rows: 0,
+                last_insert_id: 0,
+                status: Status::empty(),
+                warnings: 0,
+            },
+            (),
+        )?;
+        self.stream.flush().await?;
+        Ok(())
+    }
+
+    async fn external_url(&mut self) -> Result<Url, MySqlError> {
+        Ok(construct_external_url(None, &*self.services.config.lock().await, None).await?)
+    }
+
+    /// The MySQL connection phase has no packet for showing the user a link, so
+    /// a policy requiring web approval can't be satisfied over MySQL.
+    async fn send_web_approval_prompt(
+        &mut self,
+        _url: &Url,
+        _identification_string: &str,
+    ) -> Result<bool, MySqlError> {
+        warn!("Web user approval is not supported over MySQL");
+        Ok(false)
+    }
+
+    async fn send_denied(&mut self) -> Result<(), MySqlError> {
+        self.send_access_denied().await
+    }
 }
 
 impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
@@ -51,10 +102,13 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         tls_config: ServerConfig,
         remote_address: SocketAddr,
     ) -> Self {
-        let id = server_handle.lock().await.id();
+        let id = server_handle.lock().await.user_session_id();
         Self {
             services,
             stream: MySqlStream::new(stream),
+            // The target is only picked after this handshake is already on the
+            // wire, so it can turn out to lack capabilities offered here.
+            // [`ResponseRelay`] rewrites its responses into this framing.
             capabilities: Capabilities::PROTOCOL_41
                 | Capabilities::PLUGIN_AUTH
                 | Capabilities::FOUND_ROWS
@@ -76,6 +130,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
             server_handle,
             id,
             remote_address,
+            handshake_password: None,
         }
     }
 
@@ -93,9 +148,14 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         let challenge_2 = challenge_1.split_off(8);
         let challenge_chain = challenge_1.freeze().chain(challenge_2.freeze());
 
+        let advertised_version = {
+            let config = self.services.config.lock().await;
+            config.store.mysql.advertised_version.clone()
+        };
+
         let handshake = Handshake {
             protocol_version: 10,
-            server_version: "8.0.0-Warpgate".to_owned(),
+            server_version: advertised_version,
             connection_id: 1,
             auth_plugin_data: challenge_chain,
             server_capabilities: self.capabilities,
@@ -127,11 +187,11 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
             return Err(MySqlError::TlsNotSupportedByClient);
         };
 
-        if resp.auth_plugin == Some(AuthPlugin::MySqlClearPassword) {
-            if let Some(mut response) = resp.auth_response.clone() {
-                let password = Secret::new(response.get_str_nul()?);
-                return self.run_authorization(resp, password).await;
-            }
+        if resp.auth_plugin == Some(AuthPlugin::MySqlClearPassword)
+            && let Some(mut response) = resp.auth_response.clone()
+        {
+            let password = Secret::new(response.get_str_nul()?);
+            return self.run_authorization(resp, password).await;
         }
 
         let req = AuthSwitchRequest {
@@ -163,143 +223,38 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         Ok(())
     }
 
+    async fn send_access_denied(&mut self) -> Result<(), MySqlError> {
+        self.send_error(1, "Warpgate access denied").await
+    }
+
     pub async fn run_authorization(
         mut self,
         handshake: HandshakeResponse,
         password: Secret<String>,
     ) -> Result<(), MySqlError> {
-        async fn fail<S: AsyncRead + AsyncWrite + Send + Unpin>(
-            this: &mut MySqlSession<S>,
-        ) -> Result<(), MySqlError> {
-            this.stream.push(
-                &ErrPacket {
-                    error_code: 1,
-                    error_message: "Warpgate access denied".to_owned(),
-                    sql_state: None,
-                },
-                (),
-            )?;
-            this.stream.flush().await?;
-            Ok(())
-        }
-
         let selector: AuthSelector = handshake.username.deref().into();
+        let remote_ip = self.remote_address.ip();
+        let session_id = self.server_handle.lock().await.user_session_id();
 
-        match selector {
-            AuthSelector::User {
-                username,
-                target_name,
-            } => {
-                let state_arc = self
-                    .services
-                    .auth_state_store
-                    .lock()
-                    .await
-                    .create(
-                        Some(&self.server_handle.lock().await.id()),
-                        &username,
-                        crate::common::PROTOCOL_NAME,
-                        &[CredentialKind::Password],
-                        Some(self.remote_address.ip()),
-                    )
-                    .await?
-                    .1;
-                let mut state = state_arc.lock().await;
+        self.handshake_password = Some(password);
 
-                let user_auth_result = {
-                    let credential = AuthCredential::Password(password);
+        let services = self.services.clone();
+        let Some(approved) =
+            run_db_authorization(&mut self, &services, session_id, selector, remote_ip).await?
+        else {
+            return Ok(());
+        };
 
-                    let mut cp = self.services.config_provider.lock().await;
-                    if cp.validate_credential(&username, &credential).await? {
-                        state.add_valid_credential(credential);
-                    }
-
-                    state.verify()
-                };
-
-                match user_auth_result {
-                    AuthResult::Accepted { user_info } => {
-                        self.services
-                            .auth_state_store
-                            .lock()
-                            .await
-                            .complete(state.id())
-                            .await;
-                        let target_auth_result = {
-                            self.services
-                                .config_provider
-                                .lock()
-                                .await
-                                .authorize_target(&user_info.username, &target_name)
-                                .await
-                                .map_err(MySqlError::other)?
-                        };
-                        if !target_auth_result {
-                            warn!(
-                                "Target {} not authorized for user {}",
-                                target_name, user_info.username
-                            );
-                            return fail(&mut self).await;
-                        }
-                        self.run_authorized(handshake, user_info, target_name).await
-                    }
-                    AuthResult::Rejected | AuthResult::Need(_) => fail(&mut self).await, // TODO SSO
-                }
-            }
-            AuthSelector::Ticket { secret } => {
-                match authorize_ticket(&self.services.db, &secret)
-                    .await
-                    .map_err(MySqlError::other)?
-                {
-                    Some((ticket, target, user_info)) => {
-                        info!("Authorized for {} with a ticket", target.name);
-                        consume_ticket(&self.services.db, &ticket.id)
-                            .await
-                            .map_err(MySqlError::other)?;
-
-                        self.run_authorized(handshake, user_info, target.name).await
-                    }
-                    _ => fail(&mut self).await,
-                }
-            }
-        }
+        self.run_authorized(handshake, approved).await
     }
 
     async fn run_authorized(
         mut self,
         handshake: HandshakeResponse,
-        user_info: AuthStateUserInfo,
-        target_name: String,
+        approved: ApprovedTarget,
     ) -> Result<(), MySqlError> {
-        self.stream.push(
-            &OkPacket {
-                affected_rows: 0,
-                last_insert_id: 0,
-                status: Status::empty(),
-                warnings: 0,
-            },
-            (),
-        )?;
-        self.stream.flush().await?;
-
-        let target = {
-            self.services
-                .config_provider
-                .lock()
-                .await
-                .list_targets()
-                .await?
-                .iter()
-                .filter_map(|t| match t.options {
-                    TargetOptions::MySql(ref options) => Some((t, options)),
-                    _ => None,
-                })
-                .find(|(t, _)| t.name == target_name)
-                .map(|(t, opt)| (t.clone(), opt.clone()))
-        };
-
-        let Some((target, mysql_options)) = target else {
-            warn!("Selected target not found");
+        let Ok(approved) = approved.narrow::<TargetMySqlOptions>() else {
+            warn!("Selected target is not a MySQL target");
             self.stream.push(
                 &ErrPacket {
                     error_code: 1,
@@ -312,19 +267,20 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
             return Ok(());
         };
 
-        {
-            let handle = self.server_handle.lock().await;
-            handle.set_user_info(user_info).await?;
-            handle.set_target(&target).await?;
-        }
+        let admitted = self
+            .server_handle
+            .lock()
+            .await
+            .register_approved_target_session(approved)
+            .await?;
 
-        self.run_authorized_inner(handshake, mysql_options).await
+        self.run_authorized_inner(handshake, admitted).await
     }
 
     async fn run_authorized_inner(
         mut self,
         handshake: HandshakeResponse,
-        options: TargetMySqlOptions,
+        admitted: AdmittedTarget<TargetMySqlOptions>,
     ) -> Result<(), MySqlError> {
         self.database = handshake.database.clone();
         self.username = Some(handshake.username);
@@ -333,13 +289,14 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         }
 
         let mut client = match MySqlClient::connect(
-            &options,
+            admitted,
             ConnectionOptions {
                 collation: handshake.collation,
                 database: handshake.database,
                 max_packet_size: handshake.max_packet_size,
                 capabilities: self.capabilities,
             },
+            &*self.services.secret_backends,
         )
         .await
         {
@@ -350,6 +307,12 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
             }
             x => x,
         }?;
+
+        // The handshake's max_packet_size is forwarded to the target; the
+        // proxy's own codecs must honor it too, in both directions, or a
+        // >4 MiB row/statement/BLOB would abort the session.
+        self.stream.set_max_packet_size(handshake.max_packet_size);
+        client.stream.set_max_packet_size(handshake.max_packet_size);
 
         loop {
             self.stream.reset_sequence_id();
@@ -369,30 +332,8 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                 client.stream.push(&query, ())?;
                 client.stream.flush().await?;
 
-                let mut eof_ctr = 0;
-                loop {
-                    let Some(response) = client.stream.recv().await? else {
-                        return Err(MySqlError::Eof);
-                    };
-                    trace!(?response, "client got packet");
-                    self.stream.push(&&response[..], ())?;
-                    self.stream.flush().await?;
-                    if let Some(com) = response.first() {
-                        if com == &0xfe {
-                            if self.capabilities.contains(Capabilities::DEPRECATE_EOF) {
-                                break;
-                            }
-                            eof_ctr += 1;
-                            if eof_ctr == 2 {
-                                // todo check multiple results
-                                break;
-                            }
-                        }
-                        if com == &0 || com == &0xff {
-                            break;
-                        }
-                    }
-                }
+                let relay = ResponseRelay::result_set(self.capabilities, client.capabilities);
+                self.relay_response(&mut client, relay).await?;
             // COM_QUIT
             } else if com == Some(&0x01) {
                 break;
@@ -405,12 +346,14 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                 info!("Selected database: {db}");
                 client.stream.push(&&payload[..], ())?;
                 client.stream.flush().await?;
-                self.passthrough_until_result(&mut client).await?;
+                let relay = ResponseRelay::single(self.capabilities, client.capabilities);
+                self.relay_response(&mut client, relay).await?;
             // COM_FIELD_LIST, COM_PING, COM_RESET_CONNECTION
             } else if com == Some(&0x04) || com == Some(&0x0e) || com == Some(&0x1f) {
                 client.stream.push(&&payload[..], ())?;
                 client.stream.flush().await?;
-                self.passthrough_until_result(&mut client).await?;
+                let relay = ResponseRelay::single(self.capabilities, client.capabilities);
+                self.relay_response(&mut client, relay).await?;
             } else if let Some(com) = com {
                 warn!("Unknown packet type {com}");
                 self.send_error(1047, "Not implemented").await?;
@@ -422,21 +365,29 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         Ok(())
     }
 
-    async fn passthrough_until_result(
+    /// Forwards one target response to the client, packet by packet, until the
+    /// relay says it's complete.
+    async fn relay_response(
         &mut self,
         client: &mut MySqlClient,
+        mut relay: ResponseRelay,
     ) -> Result<(), MySqlError> {
         loop {
             let Some(response) = client.stream.recv().await? else {
                 return Err(MySqlError::Eof);
             };
             trace!(?response, "client got packet");
-            self.stream.push(&&response[..], ())?;
+
+            let (relayed, complete) = relay.next(&response)?;
+            match relayed {
+                Relayed::Verbatim => self.stream.push(&&response[..], ())?,
+                Relayed::Rewritten(ref packet) => self.stream.push(&&packet[..], ())?,
+                Relayed::Dropped => (),
+            }
             self.stream.flush().await?;
-            if let Some(com) = response.first() {
-                if com == &0 || com == &0xff || com == &0xfe {
-                    break;
-                }
+
+            if complete {
+                break;
             }
         }
         Ok(())

@@ -1,5 +1,7 @@
 mod defaults;
+mod specific_target;
 mod target;
+mod warnings;
 
 use std::ops::Deref;
 use std::path::PathBuf;
@@ -7,20 +9,19 @@ use std::time::Duration;
 
 use defaults::{
     _default_audit_retention, _default_cookie_max_age, _default_database_url, _default_false,
-    _default_http_listen, _default_kubernetes_listen, _default_mysql_listen,
-    _default_postgres_listen, _default_recordings_path, _default_retention,
-    _default_session_max_age, _default_ssh_inactivity_timeout, _default_ssh_keys_path,
-    _default_ssh_listen,
+    _default_http_listen, _default_kubernetes_listen, _default_mysql_advertised_version,
+    _default_mysql_listen, _default_postgres_listen, _default_rdp_listen, _default_recordings_path,
+    _default_retention, _default_session_max_age, _default_ssh_inactivity_timeout,
+    _default_ssh_listen, _default_vnc_listen,
 };
-use poem::http::uri;
+use poem::http::uri::Authority;
 use poem_openapi::{Object, Union};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+pub use specific_target::*;
 pub use target::*;
-use tracing::warn;
-use uri::Scheme;
-use url::Url;
 use uuid::Uuid;
+pub use warnings::{clear_config_warnings, emit_config_warning, emit_runtime_warning, warnings};
 use warpgate_sso::SsoProviderConfig;
 use warpgate_tls::IntoTlsCertificateRelativePaths;
 
@@ -28,25 +29,19 @@ use crate::auth::CredentialKind;
 use crate::helpers::hash::hash_password;
 use crate::helpers::ipnet::WarpgateIpNet;
 use crate::helpers::otp::OtpSecretKey;
-use crate::{ListenEndpoint, Secret, WarpgateError};
+use crate::{GlobalParams, ListenEndpoint, Secret};
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
-#[serde(tag = "type")]
+#[derive(Debug, Clone, PartialEq, Eq, Union)]
 #[oai(discriminator_name = "kind", one_of)]
 pub enum UserAuthCredential {
-    #[serde(rename = "password")]
     Password(UserPasswordCredential),
-    #[serde(rename = "publickey")]
     PublicKey(UserPublicKeyCredential),
-    #[serde(rename = "certificate")]
     Certificate(UserCertificateCredential),
-    #[serde(rename = "otp")]
     Totp(UserTotpCredential),
-    #[serde(rename = "sso")]
     Sso(UserSsoCredential),
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Clone, PartialEq, Eq, Object)]
 pub struct UserPasswordCredential {
     pub hash: Secret<String>,
 }
@@ -59,22 +54,21 @@ impl UserPasswordCredential {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Clone, PartialEq, Eq, Object)]
 pub struct UserPublicKeyCredential {
     pub key: Secret<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Clone, PartialEq, Eq, Object)]
 pub struct UserCertificateCredential {
     pub certificate_pem: Secret<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Clone, PartialEq, Eq, Object)]
 pub struct UserTotpCredential {
-    #[serde(with = "crate::helpers::serde_base64_secret")]
     pub key: OtpSecretKey,
 }
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Clone, PartialEq, Eq, Object)]
 pub struct UserSsoCredential {
     pub provider: Option<String>,
     pub email: String,
@@ -92,18 +86,27 @@ impl UserAuthCredential {
     }
 }
 
+/// Coerce [] to None
+fn credential_entry_is_unset(entry: &Option<Vec<CredentialKind>>) -> bool {
+    entry.as_ref().is_none_or(Vec::is_empty)
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
 pub struct UserRequireCredentialsPolicy {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub http: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub kubernetes: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub ssh: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub mysql: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub postgres: Option<Vec<CredentialKind>>,
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
+    pub vnc: Option<Vec<CredentialKind>>,
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
+    pub rdp: Option<Vec<CredentialKind>>,
 }
 
 impl UserRequireCredentialsPolicy {
@@ -173,17 +176,16 @@ impl Deref for UserDetails {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Hash, Object)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Object)]
 pub struct Role {
-    #[serde(default)]
     pub id: Uuid,
     pub name: String,
     pub description: String,
+    pub is_default: bool,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Clone, PartialEq, Eq, Object)]
 pub struct AdminRole {
-    #[serde(default)]
     pub id: Uuid,
     pub name: String,
     pub description: String,
@@ -203,6 +205,7 @@ pub struct AdminRole {
 
     pub sessions_view: bool,
     pub sessions_terminate: bool,
+    pub approve_sessions: bool,
 
     pub recordings_view: bool,
 
@@ -212,9 +215,11 @@ pub struct AdminRole {
     pub config_edit: bool,
 
     pub admin_roles_manage: bool,
+
+    pub ticket_requests_manage: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, JsonSchema, strum::EnumIter)]
 #[serde(rename_all = "snake_case")]
 pub enum AdminPermission {
     TargetsCreate,
@@ -229,11 +234,13 @@ pub enum AdminPermission {
     AccessRolesAssign,
     SessionsView,
     SessionsTerminate,
+    ApproveSessions,
     RecordingsView,
     TicketsCreate,
     TicketsDelete,
     ConfigEdit,
     AdminRolesManage,
+    TicketRequestsManage,
 }
 
 impl AdminRole {
@@ -251,16 +258,148 @@ impl AdminRole {
             AdminPermission::AccessRolesAssign => self.access_roles_assign,
             AdminPermission::SessionsView => self.sessions_view,
             AdminPermission::SessionsTerminate => self.sessions_terminate,
+            AdminPermission::ApproveSessions => self.approve_sessions,
             AdminPermission::RecordingsView => self.recordings_view,
             AdminPermission::TicketsCreate => self.tickets_create,
             AdminPermission::TicketsDelete => self.tickets_delete,
             AdminPermission::ConfigEdit => self.config_edit,
             AdminPermission::AdminRolesManage => self.admin_roles_manage,
+            AdminPermission::TicketRequestsManage => self.ticket_requests_manage,
         }
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq, Copy, JsonSchema)]
+use strum::IntoEnumIterator;
+
+impl AdminPermission {
+    /// The bit this permission occupies in an [`AdminPermissionSet`].
+    const fn bit(self) -> u32 {
+        1 << self as u32
+    }
+}
+
+/// The set of admin permissions a principal holds, folded from their assigned roles once so
+/// every consumer — the endpoint gate, the "is this an admin?" checks, and the UI
+/// serialization — reads one value instead of re-deriving the model three different ways.
+///
+/// An administrator is a principal holding at least one permission: a role that grants nothing
+/// confers no admin standing (there is no such thing as a permissionless admin).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AdminPermissionSet(u32);
+
+impl AdminPermissionSet {
+    /// No permissions — the principal is not an administrator.
+    #[must_use]
+    pub const fn none() -> Self {
+        Self(0)
+    }
+
+    /// Every permission, e.g. for an admin token.
+    #[must_use]
+    pub fn all() -> Self {
+        Self(AdminPermission::iter().fold(0, |bits, perm| bits | perm.bit()))
+    }
+
+    /// The union of the permissions granted by `roles`.
+    #[must_use]
+    pub fn from_roles(roles: impl IntoIterator<Item = AdminRole>) -> Self {
+        let mut bits = 0;
+        for role in roles {
+            for perm in AdminPermission::iter() {
+                if role.has_permission(perm) {
+                    bits |= perm.bit();
+                }
+            }
+        }
+        Self(bits)
+    }
+
+    #[must_use]
+    pub const fn contains(self, perm: AdminPermission) -> bool {
+        self.0 & perm.bit() != 0
+    }
+
+    /// Holding any permission at all makes the principal an administrator.
+    #[must_use]
+    pub const fn is_admin(self) -> bool {
+        self.0 != 0
+    }
+}
+
+#[cfg(test)]
+mod admin_permission_set_tests {
+    use strum::IntoEnumIterator;
+    use uuid::Uuid;
+
+    use super::{AdminPermission, AdminPermissionSet, AdminRole};
+
+    fn empty_role() -> AdminRole {
+        AdminRole {
+            id: Uuid::nil(),
+            name: String::new(),
+            description: String::new(),
+            targets_create: false,
+            targets_edit: false,
+            targets_delete: false,
+            users_create: false,
+            users_edit: false,
+            users_delete: false,
+            access_roles_create: false,
+            access_roles_edit: false,
+            access_roles_delete: false,
+            access_roles_assign: false,
+            sessions_view: false,
+            sessions_terminate: false,
+            approve_sessions: false,
+            recordings_view: false,
+            tickets_create: false,
+            tickets_delete: false,
+            config_edit: false,
+            admin_roles_manage: false,
+            ticket_requests_manage: false,
+        }
+    }
+
+    #[test]
+    fn empty_is_not_admin() {
+        let set = AdminPermissionSet::from_roles([]);
+        assert_eq!(set, AdminPermissionSet::none());
+        assert!(!set.is_admin());
+        assert!(!set.contains(AdminPermission::ConfigEdit));
+    }
+
+    #[test]
+    fn unions_roles_and_reports_admin() {
+        let mut a = empty_role();
+        a.targets_create = true;
+        let mut b = empty_role();
+        b.config_edit = true;
+        let set = AdminPermissionSet::from_roles([a, b]);
+        assert!(set.is_admin());
+        assert!(set.contains(AdminPermission::TargetsCreate));
+        assert!(set.contains(AdminPermission::ConfigEdit));
+        assert!(!set.contains(AdminPermission::UsersDelete));
+    }
+
+    #[test]
+    fn all_contains_every_permission() {
+        let all = AdminPermissionSet::all();
+        for perm in AdminPermission::iter() {
+            assert!(all.contains(perm), "missing {perm:?}");
+        }
+    }
+
+    #[test]
+    fn role_granting_nothing_is_not_admin() {
+        let set = AdminPermissionSet::from_roles([empty_role()]);
+        assert!(!set.is_admin());
+        assert_eq!(set, AdminPermissionSet::none());
+    }
+}
+
+#[derive(
+    Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq, Copy, JsonSchema, clap::ValueEnum,
+)]
 pub enum SshHostKeyVerificationMode {
     #[serde(rename = "prompt")]
     #[default]
@@ -269,6 +408,8 @@ pub enum SshHostKeyVerificationMode {
     AutoAccept,
     #[serde(rename = "auto_reject")]
     AutoReject,
+    #[serde(rename = "ignore")]
+    Ignore,
 }
 
 #[derive(
@@ -289,15 +430,23 @@ pub struct SshConfig {
     #[serde(default = "_default_ssh_listen")]
     pub listen: ListenEndpoint,
 
+    /// Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.
+    #[serde(default)]
+    pub proxy_protocol: bool,
+
     #[serde(default)]
     pub external_port: Option<u16>,
 
     #[serde(default)]
     pub external_host: Option<String>,
 
-    #[serde(default = "_default_ssh_keys_path")]
-    pub keys: String,
+    /// Legacy directory for the SSH host keys (`host-ed25519`, `host-rsa`).
+    /// If set, key files are re-imported into the database, after which the option can be removed from the config.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keys: Option<String>,
 
+    /// Only seeds the `ssh_host_key_verification` parameter when the database
+    /// row is first created; the admin UI owns the setting afterwards.
     #[serde(default)]
     pub host_key_verification: SshHostKeyVerificationMode,
 
@@ -305,7 +454,8 @@ pub struct SshConfig {
     #[schemars(with = "String")]
     pub inactivity_timeout: Duration,
 
-    #[serde(default)]
+    #[serde(default, with = "humantime_serde")]
+    #[schemars(with = "Option<String>")]
     pub keepalive_interval: Option<Duration>,
 }
 
@@ -314,7 +464,8 @@ impl Default for SshConfig {
         Self {
             enable: false,
             listen: _default_ssh_listen(),
-            keys: _default_ssh_keys_path(),
+            proxy_protocol: false,
+            keys: None,
             host_key_verification: <_>::default(),
             external_port: None,
             external_host: None,
@@ -332,6 +483,12 @@ impl SshConfig {
     pub fn external_host(&self) -> Option<String> {
         self.external_host.clone()
     }
+
+    pub fn keys_path(&self, params: &GlobalParams) -> PathBuf {
+        params
+            .paths_relative_to()
+            .join(self.keys.as_deref().unwrap_or("./data/keys"))
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
@@ -344,6 +501,10 @@ pub struct SniCertificateConfig {
 pub struct HttpConfig {
     #[serde(default = "_default_http_listen")]
     pub listen: ListenEndpoint,
+
+    /// Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.
+    #[serde(default)]
+    pub proxy_protocol: bool,
 
     #[serde(default)]
     pub external_port: Option<u16>,
@@ -376,6 +537,7 @@ impl Default for HttpConfig {
     fn default() -> Self {
         Self {
             listen: _default_http_listen(),
+            proxy_protocol: false,
             external_port: None,
             external_host: None,
             certificate: "".into(),
@@ -426,6 +588,10 @@ pub struct MySqlConfig {
     #[serde(default = "_default_mysql_listen")]
     pub listen: ListenEndpoint,
 
+    /// Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.
+    #[serde(default)]
+    pub proxy_protocol: bool,
+
     #[serde(default)]
     pub external_port: Option<u16>,
 
@@ -437,6 +603,12 @@ pub struct MySqlConfig {
 
     #[serde(default)]
     pub key: String,
+
+    /// The server version advertised to clients during the handshake.
+    /// We can't auto-match the target's version since the target is only known
+    /// after the handshake, but clients use it to pick a protocol dialect.
+    #[serde(default = "_default_mysql_advertised_version")]
+    pub advertised_version: String,
 }
 
 impl Default for MySqlConfig {
@@ -444,10 +616,12 @@ impl Default for MySqlConfig {
         Self {
             enable: false,
             listen: _default_mysql_listen(),
+            proxy_protocol: false,
             external_port: None,
             external_host: None,
             certificate: "".into(),
             key: "".into(),
+            advertised_version: _default_mysql_advertised_version(),
         }
     }
 }
@@ -469,6 +643,10 @@ pub struct KubernetesConfig {
 
     #[serde(default = "_default_kubernetes_listen")]
     pub listen: ListenEndpoint,
+
+    /// Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.
+    #[serde(default)]
+    pub proxy_protocol: bool,
 
     #[serde(default)]
     pub external_port: Option<u16>,
@@ -492,6 +670,7 @@ impl Default for KubernetesConfig {
         Self {
             enable: false,
             listen: _default_kubernetes_listen(),
+            proxy_protocol: false,
             external_port: None,
             external_host: None,
             certificate: "".into(),
@@ -519,6 +698,10 @@ pub struct PostgresConfig {
     #[serde(default = "_default_postgres_listen")]
     pub listen: ListenEndpoint,
 
+    /// Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.
+    #[serde(default)]
+    pub proxy_protocol: bool,
+
     #[serde(default)]
     pub external_port: Option<u16>,
 
@@ -537,6 +720,7 @@ impl Default for PostgresConfig {
         Self {
             enable: false,
             listen: _default_postgres_listen(),
+            proxy_protocol: false,
             external_port: None,
             external_host: None,
             certificate: "".into(),
@@ -546,6 +730,109 @@ impl Default for PostgresConfig {
 }
 
 impl PostgresConfig {
+    pub fn external_port(&self) -> u16 {
+        self.external_port.unwrap_or_else(|| self.listen.port())
+    }
+
+    pub fn external_host(&self) -> Option<String> {
+        self.external_host.clone()
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
+pub struct VncConfig {
+    #[serde(default = "_default_false")]
+    pub enable: bool,
+
+    #[serde(default = "_default_vnc_listen")]
+    pub listen: ListenEndpoint,
+
+    /// Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.
+    #[serde(default)]
+    pub proxy_protocol: bool,
+
+    #[serde(default)]
+    pub external_port: Option<u16>,
+
+    #[serde(default)]
+    pub external_host: Option<String>,
+
+    #[serde(default)]
+    pub certificate: String,
+
+    #[serde(default)]
+    pub key: String,
+
+    /// Enable Apple-DH (ARD / type 30) auth. It does not support TLS unlike VeNCrypt
+    #[serde(default = "_default_false")]
+    pub enable_ard_auth: bool,
+}
+
+impl Default for VncConfig {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            listen: _default_vnc_listen(),
+            proxy_protocol: false,
+            external_port: None,
+            external_host: None,
+            certificate: "".into(),
+            key: "".into(),
+            enable_ard_auth: false,
+        }
+    }
+}
+
+impl VncConfig {
+    pub fn external_port(&self) -> u16 {
+        self.external_port.unwrap_or_else(|| self.listen.port())
+    }
+
+    pub fn external_host(&self) -> Option<String> {
+        self.external_host.clone()
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
+pub struct RdpConfig {
+    #[serde(default = "_default_false")]
+    pub enable: bool,
+
+    #[serde(default = "_default_rdp_listen")]
+    pub listen: ListenEndpoint,
+
+    /// Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.
+    #[serde(default)]
+    pub proxy_protocol: bool,
+
+    #[serde(default)]
+    pub external_port: Option<u16>,
+
+    #[serde(default)]
+    pub external_host: Option<String>,
+
+    #[serde(default)]
+    pub certificate: String,
+
+    #[serde(default)]
+    pub key: String,
+}
+
+impl Default for RdpConfig {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            listen: _default_rdp_listen(),
+            proxy_protocol: false,
+            external_port: None,
+            external_host: None,
+            certificate: "".into(),
+            key: "".into(),
+        }
+    }
+}
+
+impl RdpConfig {
     pub fn external_port(&self) -> u16 {
         self.external_port.unwrap_or_else(|| self.listen.port())
     }
@@ -606,8 +893,8 @@ pub struct WarpgateConfigStore {
     #[serde(default)]
     pub sso_providers: Vec<SsoProviderConfig>,
 
-    #[serde(default)]
-    pub recordings: RecordingsConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recordings: Option<RecordingsConfig>,
 
     #[serde(default)]
     pub external_host: Option<String>,
@@ -632,6 +919,12 @@ pub struct WarpgateConfigStore {
     pub postgres: PostgresConfig,
 
     #[serde(default)]
+    pub vnc: VncConfig,
+
+    #[serde(default)]
+    pub rdp: RdpConfig,
+
+    #[serde(default)]
     pub log: LogConfig,
 }
 
@@ -647,6 +940,8 @@ impl Default for WarpgateConfigStore {
             kubernetes: <_>::default(),
             mysql: <_>::default(),
             postgres: <_>::default(),
+            vnc: <_>::default(),
+            rdp: <_>::default(),
             log: <_>::default(),
         }
     }
@@ -658,99 +953,75 @@ pub struct WarpgateConfig {
 }
 
 impl WarpgateConfig {
-    pub fn external_host_from_config(&self) -> Option<(Scheme, String, Option<u16>)> {
-        self.store.external_host.as_ref().map(|external_host| {
-            #[allow(clippy::unwrap_used)]
-            let external_host = external_host.split(':').next().unwrap();
-
-            (
-                Scheme::HTTPS,
-                external_host.to_owned(),
-                self.store
-                    .http
-                    .external_port
-                    .or_else(|| Some(self.store.http.listen.port())),
-            )
-        })
-    }
-
-    /// Extract external host:port from request headers
-    pub fn external_host_from_request(
-        &self,
-        request: &poem::Request,
-    ) -> Option<(Scheme, String, Option<u16>)> {
-        let (mut scheme, mut host, mut port) = (Scheme::HTTPS, None, None);
-        let trust_forwarded_headers = self.store.http.trust_x_forwarded_headers;
-
-        // Try the Host header first
-        scheme = request.uri().scheme().cloned().unwrap_or(scheme);
-
-        let original_url = request.original_uri();
-        if let Some(original_host) = original_url.host() {
-            host = Some(original_host.to_string());
-            port = original_url.port().map(|x| x.as_u16());
-        }
-
-        // But prefer X-Forwarded-* headers if enabled
-        if trust_forwarded_headers {
-            scheme = request
-                .header("x-forwarded-proto")
-                .and_then(|x| Scheme::try_from(x).ok())
-                .unwrap_or(scheme);
-
-            if let Some(xfh) = request.header("x-forwarded-host") {
-                // XFH can contain both host and port
-                let parts = xfh.split(':').collect::<Vec<_>>();
-                host = parts.first().map(ToString::to_string).or(host);
-                port = parts.get(1).and_then(|x| x.parse::<u16>().ok());
-            }
-
-            port = request
-                .header("x-forwarded-port")
-                .and_then(|x| x.parse::<u16>().ok())
-                .or(port);
-        }
-
-        host.map(|host| (scheme, host, port))
-    }
-
-    pub fn construct_external_url(
-        &self,
-        for_request: Option<&poem::Request>,
-        domain_whitelist: Option<&[String]>,
-    ) -> Result<Url, WarpgateError> {
-        let Some((scheme, host, port)) = for_request
-            .and_then(|r| self.external_host_from_request(r))
-            .or_else(|| self.external_host_from_config())
-        else {
-            return Err(WarpgateError::ExternalHostUnknown);
-        };
-
-        if let Some(list) = domain_whitelist {
-            if !list.contains(&host) {
-                return Err(WarpgateError::ExternalHostNotWhitelisted(
-                    host,
-                    list.to_vec(),
-                ));
-            }
-        }
-
-        let mut url = format!("{scheme}://{host}");
-        if let Some(port) = port {
-            // can't `match` `Scheme`
-            if scheme == Scheme::HTTP && port != 80 || scheme == Scheme::HTTPS && port != 443 {
-                url = format!("{url}:{port}");
-            }
-        }
-        Url::parse(&url).map_err(WarpgateError::UrlParse)
+    pub fn external_host_name(&self) -> Option<String> {
+        let ext = self.store.external_host.as_deref()?;
+        // ignore anything that does not look like a bare hostname or at least a legacy host:port
+        Some(ext.parse::<Authority>().ok()?.host().to_owned())
     }
 
     pub fn validate(&self) {
-        if let Some(ref ext) = self.store.external_host {
-            if ext.contains(':') {
-                warn!("Looks like your `external_host` config option contains a port - it will be ignored.");
-                warn!("Set the external port via the `http.external_port`, `ssh.external_port` or `mysql.external_port` options.");
-            }
+        let Some(ext) = self.store.external_host.as_deref() else {
+            return;
+        };
+        let tip = "`external_host` takes a bare hostname - set the external port via the `http.external_port` instead.";
+        match self.external_host_name() {
+            None => emit_config_warning(format!(
+                "Your `external_host` config option is set to `{ext}`, which is not a hostname and will be ignored. {tip}"
+            )),
+            Some(host) if host != ext => emit_config_warning(format!(
+                "Your `external_host` config option is set to `{ext}` - only `{host}` will be used. {tip}"
+            )),
+            Some(_) => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::{SshConfig, WarpgateConfig, WarpgateConfigStore};
+
+    #[test]
+    fn keepalive_interval_is_a_humantime_string() {
+        let config = serde_json::from_str::<SshConfig>(r#"{"keepalive_interval": "1m"}"#).unwrap();
+        assert_eq!(config.keepalive_interval, Some(Duration::from_secs(60)));
+        assert!(
+            serde_json::to_string(&config)
+                .unwrap()
+                .contains(r#""keepalive_interval":"1m""#)
+        );
+    }
+
+    #[test]
+    fn default_config_store_omits_recordings() {
+        let config = serde_json::to_value(WarpgateConfigStore::default()).unwrap();
+        let config = config.as_object().unwrap();
+
+        assert!(!config.contains_key("recordings"));
+    }
+
+    #[test]
+    fn external_host_name_keeps_only_a_hostname() {
+        let name = |ext: &str| {
+            WarpgateConfig {
+                store: WarpgateConfigStore {
+                    external_host: Some(ext.to_owned()),
+                    ..Default::default()
+                },
+            }
+            .external_host_name()
+        };
+
+        assert_eq!(
+            name("warp.example.com").as_deref(),
+            Some("warp.example.com")
+        );
+        assert_eq!(
+            name("warp.example.com:8888").as_deref(),
+            Some("warp.example.com")
+        );
+        assert_eq!(name("https://warp.example.com:8888"), None);
+        assert_eq!(name("warp.example.com/gateway"), None);
     }
 }

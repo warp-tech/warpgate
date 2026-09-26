@@ -1,3 +1,4 @@
+use sea_orm::DbBackend;
 use sea_orm_migration::prelude::*;
 
 pub struct Migration;
@@ -12,15 +13,16 @@ impl MigrationName for Migration {
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        let mut col = ColumnDef::new(Alias::new("metadata")).text().to_owned();
+        // MySQL does not allow defaults on TEXT columns; omit the default (NULL is equivalent here).
+        if manager.get_database_backend() != DbBackend::MySql {
+            col.default("null");
+        }
         manager
             .alter_table(
                 Table::alter()
                     .table(recording::Entity)
-                    .add_column(
-                        ColumnDef::new(Alias::new("metadata"))
-                            .text()
-                            .default("null"),
-                    )
+                    .add_column(col)
                     .to_owned(),
             )
             .await

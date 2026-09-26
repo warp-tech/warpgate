@@ -4,7 +4,7 @@ use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::{Target, TargetOptions};
 
-#[derive(Debug, PartialEq, Eq, Serialize, Clone, Enum, EnumIter, DeriveActiveEnum)]
+#[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
 pub enum TargetKind {
     #[sea_orm(string_value = "http")]
@@ -17,6 +17,10 @@ pub enum TargetKind {
     Ssh,
     #[sea_orm(string_value = "postgres")]
     Postgres,
+    #[sea_orm(string_value = "vnc")]
+    Vnc,
+    #[sea_orm(string_value = "rdp")]
+    Rdp,
 }
 
 impl From<&TargetOptions> for TargetKind {
@@ -27,6 +31,8 @@ impl From<&TargetOptions> for TargetKind {
             TargetOptions::MySql(_) => Self::MySql,
             TargetOptions::Postgres(_) => Self::Postgres,
             TargetOptions::Ssh(_) => Self::Ssh,
+            TargetOptions::Vnc(_) => Self::Vnc,
+            TargetOptions::Rdp(_) => Self::Rdp,
         }
     }
 }
@@ -44,6 +50,11 @@ pub struct Model {
     pub options: serde_json::Value,
     pub rate_limit_bytes_per_second: Option<i64>,
     pub group_id: Option<Uuid>,
+    pub ticket_max_duration_seconds: Option<i64>,
+    pub ticket_requests_disabled: bool,
+    pub ticket_require_approval: bool,
+    pub ticket_max_uses: Option<i16>,
+    pub require_approval: bool,
 }
 
 impl Related<super::Role::Entity> for Entity {
@@ -87,6 +98,11 @@ impl TryFrom<Model> for Target {
             options,
             rate_limit_bytes_per_second: model.rate_limit_bytes_per_second.map(|v| v as u32),
             group_id: model.group_id,
+            ticket_max_duration_seconds: model.ticket_max_duration_seconds,
+            ticket_requests_disabled: model.ticket_requests_disabled,
+            ticket_require_approval: model.ticket_require_approval,
+            ticket_max_uses: model.ticket_max_uses,
+            require_approval: model.require_approval,
         })
     }
 }

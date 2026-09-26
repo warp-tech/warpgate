@@ -1,61 +1,147 @@
 <script lang="ts">
-    import { FormGroup, Input } from '@sveltestrap/sveltestrap'
-    import { type TargetOptionsTargetSSHOptions } from '../../../lib/api'
     import { faExternalLink } from '@fortawesome/free-solid-svg-icons'
+    import { Alert, FormGroup, Input } from '@sveltestrap/sveltestrap'
+    import {
+        api,
+        type SSHClientKey,
+        type Target,
+        type TargetOptionsTargetSSHOptions,
+    } from 'admin/lib/api'
+    import { adminPermissions } from 'admin/lib/store'
+    import SecretRefInput from 'common/SecretRefInput.svelte'
+    import { TargetKind } from 'gateway/lib/api'
+    import { serverInfo } from 'gateway/lib/store'
+    import { untrack } from 'svelte'
     import Fa from 'svelte-fa'
     import TargetSshHostKeyChecker from './KeyChecker.svelte'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
-    import { adminPermissions } from 'admin/lib/store'
-    import { serverInfo } from 'gateway/lib/store'
 
     interface Props {
-        id: string,
-        options: TargetOptionsTargetSSHOptions,
+        id: string
+        name: string
+        options: TargetOptionsTargetSSHOptions
     }
 
-    let { id, options }: Props = $props()
+    let { id, name, options }: Props = $props()
 
     let hostKeyCheckInvalidated = $state(false)
+    let sshTargets = $state<Target[]>([])
+    let clientKeys = $state<SSHClientKey[]>([])
+
+    api.getSshOwnKeys().then(keys => {
+        clientKeys = keys
+    })
 
     $effect(() => {
-        // eslint-disable-next-line @typescript-eslint/no-unused-expressions
         options // run effect when options get reassigned after saving
         hostKeyCheckInvalidated = false
+    })
+
+    api.getTargets().then(targets => {
+        sshTargets = targets.filter(
+            t => t.options.kind === TargetKind.Ssh && t.id !== id,
+        )
+    })
+
+    // svelte-ignore state_referenced_locally
+    let jumpHostSelectValue = $state(options.jumpHost ?? '')
+
+    $effect(() => {
+        const val = jumpHostSelectValue
+        untrack(() => {
+            options.jumpHost = val || undefined
+        })
+    })
+
+    // Re-sync from options when the prop is reassigned (e.g. after save)
+    $effect(() => {
+        const jumpHost = options.jumpHost
+        untrack(() => {
+            jumpHostSelectValue = jumpHost ?? ''
+        })
+    })
+
+    // svelte-ignore state_referenced_locally
+    let clientKeySelectValue = $state(
+        options.auth.kind === 'PublicKey' ? (options.auth.keyId ?? '') : '',
+    )
+
+    $effect(() => {
+        const val = clientKeySelectValue
+        untrack(() => {
+            if (options.auth.kind === 'PublicKey') {
+                options.auth.keyId = val || undefined
+            }
+        })
+    })
+
+    $effect(() => {
+        const keyId =
+            options.auth.kind === 'PublicKey' ? options.auth.keyId : undefined
+        untrack(() => {
+            clientKeySelectValue = keyId ?? ''
+        })
     })
 </script>
 
 <h4 class="mt-4">Connection</h4>
 
 <div class="row">
-    <div class="col-8">
+    {#if sshTargets.length}
+        <div class="col">
+            <FormGroup floating label="Jump host">
+                <select class="form-control" bind:value={jumpHostSelectValue}>
+                    <option value="">Direct connection</option>
+                    {#each sshTargets as target (target.id)}
+                        <option value={target.id}>{target.name}</option>
+                    {/each}
+                </select>
+            </FormGroup>
+        </div>
+    {/if}
+    <div class="col" style="flex-grow: 2">
         <FormGroup floating label="Target host">
-            <input class="form-control" bind:value={options.host} onchange={() => hostKeyCheckInvalidated = true} />
+            <input
+                class="form-control"
+                bind:value={options.host}
+                onchange={() => hostKeyCheckInvalidated = true}
+            >
         </FormGroup>
     </div>
-    <div class="col-4">
+    <div class="col">
         <FormGroup floating label="Target port">
-            <input class="form-control" type="number" bind:value={options.port} min="1" max="65535" step="1" onchange={() => hostKeyCheckInvalidated = true} />
+            <input
+                class="form-control"
+                type="number"
+                bind:value={options.port}
+                min="1"
+                max="65535"
+                step="1"
+                onchange={() => hostKeyCheckInvalidated = true}
+            >
         </FormGroup>
     </div>
 </div>
+
+{#if $adminPermissions.targetsEdit}
+    <div class="mb-3">
+        {#if !hostKeyCheckInvalidated}
+            <TargetSshHostKeyChecker {id} {options} />
+        {:else}
+            <Alert color="secondary">
+                Save changes to see the host key validation status
+            </Alert>
+        {/if}
+    </div>
+{/if}
 
 <h4 class="mt-4">Authentication</h4>
 
-{#if $adminPermissions.targetsEdit}
-<div class="mb-3">
-    {#if !hostKeyCheckInvalidated}
-    <TargetSshHostKeyChecker id={id} options={options} />
-    {:else}
-    <Alert color="secondary">Save changes to see the host key validation status</Alert>
-    {/if}
-</div>
-{/if}
-
 <FormGroup floating label="Username">
-    <input class="form-control"
+    <input
+        class="form-control"
         placeholder="Use the currently logged in user's name"
         bind:value={options.username}
-    />
+    >
 </FormGroup>
 
 <div class="d-flex">
@@ -64,22 +150,43 @@
             <option value="PublicKey">Warpgate's own private keys</option>
             <option value="Password">Password</option>
             {#if $serverInfo?.runningOnEc2}
-                <option value="IamRole">IAM Role (experimental)</option>
+                <option value="IamRole">IAM Role</option>
             {/if}
         </select>
     </FormGroup>
     {#if options.auth.kind === 'PublicKey'}
+        <FormGroup floating label="Key" class="w-100 ms-3">
+            <select class="form-control" bind:value={clientKeySelectValue}>
+                <option value="">Use default keys</option>
+                {#each clientKeys as key (key.id)}
+                    <option value={key.id}>
+                        {key.label}
+                        ({key.kind}){key.isDefault ? ' — default' : ''}
+                    </option>
+                {/each}
+            </select>
+        </FormGroup>
         <a
             class="btn btn-link mb-3 d-flex align-items-center"
             href="/@warpgate/admin#/config/ssh"
-            target="_blank">
+            target="_blank"
+        >
             <Fa fw icon={faExternalLink} />
         </a>
     {/if}
     {#if options.auth.kind === 'Password'}
-        <FormGroup floating label="Password" class="w-100 ms-3">
-            <input class="form-control" type="password" autocomplete="off" bind:value={options.auth.password} />
-        </FormGroup>
+        <div class="w-100 ms-3 d-flex align-items-center">
+            <SecretRefInput
+                bind:value={options.auth.password}
+                inlineLabel="Password"
+                disabled={!$adminPermissions.targetsEdit}
+                intendedUsage={{
+                    kind: 'Target',
+                    id,
+                    name
+                }}
+            />
+        </div>
     {/if}
 </div>
 
@@ -88,5 +195,6 @@
         class="mb-0 me-2"
         type="switch"
         label="Allow insecure SSH algorithms (e.g. for older network devices)"
-        bind:checked={options.allowInsecureAlgos} />
+        bind:checked={options.allowInsecureAlgos}
+    />
 </div>

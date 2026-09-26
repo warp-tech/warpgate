@@ -1,8 +1,8 @@
 <script lang="ts">
-    import { link } from 'svelte-spa-router'
-    import Badge from 'common/sveltestrap-s5-ports/Badge.svelte'
-    import Fa from 'svelte-fa'
     import { faCog } from '@fortawesome/free-solid-svg-icons'
+    import { Badge } from '@sveltestrap/sveltestrap'
+    import Fa from 'svelte-fa'
+    import { link } from 'svelte-spa-router'
 
     export let id: string
     export let name: string

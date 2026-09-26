@@ -1,6 +1,6 @@
-mod api;
 use poem_openapi::OpenApiService;
 use regex::Regex;
+use warpgate_admin::api;
 use warpgate_common::version::warpgate_version;
 
 #[allow(clippy::unwrap_used)]

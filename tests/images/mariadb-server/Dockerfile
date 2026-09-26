@@ -1,0 +1,6 @@
+FROM mariadb:10.8@sha256:456709ab146585d6189da05669b84384518baecd83670c9e5221f8c20a47cf1e
+
+ENV MYSQL_DATABASE=db
+ENV MYSQL_ROOT_PASSWORD=123
+
+ADD init.sql /docker-entrypoint-initdb.d

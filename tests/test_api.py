@@ -1,0 +1,1314 @@
+"""
+This test runs against Postgres for a better chance to catch
+DB field type related issues that don't surface on SQLite (e.g. timestamp types)
+"""
+
+import contextlib
+from dataclasses import dataclass
+from typing import Callable, Dict, Optional, Set
+from json import load
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from uuid import uuid4
+
+import pytest
+import requests
+
+from .api_client import sdk, admin_client as new_admin_client
+from .conftest import ProcessManager, WarpgateProcess
+from .test_http_common import *  # noqa
+from .util import wait_port
+
+
+@dataclass
+class AdminApiTestCase:
+    id: str
+    permission: Optional[str]
+    call: Callable[[sdk.DefaultApi, Dict[str, object]], sdk.ApiResponse]
+    expected_statuses: Set[int]
+
+
+@contextlib.contextmanager
+def assert_401():
+    with pytest.raises(sdk.ApiException) as e:
+        yield
+    assert e.value.status == 401
+
+
+def _ssh_target_request(name: str) -> sdk.TargetDataRequest:
+    return sdk.TargetDataRequest(
+        name=name,
+        require_approval=False,
+        ticket_requests_disabled=False,
+        ticket_require_approval=False,
+        options=sdk.TargetOptions(
+            sdk.TargetOptionsTargetSSHOptions(
+                kind="Ssh",
+                allow_insecure_algos=False,
+                host="127.0.0.1",
+                port=22,
+                username="user",
+                auth=sdk.SSHTargetAuth(
+                    sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
+                ),
+            )
+        ),
+    )
+
+
+def make_limited_admin_role_payload(**overrides):
+    return {
+        "name": overrides.get("name", f"limited-{uuid4()}"),
+        "description": "limited permissions",
+        "targets_create": False,
+        "targets_edit": False,
+        "targets_delete": False,
+        "users_create": False,
+        "users_edit": False,
+        "users_delete": False,
+        "access_roles_create": False,
+        "access_roles_edit": False,
+        "access_roles_delete": False,
+        "access_roles_assign": False,
+        "sessions_view": False,
+        "sessions_terminate": False,
+        "approve_sessions": False,
+        "recordings_view": False,
+        "tickets_create": False,
+        "tickets_delete": False,
+        "config_edit": False,
+        "admin_roles_manage": False,
+        "ticket_requests_manage": False,
+        **overrides,
+    }
+
+
+ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
+    AdminApiTestCase(
+        id="get_sessions",
+        permission="sessions_view",
+        call=lambda api, r: api.get_sessions_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_session",
+        permission="sessions_view",
+        call=lambda api, r: api.get_session_with_http_info(r["session_id"]),
+        expected_statuses={200, 404},
+    ),
+    AdminApiTestCase(
+        id="get_session_recordings",
+        permission="recordings_view",
+        call=lambda api, r: api.get_session_recordings_with_http_info(r["session_id"]),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="close_session",
+        permission="sessions_terminate",
+        call=lambda api, r: api.close_session_with_http_info(r["session_id"]),
+        expected_statuses={200, 404},
+    ),
+    AdminApiTestCase(
+        id="close_all_sessions",
+        permission="sessions_terminate",
+        call=lambda api, r: api.close_all_sessions_with_http_info(),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="get_session_approvals",
+        permission="approve_sessions",
+        call=lambda api, r: api.get_session_approvals_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="approve_session",
+        permission="approve_sessions",
+        call=lambda api, r: api.approve_session_with_http_info(
+            r["session_id"],
+            sdk.ApproveSessionRequest(
+                scope=sdk.ApprovalScope.ONCE, target="no-such-target"
+            ),
+        ),
+        expected_statuses={200, 404},
+    ),
+    AdminApiTestCase(
+        id="reject_session",
+        permission="approve_sessions",
+        call=lambda api, r: api.reject_session_with_http_info(
+            r["session_id"], sdk.RejectSessionRequest(target="no-such-target")
+        ),
+        expected_statuses={200, 404},
+    ),
+    AdminApiTestCase(
+        id="get_recording",
+        permission="recordings_view",
+        call=lambda api, r: api.get_recording_with_http_info(r["recording_id"]),
+        expected_statuses={200, 404},
+    ),
+    AdminApiTestCase(
+        id="get_roles",
+        permission=None,
+        call=lambda api, r: api.get_roles_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="create_role",
+        permission="access_roles_create",
+        call=lambda api, r: api.create_role_with_http_info(
+            sdk.RoleDataRequest(name=f"role-{uuid4()}"),
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="get_role",
+        permission=None,
+        call=lambda api, r: api.get_role_with_http_info(r["role_id"]),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="update_role",
+        permission="access_roles_edit",
+        call=lambda api, r: api.update_role_with_http_info(
+            r["role_id"],
+            sdk.RoleDataRequest(name=f"role-{uuid4()}"),
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_role_targets",
+        permission=None,
+        call=lambda api, r: api.get_role_targets_with_http_info(r["role_id"]),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_role_users",
+        permission=None,
+        call=lambda api, r: api.get_role_users_with_http_info(r["role_id"]),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_admin_roles",
+        permission=None,
+        call=lambda api, r: api.get_admin_roles_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="create_admin_role",
+        permission="admin_roles_manage",
+        call=lambda api, r: api.create_admin_role_with_http_info(
+            sdk.AdminRoleDataRequest(
+                **make_limited_admin_role_payload(name=f"admin-role-{uuid4()}")
+            )
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="get_admin_role",
+        permission=None,
+        call=lambda api, r: api.get_admin_role_with_http_info(r["admin_role_id"]),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="update_admin_role",
+        permission="admin_roles_manage",
+        call=lambda api, r: api.update_admin_role_with_http_info(
+            r["admin_role_id"],
+            sdk.AdminRoleDataRequest(
+                **make_limited_admin_role_payload(name=f"admin-role-{uuid4()}")
+            ),
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_admin_role_users",
+        permission=None,
+        call=lambda api, r: api.get_admin_role_users_with_http_info(r["admin_role_id"]),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_tickets",
+        permission=None,
+        call=lambda api, r: api.get_tickets_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="create_ticket",
+        permission="tickets_create",
+        call=lambda api, r: api.create_ticket_with_http_info(
+            sdk.CreateTicketRequest(
+                username=r["username"],
+                target_name=r["target_name"],
+            ),
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="delete_ticket",
+        permission="tickets_delete",
+        call=lambda api, r: api.delete_ticket_with_http_info(r["ticket_id"]),
+        expected_statuses={204},
+    ),
+    AdminApiTestCase(
+        id="add_ssh_known_host",
+        permission="config_edit",
+        call=lambda api, r: api.add_ssh_known_host_with_http_info(
+            sdk.AddSshKnownHostRequest(
+                host="127.0.0.1",
+                port=22,
+                key_type="ecdsa-sha2-nistp256",
+                key_base64="AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBKL5C+OCN2hAbPoR+mwG4M402Z0XVDOuV5k7n6zCRIMsgnYiyz6a61Zcw/RRHoQAb7ndqUyk8eAi9gjPEiGq2d0=",
+            ),
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_ssh_known_hosts",
+        permission="config_edit",
+        call=lambda api, r: api.get_ssh_known_hosts_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="delete_ssh_known_host",
+        permission="config_edit",
+        call=lambda api, r: api.delete_ssh_known_host_with_http_info(
+            r["ssh_known_host_id"]
+        ),
+        expected_statuses={204, 404},
+    ),
+    AdminApiTestCase(
+        id="get_ssh_own_keys",
+        permission=None,
+        call=lambda api, r: api.get_ssh_own_keys_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="import_ssh_own_key_reference",
+        permission="config_edit",
+        call=lambda api, r: api.import_ssh_own_key_reference_with_http_info(
+            sdk.ImportSshClientKeyReferenceRequest(
+                label=f"key-{uuid4()}",
+                reference="secret://not-configured/secret/key#private_key",
+                is_default=False,
+            )
+        ),
+        expected_statuses={400},
+    ),
+    AdminApiTestCase(
+        id="get_secret_backends",
+        permission="config_edit",
+        call=lambda api, r: api.get_secret_backends_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_secret_backends_summary",
+        permission=None,
+        call=lambda api, r: api.get_secret_backends_summary_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_secret_reference_usage",
+        permission="targets_edit",
+        call=lambda api, r: api.get_secret_reference_usage_with_http_info(str(uuid4())),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="create_secret_backend",
+        permission="config_edit",
+        call=lambda api, r: api.create_secret_backend_with_http_info(
+            sdk.SecretBackendRequest(
+                name=f"vault-{uuid4().hex[:8]}",
+                backend_type="vault",
+                address="https://vault.invalid:8200",
+                auth=sdk.SecretBackendAuth(
+                    sdk.SecretBackendAuthVaultTokenAuth(method="Token", token="test")
+                ),
+            )
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="get_secret_backend",
+        permission=None,
+        call=lambda api, r: api.get_secret_backend_with_http_info(str(uuid4())),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="update_secret_backend",
+        permission="config_edit",
+        call=lambda api, r: api.update_secret_backend_with_http_info(
+            str(uuid4()),
+            sdk.SecretBackendRequest(
+                name="vault-missing",
+                backend_type="vault",
+                address="https://vault.invalid:8200",
+                auth=sdk.SecretBackendAuth(sdk.SecretBackendAuthVaultTokenAuth(method="Token", token="")),
+            ),
+        ),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="delete_secret_backend",
+        permission="config_edit",
+        call=lambda api, r: api.delete_secret_backend_with_http_info(str(uuid4())),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="check_secret_backend_health",
+        permission="config_edit",
+        call=lambda api, r: api.check_secret_backend_health_with_http_info(str(uuid4())),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="test_secret_resolve",
+        permission="targets_edit",
+        call=lambda api, r: api.test_secret_resolve_with_http_info(
+            sdk.TestResolveRequest(
+                reference="secret://not-configured/secret/x#password"
+            )
+        ),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="import_ssh_own_key",
+        permission="config_edit",
+        call=lambda api, r: api.import_ssh_own_key_with_http_info(
+            sdk.ImportSshClientKeyRequest(
+                label=f"key-{uuid4()}",
+                secret_key=open("ssh-keys/id_ed25519").read(),
+                is_default=False,
+            )
+        ),
+        expected_statuses={201, 409},
+    ),
+    AdminApiTestCase(
+        id="generate_ssh_own_key",
+        permission="config_edit",
+        call=lambda api, r: api.generate_ssh_own_key_with_http_info(
+            sdk.GenerateSSHClientKeyRequest(
+                label=f"key-{uuid4()}", kind=sdk.SSHClientKeyKind.ED25519
+            )
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="update_ssh_own_key",
+        permission="config_edit",
+        call=lambda api, r: api.update_ssh_own_key_with_http_info(
+            r["ssh_client_key_id"],
+            sdk.UpdateSSHClientKeyRequest(label=f"key-{uuid4()}", is_default=False),
+        ),
+        expected_statuses={200, 404},
+    ),
+    AdminApiTestCase(
+        id="delete_ssh_own_key",
+        permission="config_edit",
+        call=lambda api, r: api.delete_ssh_own_key_with_http_info(
+            r["ssh_client_key_id"]
+        ),
+        expected_statuses={204, 400, 404},
+    ),
+    AdminApiTestCase(
+        id="get_logs",
+        permission=None,
+        # A non-empty search is what actually exercises the filter - an empty one
+        # is skipped, hiding e.g. Postgres rejecting lower() on the JSON column
+        call=lambda api, r: api.get_logs_with_http_info(
+            sdk.GetLogsRequest(search="test")
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_targets",
+        permission=None,
+        call=lambda api, r: api.get_targets_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="create_target",
+        permission="targets_create",
+        call=lambda api, r: api.create_target_with_http_info(
+            _ssh_target_request(f"target-{uuid4()}"),
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="get_target",
+        permission=None,
+        call=lambda api, r: api.get_target_with_http_info(r["target_id"]),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="update_target",
+        permission="targets_edit",
+        call=lambda api, r: api.update_target_with_http_info(
+            r["target_id"],
+            _ssh_target_request(f"target-{uuid4()}"),
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_ssh_target_known_ssh_host_keys",
+        permission="targets_edit",
+        call=lambda api, r: api.get_ssh_target_known_ssh_host_keys_with_http_info(
+            r["target_id"]
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_target_roles",
+        permission=None,
+        call=lambda api, r: api.get_target_roles_with_http_info(r["target_id"]),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="add_target_role",
+        permission="access_roles_assign",
+        call=lambda api, r: api.add_target_role_with_http_info(
+            r["target_id"], r["role_id"]
+        ),
+        expected_statuses={201, 409},
+    ),
+    AdminApiTestCase(
+        id="delete_target_role",
+        permission="access_roles_assign",
+        call=lambda api, r: api.delete_target_role_with_http_info(
+            r["target_id"], r["role_id"]
+        ),
+        expected_statuses={204},
+    ),
+    AdminApiTestCase(
+        id="list_target_groups",
+        permission=None,
+        call=lambda api, r: api.list_target_groups_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="create_target_group",
+        permission="targets_create",
+        call=lambda api, r: api.create_target_group_with_http_info(
+            sdk.TargetGroupDataRequest(name=f"group-{uuid4()}"),
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="get_target_group",
+        permission=None,
+        call=lambda api, r: api.get_target_group_with_http_info(r["target_group_id"]),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="update_target_group",
+        permission="targets_edit",
+        call=lambda api, r: api.update_target_group_with_http_info(
+            r["target_group_id"],
+            sdk.TargetGroupDataRequest(name=f"group-{uuid4()}"),
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="delete_target_group",
+        permission="targets_delete",
+        call=lambda api, r: api.delete_target_group_with_http_info(
+            r["target_group_id"]
+        ),
+        expected_statuses={204},
+    ),
+    AdminApiTestCase(
+        id="get_users",
+        permission=None,
+        call=lambda api, r: api.get_users_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="create_user",
+        permission="users_create",
+        call=lambda api, r: api.create_user_with_http_info(
+            sdk.CreateUserRequest(username=f"user-{uuid4()}"),
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="get_user",
+        permission=None,
+        call=lambda api, r: api.get_user_with_http_info(r["user_id"]),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="update_user",
+        permission="users_edit",
+        call=lambda api, r: api.update_user_with_http_info(
+            r["user_id"],
+            sdk.UserDataRequest(username=f"user-{uuid4()}"),
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="unlink_user_from_ldap",
+        permission="users_edit",
+        call=lambda api, r: api.unlink_user_from_ldap_with_http_info(r["user_id"]),
+        expected_statuses={200, 400},
+    ),
+    AdminApiTestCase(
+        id="auto_link_user_to_ldap",
+        permission="users_edit",
+        call=lambda api, r: api.auto_link_user_to_ldap_with_http_info(r["user_id"]),
+        expected_statuses={200, 400},
+    ),
+    AdminApiTestCase(
+        id="get_user_roles",
+        permission=None,
+        call=lambda api, r: api.get_user_roles_with_http_info(r["user_id"]),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="add_user_role",
+        permission="access_roles_assign",
+        call=lambda api, r: api.add_user_role_with_http_info(
+            r["user_id"], r["role_id"]
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="delete_user_role",
+        permission="access_roles_assign",
+        call=lambda api, r: api.delete_user_role_with_http_info(
+            r["user_id"], r["role_id"]
+        ),
+        expected_statuses={204},
+    ),
+    AdminApiTestCase(
+        id="get_user_admin_roles",
+        permission=None,
+        call=lambda api, r: api.get_user_admin_roles_with_http_info(r["user_id"]),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="add_user_admin_role",
+        permission="admin_roles_manage",
+        call=lambda api, r: api.add_user_admin_role_with_http_info(
+            r["user_id"], r["admin_role_id"]
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="delete_user_admin_role",
+        permission="admin_roles_manage",
+        call=lambda api, r: api.delete_user_admin_role_with_http_info(
+            r["user_id"], r["admin_role_id"]
+        ),
+        expected_statuses={204},
+    ),
+    AdminApiTestCase(
+        id="get_password_credentials",
+        permission="users_edit",
+        call=lambda api, r: api.get_password_credentials_with_http_info(r["user_id"]),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="create_password_credential",
+        permission="users_edit",
+        call=lambda api, r: api.create_password_credential_with_http_info(
+            r["user_id"],
+            sdk.NewPasswordCredential(password="123"),
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="delete_password_credential",
+        permission="users_edit",
+        call=lambda api, r: api.delete_password_credential_with_http_info(
+            r["user_id"], r["password_id"]
+        ),
+        expected_statuses={204},
+    ),
+    AdminApiTestCase(
+        id="get_sso_credentials",
+        permission="users_edit",
+        call=lambda api, r: api.get_sso_credentials_with_http_info(r["user_id"]),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="create_sso_credential",
+        permission="users_edit",
+        call=lambda api, r: api.create_sso_credential_with_http_info(
+            r["user_id"],
+            sdk.NewSsoCredential(email="test@example.com", provider="test"),
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="update_sso_credential",
+        permission="users_edit",
+        call=lambda api, r: api.update_sso_credential_with_http_info(
+            r["user_id"],
+            r["sso_id"],
+            sdk.NewSsoCredential(email="test@example.com", provider="test"),
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="delete_sso_credential",
+        permission="users_edit",
+        call=lambda api, r: api.delete_sso_credential_with_http_info(
+            r["user_id"], r["sso_id"]
+        ),
+        expected_statuses={204},
+    ),
+    AdminApiTestCase(
+        id="get_public_key_credentials",
+        permission="users_edit",
+        call=lambda api, r: api.get_public_key_credentials_with_http_info(r["user_id"]),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="create_public_key_credential",
+        permission="users_edit",
+        call=lambda api, r: api.create_public_key_credential_with_http_info(
+            r["user_id"],
+            sdk.NewPublicKeyCredential(
+                label="key",
+                openssh_public_key="ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBKL5C+OCN2hAbPoR+mwG4M402Z0XVDOuV5k7n6zCRIMsgnYiyz6a61Zcw/RRHoQAb7ndqUyk8eAi9gjPEiGq2d0=",
+            ),
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="update_public_key_credential",
+        permission="users_edit",
+        call=lambda api, r: api.update_public_key_credential_with_http_info(
+            r["user_id"],
+            r["public_key_id"],
+            sdk.NewPublicKeyCredential(
+                label="key",
+                openssh_public_key="ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBKL5C+OCN2hAbPoR+mwG4M402Z0XVDOuV5k7n6zCRIMsgnYiyz6a61Zcw/RRHoQAb7ndqUyk8eAi9gjPEiGq2d0=",
+            ),
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="delete_public_key_credential",
+        permission="users_edit",
+        call=lambda api, r: api.delete_public_key_credential_with_http_info(
+            r["user_id"], r["public_key_id"]
+        ),
+        expected_statuses={204},
+    ),
+    AdminApiTestCase(
+        id="get_otp_credentials",
+        permission="users_edit",
+        call=lambda api, r: api.get_otp_credentials_with_http_info(r["user_id"]),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="create_otp_credential",
+        permission="users_edit",
+        call=lambda api, r: api.create_otp_credential_with_http_info(
+            r["user_id"],
+            sdk.NewOtpCredential(name="otp-1", secret_key=[1, 2, 3]),
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="delete_otp_credential",
+        permission="users_edit",
+        call=lambda api, r: api.delete_otp_credential_with_http_info(
+            r["user_id"], r["otp_id"]
+        ),
+        expected_statuses={204},
+    ),
+    AdminApiTestCase(
+        id="get_ldap_servers",
+        permission="config_edit",
+        call=lambda api, r: api.get_ldap_servers_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="create_ldap_server",
+        permission="config_edit",
+        call=lambda api, r: api.create_ldap_server_with_http_info(
+            sdk.CreateLdapServerRequest(
+                name=f"ldap-{uuid4()}",
+                host="127.0.0.1",
+                bind_dn="cn=admin,dc=example,dc=org",
+                bind_password="pass",
+            ),
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="test_ldap_server_connection",
+        permission="config_edit",
+        call=lambda api, r: api.test_ldap_server_connection_with_http_info(
+            sdk.TestLdapServerRequest(
+                host="127.0.0.1",
+                port=389,
+                bind_dn="cn=admin,dc=example,dc=org",
+                bind_password="pass",
+                tls_mode=sdk.TlsMode.DISABLED,
+                tls_verify=False,
+            ),
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_ldap_server",
+        permission="config_edit",
+        call=lambda api, r: api.get_ldap_server_with_http_info(r["ldap_server_id"]),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="update_ldap_server",
+        permission="config_edit",
+        call=lambda api, r: api.update_ldap_server_with_http_info(
+            r["ldap_server_id"],
+            sdk.UpdateLdapServerRequest(
+                name=f"ldap-{uuid4()}",
+                host="127.0.0.1",
+                bind_dn="cn=admin,dc=example,dc=org",
+                bind_password="pass",
+                auto_link_sso_users=False,
+                description="",
+                enabled=True,
+                port=123,
+                ssh_key_attribute="asd",
+                tls_mode=sdk.TlsMode.DISABLED,
+                tls_verify=False,
+                user_filter="(&(objectClass=person)(uid={0}))",
+                username_attribute=sdk.LdapUsernameAttribute.UID,
+                uuid_attribute="uid",
+            ),
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_ldap_users",
+        permission="users_create",
+        call=lambda api, r: api.get_ldap_users_with_http_info(r["ldap_server_id"]),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="import_ldap_users",
+        permission="users_create",
+        call=lambda api, r: api.import_ldap_users_with_http_info(
+            r["ldap_server_id"],
+            import_ldap_users_request=sdk.ImportLdapUsersRequest(dns=[]),
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_parameters",
+        permission=None,
+        call=lambda api, r: api.get_parameters_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="update_parameters",
+        permission="config_edit",
+        call=lambda api, r: api.update_parameters_with_http_info(
+            sdk.ParameterUpdate(
+                allow_own_credential_management=True,
+                rate_limit_bytes_per_second=None,
+                ssh_client_auth_keyboard_interactive=True,
+                ssh_client_auth_password=True,
+                ssh_client_auth_publickey=True,
+                ticket_self_service_enabled=False,
+                ticket_auto_approve_existing_access=True,
+                ticket_max_duration_seconds=28800,
+                ticket_max_uses=None,
+                ticket_require_description=False,
+            ),
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="test_recordings_storage",
+        permission="config_edit",
+        call=lambda api, r: api.test_recordings_storage_with_http_info(
+            sdk.RecordingsStorageConfig(
+                sdk.RecordingsStorageConfigRecordingsDiskConfig(
+                    kind="Disk", path="/tmp/recordings-test"
+                )
+            )
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_analytics_preview",
+        permission="config_edit",
+        call=lambda api, r: api.get_analytics_preview_with_http_info(normal=True),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_ticket_requests",
+        permission="ticket_requests_manage",
+        call=lambda api, r: api.get_ticket_requests_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="approve_ticket_request",
+        permission="ticket_requests_manage",
+        call=lambda api, r: api.approve_ticket_request_with_http_info(
+            r["ticket_request_id"]
+        ),
+        expected_statuses={200, 404},
+    ),
+    AdminApiTestCase(
+        id="deny_ticket_request",
+        permission="ticket_requests_manage",
+        call=lambda api, r: api.deny_ticket_request_with_http_info(
+            r["ticket_request_id"],
+            sdk.DenyTicketRequestBody(reason="test"),
+        ),
+        expected_statuses={200, 404},
+    ),
+    AdminApiTestCase(
+        id="check_ssh_host_key",
+        permission="targets_edit",
+        call=lambda api, r: api.check_ssh_host_key_with_http_info(
+            sdk.CheckSshHostKeyRequest(target_id=r["target_id"]),
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_certificate_credentials",
+        permission="users_edit",
+        call=lambda api, r: api.get_certificate_credentials_with_http_info(
+            r["user_id"]
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="issue_certificate_credential",
+        permission="users_edit",
+        call=lambda api, r: api.issue_certificate_credential_with_http_info(
+            r["user_id"],
+            sdk.IssueCertificateCredentialRequest(
+                label="test",
+                public_key_pem="-----BEGIN PUBLIC KEY-----\nMFswDQYJKoZIhvcNAQEBBQADSgAwRwJAXWRPQyGlEY+SXz8Uslhe+MLjTgWd8lf/\nnA0hgCm9JFKC1tq1S73cQ9naClNXsMqY7pwPt1bSY8jYRqHHbdoUvwIDAQAB\n-----END PUBLIC KEY-----",
+            ),
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="update_certificate_credential",
+        permission="users_edit",
+        call=lambda api, r: api.update_certificate_credential_with_http_info(
+            r["user_id"],
+            r["certificate_id"],
+            sdk.UpdateCertificateCredential(label="test"),
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="revoke_certificate_credential",
+        permission="users_edit",
+        call=lambda api, r: api.revoke_certificate_credential_with_http_info(
+            r["user_id"], r["certificate_id"]
+        ),
+        expected_statuses={204},
+    ),
+    AdminApiTestCase(
+        id="get_user_role",
+        permission=None,
+        call=lambda api, r: api.get_user_role_with_http_info(
+            r["user_id"], r["role_id"]
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="update_user_role",
+        permission="access_roles_assign",
+        call=lambda api, r: api.update_user_role_with_http_info(
+            r["user_id"],
+            r["role_id"],
+            sdk.UpdateUserRoleRequest(
+                expires_at=(datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+            ),
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="delete_role",
+        permission="access_roles_delete",
+        call=lambda api, r: api.delete_role_with_http_info(r["role_id"]),
+        expected_statuses={204},
+    ),
+    AdminApiTestCase(
+        id="delete_target",
+        permission="targets_delete",
+        call=lambda api, r: api.delete_target_with_http_info(r["target_id"]),
+        expected_statuses={204},
+    ),
+    AdminApiTestCase(
+        id="delete_user",
+        permission="users_delete",
+        call=lambda api, r: api.delete_user_with_http_info(r["user_id"]),
+        expected_statuses={204},
+    ),
+    AdminApiTestCase(
+        id="delete_ldap_server",
+        permission="config_edit",
+        call=lambda api, r: api.delete_ldap_server_with_http_info(r["ldap_server_id"]),
+        expected_statuses={204},
+    ),
+    AdminApiTestCase(
+        id="delete_admin_role",
+        permission="admin_roles_manage",
+        call=lambda api, r: api.delete_admin_role_with_http_info(r["admin_role_id"]),
+        expected_statuses={204},
+    ),
+    AdminApiTestCase(
+        id="get_security_status",
+        permission=None,
+        call=lambda api, r: api.get_security_status_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="list_blocked_ips",
+        permission=None,
+        call=lambda api, r: api.list_blocked_ips_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="unblock_ip",
+        permission="config_edit",
+        call=lambda api, r: api.unblock_ip_with_http_info(
+            sdk.UnblockIpRequest(ip="127.0.0.1")
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="list_locked_users",
+        permission=None,
+        call=lambda api, r: api.list_locked_users_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="unlock_user",
+        permission="config_edit",
+        call=lambda api, r: api.unlock_user_with_http_info("nonexistent-user"),
+        expected_statuses={200, 404},
+    ),
+    AdminApiTestCase(
+        id="get_listener_states",
+        permission="config_edit",
+        call=lambda api, r: api.get_listener_states_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_ip_echo",
+        permission="config_edit",
+        call=lambda api, r: api.get_ip_echo_with_http_info(),
+        expected_statuses={200},
+    ),
+]
+
+
+def _verify_all_openapi_ops_are_covered():
+    schema = load(
+        open(
+            Path(__file__).resolve().parents[1]
+            / "warpgate-web"
+            / "src"
+            / "admin"
+            / "lib"
+            / "openapi-schema.json"
+        )
+    )
+    schema_ops = {
+        op.get("operationId")
+        for methods in schema.get("paths", {}).values()
+        for op in methods.values()
+        if op.get("operationId")
+    }
+    missing = schema_ops - {c.id for c in ADMIN_API_TEST_CASES}
+    assert not missing, f"Missing test cases for operations: {sorted(missing)}"
+
+
+def _create_admin_role(admin_api: sdk.DefaultApi, payload: dict) -> sdk.AdminRole:
+    return admin_api.create_admin_role(sdk.AdminRoleDataRequest(**payload))
+
+
+def _create_user_with_role(admin_api: sdk.DefaultApi, role_id: str | None):
+    user = admin_api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
+    admin_api.create_password_credential(
+        user.id, sdk.NewPasswordCredential(password="123")
+    )
+    if role_id:
+        admin_api.add_user_admin_role(user.id, role_id)
+    return user
+
+
+def _create_user_api_token(
+    base_url: str, username: str, password: str, label: str = "test"
+) -> str:
+    session = requests.Session()
+    session.verify = False
+
+    # Log in to get an authenticated session cookie.
+    resp = session.post(
+        f"{base_url}/@warpgate/api/auth/login",
+        json={"username": username, "password": password},
+    )
+    resp.raise_for_status()
+
+    expiry = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    token_resp = session.post(
+        f"{base_url}/@warpgate/api/profile/api-tokens",
+        json={"label": label, "expiry": expiry},
+    )
+    token_resp.raise_for_status()
+
+    return token_resp.json()["secret"]
+
+
+@pytest.fixture(scope="session")
+def pg_wg(processes: ProcessManager):
+    db_port = processes.start_postgres_server()
+    wg = processes.start_wg(
+        database_url=f"postgres://user:123@localhost:{db_port}/db",
+    )
+    wait_port(wg.http_port, for_process=wg.process, recv=False)
+    wait_port(wg.ssh_port, for_process=wg.process)
+    wait_port(wg.kubernetes_port, for_process=wg.process, recv=False)
+    yield wg
+
+
+@pytest.fixture
+def admin_client(pg_wg: WarpgateProcess):
+    url = f"https://localhost:{pg_wg.http_port}"
+    with new_admin_client(url) as api:
+        yield api
+
+
+@pytest.fixture(scope="session")
+def _session_admin_client(pg_wg: WarpgateProcess):
+    url = f"https://localhost:{pg_wg.http_port}"
+    with new_admin_client(url) as api:
+        yield api
+
+
+@pytest.fixture(scope="session")
+def api_test_resources(
+    pg_wg: WarpgateProcess, _session_admin_client: sdk.DefaultApi
+) -> Dict[str, object]:
+    _verify_all_openapi_ops_are_covered()
+
+    ac = _session_admin_client
+    resources: Dict[str, object] = {}
+    resources["role_id"] = ac.create_role(
+        sdk.RoleDataRequest(name=f"role-{uuid4()}")
+    ).id
+    resources["admin_role_id"] = _create_admin_role(
+        ac,
+        make_limited_admin_role_payload(name=f"admin-role-{uuid4()}"),
+    ).id
+    resources["target_group_id"] = ac.create_target_group(
+        sdk.TargetGroupDataRequest(
+            name=f"group-{uuid4()}", description="", color=sdk.BootstrapThemeColor.INFO
+        )
+    ).id
+    user = ac.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
+    resources["user_id"] = user.id
+    resources["username"] = user.username
+
+    # fake IDs here
+    resources["session_id"] = str(uuid4())
+    resources["recording_id"] = str(uuid4())
+    resources["ssh_known_host_id"] = str(uuid4())
+    resources["ssh_client_key_id"] = str(uuid4())
+    resources["ticket_request_id"] = str(uuid4())
+
+    target = ac.create_target(_ssh_target_request(f"target-{uuid4()}"))
+    resources["target_id"] = target.id
+    resources["target_name"] = target.name
+
+    ticket = ac.create_ticket(
+        sdk.CreateTicketRequest(
+            username=resources["username"], target_name=resources["target_name"]
+        )
+    )
+    resources["ticket_id"] = ticket.ticket.id
+
+    pw = ac.create_password_credential(
+        resources["user_id"], sdk.NewPasswordCredential(password="123")
+    )
+    resources["password_id"] = pw.id
+    sso = ac.create_sso_credential(
+        resources["user_id"],
+        sdk.NewSsoCredential(email="test@example.com", provider="test"),
+    )
+    resources["sso_id"] = sso.id
+    public_key = ac.create_public_key_credential(
+        resources["user_id"],
+        sdk.NewPublicKeyCredential(
+            label="key",
+            openssh_public_key="ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBKL5C+OCN2hAbPoR+mwG4M402Z0XVDOuV5k7n6zCRIMsgnYiyz6a61Zcw/RRHoQAb7ndqUyk8eAi9gjPEiGq2d0=",
+        ),
+    )
+    resources["public_key_id"] = public_key.id
+    otp = ac.create_otp_credential(
+        resources["user_id"], sdk.NewOtpCredential(name="otp-1", secret_key=[1, 2, 3])
+    )
+    resources["otp_id"] = otp.id
+    cert = ac.issue_certificate_credential(
+        resources["user_id"],
+        sdk.IssueCertificateCredentialRequest(
+            label="test",
+            public_key_pem="-----BEGIN PUBLIC KEY-----\nMFswDQYJKoZIhvcNAQEBBQADSgAwRwJAXWRPQyGlEY+SXz8Uslhe+MLjTgWd8lf/\nnA0hgCm9JFKC1tq1S73cQ9naClNXsMqY7pwPt1bSY8jYRqHHbdoUvwIDAQAB\n-----END PUBLIC KEY-----",
+        ),
+    )
+    resources["certificate_id"] = cert.credential.id
+    ldap = ac.create_ldap_server(
+        sdk.CreateLdapServerRequest(
+            name=f"ldap-{uuid4()}",
+            host="127.0.0.1",
+            bind_dn="cn=admin,dc=example,dc=org",
+            bind_password="pass",
+        )
+    )
+    resources["ldap_server_id"] = ldap.id
+
+    return resources
+
+
+@pytest.mark.parametrize(
+    "case",
+    ADMIN_API_TEST_CASES,
+    ids=[c.id for c in ADMIN_API_TEST_CASES],
+)
+def test_admin_api_permission_enforcement(
+    pg_wg: WarpgateProcess,
+    admin_client: sdk.DefaultApi,
+    api_test_resources: Dict[str, object],
+    case: AdminApiTestCase,
+):
+    url = f"https://localhost:{pg_wg.http_port}"
+
+    # Base-check endpoints (permission=None) admit any admin. An admin holds at least one
+    # permission — a permissionless role is not a real admin — so grant a benign baseline.
+    allow_payload = make_limited_admin_role_payload(
+        **({case.permission: True} if case.permission else {"sessions_view": True})
+    )
+    allowed_role = _create_admin_role(admin_client, allow_payload)
+    allowed_user = _create_user_with_role(admin_client, allowed_role.id)
+    token = _create_user_api_token(url, allowed_user.username, "123")
+    with new_admin_client(url, token) as allowed_api:
+        try:
+            response = case.call(allowed_api, api_test_resources)
+            status, body = response.status_code, response.data
+        except sdk.ApiException as e:
+            status, body = e.status, e.body
+        assert (
+            status in case.expected_statuses
+        ), f"{case.id} expected {case.expected_statuses} but got {status}: {body}"
+
+    if case.permission:
+        denied_role = _create_admin_role(
+            admin_client,
+            {k: not v if isinstance(v, bool) else v for k, v in allow_payload.items()},
+        )
+        denied_user = _create_user_with_role(admin_client, denied_role.id)
+    else:
+        denied_user = _create_user_with_role(admin_client, None)
+
+    denied_token = _create_user_api_token(url, denied_user.username, "123")
+    with new_admin_client(url, denied_token) as denied_api:
+        try:
+            response = case.call(denied_api, api_test_resources)
+            status, body = response.status_code, response.data
+        except sdk.ApiException as e:
+            status, body = e.status, e.body
+        assert status in {
+            401,
+            403,
+        }, f"{case.id} should be forbidden without {case.permission}, got {status}: {body}"
+
+
+def test_update_target_must_state_the_approval_gate(
+    pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
+):
+    # The gate is a required field of every target write: a client that
+    # predates it — or simply doesn't set it — is rejected outright rather
+    # than silently taking the gate off a target by saving the rest of it.
+    # The generated client can't express the omission, so raw JSON it is.
+    gated = _ssh_target_request(f"gated-{uuid4()}")
+    gated.require_approval = True
+    target = admin_client.create_target(gated)
+    assert target.require_approval
+
+    url = f"https://localhost:{pg_wg.http_port}"
+    session = requests.Session()
+    session.verify = False
+    session.headers["X-Warpgate-Token"] = "token-value"
+    body = admin_client.get_target(target.id).to_dict()
+    del body["require_approval"]
+    silent = session.put(f"{url}/@warpgate/admin/api/targets/{target.id}", json=body)
+    assert silent.status_code == 400, (
+        "an update that says nothing about the gate must be refused, "
+        f"got {silent.status_code}"
+    )
+    assert admin_client.get_target(
+        target.id
+    ).require_approval, "and must not have touched it"
+
+    # Turning it off is an ordinary, explicit edit.
+    off = _ssh_target_request(target.name)
+    off.require_approval = False
+    admin_client.update_target(target.id, off)
+    assert not admin_client.get_target(target.id).require_approval
+
+
+def test_approval_parameters_can_be_cleared_and_reject_nonsense(
+    pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
+):
+    # The generated clients omit a `None` field rather than sending `null`, so
+    # clearing one is only reachable over raw JSON — which is what the admin UI
+    # sends when the field is blanked.
+    url = f"https://localhost:{pg_wg.http_port}"
+    session = requests.Session()
+    session.verify = False
+    session.headers["X-Warpgate-Token"] = "token-value"
+    endpoint = f"{url}/@warpgate/admin/api/parameters"
+
+    def put(**overrides):
+        body = admin_client.get_parameters().to_dict()
+        body.update(overrides)
+        return session.put(endpoint, json=body)
+
+    assert put(admin_approval_grace_period_seconds=300).status_code // 100 == 2
+    assert admin_client.get_parameters().admin_approval_grace_period_seconds == 300
+
+    assert put(admin_approval_grace_period_seconds=None).status_code // 100 == 2
+    assert (
+        admin_client.get_parameters().admin_approval_grace_period_seconds is None
+    ), "an explicit null must turn approval caching off, not be ignored"
+
+    for field in (
+        "admin_approval_grace_period_seconds",
+        "admin_approval_timeout_seconds",
+    ):
+        assert (
+            put(**{field: -1}).status_code == 400
+        ), f"{field} must reject a negative window"
+
+
+def test_update_target_rejects_duplicate_name(admin_client: sdk.DefaultApi):
+    first = admin_client.create_target(_ssh_target_request(f"dup-a-{uuid4()}"))
+    second = admin_client.create_target(_ssh_target_request(f"dup-b-{uuid4()}"))
+    with pytest.raises(sdk.ApiException) as err:
+        admin_client.update_target(second.id, _ssh_target_request(first.name))
+    assert err.value.status == 409
+    still = admin_client.get_target(second.id)
+    assert still.name == second.name
+
+    renamed = admin_client.update_target(second.id, _ssh_target_request(second.name))
+    assert renamed.name == second.name
+
+
+def test_update_target_rejects_empty_name(admin_client: sdk.DefaultApi):
+    target = admin_client.create_target(_ssh_target_request(f"empty-{uuid4()}"))
+    with pytest.raises(sdk.ApiException) as err:
+        admin_client.update_target(target.id, _ssh_target_request(""))
+    assert err.value.status == 400
+    assert admin_client.get_target(target.id).name == target.name

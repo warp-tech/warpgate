@@ -1,7 +1,6 @@
 <script lang="ts">
-    import { uuid } from './sveltestrap-s5-ports/_sveltestrapUtils'
-    import Badge from './sveltestrap-s5-ports/Badge.svelte'
-    import Tooltip from './sveltestrap-s5-ports/Tooltip.svelte'
+    import { Badge, Tooltip } from '@sveltestrap/sveltestrap'
+    import { uuid } from './helpers'
 
     interface DatedCredential {
         lastUsed?: Date
@@ -16,24 +15,28 @@
 </script>
 
 <span bind:this={badge}>
-{#if credential.lastUsed}
-    {#if credential.lastUsed.getTime() < lastUseThreshold.getTime()}
-        <Badge id={id} color="warning">Not used recently</Badge>
+    {#if credential.lastUsed}
+        {#if credential.lastUsed.getTime() < lastUseThreshold.getTime()}
+            <Badge {id} color="warning">Not used recently</Badge>
+        {:else}
+            <Badge {id} color="success">Used recently</Badge>
+        {/if}
     {:else}
-        <Badge id={id} color="success">Used recently</Badge>
+        <Badge {id} color="warning">Never used</Badge>
     {/if}
-{:else}
-    <Badge id={id} color="warning">Never used</Badge>
-{/if}
 </span>
 
 {#if credential.dateAdded || credential.lastUsed}
     <Tooltip target={badge} animation delay="250">
         {#if credential.dateAdded}
-            <div>Added on: {new Date(credential.dateAdded).toLocaleString()}</div>
+            <div>
+                Added on: {new Date(credential.dateAdded).toLocaleString()}
+            </div>
         {/if}
         {#if credential.lastUsed}
-            <div>Last used: {new Date(credential.lastUsed).toLocaleString()}</div>
+            <div>
+                Last used: {new Date(credential.lastUsed).toLocaleString()}
+            </div>
         {/if}
     </Tooltip>
 {/if}

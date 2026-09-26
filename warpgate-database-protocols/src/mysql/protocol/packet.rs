@@ -4,8 +4,8 @@ use bytes::Bytes;
 
 use crate::error::Error;
 use crate::io::{Decode, Encode};
-use crate::mysql::protocol::response::{EofPacket, OkPacket};
 use crate::mysql::protocol::Capabilities;
+use crate::mysql::protocol::response::{EofPacket, OkPacket};
 
 #[derive(Debug)]
 pub struct Packet<T>(pub T);

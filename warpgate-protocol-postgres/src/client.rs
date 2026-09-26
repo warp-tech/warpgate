@@ -3,33 +3,32 @@ use std::fmt::Debug;
 use std::io::Write;
 use std::sync::Arc;
 
-use pgwire::messages::PgWireBackendMessage;
+use pgwire::messages::{DecodeContext, PgWireBackendMessage, ProtocolVersion};
 use rsasl::config::SASLConfig;
 use rsasl::prelude::{Mechname, SASLClient};
 use tokio::net::TcpStream;
-use tokio_rustls::client::TlsStream;
 use tracing::{debug, info, warn};
-use warpgate_common::{TargetPostgresOptions, WarpgateError};
-use warpgate_tls::{configure_tls_connector, TlsMode};
+use warpgate_common::{SecretResolver, TargetPostgresOptions, WarpgateError};
+use warpgate_core::AdmittedTarget;
+use warpgate_tls::{ClientTlsStream, TlsMode, configure_tls_connector};
 
 use crate::error::PostgresError;
 use crate::stream::{PgWireGenericBackendMessage, PostgresEncode, PostgresStream};
 
 pub struct PostgresClient {
-    pub stream: PostgresStream<TcpStream, TlsStream<TcpStream>>,
+    pub stream: PostgresStream<TcpStream, ClientTlsStream<TcpStream>>,
+    decode_context: DecodeContext,
 }
 
 pub struct ConnectionOptions {
-    pub protocol_number_major: u16,
-    pub protocol_number_minor: u16,
+    pub protocol_version: ProtocolVersion,
     pub parameters: BTreeMap<String, String>,
 }
 
 impl Default for ConnectionOptions {
     fn default() -> Self {
         Self {
-            protocol_number_major: 3,
-            protocol_number_minor: 0,
+            protocol_version: ProtocolVersion::PROTOCOL3_2,
             parameters: BTreeMap::new(),
         }
     }
@@ -53,21 +52,28 @@ impl Write for SaslBufferWriter<'_> {
 }
 
 impl PostgresClient {
+    pub const fn protocol_version(&self) -> ProtocolVersion {
+        self.decode_context.protocol_version
+    }
+
     pub async fn connect(
-        target: &TargetPostgresOptions,
+        admitted: AdmittedTarget<TargetPostgresOptions>,
         options: ConnectionOptions,
+        secrets: &dyn SecretResolver,
     ) -> Result<Self, PostgresError> {
+        let target = admitted.specific_target().options().clone();
         let stream = TcpStream::connect((target.host.clone(), target.port)).await?;
         stream.set_nodelay(true)?;
 
         let mut stream = PostgresStream::new(stream);
+        let mut ctx = DecodeContext::new(options.protocol_version);
 
         if target.tls.mode != TlsMode::Disabled {
             stream.push(pgwire::messages::startup::SslRequest::new())?;
             stream.flush().await?;
 
             let Some(response) = stream
-                .recv::<pgwire::messages::response::SslResponse>()
+                .recv::<pgwire::messages::response::SslResponse>(&ctx)
                 .await?
             else {
                 return Err(PostgresError::Eof);
@@ -114,33 +120,41 @@ impl PostgresClient {
         startup
             .parameters
             .insert("user".to_owned(), target.username.clone());
-        startup.protocol_number_major = options.protocol_number_major;
-        startup.protocol_number_minor = options.protocol_number_minor;
+        startup.protocol_number_major = options.protocol_version.version_number().0;
+        startup.protocol_number_minor = options.protocol_version.version_number().1;
 
         stream.push(startup)?;
         stream.flush().await?;
 
-        // Resolve effective password (may be an IAM-generated token or legacy field)
-        let effective_password = match &target.effective_auth() {
-            warpgate_common::DatabaseTargetAuth::Password(auth) => auth.password.clone(),
+        // An IAM role yields a short-lived token in place of a stored password
+        let effective_password = match &target.auth {
+            warpgate_common::DatabaseTargetAuth::Password(auth) => auth
+                .password
+                .resolve(secrets)
+                .await?
+                .expose_secret()
+                .clone(),
             warpgate_common::DatabaseTargetAuth::IamRole(_) => {
-                let token = warpgate_aws::generate_rds_auth_token(
-                    &target.host,
-                    target.port,
-                    &target.username,
-                )
-                .await
-                .map_err(WarpgateError::Aws)?;
-                token
+                warpgate_aws::generate_rds_auth_token(&target.host, target.port, &target.username)
+                    .await
+                    .map_err(WarpgateError::Aws)?
             }
         };
 
         loop {
-            let Some(payload) = stream.recv::<PgWireGenericBackendMessage>().await? else {
+            let Some(payload) = stream.recv::<PgWireGenericBackendMessage>(&ctx).await? else {
                 return Err(PostgresError::Eof);
             };
 
             match payload.0 {
+                PgWireBackendMessage::NegotiateProtocolVersion(neg) => {
+                    debug!("Server requested protocol version: {neg:?}");
+                    ctx.protocol_version = ProtocolVersion::from_version_number(
+                        (neg.newest_minor_protocol >> 16) as u16,
+                        neg.newest_minor_protocol as u16,
+                    )
+                    .ok_or(PostgresError::InvalidVersionDowngradeRequested(neg))?;
+                }
                 PgWireBackendMessage::ErrorResponse(err) => {
                     return Err(PostgresError::from(err));
                 }
@@ -171,6 +185,7 @@ impl PostgresClient {
                             mechanisms,
                             &target.username,
                             &effective_password,
+                            &ctx,
                         )
                         .await?;
                     }
@@ -188,14 +203,18 @@ impl PostgresClient {
             }
         }
 
-        Ok(Self { stream })
+        Ok(Self {
+            stream,
+            decode_context: ctx,
+        })
     }
 
     async fn run_sasl_auth(
-        stream: &mut PostgresStream<TcpStream, TlsStream<TcpStream>>,
+        stream: &mut PostgresStream<TcpStream, ClientTlsStream<TcpStream>>,
         mechanisms: Vec<String>,
         username: &str,
         password: &str,
+        decode_context: &DecodeContext,
     ) -> Result<(), PostgresError> {
         let cfg = SASLConfig::with_credentials(None, username.into(), password.into())?;
         let sasl = SASLClient::new(cfg);
@@ -240,7 +259,10 @@ impl PostgresClient {
 
             state.is_running()
         } {
-            let Some(payload) = stream.recv::<PgWireGenericBackendMessage>().await? else {
+            let Some(payload) = stream
+                .recv::<PgWireGenericBackendMessage>(decode_context)
+                .await?
+            else {
                 return Err(PostgresError::Eof);
             };
 
@@ -265,7 +287,7 @@ impl PostgresClient {
 
     pub async fn recv(&mut self) -> Result<Option<PgWireGenericBackendMessage>, PostgresError> {
         self.stream
-            .recv::<PgWireGenericBackendMessage>()
+            .recv::<PgWireGenericBackendMessage>(&self.decode_context)
             .await
             .map_err(Into::into)
     }

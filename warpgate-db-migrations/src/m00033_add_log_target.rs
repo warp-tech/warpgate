@@ -10,7 +10,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(Alias::new("log"))
-                    .add_column_if_not_exists(
+                    .add_column(
                         ColumnDef::new(Alias::new("target"))
                             .string()
                             .not_null()

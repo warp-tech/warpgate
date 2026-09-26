@@ -19,6 +19,18 @@ pub const fn _default_mysql_port() -> u16 {
     3306
 }
 
+pub const fn _default_postgres_port() -> u16 {
+    5432
+}
+
+pub const fn _default_vnc_port() -> u16 {
+    5900
+}
+
+pub const fn _default_rdp_port() -> u16 {
+    3389
+}
+
 #[inline]
 pub fn _default_username() -> String {
     "root".to_owned()
@@ -50,6 +62,13 @@ pub fn _default_mysql_listen() -> ListenEndpoint {
 }
 
 #[inline]
+pub fn _default_mysql_advertised_version() -> String {
+    // Has to be >= 8.0.3 to stop Connector/J from probing
+    // query cache variables that no longer exist (#947)
+    "8.0.3-Warpgate".into()
+}
+
+#[inline]
 pub fn _default_postgres_listen() -> ListenEndpoint {
     ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 55432))
 }
@@ -60,23 +79,33 @@ pub fn _default_kubernetes_listen() -> ListenEndpoint {
 }
 
 #[inline]
+pub fn _default_vnc_listen() -> ListenEndpoint {
+    ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 5900))
+}
+
+#[inline]
+pub fn _default_rdp_listen() -> ListenEndpoint {
+    ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 3389))
+}
+
+#[inline]
 pub const fn _default_retention() -> Duration {
-    Duration::from_secs(60 * 60 * 24 * 7)
+    Duration::from_hours(168)
 }
 
 #[inline]
 pub const fn _default_audit_retention() -> Duration {
-    Duration::from_secs(60 * 60 * 24 * 365)
+    Duration::from_hours(8760)
 }
 
 #[inline]
 pub const fn _default_session_max_age() -> Duration {
-    Duration::from_secs(60 * 30)
+    Duration::from_mins(30)
 }
 
 #[inline]
 pub const fn _default_cookie_max_age() -> Duration {
-    Duration::from_secs(60 * 60 * 24)
+    Duration::from_hours(24)
 }
 
 #[inline]
@@ -88,12 +117,8 @@ pub fn _default_ssh_listen() -> ListenEndpoint {
     ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 2222))
 }
 
-pub fn _default_ssh_keys_path() -> String {
-    "./data/keys".to_owned()
-}
-
 pub const fn _default_ssh_inactivity_timeout() -> Duration {
-    Duration::from_secs(60 * 5)
+    Duration::from_mins(5)
 }
 
 #[allow(clippy::unnecessary_wraps)]

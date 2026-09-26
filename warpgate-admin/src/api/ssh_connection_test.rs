@@ -1,23 +1,17 @@
-use poem::web::Data;
 use poem_openapi::payload::{Json, PlainText};
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::PublicKeyBase64;
 use uuid::Uuid;
-use warpgate_common::{
-    AdminPermission, SSHTargetAuth, SshTargetPasswordAuth, TargetSSHOptions, WarpgateError,
-};
-use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_protocol_ssh::{RCCommand, RCEvent, RemoteClient};
+use warpgate_common::{AdminPermission, UserSessionId, WarpgateError};
+use warpgate_protocol_ssh::{RCCommand, RCEvent, RemoteClient, resolve_ssh_chain_for_admin};
 
-use super::AnySecurityScheme;
-use crate::api::common::require_admin_permission;
+use super::AdminContext;
 
 pub struct Api;
 
 #[derive(Object)]
 struct CheckSshHostKeyRequest {
-    host: String,
-    port: u16,
+    target_id: Uuid,
 }
 
 #[derive(Object)]
@@ -43,31 +37,46 @@ impl Api {
     )]
     async fn api_ssh_check_host_key(
         &self,
-        ctx: Data<&AuthenticatedRequestContext>,
+        admin: AdminContext,
         body: Json<CheckSshHostKeyRequest>,
-        _sec_scheme: AnySecurityScheme,
     ) -> Result<CheckSshHostKeyResponse, WarpgateError> {
-        require_admin_permission(&ctx, Some(AdminPermission::TargetsEdit)).await?;
+        admin.require(AdminPermission::TargetsEdit)?;
 
-        let mut handles = RemoteClient::create(Uuid::new_v4(), ctx.services().clone())?;
+        let ssh_chain =
+            resolve_ssh_chain_for_admin(admin.services(), body.target_id, admin.auth.username())
+                .await?;
 
-        let _ = handles.command_tx.send((
-            RCCommand::Connect(TargetSSHOptions {
-                host: body.host.clone(),
-                port: body.port,
-                username: String::new(),
-                allow_insecure_algos: None,
-                auth: SSHTargetAuth::Password(SshTargetPasswordAuth {
-                    password: String::new().into(),
-                }),
-            }),
-            None,
-        ));
+        let Some(target) = ssh_chain.last() else {
+            return Err(WarpgateError::InconsistentState(
+                "Did not resolve SSH chain".into(),
+            ));
+        };
+        let (target_host, target_port) = (target.ssh_options.host.clone(), target.ssh_options.port);
+
+        let ssh_chain = ssh_chain
+            .into_iter()
+            .map(|x| x.ssh_options)
+            .collect::<Vec<_>>();
+
+        let mut handles =
+            RemoteClient::create(UserSessionId(Uuid::new_v4()), admin.services().clone())?;
+        let _ = handles
+            .command_tx
+            .send((RCCommand::Connect(ssh_chain), None));
 
         let fut = async move {
             let key = loop {
                 match handles.event_rx.recv().await {
-                    Some(RCEvent::HostKeyReceived(key)) => break key,
+                    Some(RCEvent::HostKeyReceived(key, host, port))
+                        if host == target_host && port == target_port =>
+                    {
+                        break key;
+                    }
+                    Some(RCEvent::HostKeyUnknown(_, host, port, reply)) => {
+                        // this is a jump host, target key would hit  HostKeyReceived
+                        let _ = reply.send(false);
+                        anyhow::bail!("Jump host {host}:{port} has an untrusted host key");
+                    }
                     Some(RCEvent::ConnectionError(err)) => return Err(anyhow::Error::from(err)),
                     Some(RCEvent::Error(err)) => return Err(err),
                     None => anyhow::bail!("Failed to connect to target"),

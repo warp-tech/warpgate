@@ -1,16 +1,19 @@
 use std::fmt::Debug;
 
 use anyhow::Result;
-use warpgate_common::{ListenEndpoint, ProtocolName};
+use futures::future::BoxFuture;
+use warpgate_common::{ListenEndpoint, Protocol};
 use warpgate_core::{ProtocolServer, Services};
+use warpgate_tls::TlsCertificateAndPrivateKey;
 
+mod audit;
 mod correlator;
 pub mod recording;
 mod server;
 mod session_handle;
-pub use server::run_server;
+pub use server::bind_server;
 
-pub static PROTOCOL_NAME: ProtocolName = "Kubernetes";
+pub const PROTOCOL_NAME: Protocol = Protocol::Kubernetes;
 
 #[derive(Clone)]
 pub struct KubernetesProtocolServer {
@@ -26,8 +29,13 @@ impl KubernetesProtocolServer {
 }
 
 impl ProtocolServer for KubernetesProtocolServer {
-    async fn run(self, address: ListenEndpoint) -> Result<()> {
-        run_server(self.services, address).await
+    async fn bind(
+        self,
+        address: ListenEndpoint,
+        proxy_protocol: bool,
+        tls: Vec<TlsCertificateAndPrivateKey>,
+    ) -> Result<BoxFuture<'static, Result<()>>> {
+        bind_server(self.services, address, proxy_protocol, tls).await
     }
 
     fn name(&self) -> &'static str {

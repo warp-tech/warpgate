@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 22a32450b3cada4bb46952cb5109e3b305e8c756d58d37136a195c3bc3dee4cb # shrinks to account_name = "@", domain_name = "A"
+cc 7f7cdbd18aad0a1d970b6ff9ce7fbfaa7e4dabeb0b55cca0c7f7610f8f0e3cbf # shrinks to value = "A@\\.a"
+cc f946f1001aacc60322cba7ba063fa386f4e0c6d9497d8144e300f8b4652e378e # shrinks to value = "A\\a\\a"
+cc 033e00adafc5d7bc9402013f261b9f7de65938d4ce9f66f2ea4ec1419a0ae286 # shrinks to value = "A@0@a"

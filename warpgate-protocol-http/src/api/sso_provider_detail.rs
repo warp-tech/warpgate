@@ -1,14 +1,17 @@
+use poem::Request;
 use poem::session::Session;
 use poem::web::Data;
-use poem::Request;
 use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info};
+use tracing::{debug, warn};
 use warpgate_common::WarpgateError;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
-use warpgate_sso::{SsoClient, SsoLoginRequest};
+use warpgate_common_http::ext::construct_external_url;
+use warpgate_sso::{SsoClient, SsoLoginRequest, SsoReturnUrlDomainPreference};
+
+use crate::common::{host_is_subdomain_of_or_equal, is_localhost_host};
 
 pub struct Api;
 
@@ -24,6 +27,10 @@ enum StartSsoResponse {
     Ok(Json<StartSsoResponseParams>),
     #[oai(status = 404)]
     NotFound,
+    /// The request originates from a domain that has no cookie domain relationship
+    /// with `external_host` while `return_url_domain` is `external_host`
+    #[oai(status = 400)]
+    IncompatibleSsoDomain,
 }
 
 pub static SSO_CONTEXT_SESSION_KEY: &str = "sso_request";
@@ -34,7 +41,11 @@ pub struct SsoContext {
     pub request: SsoLoginRequest,
     pub next_url: Option<String>,
     pub supports_single_logout: bool,
-    pub return_host: Option<String>,
+    /// Origin the identity provider will return the browser to, taken from the
+    /// return URL rather than from the request, so it carries the same
+    /// `return_domain_whitelist` validation. The post-login redirect is
+    /// resolved against it.
+    pub return_origin: String,
 }
 
 #[OpenApi]
@@ -58,23 +69,59 @@ impl Api {
 
         let Some(provider_config) = config.store.sso_providers.iter().find(|p| p.name == *name)
         else {
+            warn!(provider = %name, "SSO login requested for a provider that is not configured");
             return Ok(StartSsoResponse::NotFound);
         };
-        let mut return_url = config.construct_external_url(
-            Some(req),
+
+        if matches!(
+            provider_config.return_url_domain,
+            SsoReturnUrlDomainPreference::ExternalHost
+        ) && let (Some(request_host), Some(external_host)) =
+            (ctx.trusted_hostname(req), config.external_host_name())
+            && !is_localhost_host(&request_host)
+            && !host_is_subdomain_of_or_equal(&request_host, &external_host)
+        {
+            warn!(
+                %request_host,
+                %external_host,
+                provider = %name,
+                "SSO login refused: this provider returns to `external_host`, and the host the browser used is neither that host nor a subdomain of it. Point `external_host` at the hostname users open Warpgate on, or set `return_url_domain: host_header` on the provider."
+            );
+            return Ok(StartSsoResponse::IncompatibleSsoDomain);
+        }
+
+        let mut return_url = construct_external_url(
+            match provider_config.return_url_domain {
+                // Let `construct_external_url` fall back to config file
+                SsoReturnUrlDomainPreference::ExternalHost => None,
+                SsoReturnUrlDomainPreference::HostHeader => Some(req),
+            },
+            &config,
             provider_config.return_domain_whitelist.as_deref(),
-        )?;
-        info!("{:?}", provider_config);
+        )
+        .await?;
         return_url.set_path(&format!(
             "{}warpgate/api/sso/return",
             provider_config.return_url_prefix
         ));
         debug!("Return URL: {return_url}");
 
+        // The post-login redirect lands on the host the user started from, which
+        // in `external_host` mode is not the return URL's host — the IdP callback
+        // goes to the parent domain there and hands off via the shared cookie.
+        // Built through `construct_external_url` so the authority is parsed
+        // rather than interpolated from the raw `Host` header. No whitelist is
+        // passed because this host has already been checked: `external_host` mode
+        // by the `IncompatibleSsoDomain` guard above, `host_header` mode by the
+        // return URL, which is this same host.
+        let return_origin = construct_external_url(Some(req), &config, None)
+            .await?
+            .origin()
+            .ascii_serialization();
+
         let client = SsoClient::new(provider_config.provider.clone())?;
 
         let sso_req = client.start_login(return_url.to_string()).await?;
-        let return_host = ctx.trusted_host_header(req);
 
         let url = sso_req.auth_url().to_string();
         session.set(
@@ -84,7 +131,7 @@ impl Api {
                 request: sso_req,
                 next_url: next.0.clone(),
                 supports_single_logout: client.supports_single_logout().await?,
-                return_host,
+                return_origin,
             },
         );
 

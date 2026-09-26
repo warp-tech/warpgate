@@ -1,7 +1,10 @@
-projects := "warpgate warpgate-admin warpgate-common warpgate-db-entities warpgate-db-migrations warpgate-database-protocols warpgate-protocol-ssh warpgate-protocol-mysql warpgate-protocol-postgres warpgate-protocol-kubernetes warpgate-protocol-http warpgate-core warpgate-sso"
+projects := "warpgate warpgate-admin warpgate-common warpgate-db-entities warpgate-db-migrations warpgate-database-protocols warpgate-protocol-ssh warpgate-protocol-mysql warpgate-protocol-postgres warpgate-protocol-kubernetes warpgate-protocol-http warpgate-protocol-rdp warpgate-protocol-vnc warpgate-core warpgate-sso warpgate-secrets-vault"
 
-run $RUST_BACKTRACE='1' *ARGS='run':
-     cargo run --all-features -- --config config.yaml {{ARGS}}
+run *ARGS='run':
+    RUST_BACKTRACE=1 cargo run --all-features -- --config config.yaml {{ARGS}}
+
+run-release *ARGS='run':
+    RUST_BACKTRACE=1 cargo run --all-features --release -- --config config.yaml {{ARGS}}
 
 fmt:
     for p in {{projects}}; do cargo fmt -p $p -v; done
@@ -10,7 +13,7 @@ fix *ARGS:
     for p in {{projects}}; do cargo fix --all-features -p $p {{ARGS}}; done
 
 clippy *ARGS:
-    for p in {{projects}}; do cargo cranky --all-features -p $p {{ARGS}}; done
+    cargo cranky --workspace --all-features {{ARGS}}
 
 bless *ARGS:
     for p in {{projects}}; do cargo bless --manifest-path $p/Cargo.toml {{ARGS}}; done

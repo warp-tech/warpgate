@@ -3,8 +3,8 @@ use bytes::{Buf, Bytes};
 use crate::err_protocol;
 use crate::error::Error;
 use crate::io::Decode;
-use crate::mysql::protocol::response::Status;
 use crate::mysql::protocol::Capabilities;
+use crate::mysql::protocol::response::Status;
 
 /// Marks the end of a result set, returning status and warnings.
 ///

@@ -3,18 +3,25 @@ use std::sync::Arc;
 use poem::session::Session;
 use poem::web::websocket::WebSocket;
 use poem::web::{Data, FromRequest, Redirect};
-use poem::{handler, Body, IntoResponse, Request, Response};
+use poem::{Body, IntoResponse, Request, Response, handler};
 use serde::Deserialize;
 use tokio::sync::Mutex;
-use tracing::{debug, info_span, Instrument};
-use warpgate_common::{Target, TargetHTTPOptions, TargetOptions};
+use tracing::{Instrument, debug, info_span};
+use warpgate_common::auth::AuthStateUserInfo;
+use warpgate_common::{TargetHTTPOptions, WarpgateError};
+use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::{
-    AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
+    AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization, SessionKeepalive,
 };
-use warpgate_core::{ConfigProvider, WarpgateServerHandle};
+use warpgate_core::{
+    ConfigProvider, TargetAuthorization, TargetSessionStart, authorize_for_target,
+};
 
+use crate::approval_gate::resolve_admin_approval;
+use crate::client_cache::HttpClientCache;
 use crate::common::SessionExt;
 use crate::proxy::{proxy_normal_request, proxy_websocket_request};
+use crate::session::SessionStore;
 
 #[derive(Deserialize)]
 struct QueryParams {
@@ -27,71 +34,157 @@ pub fn target_select_redirect() -> Response {
 }
 
 #[handler]
+#[allow(clippy::too_many_arguments)]
 pub async fn catchall_endpoint(
     req: &Request,
     ws: Option<WebSocket>,
     session: &Session,
     body: Body,
     ctx: Data<&AuthenticatedRequestContext>,
-    server_handle: Option<Data<&Arc<Mutex<WarpgateServerHandle>>>>,
+    unauthenticated_ctx: Data<&UnauthenticatedRequestContext>,
+    http_client_cache: Data<&HttpClientCache>,
+    session_store: Data<&Arc<Mutex<SessionStore>>>,
 ) -> poem::Result<Response> {
-    let target_and_options = get_target_for_request(req, &ctx).await?;
-    let Some((target, options)) = target_and_options else {
+    let Some(authorization) = get_target_for_request(req, &ctx).await? else {
         return Ok(target_select_redirect());
     };
 
-    session.set_target_name(target.name.clone());
+    session.set_target_name(authorization.target().name.clone());
 
-    if let Some(server_handle) = server_handle {
-        server_handle.lock().await.set_target(&target).await?;
-    }
+    let RequestAuthorization::Session(_) = &ctx.auth else {
+        return Err(poem::Error::from_status(
+            poem::http::StatusCode::UNAUTHORIZED,
+        ));
+    };
 
-    let span = info_span!("", target=%target.name);
+    let (handle, close_rx) = {
+        let mut store = session_store.lock().await;
+        let handle = store.handle_for_request(req, &unauthenticated_ctx).await?;
+        let id = handle.lock().await.user_session_id();
+        let close_rx = store.close_receiver_by_id(id).ok_or_else(|| {
+            poem::Error::from_status(poem::http::StatusCode::INTERNAL_SERVER_ERROR)
+        })?;
+        (handle, close_rx)
+    };
+
+    // start_target_session already sets/checks session user info
+    let started = handle
+        .lock()
+        .await
+        .start_target_session(authorization)
+        .await;
+    let admitted = match started {
+        Err(WarpgateError::UserSessionEnded) => {
+            // got revoked in the meantime
+            session.purge();
+            return Err(poem::Error::from_status(
+                poem::http::StatusCode::UNAUTHORIZED,
+            ));
+        }
+        Ok(TargetSessionStart::Started(started)) => started,
+        Err(error) => return Err(error.into()),
+        Ok(TargetSessionStart::NeedsApproval(authorization)) => {
+            // Fail early, before we get to websocket
+            match resolve_admin_approval(req, &ctx, &handle, authorization).await? {
+                Ok(started) => started,
+                Err(response) => return Ok(response),
+            }
+        }
+    };
+    let keepalive_guard = Data::<&SessionKeepalive>::from_request_without_body(req)
+        .await
+        .ok()
+        .map(|keepalive| keepalive.guard());
+
+    // `session` field is UserSession, not this
+    let span = info_span!("", target_session=%admitted.id(), target=%admitted.target().name);
 
     Ok(match ws {
-        Some(ws) => proxy_websocket_request(req, ws, &ctx, &options)
+        Some(ws) => proxy_websocket_request(req, ws, &ctx, admitted, close_rx)
             .instrument(span)
             .await?
             .into_response(),
-        None => proxy_normal_request(req, *ctx, body, &options)
-            .instrument(span)
-            .await?
-            .into_response(),
+        None => proxy_normal_request(
+            req,
+            *ctx,
+            body,
+            *http_client_cache,
+            admitted,
+            close_rx,
+            keepalive_guard,
+        )
+        .instrument(span)
+        .await?
+        .into_response(),
     })
+}
+
+fn is_http_authorization(
+    authorization: TargetAuthorization,
+) -> Option<TargetAuthorization<TargetHTTPOptions>> {
+    authorization.narrow().ok()
 }
 
 async fn get_target_for_request(
     req: &Request,
     ctx: &AuthenticatedRequestContext,
-) -> poem::Result<Option<(Target, TargetHTTPOptions)>> {
+) -> poem::Result<Option<TargetAuthorization<TargetHTTPOptions>>> {
+    let config_provider = ctx.services().config_provider.as_ref();
+
+    // A ticket is bound to one target row, and it was authorized against that row
+    // when the session was established. Resolving by id keeps the request from
+    // steering it elsewhere — via query param, host rebinding or session state —
+    // and survives the target being renamed.
+    if let RequestAuthorization::Session(SessionAuthorization::Ticket {
+        user_id,
+        username,
+        target_id,
+        ticket_id,
+        ..
+    }) = &ctx.auth
+    {
+        let Some(target) = config_provider.get_target_by_id(*target_id).await? else {
+            return Ok(None);
+        };
+
+        if target.id != *target_id {
+            return Err(WarpgateError::InconsistentState(
+                "ticket session target does not match the ticket's target".into(),
+            )
+            .into());
+        }
+
+        return Ok(is_http_authorization(
+            TargetAuthorization::for_ticket_session(
+                AuthStateUserInfo {
+                    id: *user_id,
+                    username: username.clone(),
+                },
+                target,
+                *ticket_id,
+                crate::common::PROTOCOL_NAME,
+            )?,
+        ));
+    }
+
+    let RequestAuthorization::Session(SessionAuthorization::User { .. }) = &ctx.auth else {
+        return Ok(None);
+    };
+
     let session = <&Session>::from_request_without_body(req).await?;
     let params: QueryParams = req.params()?;
 
-    let selected_target_name;
-    let need_role_auth;
-
     let request_host = ctx.trusted_hostname(req);
 
-    let host_based_target_name = if let Some(host) = request_host {
-        let found = ctx
-            .services()
-            .config_provider
-            .lock()
-            .await
-            .list_targets()
-            .await?
-            .iter()
-            .filter_map(|t| match t.options {
-                TargetOptions::Http(ref options) => Some((t, options)),
-                _ => None,
-            })
-            .find(|(_, o)| o.external_host.as_deref() == Some(&host))
-            .map(|(t, _)| t.name.clone());
-
+    let host_based_target = if let Some(host) = request_host {
+        let found = config_provider
+            .get_target_by_hostname(host.as_str())
+            .await?;
         if found.is_some() {
             debug!(
                 "Domain rebinding detected: host={} -> target={:?}",
-                host, found
+                host,
+                found.as_ref().map(|target| &target.name)
             );
         }
         found
@@ -99,67 +192,41 @@ async fn get_target_for_request(
         None
     };
 
-    let username = match &ctx.auth {
-        RequestAuthorization::Session(SessionAuthorization::Ticket {
-            target_name,
-            username,
-            ..
-        }) => {
-            selected_target_name = Some(target_name.clone());
-            need_role_auth = false;
-            username
-        }
-        RequestAuthorization::Session(SessionAuthorization::User { username, .. }) => {
-            need_role_auth = true;
-
-            selected_target_name = if let Some(ref rebound_target) = host_based_target_name {
-                Some(rebound_target.clone())
-            } else if let Some(warpgate_target) = params.warpgate_target {
-                Some(warpgate_target)
-            } else {
-                session.get_target_name()
-            };
-            username
-        }
-        RequestAuthorization::UserToken { .. } | RequestAuthorization::AdminToken => {
-            return Ok(None)
-        }
+    let selected_target_name = if let Some(warpgate_target) = params.warpgate_target {
+        Some(warpgate_target)
+    } else if let Some(ref rebound_target) = host_based_target {
+        Some(rebound_target.name.clone())
+    } else {
+        session.get_target_name()
     };
 
-    let domain_rebinding_configured = host_based_target_name.is_some();
-    let final_target_name = selected_target_name.or(host_based_target_name);
+    let domain_rebinding_configured = host_based_target.is_some();
+    let final_target_name = selected_target_name
+        .or_else(|| host_based_target.as_ref().map(|target| target.name.clone()));
 
     if let Some(target_name) = final_target_name {
-        let target = {
-            ctx.services()
-                .config_provider
-                .lock()
-                .await
-                .list_targets()
-                .await?
-                .iter()
-                .filter(|t| t.name == target_name)
-                .find_map(|t| match t.options {
-                    TargetOptions::Http(ref options) => Some((t, options)),
-                    _ => None,
-                })
-                .map(|(t, o)| (t.clone(), o.clone()))
-        };
-
-        if let Some(target) = target {
-            if need_role_auth
-                && !ctx
-                    .services()
-                    .config_provider
-                    .lock()
-                    .await
-                    .authorize_target(username, &target.0.name)
+        let target =
+            if let Some(target) = host_based_target.filter(|target| target.name == target_name) {
+                Some(target)
+            } else {
+                config_provider
+                    .get_target_by_name(target_name.as_str())
                     .await?
-            {
-                return Ok(None);
-            }
+            };
 
-            return Ok(Some(target));
+        // Reached only for a `SessionAuthorization::User` (ticket sessions are
+        // handled separately above), so the session is the prior-auth evidence.
+        let Some(full) = ctx.auth.as_full_user() else {
+            return Ok(None);
+        };
+        let identity = full.identity(crate::common::PROTOCOL_NAME);
+
+        if let Some(target) = target
+            && let Some(authorization) =
+                authorize_for_target(config_provider, &identity, target).await?
+            && let Some(authorization) = is_http_authorization(authorization)
+        {
+            return Ok(Some(authorization));
         }
     }
 

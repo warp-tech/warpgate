@@ -4,12 +4,9 @@ import sveltePreprocess from 'svelte-preprocess'
 const config = {
     compilerOptions: {
         dev: true,
-        compatibility: {
-          componentApi: 4,
-        },
     },
     preprocess: sveltePreprocess({
-        sourceMap: true,
+        sourceMap: false,
     }),
     vitePlugin: {
         prebundleSvelteLibraries: true,

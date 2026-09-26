@@ -3,8 +3,8 @@ use bytes::{Buf, BufMut, Bytes};
 use crate::err_protocol;
 use crate::error::Error;
 use crate::io::{BufExt, BufMutExt, Decode, Encode};
-use crate::mysql::protocol::auth::AuthPlugin;
 use crate::mysql::protocol::Capabilities;
+use crate::mysql::protocol::auth::AuthPlugin;
 
 // https://dev.mysql.com/doc/dev/mysql-server/8.0.12/page_protocol_connection_phase_packets_protocol_auth_switch_request.html
 
@@ -26,15 +26,13 @@ impl Decode<'_> for AuthSwitchRequest {
 
         let plugin = buf.get_str_nul()?.parse()?;
 
+        // Scramble-based plugins send a NUL-terminated challenge; others
+        // (e.g. mysql_clear_password) may send no data at all.
         // See: https://github.com/mysql/mysql-server/blob/ea7d2e2d16ac03afdd9cb72a972a95981107bf51/sql/auth/sha2_password.cc#L942
-        if buf.len() != 21 {
-            return Err(err_protocol!(
-                "expected 21 bytes but found {} bytes",
-                buf.len()
-            ));
-        }
-        let data = buf.get_bytes(20);
-        buf.advance(1); // NUL-terminator
+        let data = match buf.last() {
+            Some(0) => buf.slice(..buf.len() - 1),
+            _ => buf,
+        };
 
         Ok(Self { plugin, data })
     }

@@ -2,7 +2,6 @@ from asyncio import subprocess
 from base64 import b64decode
 from uuid import uuid4
 import pyotp
-import pytest
 from pathlib import Path
 from textwrap import dedent
 
@@ -59,9 +58,13 @@ class Test:
             ssh_target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"ssh-{uuid4()}",
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetSSHOptions(
                             kind="Ssh",
+                            allow_insecure_algos=False,
                             host="localhost",
                             port=ssh_port,
                             username="root",

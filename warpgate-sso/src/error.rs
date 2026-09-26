@@ -1,7 +1,7 @@
 use std::error::Error;
 
 use openidconnect::{
-    reqwest, ClaimsVerificationError, ConfigurationError, SignatureVerificationError, SigningError,
+    ClaimsVerificationError, ConfigurationError, SignatureVerificationError, SigningError, reqwest,
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -36,6 +36,10 @@ pub enum SsoError {
     GoogleDirectory(String),
     #[error("the OIDC provider doesn't support RP-initiated logout")]
     LogoutNotSupported,
+    #[error(
+        "the OIDC provider advertised a {endpoint} of `{url}`: only http and https endpoints are accepted"
+    )]
+    UnsupportedEndpointScheme { endpoint: String, url: String },
     #[error(transparent)]
     Other(Box<dyn Error + Send + Sync>),
 }

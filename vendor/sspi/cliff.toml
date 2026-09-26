@@ -1,0 +1,94 @@
+# Configuration file for git-cliff
+
+[changelog]
+trim = false
+
+header = """
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+"""
+
+# https://tera.netlify.app/docs/#introduction
+body = """
+{% if version -%}
+  ## [[{{ version | trim_start_matches(pat="v") }}]{%- if release_link -%}({{ release_link }}){% endif %}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{%- else -%}
+  ## [Unreleased]
+{%- endif %}
+
+{% for group, commits in commits | group_by(attribute="group") -%}
+
+### {{ group | upper_first }}
+
+{%- for commit in commits %}
+
+{%- set message = commit.message | upper_first %}
+
+{%- if commit.breaking %}
+  {%- set breaking = "[**breaking**] " %}
+{%- else %}
+  {%- set breaking = "" %}
+{%- endif %}
+
+{%- set short_sha = commit.id | truncate(length=10, end="") %}
+{%- set commit_url = "https://github.com/Devolutions/sspi-rs/commit/" ~ commit.id %}
+{%- set commit_link = "[" ~ short_sha ~ "](" ~ commit_url ~ ")" %}
+
+- {{ breaking }}{{ message }} ({{ commit_link }}) \
+  {% if commit.body %}\n\n  {{ commit.body | replace(from="\n", to="\n  ") }}{% endif %}
+{%- endfor %}
+
+{% endfor -%}
+"""
+
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+filter_commits = false
+date_order = false
+protect_breaking_commits = true
+sort_commits = "oldest"
+
+commit_preprocessors = [
+  # Replace issue number with the link
+  { pattern = '\((\w+\s)?#([0-9]+)\)', replace = "([#${2}](https://github.com/Devolutions/sspi-rs/issues/${2}))"},
+  # Replace commit sha1 with the link
+  { pattern = '([a-f0-9]{10})([a-f0-9]{30})', replace = "[${0}](https://github.com/Devolutions/sspi-rs/commit/${1}${2})" }
+]
+
+# regex for parsing and grouping commits
+# <!-- <NUMBER> --> is a trick to control the section order: https://github.com/orhun/git-cliff/issues/9#issuecomment-914521594
+commit_parsers = [
+  { message = "^chore", skip = true },
+  { message = "^style", skip = true },
+  { message = "^refactor", skip = true },
+  { message = "^test", skip = true },
+  { message = "^ci", skip = true },
+  { message = "^chore\\(release\\): prepare for", skip = true },
+  { footer = "^[Cc]hangelog: ?ignore", skip = true },
+
+  { message = "(?i)security", group = "<!-- 0 -->Security" },
+  { body = "(?i)security", group = "<!-- 0 -->Security" },
+  { footer = "^[Ss]ecurity: ?yes", group = "<!-- 0 -->Security" },
+
+  { message = "^feat", group = "<!-- 1 -->Features" },
+
+  { message = "^revert", group = "<!-- 3 -->Revert" },
+  { message = "^fix", group = "<!-- 4 -->Bug Fixes" },
+  { message = "^perf", group = "<!-- 5 -->Performance" },
+  { message = "^doc", group = "<!-- 6 -->Documentation" },
+  { message = "^build", group = "<!-- 7 -->Build" },
+
+  { message = "(?i)improve", group = "<!-- 2 -->Improvements" },
+  { message = "(?i)adjust", group = "<!-- 2 -->Improvements" },
+  { message = "(?i)change", group = "<!-- 2 -->Improvements" },
+
+  { message = ".*", group = "<!-- 99 -->Please Sort" },
+]

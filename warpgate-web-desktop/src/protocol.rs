@@ -1,0 +1,242 @@
+use bytes::Bytes;
+use serde::{Deserialize, Serialize};
+use warpgate_core::{
+    DesktopEvent, DesktopInput, DesktopRect, DesktopState, MAX_CLIPBOARD_BYTES, Scancode,
+    truncate_clipboard_contents_in_place,
+};
+
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct WsRect {
+    pub x: u16,
+    pub y: u16,
+    pub width: u16,
+    pub height: u16,
+}
+
+impl From<DesktopRect> for WsRect {
+    fn from(r: DesktopRect) -> Self {
+        Self {
+            x: r.x,
+            y: r.y,
+            width: r.width,
+            height: r.height,
+        }
+    }
+}
+
+/// Messages sent from the browser to the server.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ClientMessage {
+    PointerEvent {
+        x: u16,
+        y: u16,
+        buttons: u8,
+    },
+    /// The browser reports both forms it can derive from a `KeyboardEvent`: the keysym
+    /// from `event.key` (already mapped through the client's layout) and the scancode
+    /// from `event.code` (the physical key). Older clients send only the keysym.
+    KeyEvent {
+        keysym: Option<u32>,
+        #[serde(default)]
+        scancode: Option<u8>,
+        #[serde(default)]
+        extended: bool,
+        down: bool,
+    },
+    WheelEvent {
+        x: u16,
+        y: u16,
+        vertical: bool,
+        delta: i16,
+    },
+    Clipboard {
+        text: String,
+    },
+    Refresh,
+    Resize {
+        width: u16,
+        height: u16,
+    },
+}
+
+impl From<ClientMessage> for Option<DesktopInput> {
+    fn from(msg: ClientMessage) -> Self {
+        Some(match msg {
+            ClientMessage::PointerEvent { x, y, buttons } => {
+                DesktopInput::Pointer { x, y, buttons }
+            }
+            ClientMessage::KeyEvent {
+                keysym,
+                scancode,
+                extended,
+                down,
+            } => DesktopInput::Key {
+                keysym,
+                scancode: scancode.map(|code| Scancode { code, extended }),
+                down,
+            },
+            ClientMessage::WheelEvent {
+                x,
+                y,
+                vertical,
+                delta,
+            } => DesktopInput::Wheel {
+                x,
+                y,
+                vertical,
+                delta,
+            },
+            ClientMessage::Clipboard { mut text } => {
+                truncate_clipboard_contents_in_place(&mut text, MAX_CLIPBOARD_BYTES);
+                DesktopInput::Clipboard(text)
+            }
+            ClientMessage::Refresh => DesktopInput::Refresh,
+            ClientMessage::Resize { width, height } => DesktopInput::Resize { width, height },
+        })
+    }
+}
+
+/// Messages sent from the server to the browser.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ServerMessage {
+    ConnectionState {
+        state: &'static str,
+    },
+    Resize {
+        width: u16,
+        height: u16,
+    },
+    RawImage {
+        rect: WsRect,
+        #[serde(with = "warpgate_common::helpers::serde_base64")]
+        data: Bytes,
+    },
+    JpegImage {
+        rect: WsRect,
+        #[serde(with = "warpgate_common::helpers::serde_base64")]
+        data: Bytes,
+    },
+    PngImage {
+        rect: WsRect,
+        #[serde(with = "warpgate_common::helpers::serde_base64")]
+        data: Bytes,
+    },
+    /// Full-canvas PNG snapshot handed to a viewer as it attaches, so it has a base image
+    /// to paint deltas onto. Structural: a viewer that loses this one paints onto black.
+    Keyframe {
+        rect: WsRect,
+        #[serde(with = "warpgate_common::helpers::serde_base64")]
+        data: Bytes,
+    },
+    CopyRect {
+        dst: WsRect,
+        src_x: u16,
+        src_y: u16,
+    },
+    Cursor {
+        rect: WsRect,
+        #[serde(with = "warpgate_common::helpers::serde_base64")]
+        data: Bytes,
+    },
+    Clipboard {
+        text: String,
+    },
+    Bell,
+    Error {
+        message: String,
+    },
+}
+
+impl ServerMessage {
+    /// Whether this is an incremental framebuffer delta that may be dropped under
+    /// output-buffer pressure, as opposed to a structural message (resize, clipboard,
+    /// connection state) whose loss would corrupt or desync the client.
+    pub const fn is_incremental(&self) -> bool {
+        matches!(
+            self,
+            Self::RawImage { .. }
+                | Self::JpegImage { .. }
+                | Self::PngImage { .. }
+                | Self::CopyRect { .. }
+                | Self::Cursor { .. }
+        )
+    }
+
+    /// Encode for the WebSocket. Pixel-carrying frames are sent as compact **binary**
+    /// (`[kind: u8][x,y,w,h: u16 LE][pixels…]`) so large buffers avoid the base64 +
+    /// JSON-string cost that otherwise pins a core on the hot path; everything else stays
+    /// small JSON text.
+    pub fn ws_payload(&self) -> WsPayload {
+        match self {
+            Self::RawImage { rect, data } => WsPayload::Binary(encode_image(1, *rect, data)),
+            Self::JpegImage { rect, data } => WsPayload::Binary(encode_image(2, *rect, data)),
+            Self::Cursor { rect, data } => WsPayload::Binary(encode_image(3, *rect, data)),
+            Self::Keyframe { rect, data } => WsPayload::Binary(encode_image(4, *rect, data)),
+            Self::PngImage { rect, data } => WsPayload::Binary(encode_image(5, *rect, data)),
+            other => WsPayload::Text(serde_json::to_string(other).unwrap_or_default()),
+        }
+    }
+}
+
+/// A WebSocket payload: small control messages as JSON text, pixel frames as binary.
+pub enum WsPayload {
+    Text(String),
+    Binary(Vec<u8>),
+}
+
+/// `[kind: u8][x: u16 LE][y: u16 LE][width: u16 LE][height: u16 LE][pixels…]`.
+fn encode_image(kind: u8, rect: WsRect, data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(9 + data.len());
+    out.push(kind);
+    out.extend_from_slice(&rect.x.to_le_bytes());
+    out.extend_from_slice(&rect.y.to_le_bytes());
+    out.extend_from_slice(&rect.width.to_le_bytes());
+    out.extend_from_slice(&rect.height.to_le_bytes());
+    out.extend_from_slice(data);
+    out
+}
+
+const fn state_name(state: DesktopState) -> &'static str {
+    match state {
+        DesktopState::Connecting => "connecting",
+        DesktopState::Connected => "connected",
+        DesktopState::Disconnected => "disconnected",
+    }
+}
+
+impl From<DesktopEvent> for ServerMessage {
+    fn from(event: DesktopEvent) -> Self {
+        match event {
+            DesktopEvent::State(state) => Self::ConnectionState {
+                state: state_name(state),
+            },
+            DesktopEvent::Resize { width, height } => Self::Resize { width, height },
+            DesktopEvent::RawImage { rect, data } => Self::RawImage {
+                rect: rect.into(),
+                data,
+            },
+            DesktopEvent::JpegImage { rect, data } => Self::JpegImage {
+                rect: rect.into(),
+                data,
+            },
+            DesktopEvent::PngImage { rect, data } => Self::PngImage {
+                rect: rect.into(),
+                data,
+            },
+            DesktopEvent::CopyRect { dst, src_x, src_y } => Self::CopyRect {
+                dst: dst.into(),
+                src_x,
+                src_y,
+            },
+            DesktopEvent::Cursor { rect, data } => Self::Cursor {
+                rect: rect.into(),
+                data,
+            },
+            DesktopEvent::Clipboard(text) => Self::Clipboard { text },
+            DesktopEvent::Bell => Self::Bell,
+            DesktopEvent::Error(message) => Self::Error { message },
+        }
+    }
+}

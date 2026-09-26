@@ -1,16 +1,24 @@
 [package]
-edition = "2021"
-license = "Apache-2.0"
 name = "warpgate-common-http"
-version = "0.22.0-beta.6"
+version = "0.29.1"
+edition = "2024"
+license = "Apache-2.0"
 publish = false
 
 [dependencies]
-warpgate-common = { path = "../warpgate-common" }
-warpgate-core = { path = "../warpgate-core" }
+html-escape.workspace = true
 poem.workspace = true
 poem-openapi.workspace = true
 serde.workspace = true
+subtle.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+url.workspace = true
 uuid.workspace = true
+warpgate-common = { path = "../warpgate-common" }
+warpgate-core = { path = "../warpgate-core" }
+warpgate-db-entities = { path = "../warpgate-db-entities" }
+
+[dev-dependencies]
+anyhow.workspace = true
+thiserror.workspace = true

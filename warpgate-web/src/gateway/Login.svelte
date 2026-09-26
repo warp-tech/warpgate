@@ -1,32 +1,58 @@
 <script lang="ts">
-    import { get } from 'svelte/store'
-    import { querystring, replace } from 'svelte-spa-router'
-    import { Button, FormGroup } from '@sveltestrap/sveltestrap'
-    import Fa from 'svelte-fa'
+    import {
+        faApple,
+        faGoogle,
+        faMicrosoft,
+    } from '@fortawesome/free-brands-svg-icons'
     import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
-    import { faGoogle, faMicrosoft, faApple } from '@fortawesome/free-brands-svg-icons'
-
-    import { api, ApiAuthState, LoginFailureResponseFromJSON, type SsoProviderDescription, SsoProviderKind, ResponseError } from 'gateway/lib/api'
-    import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
+    import { Alert, Button, FormGroup } from '@sveltestrap/sveltestrap'
     import { stringifyError } from 'common/errors'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
+    import { navigateToExternalUrl, routeQueryParams } from 'common/helpers'
     import Loadable from 'common/Loadable.svelte'
 
-    let error: string|null = $state(null)
+    import {
+        ApiAuthState,
+        api,
+        LoginFailureResponseFromJSON,
+        PasswordLoginMode,
+        ResponseError,
+        type SsoProviderDescription,
+        SsoProviderKind,
+    } from 'gateway/lib/api'
+    import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
+    import Fa from 'svelte-fa'
+    import { replace } from 'svelte-spa-router'
+
+    let error: string | null = $state(null)
     let username = $state('')
     let password = $state('')
     let otp = $state('')
     let busy = $state(false)
-    let otpInput: HTMLInputElement|undefined = $state()
-    let authState: ApiAuthState|undefined = $state()
+    let credentialRejected = $state(false)
+    let otpInput: HTMLInputElement | undefined = $state()
+    let authState: ApiAuthState | undefined = $state()
     let ssoProvidersPromise = api.getSsoProviders()
     let showPasswordLogin = $state(false)
 
-    const nextURL = new URLSearchParams(get(querystring)).get('next') ?? undefined
-    const serverErrorMessage = new URLSearchParams(location.search).get('login_error')
+    const passwordLoginMode = $derived(
+        $serverInfo?.passwordLoginMode ?? PasswordLoginMode.Enabled,
+    )
+    const passwordLoginAllowed = $derived(
+        passwordLoginMode !== PasswordLoginMode.Disabled,
+    )
+    const passwordLoginMinimized = $derived(
+        passwordLoginMode === PasswordLoginMode.Minimized,
+    )
+
+    const urlParams = routeQueryParams()
+    const nextURL = urlParams.get('next') ?? undefined
+    const reauthRequired = urlParams.get('reauth') === '1'
+    const serverErrorMessage = new URLSearchParams(location.search).get(
+        'login_error',
+    )
     const initPromise = init()
 
-    async function init () {
+    async function init() {
         try {
             authState = (await api.getDefaultAuthState()).state
         } catch (err) {
@@ -38,27 +64,37 @@
                 throw err
             }
         }
-        continueWithState()
+        await continueWithState()
     }
 
-    function success () {
-        if (nextURL) {
-            location.assign(nextURL)
+    function sanitizeRedirect(url: string): string | undefined {
+        try {
+            const resolved = new URL(url, location.origin)
+            return resolved.origin === location.origin
+                ? resolved.href
+                : undefined
+        } catch {
+            return undefined
+        }
+    }
+
+    function success() {
+        const target = nextURL ? sanitizeRedirect(nextURL) : undefined
+        if (target) {
+            location.assign(target)
         } else {
             replace('/')
         }
     }
 
-    async function continueWithState () {
+    async function continueWithState({ allowSsoRedirect = true } = {}) {
         if (authState === ApiAuthState.Success) {
             success()
         }
-        if (authState === ApiAuthState.SsoNeeded) {
+        if (authState === ApiAuthState.SsoNeeded && allowSsoRedirect) {
             const providers = await ssoProvidersPromise
-            if (!providers.length) {
-                // todo
-            }
             if (providers.length === 1) {
+                // biome-ignore lint/style/noNonNullAssertion: length checked above
                 startSSO(providers[0]!)
             }
         }
@@ -69,7 +105,7 @@
         }
     }
 
-    async function login () {
+    async function login() {
         busy = true
         try {
             await _login()
@@ -78,8 +114,9 @@
         }
     }
 
-    async function _login () {
+    async function _login() {
         error = null
+        credentialRejected = false
         try {
             if (authState === ApiAuthState.OtpNeeded) {
                 await api.otpLogin({
@@ -100,10 +137,16 @@
         } catch (err) {
             if (err instanceof ResponseError) {
                 if (err.response.status === 401) {
-                    const failure = LoginFailureResponseFromJSON(await err.response.json())
+                    const failure = LoginFailureResponseFromJSON(
+                        await err.response.json(),
+                    )
                     authState = failure.state
+                    credentialRejected = failure.credentialRejected ?? false
 
-                    continueWithState()
+                    // Don't auto-advance to another auth method (e.g. SSO) when
+                    // the submitted credential was rejected — show the error and
+                    // let the user retry or pick a method themselves.
+                    continueWithState({ allowSsoRedirect: !credentialRejected })
                 } else {
                     error = await err.response.text()
                 }
@@ -113,16 +156,16 @@
         }
     }
 
-    async function cancel () {
+    async function cancel() {
         await api.cancelDefaultAuth()
         location.reload()
     }
 
-    async function startSSO (provider: SsoProviderDescription) {
+    async function startSSO(provider: SsoProviderDescription) {
         busy = true
         try {
             const p = await api.startSso({ name: provider.name, next: nextURL })
-            location.href = p.url
+            navigateToExternalUrl(p.url)
         } catch (err) {
             error = await stringifyError(err)
             busy = false
@@ -131,10 +174,13 @@
 </script>
 
 {#snippet localLoginForm()}
-    <form autocomplete="on" onsubmit={e => {
+    <form
+        autocomplete="on"
+        onsubmit={e => {
         login()
         e.preventDefault()
-    }}>
+    }}
+    >
         <FormGroup floating label="Username">
             <!-- svelte-ignore a11y_autofocus -->
             <input
@@ -144,7 +190,8 @@
                 disabled={busy}
                 class="form-control"
                 required
-                autofocus />
+                autofocus
+            >
         </FormGroup>
 
         <FormGroup floating label="Password">
@@ -155,36 +202,39 @@
                 autocomplete="current-password"
                 disabled={busy}
                 required
-                class="form-control" />
+                class="form-control"
+            >
         </FormGroup>
 
         <Button
-            class="d-flex align-items-center"
+            class="d-flex align-items-center login-view-button"
             color="primary"
             type="submit"
             disabled={busy}
         >
-            Login
+            Log in
             <Fa class="ms-2" fw icon={faArrowRight} />
         </Button>
     </form>
 {/snippet}
 
 <Loadable promise={initPromise}>
-
-    <div class="mt-5">
+    <div class="content">
         <div class="page-summary-bar">
             {#if authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected}
-                <h1>Welcome</h1>
+                <h1 style="margin-left: -4px">Welcome</h1>
             {:else}
                 <h1>Continue login</h1>
             {/if}
         </div>
         {#if authState === ApiAuthState.OtpNeeded}
-            <form class="d-flex align-items-stretch gap-2" onsubmit={e => {
+            <form
+                class="d-flex align-items-stretch gap-2"
+                onsubmit={e => {
                 login()
                 e.preventDefault()
-            }}>
+            }}
+            >
                 <FormGroup floating label="One-time password" class="w-100">
                     <!-- svelte-ignore a11y_autofocus -->
                     <input
@@ -196,11 +246,12 @@
                         autofocus
                         inputmode="numeric"
                         disabled={busy}
-                        class="form-control" />
+                        class="form-control"
+                    >
                 </FormGroup>
 
                 <Button
-                class="mb-3"
+                    class="mb-3"
                     color="primary"
                     type="submit"
                     disabled={busy}
@@ -209,78 +260,88 @@
                 </Button>
             </form>
         {/if}
-        {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected) && (!$serverInfo?.minimizePasswordLogin || showPasswordLogin)}
-            <!-- eslint-disable-next-line @typescript-eslint/no-confusing-void-expression -->
+        {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected) && passwordLoginAllowed && (!passwordLoginMinimized || showPasswordLogin)}
             {@render localLoginForm()}
         {/if}
 
-        <div class="mt-3"></div>
-
-        {#if authState === ApiAuthState.Failed}
-            <Alert color="danger">Incorrect credentials</Alert>
+        {#if reauthRequired}
+            <Alert class="mt-3" color="warning">
+                The security policy requires you to sign in again before
+                accessing this function.
+            </Alert>
+        {/if}
+        {#if credentialRejected || authState === ApiAuthState.Failed}
+            <Alert class="mt-3" color="danger">Incorrect credentials</Alert>
         {/if}
         {#if authState === ApiAuthState.IpRejected}
-            <Alert color="danger">Login denied: your IP address is not in the allowed range for this user</Alert>
+            <Alert class="mt-3" color="danger">
+                Login denied: your IP address is not in the allowed range for
+                this user
+            </Alert>
         {/if}
         {#if serverErrorMessage}
-            <Alert color="danger">{serverErrorMessage}</Alert>
+            <Alert class="mt-3" color="danger">{serverErrorMessage}</Alert>
         {/if}
         {#if error}
-            <Alert color="danger">{error}</Alert>
+            <Alert class="mt-3" color="danger">{error}</Alert>
+        {/if}
+
+        {#if authState === ApiAuthState.SsoNeeded || authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected}
+            <Loadable promise={ssoProvidersPromise}>
+                {#snippet children(ssoProviders)}
+                    {#if ssoProviders.length && passwordLoginAllowed && !(passwordLoginMinimized && !showPasswordLogin)}
+                        <div class="sso-separator"></div>
+                    {/if}
+                    <div class="sso-buttons">
+                        {#each ssoProviders as ssoProvider (ssoProvider.name)}
+                            <button
+                                type="button"
+                                class="btn btn-secondary login-view-button"
+                                disabled={busy}
+                                onclick={() => startSSO(ssoProvider)}
+                            >
+                                {#if ssoProvider.kind === SsoProviderKind.Google}
+                                    <Fa fw class="me-2" icon={faGoogle} />
+                                {/if}
+                                {#if ssoProvider.kind === SsoProviderKind.Azure}
+                                    <Fa fw class="me-2" icon={faMicrosoft} />
+                                {/if}
+                                {#if ssoProvider.kind === SsoProviderKind.Apple}
+                                    <Fa fw class="me-2" icon={faApple} />
+                                {/if}
+                                {ssoProvider.label || ssoProvider.name}
+                            </button>
+                        {/each}
+                    </div>
+                    {#if ssoProviders.length && passwordLoginAllowed && passwordLoginMinimized && !showPasswordLogin}
+                        <div class="sso-separator"></div>
+                    {/if}
+                {/snippet}
+            </Loadable>
+        {/if}
+
+        {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected) && passwordLoginMinimized && !showPasswordLogin}
+            <div class="text-center">
+                <button
+                    type="button"
+                    class="btn btn-link"
+                    onclick={() => showPasswordLogin = true}
+                >
+                    Password login
+                </button>
+            </div>
+        {/if}
+
+        {#if authState !== ApiAuthState.NotStarted && authState !== ApiAuthState.Failed && authState !== ApiAuthState.IpRejected}
+            <button
+                type="button"
+                class="btn w-100 mt-3 btn-secondary login-view-button"
+                onclick={cancel}
+            >
+                Cancel
+            </button>
         {/if}
     </div>
-
-    {#if authState === ApiAuthState.SsoNeeded || authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected}
-        <Loadable promise={ssoProvidersPromise}>
-            {#snippet children(ssoProviders)}
-                <div class="mt-3 sso-buttons">
-                    {#each ssoProviders as ssoProvider (ssoProvider.name)}
-                        <button
-                            class="btn btn-secondary"
-                            disabled={busy}
-                            onclick={() => startSSO(ssoProvider)}
-                        >
-                            {#if ssoProvider.kind === SsoProviderKind.Google}
-                                <Fa fw class="me-2" icon={faGoogle} />
-                            {/if}
-                            {#if ssoProvider.kind === SsoProviderKind.Azure}
-                                <Fa fw class="me-2" icon={faMicrosoft} />
-                            {/if}
-                            {#if ssoProvider.kind === SsoProviderKind.Apple}
-                                <Fa fw class="me-2" icon={faApple} />
-                            {/if}
-                            {ssoProvider.label || ssoProvider.name}
-                        </button>
-                    {/each}
-                </div>
-            {/snippet}
-        </Loadable>
-    {/if}
-
-    {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected) && $serverInfo?.minimizePasswordLogin && !showPasswordLogin}
-        <div class="mt-3 text-center">
-            <!-- svelte-ignore a11y_invalid_attribute -->
-            <a
-                href="#"
-                class="password-login-link"
-                onclick={e => {
-                    e.preventDefault()
-                    showPasswordLogin = true
-                }}
-            >
-                Password login
-            </a>
-        </div>
-    {/if}
-
-    {#if authState !== ApiAuthState.NotStarted && authState !== ApiAuthState.Failed && authState !== ApiAuthState.IpRejected}
-        <button
-            class="btn w-100 mt-3 btn-secondary"
-            onclick={cancel}
-        >
-            Cancel
-        </button>
-    {/if}
 </Loadable>
 
 <style lang="scss">
@@ -302,5 +363,44 @@
         }
     }
 
+    .sso-separator {
+        position: relative;
+        text-align: center;
+        margin: 1.5rem 0;
+        font-style: italic;
+        font-size: 0.75rem;
+        opacity: 0.5;
 
+        &::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background-color: var(--bs-body-color);
+            opacity: 0.5;
+        }
+
+        &::after {
+            content: 'or';
+            position: relative;
+            display: inline-block;
+            padding: 0 1rem;
+            background-color: var(--bs-body-bg);
+        }
+    }
+
+    :global(.login-view-button) {
+        min-height: 45px;
+    }
+
+    .content {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+
+        padding-bottom: 5rem;
+        flex-grow: 1;
+    }
 </style>

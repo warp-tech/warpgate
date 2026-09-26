@@ -13,6 +13,7 @@ pub mod known_host {
         pub host: String,
         pub port: i32,
         pub key_type: String,
+        #[sea_orm(column_type = "Text")]
         pub key_base64: String,
     }
 

@@ -1,12 +1,12 @@
 <script lang="ts">
-    import { TargetKind } from 'gateway/lib/api'
+    import { Badge } from '@sveltestrap/sveltestrap'
     import NavListItem from 'common/NavListItem.svelte'
-    import Badge from 'common/sveltestrap-s5-ports/Badge.svelte'
+    import { TargetKind } from 'gateway/lib/api'
 
     const kinds: {
-        name: string,
-        value: TargetKind,
-        description: string,
+        name: string
+        value: TargetKind
+        description: string
         experimental?: boolean
     }[] = [
         {
@@ -32,8 +32,18 @@
         {
             name: 'Kubernetes',
             value: TargetKind.Kubernetes,
-            description: 'Expose Kubernetes API protocol for tools like kubectl',
-            experimental: true,
+            description:
+                'Expose Kubernetes API protocol for tools like kubectl',
+        },
+        {
+            name: 'VNC',
+            value: TargetKind.Vnc,
+            description: 'Access a remote desktop in the browser',
+        },
+        {
+            name: 'RDP',
+            value: TargetKind.Rdp,
+            description: 'Access a Windows remote desktop in the browser',
         },
     ]
 </script>

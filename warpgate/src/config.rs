@@ -1,14 +1,18 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use config::{Config, Environment, File, FileFormat};
-use notify::{recommended_watcher, RecursiveMode, Watcher};
-use tokio::sync::{broadcast, mpsc, Mutex};
-use tracing::{error, info, warn};
+use config::{Config, File, FileFormat};
+use notify::{RecursiveMode, Watcher, recommended_watcher};
+use tokio::sync::{Mutex, mpsc, watch};
+use tracing::{error, info};
 use warpgate_common::helpers::fs::secure_file;
-use warpgate_common::{GlobalParams, WarpgateConfig, WarpgateConfigStore};
+use warpgate_common::{
+    GlobalParams, WarpgateConfig, WarpgateConfigStore, clear_config_warnings, emit_config_warning,
+};
 
 pub fn load_config(params: &GlobalParams, secure: bool) -> Result<WarpgateConfig> {
+    clear_config_warnings();
+
     let mut store: serde_yaml::Value = Config::builder()
         .add_source(File::new(
             params
@@ -17,7 +21,6 @@ pub fn load_config(params: &GlobalParams, secure: bool) -> Result<WarpgateConfig
                 .context("Invalid config path")?,
             FileFormat::Yaml,
         ))
-        .add_source(Environment::with_prefix("WARPGATE"))
         .build()
         .context("Could not load config")?
         .try_deserialize()
@@ -29,8 +32,21 @@ pub fn load_config(params: &GlobalParams, secure: bool) -> Result<WarpgateConfig
 
     check_and_migrate_config(&mut store);
 
-    let store: WarpgateConfigStore =
-        serde_yaml::from_value(store).context("Could not load config")?;
+    // Deserialize via serde_ignored so that unknown / misplaced keys are
+    // surfaced instead of silently dropped. Warpgate's config structs do not
+    // use `deny_unknown_fields`, so a typo'd or wrongly-nested key (e.g.
+    // `role_mappings` placed on the sso_providers entry instead of under
+    // `provider`, or `log.retention_days` instead of `log.retention`) would
+    // otherwise parse green and have no effect — and `warpgate check` could not
+    // catch it. We keep loading (non-breaking) but warn with the full path of
+    // each ignored key.
+    let (store, ignored_keys) =
+        deserialize_store_collecting_ignored(store).context("Could not load config")?;
+    for path in ignored_keys {
+        emit_config_warning(format!(
+            "Ignoring unknown config key `{path}` — likely a typo or a misplaced key; it has NO effect"
+        ));
+    }
 
     let config = WarpgateConfig { store };
 
@@ -39,19 +55,37 @@ pub fn load_config(params: &GlobalParams, secure: bool) -> Result<WarpgateConfig
     Ok(config)
 }
 
+/// Deserialize the merged config value into the typed store, collecting the
+/// dotted paths of any keys Warpgate does not recognise. Because the config
+/// structs have no `deny_unknown_fields`, such keys are otherwise silently
+/// dropped; we record them so the caller can warn instead.
+fn deserialize_store_collecting_ignored(
+    value: serde_yaml::Value,
+) -> Result<(WarpgateConfigStore, Vec<String>), serde_yaml::Error> {
+    use serde::de::IntoDeserializer;
+    let mut ignored = vec![];
+    let store = serde_ignored::deserialize(
+        IntoDeserializer::<serde_yaml::Error>::into_deserializer(value),
+        |path| ignored.push(path.to_string()),
+    )?;
+    Ok((store, ignored))
+}
+
 fn check_and_migrate_config(store: &mut serde_yaml::Value) {
     use serde_yaml::Value;
     if let Some(map) = store.as_mapping_mut() {
         if let Some(web_admin) = map.remove(Value::String("web_admin".into())) {
-            warn!("The `web_admin` config section is deprecated. Rename it to `http`.");
+            emit_config_warning(
+                "The `web_admin` config section is deprecated. Rename it to `http`.".to_owned(),
+            );
             map.insert(Value::String("http".into()), web_admin);
         }
 
-        if let Some(Value::Sequence(ref mut users)) = map.get_mut(Value::String("users".into())) {
+        if let Some(Value::Sequence(users)) = map.get_mut(Value::String("users".into())) {
             for user in users {
-                if let Value::Mapping(ref mut user) = user {
-                    if let Some(new_require) = match user.get(Value::String("require".into())) {
-                        Some(Value::Sequence(ref old_requires)) => Some(Value::Mapping(
+                if let Value::Mapping(user) = user
+                    && let Some(new_require) = match user.get(Value::String("require".into())) {
+                        Some(Value::Sequence(old_requires)) => Some(Value::Mapping(
                             vec![
                                 (
                                     Value::String("ssh".into()),
@@ -66,19 +100,51 @@ fn check_and_migrate_config(store: &mut serde_yaml::Value) {
                             .collect(),
                         )),
                         x => x.cloned(),
-                    } {
-                        user.insert(Value::String("require".into()), new_require);
                     }
+                {
+                    user.insert(Value::String("require".into()), new_require);
                 }
             }
+        }
+
+        // `ssh.keepalive_interval` used to be read as a raw `Duration`, so old
+        // configs carry the `{secs, nanos}` shape where a humantime string is
+        // now expected.
+        if let Some(Value::Mapping(ssh)) = map.get_mut(Value::String("ssh".into())) {
+            let key = Value::String("keepalive_interval".into());
+            if let Some(Value::Mapping(legacy)) = ssh.get(&key) {
+                let duration = std::time::Duration::new(
+                    legacy.get("secs").and_then(Value::as_u64).unwrap_or(0),
+                    legacy
+                        .get("nanos")
+                        .and_then(Value::as_u64)
+                        .and_then(|n| u32::try_from(n).ok())
+                        .unwrap_or(0),
+                );
+                let humantime = humantime::format_duration(duration).to_string();
+                emit_config_warning(format!(
+                    "Deprecated duration format for `ssh.keepalive_interval` — replace it with `{humantime}`"
+                ));
+                ssh.insert(key, Value::String(humantime));
+            }
+        }
+
+        if store.get("recordings").is_some() {
+            emit_config_warning(
+                "The `recordings` config section is deprecated. Its values have been imported into the database, you can remove this section from the file.".to_owned()
+            );
         }
     }
 }
 
-pub fn watch_config(
+/// Watch the config file and push each successfully reloaded [`WarpgateConfig`]
+/// onto a [`watch`] channel. The `config` mutex remains the canonical store that
+/// existing readers lock; the returned receiver is the change stream that drives
+/// realtime consumers such as the port-listener supervisors.
+pub async fn watch_config(
     params: &GlobalParams,
     config: Arc<Mutex<WarpgateConfig>>,
-) -> Result<broadcast::Receiver<()>> {
+) -> Result<watch::Receiver<WarpgateConfig>> {
     let params = params.clone();
 
     let (tx, mut rx) = mpsc::channel(16);
@@ -87,34 +153,116 @@ pub fn watch_config(
     })?;
     watcher.watch(params.config_path().as_ref(), RecursiveMode::NonRecursive)?;
 
-    let (tx2, rx2) = broadcast::channel(16);
+    let (tx2, rx2) = watch::channel(config.lock().await.clone());
     tokio::spawn(async move {
         let _watcher = watcher; // avoid dropping the watcher
         loop {
+            // Block until a modify event, then debounce: editors emit several
+            // events per save, so wait for 500ms of quiet before reloading once.
             match rx.recv().await {
-                Some(Ok(event)) => {
-                    if event.kind.is_modify() {
-                        match load_config(&params, false) {
-                            Ok(new_config) => {
-                                *(config.lock().await) = new_config;
-                                let _ = tx2.send(());
-                                info!("Reloaded config");
-                            }
-                            Err(error) => error!(?error, "Failed to reload config"),
-                        }
-                    }
+                Some(Ok(event)) if event.kind.is_modify() => {}
+                Some(Ok(_)) => continue,
+                Some(Err(error)) => {
+                    error!(?error, "Failed to watch config");
+                    continue;
                 }
-                Some(Err(error)) => error!(?error, "Failed to watch config"),
                 None => {
                     error!("Config watch failed");
                     break;
                 }
             }
-        }
+            while let Ok(pending) =
+                tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await
+            {
+                match pending {
+                    Some(Err(error)) => error!(?error, "Failed to watch config"),
+                    None => return,
+                    Some(Ok(_)) => {} // more activity, keep debouncing
+                }
+            }
 
-        #[allow(unreachable_code)]
-        Ok::<_, anyhow::Error>(())
+            match load_config(&params, false) {
+                Ok(new_config) => {
+                    *(config.lock().await) = new_config.clone();
+                    let _ = tx2.send(new_config);
+                    info!("Reloaded config");
+                }
+                Err(error) => error!(?error, "Failed to reload config"),
+            }
+        }
     });
 
     Ok(rx2)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    fn parse(yaml: &str) -> (WarpgateConfigStore, Vec<String>) {
+        let value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        deserialize_store_collecting_ignored(value).unwrap()
+    }
+
+    #[test]
+    fn migrates_legacy_keepalive_interval() {
+        let mut value: serde_yaml::Value = serde_yaml::from_str(
+            "ssh:\n  keepalive_interval:\n    secs: 90\n    nanos: 0\n  inactivity_timeout: 5m\n",
+        )
+        .unwrap();
+        check_and_migrate_config(&mut value);
+
+        let (store, ignored) = deserialize_store_collecting_ignored(value).unwrap();
+        assert!(ignored.is_empty(), "unexpected ignored keys: {ignored:?}");
+        assert_eq!(store.ssh.keepalive_interval, Some(Duration::from_secs(90)));
+        assert_eq!(store.ssh.inactivity_timeout, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn keeps_humantime_keepalive_interval() {
+        let mut value: serde_yaml::Value =
+            serde_yaml::from_str("ssh:\n  keepalive_interval: 1m\n").unwrap();
+        check_and_migrate_config(&mut value);
+
+        let (store, _) = deserialize_store_collecting_ignored(value).unwrap();
+        assert_eq!(store.ssh.keepalive_interval, Some(Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn known_keys_produce_no_ignored_paths() {
+        let (_store, ignored) =
+            parse("external_host: bastion.example\nhttp:\n  listen: \"0.0.0.0:8888\"\n");
+        assert!(ignored.is_empty(), "unexpected ignored keys: {ignored:?}");
+    }
+
+    #[test]
+    fn reports_unknown_top_level_key() {
+        let (_store, ignored) = parse("external_host: x\nbogus_key: 1\n");
+        assert_eq!(ignored, vec!["bogus_key".to_string()]);
+    }
+
+    #[test]
+    fn reports_misplaced_nested_key_with_full_path() {
+        // role_mappings belongs UNDER `provider:`, not on the sso_providers entry.
+        // Misplaced here it is silently ignored, so SSO users get no roles.
+        let yaml = "
+sso_providers:
+  - name: keycloak
+    provider:
+      type: custom
+      client_id: warpgate
+      client_secret: secret
+      issuer_url: https://id.example/realms/x
+      scopes: [openid]
+    role_mappings:
+      admins: warpgate:admin
+";
+        let (_store, ignored) = parse(yaml);
+        assert!(
+            ignored.iter().any(|p| p.contains("role_mappings")),
+            "expected the misplaced role_mappings to be reported, got {ignored:?}"
+        );
+    }
 }

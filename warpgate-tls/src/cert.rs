@@ -7,6 +7,7 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::server::ResolvesServerCert;
 use rustls::sign::{CertifiedKey, SigningKey};
 use rustls_pki_types::pem::PemObject;
+use time::OffsetDateTime;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use x509_parser::prelude::{FromDer, GeneralName, ParsedExtension, X509Certificate};
@@ -29,12 +30,24 @@ impl TlsPrivateKey {
     pub fn key(&self) -> &Arc<dyn SigningKey> {
         &self.key
     }
+
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct TlsCertificateAndPrivateKey {
     pub certificate: TlsCertificateBundle,
     pub private_key: TlsPrivateKey,
+}
+
+impl TlsCertificateAndPrivateKey {
+    pub fn verify_key_matches_certificate(&self) -> Result<(), RustlsSetupError> {
+        CertifiedKey::from(self.clone())
+            .keys_match()
+            .map_err(|_| RustlsSetupError::MismatchedCertificateAndKey)
+    }
 }
 
 impl TlsCertificateBundle {
@@ -111,10 +124,10 @@ impl TlsCertificateBundle {
             }
         }
 
-        if let Some(subject) = cert.subject().iter_common_name().next() {
-            if let Ok(cn) = subject.as_str() {
-                names.push(cn.to_string());
-            }
+        if let Some(subject) = cert.subject().iter_common_name().next()
+            && let Ok(cn) = subject.as_str()
+        {
+            names.push(cn.to_string());
         }
 
         // Remove duplicates while preserving order
@@ -126,6 +139,13 @@ impl TlsCertificateBundle {
         }
 
         Ok(unique_names)
+    }
+
+    /// Expiry (notAfter) of the leaf certificate.
+    pub fn not_after(&self) -> Option<OffsetDateTime> {
+        let cert_der = self.certificates.first()?;
+        let (_, cert) = X509Certificate::from_der(cert_der).ok()?;
+        Some(cert.validity().not_after.to_datetime())
     }
 }
 

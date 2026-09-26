@@ -5,26 +5,38 @@ on: [push, pull_request]
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   Tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           submodules: recursive
 
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
+      # Github runner ocasionally runs out of space causing flakiness
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
+        with:
+          tool-cache: false
+          large-packages: false
+          docker-images: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24
 
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
           key: "test"
 
       - name: Install build deps
         run: |
           sudo apt-get install openssh-client expect
-          cargo install --locked just
+          cargo install --locked just@1.4.0
           # Pin cargo-llvm-cov to 0.6.15 because versions 0.6.16+ depend on ruzstd 0.8.x which uses
           # the unstable `unsigned_is_multiple_of` feature not available in nightly-2025-01-01
           cargo install --locked cargo-llvm-cov@0.6.15
@@ -38,6 +50,11 @@ jobs:
           just npm run openapi:tests-sdk
           just npm run build
 
+      # Built separately (own lockfile) so the workspace coverage build embeds it
+      # and warpgate-protocol-rdp's extraction test runs.
+      - name: Run Rust unit tests
+        run: cargo llvm-cov test --workspace
+
       - name: Build images
         working-directory: tests
         run: |
@@ -48,6 +65,10 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y gnome-keyring kubectl
+          # FreeRDP CLI (xfreerdp/xfreerdp3) drives the native RDP tests. The `-x11`
+          # build needs an X display, so xvfb provides a virtual one on headless CI.
+          sudo apt install -y xvfb
+          sudo apt install -y freerdp2-x11 || sudo apt install -y freerdp3-x11
           pip3 install keyring==24 poetry==1.8.3
           poetry install
 
@@ -70,7 +91,7 @@ jobs:
           path: target/llvm-cov/html
 
       - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@299e4b793aaa83bf2aba7c9c14bedbb485688ec4
+        uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f
         if: ${{ env.SONAR_TOKEN }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any

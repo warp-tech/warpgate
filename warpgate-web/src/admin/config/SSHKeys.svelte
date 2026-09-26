@@ -1,17 +1,28 @@
 <script lang="ts">
-    import { api, type SSHKey, type SSHKnownHost } from 'admin/lib/api'
-    import Alert from 'common/sveltestrap-s5-ports/Alert.svelte'
-    import CopyButton from 'common/CopyButton.svelte'
-    import { stringifyError } from 'common/errors'
-    import { Button } from '@sveltestrap/sveltestrap'
+    import { Alert, Badge, Button, Tooltip } from '@sveltestrap/sveltestrap'
+    import {
+        api,
+        type SSHClientKey,
+        type SSHClientKeyKind,
+        type SSHKnownHost,
+    } from 'admin/lib/api'
     import { adminPermissions } from 'admin/lib/store'
+    import CopyableTextArea from 'common/CopyableTextArea.svelte'
+    import { stringifyError } from 'common/errors'
+    import InfoBox from 'common/InfoBox.svelte'
+    import { isSecretRef } from 'common/SecretRefInput.svelte'
+    import ClientKeyModal from './ClientKeyModal.svelte'
+    import GenerateClientKeyModal from './GenerateClientKeyModal.svelte'
 
-    let error: string|undefined = $state()
-    let knownHosts: SSHKnownHost[]|undefined = $state()
-    let ownKeys: SSHKey[]|undefined = $state()
+    let error: string | undefined = $state()
+    let knownHosts: SSHKnownHost[] | undefined = $state()
+    let clientKeys: SSHClientKey[] | undefined = $state()
+    let keyModalOpen = $state(false)
+    let editingKey: SSHClientKey | undefined = $state()
+    let generateModalOpen = $state(false)
 
-    async function load () {
-        ownKeys = await api.getSshOwnKeys()
+    async function load() {
+        clientKeys = await api.getSshOwnKeys()
         if ($adminPermissions.configEdit) {
             knownHosts = await api.getSshKnownHosts()
         }
@@ -21,39 +32,156 @@
         error = await stringifyError(e)
     })
 
-    async function deleteHost (host: SSHKnownHost) {
-        await api.deleteSshKnownHost(host)
-        load()
+    async function run(action: () => Promise<unknown>) {
+        error = undefined
+        try {
+            await action()
+            await load()
+        } catch (e) {
+            error = await stringifyError(e)
+        }
     }
 
+    function openImportKey() {
+        editingKey = undefined
+        keyModalOpen = true
+    }
+
+    function openEditKey(key: SSHClientKey) {
+        editingKey = key
+        keyModalOpen = true
+    }
+
+    function saveKey(label: string, secretKey: string, isDefault: boolean) {
+        const key = editingKey
+        run(async () => {
+            if (key) {
+                await api.updateSshOwnKey({
+                    id: key.id,
+                    updateSSHClientKeyRequest: { label, isDefault },
+                })
+                return
+            }
+            if (isSecretRef(secretKey)) {
+                await api.importSshOwnKeyReference({
+                    importSshClientKeyReferenceRequest: {
+                        label,
+                        reference: secretKey,
+                        isDefault,
+                    },
+                })
+                return
+            }
+            await api.importSshOwnKey({
+                importSshClientKeyRequest: { label, secretKey, isDefault },
+            })
+        })
+    }
+
+    function generateKey(label: string, kind: SSHClientKeyKind) {
+        run(async () => {
+            await api.generateSshOwnKey({
+                generateSSHClientKeyRequest: { label, kind },
+            })
+        })
+    }
+
+    async function deleteKey(key: SSHClientKey) {
+        await run(() => api.deleteSshOwnKey(key))
+    }
+
+    async function deleteHost(host: SSHKnownHost) {
+        await run(() => api.deleteSshKnownHost(host))
+    }
 </script>
 
 <div class="page-summary-bar">
-    <h1>SSH</h1>
+    <h1>SSH keys</h1>
+    <div class="d-flex gap-2 ms-auto">
+        {#if $adminPermissions.configEdit}
+            <Button color="primary" onclick={() => (generateModalOpen = true)}>
+                Generate
+            </Button>
+            <Button color="secondary" onclick={openImportKey}> Import </Button>
+        {/if}
+    </div>
 </div>
 
 {#if error}
     <Alert color="danger">{error}</Alert>
 {/if}
 
-{#if ownKeys}
-    <h2>Warpgate's own SSH keys</h2>
-    <Alert color="info">Add these keys to the targets' <code>authorized_keys</code> files</Alert>
+{#if clientKeys}
+    <InfoBox>
+        Add one of these keys to the targets'
+        <code>authorized_keys</code>
+        files
+    </InfoBox>
+
     <div class="list-group list-group-flush">
-        {#each ownKeys as key (key)}
-            <div class="list-group-item d-flex">
-                <pre>{key.kind} {key.publicKeyBase64}</pre>
-                <div class="ms-auto">
-                    <CopyButton class="ms-3 px-0" text={key.kind + ' ' + key.publicKeyBase64} />
+        {#each clientKeys as key (key.id)}
+            <div class="list-group-item px-0">
+                <div class="d-flex align-items-center gap-2">
+                    <strong>{key.label}</strong>
+                    {#if key.isDefault}
+                        <Badge color="primary">Default</Badge>
+                    {/if}
+                    {#if key.secretBackend}
+                        <Tooltip target="keyRow-{key.id}">
+                            Private key will be loaded from the secret backend
+                            on use
+                        </Tooltip>
+                        <Badge color="info" id="keyRow-{key.id}">
+                            {key.secretBackend}
+                        </Badge>
+                    {/if}
+                    {#if $adminPermissions.configEdit}
+                        <Button
+                            class="ms-auto"
+                            color="link px-0"
+                            onclick={e => {
+                                e.preventDefault()
+                                openEditKey(key)
+                            }}
+                        >
+                            Edit
+                        </Button>
+                        <Button
+                            class="ms-3"
+                            color="link px-0"
+                            onclick={e => {
+                                e.preventDefault()
+                                deleteKey(key)
+                            }}
+                        >
+                            Delete
+                        </Button>
+                    {/if}
                 </div>
+                <CopyableTextArea label="Public key" value={key.publicKey} />
             </div>
         {/each}
     </div>
 {/if}
 
+{#if keyModalOpen}
+    <ClientKeyModal
+        bind:isOpen={keyModalOpen}
+        instance={editingKey}
+        save={saveKey}
+    />
+{/if}
+
+{#if generateModalOpen}
+    <GenerateClientKeyModal
+        bind:isOpen={generateModalOpen}
+        save={generateKey}
+    />
+{/if}
+
 <div class="mb-3"></div>
 {#if knownHosts}
-    {#if knownHosts.length }
+    {#if knownHosts.length}
         <h2>Known hosts: {knownHosts.length}</h2>
     {:else}
         <h2>No known hosts</h2>
@@ -62,9 +190,7 @@
         {#each knownHosts as host (host.id)}
             <div class="list-group-item">
                 <div class="d-flex">
-                    <strong>
-                        {host.host}:{host.port}
-                    </strong>
+                    <strong> {host.host}:{host.port} </strong>
 
                     <Button
                         class="ms-auto"
@@ -74,7 +200,9 @@
                             deleteHost(host)
                         }}
                         disabled={!$adminPermissions.configEdit}
-                    >Delete</Button>
+                    >
+                        Delete
+                    </Button>
                 </div>
                 <pre>{host.keyType} {host.keyBase64}</pre>
             </div>

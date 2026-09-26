@@ -1,11 +1,11 @@
 use anyhow::Result;
 use bytes::Bytes;
-use russh::client::Msg;
 use russh::Channel;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use russh::client::Msg;
+use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::SessionId;
+use warpgate_common::UserSessionId;
 
 use super::error::SshClientError;
 use crate::{ChannelOperation, RCEvent};
@@ -14,8 +14,8 @@ pub struct DirectTCPIPChannel {
     client_channel: Channel<Msg>,
     channel_id: Uuid,
     ops_rx: UnboundedReceiver<ChannelOperation>,
-    events_tx: UnboundedSender<RCEvent>,
-    session_id: SessionId,
+    events_tx: Sender<RCEvent>,
+    session_id: UserSessionId,
 }
 
 impl DirectTCPIPChannel {
@@ -23,8 +23,8 @@ impl DirectTCPIPChannel {
         client_channel: Channel<Msg>,
         channel_id: Uuid,
         ops_rx: UnboundedReceiver<ChannelOperation>,
-        events_tx: UnboundedSender<RCEvent>,
-        session_id: SessionId,
+        events_tx: Sender<RCEvent>,
+        session_id: UserSessionId,
     ) -> Self {
         Self {
             client_channel,
@@ -59,19 +59,19 @@ impl DirectTCPIPChannel {
                             self.events_tx.send(RCEvent::Output(
                                 self.channel_id,
                                 Bytes::from(bytes.to_vec()),
-                            )).map_err(|_| SshClientError::MpscError)?;
+                            )).await.map_err(|_| SshClientError::MpscError)?;
                         }
                         Some(russh::ChannelMsg::Close) => {
-                            self.events_tx.send(RCEvent::Close(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
+                            self.events_tx.send(RCEvent::Close(self.channel_id)).await.map_err(|_| SshClientError::MpscError)?;
                         },
                         Some(russh::ChannelMsg::Success) => {
-                            self.events_tx.send(RCEvent::Success(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
+                            self.events_tx.send(RCEvent::Success(self.channel_id)).await.map_err(|_| SshClientError::MpscError)?;
                         },
                         Some(russh::ChannelMsg::Eof) => {
-                            self.events_tx.send(RCEvent::Eof(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
+                            self.events_tx.send(RCEvent::Eof(self.channel_id)).await.map_err(|_| SshClientError::MpscError)?;
                         }
                         None => {
-                            self.events_tx.send(RCEvent::Close(self.channel_id)).map_err(|_| SshClientError::MpscError)?;
+                            self.events_tx.send(RCEvent::Close(self.channel_id)).await.map_err(|_| SshClientError::MpscError)?;
                             break
                         },
                         Some(operation) => {

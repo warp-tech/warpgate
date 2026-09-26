@@ -64,3 +64,12 @@ impl From<UserSsoCredential> for ActiveModel {
         }
     }
 }
+
+impl Model {
+    pub fn as_fingerprintable_bytes(&self) -> Vec<u8> {
+        let mut buf = self.provider.clone().unwrap_or_default().into_bytes();
+        buf.push(0);
+        buf.extend_from_slice(self.email.as_bytes());
+        buf
+    }
+}

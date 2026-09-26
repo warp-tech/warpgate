@@ -1,7 +1,18 @@
 from datetime import datetime, timezone, timedelta
+import base64
+import json
+import os
+import hashlib
+import html
+import re
+import asyncio
+import secrets
 import time
 import uuid
 import subprocess
+from urllib.parse import parse_qs, urlencode, urlparse
+
+import requests
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -10,13 +21,369 @@ import aiohttp
 import pytest
 
 from .api_client import admin_client, sdk
-from .conftest import WarpgateProcess, K3sInstance
+from .approval_util import wait_for_pending_approval
+from .conftest import ProcessManager, WarpgateProcess, K3sInstance
+from .util import alloc_port, wait_port
 
 
 def run_kubectl(args, **kwargs):
     return subprocess.run(
         args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs
     )
+
+
+# ---------------------------------------------------------------------------
+# OIDC helpers
+# ---------------------------------------------------------------------------
+
+# Mirrors the client registered by conftest.start_oidc_server.
+OIDC_CLIENT_ID = "warpgate-test"
+OIDC_CLIENT_SECRET = "warpgate-test-secret"
+# A second OIDC client that simulates kubectl's own client-id.
+# Its tokens have aud == KUBECTL_CLIENT_ID (not warpgate-test).
+KUBECTL_CLIENT_ID = "kubectl-client"
+KUBECTL_CLIENT_SECRET = "kubectl-client-secret"
+# Used as the OIDC redirect_uri for our own (non-warpgate) authorization-code
+# flow.  We register it explicitly with the mock so the token exchange below
+# validates the redirect_uri.  Warpgate never sees this URL.  The mock's
+# redirect-uri validator requires an https URL with an explicit port, so we
+# derive it from an allocated port (a real listener is never needed).
+def _provision_kubernetes_target(processes, shared_wg, label):
+    """Create a user, role and Kubernetes target pointing at a fresh k3s.
+
+    Returns ``(k3s, user, target_name, admin_url)``.
+    """
+    k3s: K3sInstance = processes.start_k3s()
+    url = f"https://localhost:{shared_wg.http_port}"
+
+    with admin_client(url) as api:
+        role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid.uuid4()}"))
+        user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid.uuid4()}"))
+        api.create_password_credential(user.id, sdk.NewPasswordCredential(password="123"))
+        api.add_user_role(user.id, role.id)
+
+        target_name = f"k8s-{label}-{uuid.uuid4()}"
+        target = api.create_target(
+            sdk.TargetDataRequest(
+                name=target_name,
+                require_approval=False,
+                ticket_requests_disabled=False,
+                ticket_require_approval=False,
+                options=sdk.TargetOptions(
+                    sdk.TargetOptionsTargetKubernetesOptions(
+                        kind="Kubernetes",
+                        cluster_url=f"https://127.0.0.1:{k3s.port}",
+                        tls=sdk.Tls(mode=sdk.TlsMode.PREFERRED, verify=False),
+                        auth=sdk.KubernetesTargetAuth(
+                            sdk.KubernetesTargetAuthKubernetesTargetTokenAuth(
+                                kind="Token", token=k3s.token
+                            )
+                        ),
+                    )
+                ),
+            )
+        )
+        api.add_target_role(target.id, role.id)
+
+    return k3s, user, target_name, url
+
+
+async def _issue_user_token(url, user, label):
+    """Log in as ``user`` and mint an API token for kubectl to present."""
+    async with aiohttp.ClientSession() as session:
+        resp = await session.post(
+            f"{url}/@warpgate/api/auth/login",
+            json={"username": user.username, "password": "123"},
+            ssl=False,
+        )
+        resp.raise_for_status()
+        resp = await session.post(
+            f"{url}/@warpgate/api/profile/api-tokens",
+            json={
+                "label": label,
+                "expiry": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            },
+            ssl=False,
+        )
+        resp.raise_for_status()
+        return (await resp.json())["secret"]
+
+
+def _create_running_pod(k3s, pod_name, *, command="['sleep', '3600']", stdin=False):
+    """Apply a single-container alpine pod and block until it is Ready."""
+    k3s.kubectl(
+        ["apply", "-f", "-"],
+        input=(
+            f"apiVersion: v1\n"
+            f"kind: Pod\n"
+            f"metadata:\n"
+            f"  name: {pod_name}\n"
+            f"  namespace: default\n"
+            f"spec:\n"
+            f"  containers:\n"
+            f"  - name: alpine\n"
+            f"    image: alpine:3\n"
+            f"    command: {command}\n"
+            + ("    stdin: true\n    stdinOnce: true\n" if stdin else "")
+        ).encode(),
+    )
+    k3s.kubectl(
+        ["wait", "--for=condition=Ready", f"pod/{pod_name}", "-n", "default", "--timeout=120s"]
+    )
+
+
+def _log_value(entry, key):
+    """One field of an audit log entry.
+
+    Values are stored as their rendered text inside the entry's JSON ``values``
+    map; some backends hand them back still JSON-quoted, which is why the log
+    viewer strips quotes too.
+    """
+    raw = (entry.values or {}).get(key)
+    if raw is None:
+        return None
+    return str(raw).strip('"')
+
+
+def _wait_for_audit_event(url, username, event_type, timeout=60):
+    """The first audit entry of ``event_type`` recorded for ``username``.
+
+    Filters on the indexed username column rather than the free-text search so
+    the assertion does not depend on how the backend searches the JSON values
+    column.
+    """
+    deadline = time.time() + timeout
+    while True:
+        with admin_client(url) as api:
+            entries = api.get_logs(
+                sdk.GetLogsRequest(username=username, limit=200)
+            )
+        for entry in entries:
+            if _log_value(entry, "_type") == event_type:
+                return entry
+        if time.time() > deadline:
+            seen = sorted(
+                {_log_value(e, "_type") for e in entries if _log_value(e, "_type")}
+            )
+            raise AssertionError(
+                f"no {event_type} audit entry for {username} within {timeout}s; saw {seen}"
+            )
+        time.sleep(1)
+
+
+def _oidc_test_redirect_uri(port):
+    return f"https://127.0.0.1:{port}/oidc-test-callback"
+
+
+def _make_oidc_sso_provider_config(
+    oidc_port,
+    *,
+    auto_create_users=False,
+    role_mappings=None,
+    additional_trusted_audiences=None,
+):
+    """Build an ``sso_providers`` config entry pointing at the OIDC mock.
+
+    Mirrors ``_make_sso_provider_config`` in ``test_http_user_auth_oidc.py`` but
+    kept local to avoid cross-test coupling.
+    """
+    provider = {
+        "type": "custom",
+        "client_id": OIDC_CLIENT_ID,
+        "client_secret": OIDC_CLIENT_SECRET,
+        "issuer_url": f"http://localhost:{oidc_port}",
+        "scopes": [
+            "openid",
+            "email",
+            "profile",
+            "preferred_username",
+            "warpgate_roles",
+        ],
+    }
+    if role_mappings is not None:
+        provider["role_mappings"] = role_mappings
+    if additional_trusted_audiences is not None:
+        provider["additional_trusted_audiences"] = additional_trusted_audiences
+    return {
+        "name": "test-oidc",
+        "label": "OIDC Test",
+        "provider": provider,
+        "auto_create_users": auto_create_users,
+        # Opt this provider into Kubernetes OIDC bearer auth. The auth path is
+        # gated on the presence of this block; the client_id is only used for
+        # kubeconfig generation, not for token validation.
+        "kubernetes": {
+            "client_id": KUBECTL_CLIENT_ID,
+        },
+    }
+
+
+def _obtain_oidc_id_token(
+    oidc_port,
+    redirect_uri,
+    *,
+    username="User1",
+    password="pwd",
+    client_id=OIDC_CLIENT_ID,
+    client_secret=OIDC_CLIENT_SECRET,
+):
+    """Drive a self-contained OIDC authorization-code flow against the mock and
+    return a raw ID token (JWT string).
+
+    This intentionally does NOT go through Warpgate's ``/sso/start`` endpoint:
+    we run our own authorization request (with our own ``redirect_uri`` and a
+    self-managed PKCE pair) so we can intercept the authorization ``code`` and
+    exchange it ourselves at the token endpoint.  The resulting token has
+    ``aud == <client_id>`` (default: ``warpgate-test``), which is what
+    Warpgate's Kubernetes Bearer-auth path validates against.
+    """
+    issuer = f"http://localhost:{oidc_port}"
+    disco = requests.get(
+        f"{issuer}/.well-known/openid-configuration", timeout=10
+    ).json()
+    authorization_endpoint = disco["authorization_endpoint"]
+    token_endpoint = disco["token_endpoint"]
+
+    session = requests.Session()
+
+    # The mock client requires PKCE, so generate a verifier/challenge pair.
+    code_verifier = (
+        base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
+    )
+    code_challenge = (
+        base64.urlsafe_b64encode(
+            hashlib.sha256(code_verifier.encode()).digest()
+        )
+        .rstrip(b"=")
+        .decode()
+    )
+
+    # 1. Authorization request -> mock login page
+    auth_params = {
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": "openid email profile preferred_username warpgate_roles",
+        "state": uuid.uuid4().hex,
+        "nonce": uuid.uuid4().hex,
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
+    }
+    auth_url = f"{authorization_endpoint}?{urlencode(auth_params)}"
+    resp = session.get(auth_url)
+    assert resp.status_code == 200, (
+        f"authorize failed: {resp.status_code} {resp.text[:300]}"
+    )
+
+    login_page_url = resp.url
+    login_html = resp.text
+
+    token_match = re.search(
+        r'name="__RequestVerificationToken"[^>]*value="([^"]*)"',
+        login_html,
+    )
+    assert token_match, f"no anti-forgery token in login form: {login_html[:300]}"
+    verification_token = html.unescape(token_match.group(1))
+
+    m = re.search(r'name="Input.ReturnUrl"[^>]*value="([^"]*)"', login_html)
+    assert m, "no ReturnUrl in login form"
+    return_url = html.unescape(m.group(1))
+
+    # 2. Submit credentials
+    resp = session.post(
+        login_page_url,
+        data={
+            "Input.Username": username,
+            "Input.Password": password,
+            "Input.Button": "login",
+            "Input.ReturnUrl": return_url,
+            "__RequestVerificationToken": verification_token,
+        },
+        allow_redirects=False,
+    )
+
+    # 3. Chase redirects until the mock sends us back to our redirect_uri
+    code = None
+    for _ in range(15):
+        if resp.status_code // 100 != 3:
+            break
+        location = resp.headers["Location"]
+        if location.startswith("/"):
+            location = f"{issuer}{location}"
+        if location.startswith(redirect_uri):
+            qs = parse_qs(urlparse(location).query)
+            assert "code" in qs, f"no code in callback: {location}"
+            code = qs["code"][0]
+            break
+        resp = session.get(location, allow_redirects=False)
+
+    assert code is not None, (
+        "OIDC mock did not redirect back with an authorization code"
+    )
+
+    # 4. Exchange the code for tokens
+    token_resp = requests.post(
+        token_endpoint,
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "code_verifier": code_verifier,
+        },
+        timeout=10,
+    )
+    assert token_resp.status_code == 200, (
+        f"token exchange failed: {token_resp.status_code} {token_resp.text[:300]}"
+    )
+    body = token_resp.json()
+    id_token = body.get("id_token")
+    assert id_token, f"no id_token in token response: {body}"
+    return id_token
+
+
+def _obtain_kubectl_client_id_token(oidc_port, redirect_uri, *, username="User1", password="pwd"):
+    """Like _obtain_oidc_id_token but uses KUBECTL_CLIENT_ID as the client.
+
+    The resulting ID token will have ``aud == kubectl-client``, which is NOT
+    Warpgate's primary client_id (``warpgate-test``).  This exercises the
+    ``additional_trusted_audiences`` path: the token is only accepted when
+    ``kubectl-client`` is in the provider's ``additional_trusted_audiences`` list.
+    """
+    return _obtain_oidc_id_token(
+        oidc_port,
+        redirect_uri,
+        username=username,
+        password=password,
+        client_id=KUBECTL_CLIENT_ID,
+        client_secret=KUBECTL_CLIENT_SECRET,
+    )
+
+
+def _oidc_user_with_roles(roles):
+    """OIDC mock user config carrying the given warpgate_roles claim values."""
+    claims = [
+        {"Type": "name", "Value": "Sam Tailor", "ValueType": "string"},
+        {"Type": "email", "Value": "sam.tailor@gmail.com", "ValueType": "string"},
+        {
+            "Type": "preferred_username",
+            "Value": "sam_tailor",
+            "ValueType": "string",
+        },
+    ]
+    for r in roles:
+        claims.append(
+            {"Type": "warpgate_roles", "Value": r, "ValueType": "string"}
+        )
+    return [
+        {
+            "SubjectId": "1",
+            "Username": "User1",
+            "Password": "pwd",
+            "Claims": claims,
+        }
+    ]
 
 
 class TestKubernetesIntegration:
@@ -79,6 +446,9 @@ class TestKubernetesIntegration:
             token_target = api.create_target(
                 sdk.TargetDataRequest(
                     name=token_target_name,
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
                             kind="Kubernetes",
@@ -184,14 +554,22 @@ class TestKubernetesIntegration:
         assert p.returncode != 0, "should not accept an unknown certificate"
 
     @pytest.mark.asyncio
-    async def test_kubectl_run(self, processes, shared_wg: WarpgateProcess):
-        """Ensure that write requests such as ``kubectl run`` are proxied."""
-        k3s: K3sInstance = processes.start_k3s()
+    async def test_kubectl_web_approval_policy(
+        self, processes, shared_wg: WarpgateProcess, timeout
+    ):
+        """A ``kubernetes: [WebUserApproval]`` policy holds a kubectl request
+        until the user approves it out of band, then lets it through.
+
+        Covers the policy-enforced branch of ``authorize_kubernetes_identity``:
+        transport auth (the API token) is the identity, and the credential policy
+        layers web approval on top — the request must block, surface in the
+        pending-approvals list, and only succeed once approved."""
+        k3s = processes.start_k3s()
         k3s_port = k3s.port
         k3s_token = k3s.token
+
         url = f"https://localhost:{shared_wg.http_port}"
 
-        # create user/role as before
         with admin_client(url) as api:
             role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid.uuid4()}"))
             user = api.create_user(
@@ -200,13 +578,24 @@ class TestKubernetesIntegration:
             api.create_password_credential(
                 user.id, sdk.NewPasswordCredential(password="123")
             )
+            api.update_user(
+                user.id,
+                sdk.UserDataRequest(
+                    username=user.username,
+                    credential_policy=sdk.UserRequireCredentialsPolicy(
+                        kubernetes=[sdk.CredentialKind.WEBUSERAPPROVAL],
+                    ),
+                ),
+            )
             api.add_user_role(user.id, role.id)
 
-        target_name = f"k8s-run-{uuid.uuid4()}"
-        with admin_client(url) as api:
+            target_name = f"k8s-approval-{uuid.uuid4()}"
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=target_name,
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
                             kind="Kubernetes",
@@ -223,18 +612,21 @@ class TestKubernetesIntegration:
             )
             api.add_target_role(target.id, role.id)
 
-        # login and request api token
+        headers = {"Host": f"localhost:{shared_wg.http_port}"}
         async with aiohttp.ClientSession() as session:
+            # This session both mints the kubectl API token and, as the same
+            # user, approves the pending Kubernetes request.
             resp = await session.post(
                 f"{url}/@warpgate/api/auth/login",
                 json={"username": user.username, "password": "123"},
+                headers=headers,
                 ssl=False,
             )
             resp.raise_for_status()
             resp = await session.post(
                 f"{url}/@warpgate/api/profile/api-tokens",
                 json={
-                    "label": "run-token",
+                    "label": "test-token",
                     "expiry": (
                         datetime.now(timezone.utc) + timedelta(days=1)
                     ).isoformat(),
@@ -244,6 +636,285 @@ class TestKubernetesIntegration:
             resp.raise_for_status()
             user_token = (await resp.json())["secret"]
 
+            server = f"https://127.0.0.1:{shared_wg.kubernetes_port}/{target_name}"
+            kubectl = subprocess.Popen(
+                [
+                    "kubectl",
+                    "get",
+                    "pods",
+                    "--server",
+                    server,
+                    "--insecure-skip-tls-verify",
+                    "--token",
+                    user_token,
+                    "-n",
+                    "default",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            try:
+                # The request must block on web approval; poll the user's pending
+                # requests until the Kubernetes one appears.
+                auth_id = None
+                deadline = time.monotonic() + (timeout - 5)
+                while time.monotonic() < deadline:
+                    r = await session.get(
+                        f"{url}/@warpgate/api/auth/web-auth-requests", ssl=False
+                    )
+                    r.raise_for_status()
+                    pending = [
+                        s
+                        for s in await r.json()
+                        if s["protocol"] == "Kubernetes"
+                    ]
+                    if pending:
+                        assert pending[0]["state"] == "WebUserApprovalNeeded"
+                        auth_id = pending[0]["id"]
+                        break
+                    await asyncio.sleep(0.25)
+
+                assert (
+                    auth_id is not None
+                ), "Kubernetes request never became a pending web approval"
+                # Enforcement: the request is held, not already through.
+                assert (
+                    kubectl.poll() is None
+                ), "kubectl was let through without web approval"
+
+                r = await session.post(
+                    f"{url}/@warpgate/api/auth/state/{auth_id}/approve",
+                    json={"scope": "Once"},
+                    ssl=False,
+                )
+                assert r.status == 200
+
+                out, err = kubectl.communicate(timeout=timeout)
+                assert kubectl.returncode == 0, (
+                    f"kubectl should succeed after approval: {err!r}"
+                )
+            finally:
+                if kubectl.poll() is None:
+                    kubectl.kill()
+                    kubectl.communicate()
+
+    async def _k8s_approval_setup(self, url, k3s, require_approval=True):
+        """A user, an API token for it, and a Kubernetes target behind the
+        administrator gate."""
+        with admin_client(url) as api:
+            role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid.uuid4()}"))
+            user = api.create_user(
+                sdk.CreateUserRequest(username=f"user-{uuid.uuid4()}")
+            )
+            api.create_password_credential(
+                user.id, sdk.NewPasswordCredential(password="123")
+            )
+            api.add_user_role(user.id, role.id)
+
+            target_name = f"k8s-admin-approval-{uuid.uuid4()}"
+            target = api.create_target(
+                sdk.TargetDataRequest(
+                    name=target_name,
+                    require_approval=require_approval,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
+                    options=sdk.TargetOptions(
+                        sdk.TargetOptionsTargetKubernetesOptions(
+                            kind="Kubernetes",
+                            cluster_url=f"https://127.0.0.1:{k3s.port}",
+                            tls=sdk.Tls(mode=sdk.TlsMode.PREFERRED, verify=False),
+                            auth=sdk.KubernetesTargetAuth(
+                                sdk.KubernetesTargetAuthKubernetesTargetTokenAuth(
+                                    kind="Token", token=k3s.token
+                                )
+                            ),
+                        )
+                    ),
+                )
+            )
+            api.add_target_role(target.id, role.id)
+        return user, target_name
+
+    async def _kubectl_token(self, session, url, username, port):
+        headers = {"Host": f"localhost:{port}"}
+        resp = await session.post(
+            f"{url}/@warpgate/api/auth/login",
+            json={"username": username, "password": "123"},
+            headers=headers,
+            ssl=False,
+        )
+        resp.raise_for_status()
+        resp = await session.post(
+            f"{url}/@warpgate/api/profile/api-tokens",
+            json={
+                "label": "test-token",
+                "expiry": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            },
+            ssl=False,
+        )
+        resp.raise_for_status()
+        return (await resp.json())["secret"]
+
+    def _kubectl_get_pods(self, wg_port, target_name, token):
+        return subprocess.Popen(
+            [
+                "kubectl",
+                "get",
+                "pods",
+                "--server",
+                f"https://127.0.0.1:{wg_port}/{target_name}",
+                "--insecure-skip-tls-verify",
+                "--token",
+                token,
+                "-n",
+                "default",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+    @pytest.mark.asyncio
+    async def test_kubectl_is_held_for_administrator_approval(
+        self, processes, shared_wg: WarpgateProcess, timeout
+    ):
+        """A gated Kubernetes target holds the whole `kubectl` command.
+
+        Kubernetes gates inside the request correlator rather than per request,
+        so one hold has to cover a command's whole fan-out: a second `kubectl`
+        against the same target joins the first's slot instead of raising a
+        second question, and one approval releases both."""
+        k3s = processes.start_k3s()
+        url = f"https://localhost:{shared_wg.http_port}"
+        user, target_name = await self._k8s_approval_setup(url, k3s)
+
+        async with aiohttp.ClientSession() as session:
+            token = await self._kubectl_token(
+                session, url, user.username, shared_wg.http_port
+            )
+            first = self._kubectl_get_pods(
+                shared_wg.kubernetes_port, target_name, token
+            )
+            second = None
+            try:
+                with admin_client(url) as api:
+                    approval = wait_for_pending_approval(
+                        api, target_name, user.username
+                    )
+                assert approval.protocol == "Kubernetes"
+                assert first.poll() is None, "kubectl was let through unapproved"
+
+                # A second command joins the held session rather than asking
+                # again — the correlator's slot is what serialises them.
+                second = self._kubectl_get_pods(
+                    shared_wg.kubernetes_port, target_name, token
+                )
+                time.sleep(2)
+                assert second.poll() is None, "the joining command was let through"
+                with admin_client(url) as api:
+                    held = [
+                        a
+                        for a in api.get_session_approvals()
+                        if a.target == target_name and a.username == user.username
+                    ]
+                assert len(held) == 1, (
+                    f"a command's fan-out must raise one question, got {len(held)}"
+                )
+
+                with admin_client(url) as api:
+                    api.approve_session(
+                        approval.id,
+                        sdk.ApproveSessionRequest(
+                            scope=sdk.ApprovalScope.ONCE, target=approval.target
+                        ),
+                    )
+
+                for label, process in (("first", first), ("second", second)):
+                    _, err = process.communicate(timeout=timeout)
+                    assert process.returncode == 0, (
+                        f"{label} kubectl should succeed after approval: {err!r}"
+                    )
+            finally:
+                for process in (first, second):
+                    if process is not None and process.poll() is None:
+                        process.kill()
+                        process.communicate()
+
+    @pytest.mark.asyncio
+    async def test_kubectl_refusal_stops_the_command_without_locking_out(
+        self, processes, shared_wg: WarpgateProcess, timeout
+    ):
+        """A refused command dies, and does not simply ask again.
+
+        The correlator caches one command's authorization, so a refusal has to
+        outlive the entry it evicts: otherwise the command's very next request
+        opens a fresh session and raises a new question, the client never sees
+        the refusal, and the queue refills for as long as it keeps trying. The
+        memory is deliberately brief — refusing one command must not lock the
+        user out of the target."""
+        k3s = processes.start_k3s()
+        url = f"https://localhost:{shared_wg.http_port}"
+        user, target_name = await self._k8s_approval_setup(url, k3s)
+
+        async with aiohttp.ClientSession() as session:
+            token = await self._kubectl_token(
+                session, url, user.username, shared_wg.http_port
+            )
+            refused = self._kubectl_get_pods(
+                shared_wg.kubernetes_port, target_name, token
+            )
+            retried = None
+            try:
+                with admin_client(url) as api:
+                    approval = wait_for_pending_approval(
+                        api, target_name, user.username
+                    )
+                    api.reject_session(
+                        approval.id, sdk.RejectSessionRequest(target=approval.target)
+                    )
+
+                    _, err = refused.communicate(timeout=timeout)
+                    assert refused.returncode != 0, (
+                        f"a refused command must not reach the cluster: {err!r}"
+                    )
+                    assert not [
+                        a
+                        for a in api.get_session_approvals()
+                        if a.target == target_name and a.username == user.username
+                    ], "the refused command asked again instead of failing"
+
+                # The refusal covers the command, not the user: once its own
+                # requests have stopped arriving, asking again is allowed.
+                time.sleep(6)
+                retried = self._kubectl_get_pods(
+                    shared_wg.kubernetes_port, target_name, token
+                )
+                with admin_client(url) as api:
+                    approval = wait_for_pending_approval(
+                        api, target_name, user.username
+                    )
+                    api.approve_session(
+                        approval.id,
+                        sdk.ApproveSessionRequest(
+                            scope=sdk.ApprovalScope.ONCE, target=approval.target
+                        ),
+                    )
+                _, err = retried.communicate(timeout=timeout)
+                assert retried.returncode == 0, (
+                    f"a later command should be approvable again: {err!r}"
+                )
+            finally:
+                for process in (refused, retried):
+                    if process is not None and process.poll() is None:
+                        process.kill()
+                        process.communicate()
+
+    @pytest.mark.asyncio
+    async def test_kubectl_run(self, processes, shared_wg: WarpgateProcess):
+        """Ensure that write requests such as ``kubectl run`` are proxied."""
+        k3s, user, target_name, url = _provision_kubernetes_target(
+            processes, shared_wg, "run"
+        )
+        user_token = await _issue_user_token(url, user, "run-token")
         server = f"https://127.0.0.1:{shared_wg.kubernetes_port}/{target_name}"
         # use interactive tty and echo some data through cat to ensure
         # stdin/stdout forwarding works for ``kubectl run`` as well
@@ -311,6 +982,9 @@ class TestKubernetesIntegration:
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=token_target_name,
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetKubernetesOptions(
                             kind="Kubernetes",
@@ -375,103 +1049,14 @@ class TestKubernetesIntegration:
     @pytest.mark.asyncio
     async def test_kubectl_exec_io(self, processes, shared_wg: WarpgateProcess):
         """Verify that ``kubectl exec`` through Warpgate proxies stdin/stdout."""
-        k3s: K3sInstance = processes.start_k3s()
-        k3s_port = k3s.port
-        k3s_token = k3s.token
-        url = f"https://localhost:{shared_wg.http_port}"
-
-        # --- set up user, role, target ---
-        with admin_client(url) as api:
-            role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid.uuid4()}"))
-            user = api.create_user(
-                sdk.CreateUserRequest(username=f"user-{uuid.uuid4()}")
-            )
-            api.create_password_credential(
-                user.id, sdk.NewPasswordCredential(password="123")
-            )
-            api.add_user_role(user.id, role.id)
-
-        target_name = f"k8s-exec-{uuid.uuid4()}"
-        with admin_client(url) as api:
-            target = api.create_target(
-                sdk.TargetDataRequest(
-                    name=target_name,
-                    options=sdk.TargetOptions(
-                        sdk.TargetOptionsTargetKubernetesOptions(
-                            kind="Kubernetes",
-                            cluster_url=f"https://127.0.0.1:{k3s_port}",
-                            tls=sdk.Tls(mode=sdk.TlsMode.PREFERRED, verify=False),
-                            auth=sdk.KubernetesTargetAuth(
-                                sdk.KubernetesTargetAuthKubernetesTargetTokenAuth(
-                                    kind="Token", token=k3s_token
-                                )
-                            ),
-                        )
-                    ),
-                )
-            )
-            api.add_target_role(target.id, role.id)
-
-        # login and obtain a user API token
-        async with aiohttp.ClientSession() as session:
-            resp = await session.post(
-                f"{url}/@warpgate/api/auth/login",
-                json={"username": user.username, "password": "123"},
-                ssl=False,
-            )
-            resp.raise_for_status()
-            resp = await session.post(
-                f"{url}/@warpgate/api/profile/api-tokens",
-                json={
-                    "label": "exec-token",
-                    "expiry": (
-                        datetime.now(timezone.utc) + timedelta(days=1)
-                    ).isoformat(),
-                },
-                ssl=False,
-            )
-            resp.raise_for_status()
-            user_token = (await resp.json())["secret"]
-
+        k3s, user, target_name, url = _provision_kubernetes_target(
+            processes, shared_wg, "exec"
+        )
+        user_token = await _issue_user_token(url, user, "exec-token")
         server = f"https://127.0.0.1:{shared_wg.kubernetes_port}/{target_name}"
 
-        # create a simple pod inside k3s
         pod_name = f"exec-test-{uuid.uuid4().hex[:8]}"
-        pod_yaml = (
-            f"apiVersion: v1\n"
-            f"kind: Pod\n"
-            f"metadata:\n"
-            f"  name: {pod_name}\n"
-            f"  namespace: default\n"
-            f"spec:\n"
-            f"  containers:\n"
-            f"  - name: alpine\n"
-            f"    image: alpine:3\n"
-            f"    command: ['sleep', '3600']\n"
-        )
-        k3s.kubectl(["apply", "-f", "-"], input=pod_yaml.encode())
-
-        # wait for the pod to be Running
-        for _ in range(120):
-            r = k3s.kubectl(
-                [
-                    "get",
-                    "pod",
-                    pod_name,
-                    "-n",
-                    "default",
-                    "-o",
-                    "jsonpath={.status.phase}",
-                ],
-                check=False,
-            )
-            if r.stdout.strip() == b"Running":
-                break
-            time.sleep(1)
-        else:
-            raise AssertionError(
-                f"pod {pod_name} did not reach Running: {r.stdout!r} {r.stderr!r}"
-            )
+        _create_running_pod(k3s, pod_name)
 
         # --- kubectl exec: send stdin and read stdout ---
         p = run_kubectl(
@@ -501,105 +1086,15 @@ class TestKubernetesIntegration:
     @pytest.mark.asyncio
     async def test_kubectl_attach_io(self, processes, shared_wg: WarpgateProcess):
         """Verify that ``kubectl attach`` through Warpgate proxies stdin/stdout."""
-        k3s: K3sInstance = processes.start_k3s()
-        k3s_port = k3s.port
-        k3s_token = k3s.token
-        url = f"https://localhost:{shared_wg.http_port}"
-
-        # --- set up user, role, target ---
-        with admin_client(url) as api:
-            role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid.uuid4()}"))
-            user = api.create_user(
-                sdk.CreateUserRequest(username=f"user-{uuid.uuid4()}")
-            )
-            api.create_password_credential(
-                user.id, sdk.NewPasswordCredential(password="123")
-            )
-            api.add_user_role(user.id, role.id)
-
-        target_name = f"k8s-attach-{uuid.uuid4()}"
-        with admin_client(url) as api:
-            target = api.create_target(
-                sdk.TargetDataRequest(
-                    name=target_name,
-                    options=sdk.TargetOptions(
-                        sdk.TargetOptionsTargetKubernetesOptions(
-                            kind="Kubernetes",
-                            cluster_url=f"https://127.0.0.1:{k3s_port}",
-                            tls=sdk.Tls(mode=sdk.TlsMode.PREFERRED, verify=False),
-                            auth=sdk.KubernetesTargetAuth(
-                                sdk.KubernetesTargetAuthKubernetesTargetTokenAuth(
-                                    kind="Token", token=k3s_token
-                                )
-                            ),
-                        )
-                    ),
-                )
-            )
-            api.add_target_role(target.id, role.id)
-
-        # login and obtain a user API token
-        async with aiohttp.ClientSession() as session:
-            resp = await session.post(
-                f"{url}/@warpgate/api/auth/login",
-                json={"username": user.username, "password": "123"},
-                ssl=False,
-            )
-            resp.raise_for_status()
-            resp = await session.post(
-                f"{url}/@warpgate/api/profile/api-tokens",
-                json={
-                    "label": "attach-token",
-                    "expiry": (
-                        datetime.now(timezone.utc) + timedelta(days=1)
-                    ).isoformat(),
-                },
-                ssl=False,
-            )
-            resp.raise_for_status()
-            user_token = (await resp.json())["secret"]
-
+        k3s, user, target_name, url = _provision_kubernetes_target(
+            processes, shared_wg, "attach"
+        )
+        user_token = await _issue_user_token(url, user, "attach-token")
         server = f"https://127.0.0.1:{shared_wg.kubernetes_port}/{target_name}"
 
-        # create a pod whose main process reads stdin and echoes it back
+        # a pod whose main process reads stdin and echoes it back
         pod_name = f"attach-test-{uuid.uuid4().hex[:8]}"
-        pod_yaml = (
-            f"apiVersion: v1\n"
-            f"kind: Pod\n"
-            f"metadata:\n"
-            f"  name: {pod_name}\n"
-            f"  namespace: default\n"
-            f"spec:\n"
-            f"  containers:\n"
-            f"  - name: cat\n"
-            f"    image: alpine:3\n"
-            f"    command: ['cat']\n"
-            f"    stdin: true\n"
-            f"    stdinOnce: true\n"
-        )
-        k3s.kubectl(["apply", "-f", "-"], input=pod_yaml.encode())
-
-        # wait for the pod to be Running
-        for _ in range(120):
-            r = k3s.kubectl(
-                [
-                    "get",
-                    "pod",
-                    pod_name,
-                    "-n",
-                    "default",
-                    "-o",
-                    "jsonpath={.status.phase}",
-                ],
-                check=False,
-            )
-            if r.stdout.strip() == b"Running":
-                break
-            time.sleep(1)
-        else:
-            raise AssertionError(
-                f"pod {pod_name} did not reach Running: {r.stdout!r} {r.stderr!r}"
-            )
+        _create_running_pod(k3s, pod_name, command="['cat']", stdin=True)
 
         # --- kubectl attach: send stdin and read stdout ---
         p = run_kubectl(
@@ -623,4 +1118,473 @@ class TestKubernetesIntegration:
         assert p.returncode == 0, f"kubectl attach failed: {p.stderr!r}"
         assert b"hello-from-attach" in p.stdout, (
             f"attach stdout did not contain expected text: {p.stdout!r}"
+        )
+
+    # -- Audit events ------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_kubectl_exec_audit_event(self, processes, shared_wg: WarpgateProcess):
+        """`kubectl exec` is audited with the pod and the *whole* command line."""
+        k3s, user, target_name, url = _provision_kubernetes_target(
+            processes, shared_wg, "exec-audit"
+        )
+        user_token = await _issue_user_token(url, user, "exec-audit-token")
+        server = f"https://127.0.0.1:{shared_wg.kubernetes_port}/{target_name}"
+
+        pod_name = f"exec-audit-{uuid.uuid4().hex[:8]}"
+        _create_running_pod(k3s, pod_name)
+
+        p = run_kubectl(
+            [
+                "kubectl",
+                "--server", server,
+                "--insecure-skip-tls-verify",
+                "--token", user_token,
+                "exec", "-n", "default", pod_name,
+                "--", "ls", "-la",
+            ],
+            timeout=30,
+        )
+        assert p.returncode == 0, f"kubectl exec failed: {p.stderr!r}"
+
+        entry = _wait_for_audit_event(url, user.username, "KubernetesExecStarted1")
+        assert _log_value(entry, "namespace") == "default"
+        assert _log_value(entry, "pod") == pod_name
+        assert _log_value(entry, "target_name") == target_name
+        # The whole argv, not just its last element: kubectl sends one
+        # `command=` query parameter per element.
+        assert json.loads(_log_value(entry, "command")) == ["ls", "-la"]
+
+    @pytest.mark.asyncio
+    async def test_kubectl_debug_audit_event(self, processes, shared_wg: WarpgateProcess):
+        """`kubectl debug` is audited with the debug image and target container.
+
+        The interesting detail lives in the request body rather than the URL, so
+        without this it would leave only a bare path in the log.
+        """
+        k3s, user, target_name, url = _provision_kubernetes_target(
+            processes, shared_wg, "debug-audit"
+        )
+        user_token = await _issue_user_token(url, user, "debug-audit-token")
+        server = f"https://127.0.0.1:{shared_wg.kubernetes_port}/{target_name}"
+
+        pod_name = f"debug-audit-{uuid.uuid4().hex[:8]}"
+        _create_running_pod(k3s, pod_name)
+
+        p = run_kubectl(
+            [
+                "kubectl",
+                "--server", server,
+                "--insecure-skip-tls-verify",
+                "--token", user_token,
+                "debug", "-n", "default", pod_name,
+                "--image=alpine:3",
+                "--target=alpine",
+                "--container=debugger",
+                "--", "true",
+            ],
+            timeout=120,
+        )
+        assert p.returncode == 0, f"kubectl debug failed: {p.stderr!r}"
+
+        entry = _wait_for_audit_event(
+            url, user.username, "KubernetesDebugContainerCreated1"
+        )
+        assert _log_value(entry, "namespace") == "default"
+        assert _log_value(entry, "pod") == pod_name
+        assert _log_value(entry, "debug_container") == "debugger"
+        assert _log_value(entry, "image") == "alpine:3"
+        assert _log_value(entry, "target_container") == "alpine"
+
+    @pytest.mark.asyncio
+    async def test_kubectl_port_forward_audit_event(
+        self, processes, shared_wg: WarpgateProcess
+    ):
+        """`kubectl port-forward` is audited with the forwarded port."""
+        k3s, user, target_name, url = _provision_kubernetes_target(
+            processes, shared_wg, "pf-audit"
+        )
+        user_token = await _issue_user_token(url, user, "pf-audit-token")
+        server = f"https://127.0.0.1:{shared_wg.kubernetes_port}/{target_name}"
+
+        pod_name = f"pf-audit-{uuid.uuid4().hex[:8]}"
+        _create_running_pod(k3s, pod_name)
+
+        local_port = alloc_port()
+        forward = subprocess.Popen(
+            [
+                "kubectl",
+                "--server", server,
+                "--insecure-skip-tls-verify",
+                "--token", user_token,
+                "port-forward", "-n", "default", pod_name,
+                f"{local_port}:8080",
+            ],
+            # Warpgate proxies the websocket port-forward protocol, not SPDY.
+            # kubectl picks websockets by default from 1.31; asking explicitly
+            # keeps the test honest on older clients rather than silently
+            # exercising a path Warpgate does not implement.
+            env={**os.environ, "KUBECTL_PORT_FORWARD_WEBSOCKETS": "true"},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            entry = _wait_for_audit_event(
+                url, user.username, "KubernetesPortForwardStarted1"
+            )
+        finally:
+            forward.terminate()
+            forward.wait(timeout=30)
+
+        assert _log_value(entry, "namespace") == "default"
+        assert _log_value(entry, "pod") == pod_name
+        # No assertion on ports: the websocket port-forward protocol negotiates
+        # them per stream and sends no query, so the event carries none. Only
+        # the SPDY variant puts them in the URL.
+
+    # -- OIDC Bearer authentication ----------------------------------------
+
+    def _start_oidc_mock_for_roles(self, processes: ProcessManager, roles):
+        """Start the OIDC mock server pre-configured with a user carrying the
+        given ``warpgate_roles`` claim values.
+
+        Returns ``(oidc_port, redirect_uri)`` where ``redirect_uri`` is a
+        registered callback URL suitable for use in the authorization-code flow.
+        """
+        wg_http_port = alloc_port()
+        redirect_uri = _oidc_test_redirect_uri(alloc_port())
+        oidc_port = processes.start_oidc_server(
+            wg_http_port,
+            extra_scopes=["warpgate_roles"],
+            users_override=_oidc_user_with_roles(roles),
+            extra_identity_resources=[
+                {"Name": "warpgate_roles", "ClaimTypes": ["warpgate_roles"]},
+            ],
+            redirect_uris=[redirect_uri],
+        )
+        return oidc_port, redirect_uri
+
+    def _start_oidc_mock_for_roles_with_kubectl_client(
+        self, processes: ProcessManager, roles
+    ):
+        """Like ``_start_oidc_mock_for_roles`` but also registers a second OIDC
+        client ``kubectl-client`` that simulates the kubectl exec-plugin audience.
+
+        Returns ``(oidc_port, primary_redirect_uri, kubectl_redirect_uri)``
+        where ``kubectl_redirect_uri`` is registered for ``KUBECTL_CLIENT_ID``.
+        """
+        wg_http_port = alloc_port()
+        primary_redirect_uri = _oidc_test_redirect_uri(alloc_port())
+        kubectl_redirect_uri = _oidc_test_redirect_uri(alloc_port())
+
+        # The extra client mirrors warpgate-test but with a different client_id.
+        # It shares the same allowed scopes and always includes user claims in
+        # the ID token so the Kubernetes OIDC path can read them without userinfo.
+        kubectl_client_entry = {
+            "ClientId": KUBECTL_CLIENT_ID,
+            "ClientSecrets": [KUBECTL_CLIENT_SECRET],
+            "AllowedGrantTypes": ["authorization_code"],
+            "AllowedScopes": [
+                "openid",
+                "profile",
+                "email",
+                "preferred_username",
+                "warpgate_roles",
+            ],
+            "ClientClaimsPrefix": "",
+            "AlwaysIncludeUserClaimsInIdToken": True,
+            "RedirectUris": [kubectl_redirect_uri],
+        }
+
+        oidc_port = processes.start_oidc_server(
+            wg_http_port,
+            extra_scopes=["warpgate_roles"],
+            users_override=_oidc_user_with_roles(roles),
+            extra_identity_resources=[
+                {"Name": "warpgate_roles", "ClaimTypes": ["warpgate_roles"]},
+            ],
+            redirect_uris=[primary_redirect_uri],
+            extra_clients=[kubectl_client_entry],
+        )
+        return oidc_port, primary_redirect_uri, kubectl_redirect_uri
+
+    def _start_wg_and_k3s_target(
+        self,
+        processes: ProcessManager,
+        *,
+        oidc_port,
+        role_mappings,
+        target_role_name,
+    ):
+        """Start a dedicated warpgate wired to the OIDC mock and a token-auth
+        Kubernetes target backed by k3s.
+
+        Returns ``(wg, target_name, k3s)``.  A role named ``target_role_name``
+        is created, granted access to the target, and used as a mapping value
+        for the OIDC ``warpgate_roles`` claim per ``role_mappings``.
+        """
+        k3s = processes.start_k3s()
+
+        wg = processes.start_wg(
+            config_patch={
+                "sso_providers": [
+                    _make_oidc_sso_provider_config(
+                        oidc_port,
+                        auto_create_users=True,
+                        role_mappings=role_mappings,
+                    )
+                ],
+            },
+        )
+        wait_port(wg.http_port, for_process=wg.process, recv=False)
+        url = f"https://localhost:{wg.http_port}"
+
+        target_name = f"k8s-oidc-{uuid.uuid4()}"
+        with admin_client(url) as api:
+            role = api.create_role(
+                sdk.RoleDataRequest(name=target_role_name)
+            )
+            target = api.create_target(
+                sdk.TargetDataRequest(
+                    name=target_name,
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
+                    options=sdk.TargetOptions(
+                        sdk.TargetOptionsTargetKubernetesOptions(
+                            kind="Kubernetes",
+                            cluster_url=f"https://127.0.0.1:{k3s.port}",
+                            tls=sdk.Tls(
+                                mode=sdk.TlsMode.PREFERRED, verify=False
+                            ),
+                            auth=sdk.KubernetesTargetAuth(
+                                sdk.KubernetesTargetAuthKubernetesTargetTokenAuth(
+                                    kind="Token", token=k3s.token
+                                )
+                            ),
+                        )
+                    ),
+                )
+            )
+            api.add_target_role(target.id, role.id)
+
+        return wg, target_name, k3s
+
+    @pytest.mark.asyncio
+    async def test_kubectl_oidc_bearer_authenticates(
+        self, processes: ProcessManager
+    ):
+        """A valid OIDC ID token for an authorized user -> 200."""
+        target_role = f"k8s-oidc-role-{uuid.uuid4()}"
+        oidc_port, redirect_uri = self._start_oidc_mock_for_roles(
+            processes, ["k8s-users"]
+        )
+
+        wg, target_name, _k3s = self._start_wg_and_k3s_target(
+            processes,
+            oidc_port=oidc_port,
+            role_mappings={"k8s-users": target_role},
+            target_role_name=target_role,
+        )
+
+        id_token = _obtain_oidc_id_token(oidc_port, redirect_uri)
+
+        resp = requests.get(
+            f"https://localhost:{wg.kubernetes_port}/{target_name}/version",
+            headers={"Authorization": f"Bearer {id_token}"},
+            verify=False,
+        )
+        assert resp.status_code == 200, (
+            f"expected 200, got {resp.status_code}: {resp.text[:300]}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_kubectl_oidc_invalid_token_rejected(
+        self, processes: ProcessManager
+    ):
+        """A garbage / unverifiable Bearer token -> 401.
+
+        The Rust auth path (auth.rs) only performs target lookup *after* a token
+        has been validated (as an API token or a verifiable OIDC ID token).  A
+        garbage token exhausts both checks and hits the final 401 before any
+        target or k3s lookup, so neither k3s nor a Kubernetes target is needed.
+        """
+        oidc_port, _ = self._start_oidc_mock_for_roles(processes, ["k8s-users"])
+
+        # Start warpgate with an SSO provider so the OIDC path is exercised,
+        # but skip k3s and target creation — auth fails before target lookup.
+        wg = processes.start_wg(
+            config_patch={
+                "sso_providers": [
+                    _make_oidc_sso_provider_config(oidc_port)
+                ],
+            },
+        )
+        wait_port(wg.http_port, for_process=wg.process, recv=False)
+
+        # An unsigned/garbage JWT - neither a valid API token nor a verifiable
+        # OIDC ID token, so authentication must fail outright.
+        bad_token = "eyJhbGciOiJub25lIn0.eyJzdWIiOiJub2JvZHkifQ.bogus"
+        resp = requests.get(
+            f"https://localhost:{wg.kubernetes_port}/some-target/version",
+            headers={"Authorization": f"Bearer {bad_token}"},
+            verify=False,
+        )
+        assert resp.status_code == 401, (
+            f"expected 401, got {resp.status_code}: {resp.text[:300]}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_kubectl_oidc_unauthorized_user_forbidden(
+        self, processes: ProcessManager
+    ):
+        """A valid OIDC token whose roles do NOT grant access -> 403."""
+        target_role = f"k8s-oidc-role-{uuid.uuid4()}"
+        # The OIDC user carries "other-team", but the target only grants the
+        # role mapped from "k8s-users".  "other-team" maps to an unrelated role
+        # that is never authorized on the target, so the user authenticates but
+        # is not authorized.
+        unrelated_role = f"k8s-oidc-unrelated-{uuid.uuid4()}"
+        oidc_port, redirect_uri = self._start_oidc_mock_for_roles(
+            processes, ["other-team"]
+        )
+
+        wg, target_name, _k3s = self._start_wg_and_k3s_target(
+            processes,
+            oidc_port=oidc_port,
+            role_mappings={
+                "k8s-users": target_role,
+                "other-team": unrelated_role,
+            },
+            target_role_name=target_role,
+        )
+        # Make sure the unrelated role exists so the mapping resolves but it is
+        # never granted on the target.
+        with admin_client(f"https://localhost:{wg.http_port}") as api:
+            api.create_role(sdk.RoleDataRequest(name=unrelated_role))
+
+        id_token = _obtain_oidc_id_token(oidc_port, redirect_uri)
+
+        resp = requests.get(
+            f"https://localhost:{wg.kubernetes_port}/{target_name}/version",
+            headers={"Authorization": f"Bearer {id_token}"},
+            verify=False,
+        )
+        assert resp.status_code == 403, (
+            f"expected 403, got {resp.status_code}: {resp.text[:300]}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_kubectl_oidc_trusted_audience_accepted(
+        self, processes: ProcessManager
+    ):
+        """A valid OIDC ID token whose aud is a separately-registered kubectl
+        client (not Warpgate's own client_id) is accepted when that client id
+        is listed in ``additional_trusted_audiences``.
+
+        The OIDC mock issues a token with ``aud == kubectl-client``; Warpgate's
+        primary ``client_id`` is ``warpgate-test``.  Because ``kubectl-client``
+        is in ``additional_trusted_audiences``, the token must be accepted (200).
+        """
+        target_role = f"k8s-oidc-role-{uuid.uuid4()}"
+        oidc_port, primary_redirect_uri, kubectl_redirect_uri = (
+            self._start_oidc_mock_for_roles_with_kubectl_client(
+                processes, ["k8s-users"]
+            )
+        )
+
+        k3s = processes.start_k3s()
+
+        # Warpgate config: client_id = warpgate-test, but kubectl-client is trusted.
+        wg = processes.start_wg(
+            config_patch={
+                "sso_providers": [
+                    _make_oidc_sso_provider_config(
+                        oidc_port,
+                        auto_create_users=True,
+                        role_mappings={"k8s-users": target_role},
+                        additional_trusted_audiences=[KUBECTL_CLIENT_ID],
+                    )
+                ],
+            },
+        )
+        wait_port(wg.http_port, for_process=wg.process, recv=False)
+        url = f"https://localhost:{wg.http_port}"
+
+        target_name = f"k8s-oidc-trusted-aud-{uuid.uuid4()}"
+        with admin_client(url) as api:
+            role = api.create_role(sdk.RoleDataRequest(name=target_role))
+            target = api.create_target(
+                sdk.TargetDataRequest(
+                    name=target_name,
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
+                    options=sdk.TargetOptions(
+                        sdk.TargetOptionsTargetKubernetesOptions(
+                            kind="Kubernetes",
+                            cluster_url=f"https://127.0.0.1:{k3s.port}",
+                            tls=sdk.Tls(mode=sdk.TlsMode.PREFERRED, verify=False),
+                            auth=sdk.KubernetesTargetAuth(
+                                sdk.KubernetesTargetAuthKubernetesTargetTokenAuth(
+                                    kind="Token", token=k3s.token
+                                )
+                            ),
+                        )
+                    ),
+                )
+            )
+            api.add_target_role(target.id, role.id)
+
+        # Obtain a token issued for kubectl-client (aud == kubectl-client).
+        id_token = _obtain_kubectl_client_id_token(oidc_port, kubectl_redirect_uri)
+
+        resp = requests.get(
+            f"https://localhost:{wg.kubernetes_port}/{target_name}/version",
+            headers={"Authorization": f"Bearer {id_token}"},
+            verify=False,
+        )
+        assert resp.status_code == 200, (
+            f"expected 200 for trusted audience, got {resp.status_code}: {resp.text[:300]}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_kubectl_oidc_untrusted_audience_rejected(
+        self, processes: ProcessManager
+    ):
+        """A valid OIDC ID token whose aud is NOT in ``additional_trusted_audiences``
+        and is NOT Warpgate's ``client_id`` must be rejected (401).
+
+        This is the negative case for the trusted-audience path: ``kubectl-client``
+        is a registered OIDC client (so the token is cryptographically valid), but
+        it is NOT listed in ``additional_trusted_audiences``.  Authentication must
+        fail before any target lookup.
+        """
+        oidc_port, _primary_redirect_uri, kubectl_redirect_uri = (
+            self._start_oidc_mock_for_roles_with_kubectl_client(
+                processes, ["k8s-users"]
+            )
+        )
+
+        # Warpgate: client_id = warpgate-test, NO additional_trusted_audiences.
+        wg = processes.start_wg(
+            config_patch={
+                "sso_providers": [
+                    _make_oidc_sso_provider_config(oidc_port)
+                    # additional_trusted_audiences intentionally omitted
+                ],
+            },
+        )
+        wait_port(wg.http_port, for_process=wg.process, recv=False)
+
+        # Token with aud == kubectl-client (valid JWT, but wrong audience).
+        id_token = _obtain_kubectl_client_id_token(oidc_port, kubectl_redirect_uri)
+
+        resp = requests.get(
+            f"https://localhost:{wg.kubernetes_port}/some-target/version",
+            headers={"Authorization": f"Bearer {id_token}"},
+            verify=False,
+        )
+        assert resp.status_code == 401, (
+            f"expected 401 for untrusted audience, got {resp.status_code}: {resp.text[:300]}"
         )

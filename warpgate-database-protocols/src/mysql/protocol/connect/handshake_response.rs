@@ -5,9 +5,9 @@ use bytes::{Buf, Bytes};
 use crate::error::Error;
 use crate::io::{BufExt, BufMutExt, Decode, Encode};
 use crate::mysql::io::{MySqlBufExt, MySqlBufMutExt};
+use crate::mysql::protocol::Capabilities;
 use crate::mysql::protocol::auth::AuthPlugin;
 use crate::mysql::protocol::connect::ssl_request::SslRequest;
-use crate::mysql::protocol::Capabilities;
 
 // https://dev.mysql.com/doc/internals/en/connection-phase-packets.html#packet-Protocol::HandshakeResponse
 // https://mariadb.com/kb/en/connection/#client-handshake-response

@@ -2,6 +2,7 @@ import requests
 from uuid import uuid4
 
 from .api_client import admin_client, sdk
+from .approval_util import create_password_user, create_postgres_target
 from .conftest import WarpgateProcess
 from .test_http_common import *  # noqa
 
@@ -22,8 +23,12 @@ class TestHTTPUserAuthTicket:
             api.add_user_role(user.id, role.id)
             echo_target = api.create_target(sdk.TargetDataRequest(
                 name=f"echo-{uuid4()}",
+                require_approval=False,
+                ticket_requests_disabled=False,
+                ticket_require_approval=False,
                 options=sdk.TargetOptions(sdk.TargetOptionsTargetHTTPOptions(
                     kind="Http",
+                    headers={},
                     url=f"http://localhost:{echo_server_port}",
                     tls=sdk.Tls(
                         mode=sdk.TlsMode.DISABLED,
@@ -36,9 +41,13 @@ class TestHTTPUserAuthTicket:
             other_target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"other-{uuid4()}",
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetHTTPOptions(
                             kind="Http",
+                            headers={},
                             url="http://badhost",
                             tls=sdk.Tls(
                                 mode=sdk.TlsMode.DISABLED,
@@ -112,3 +121,27 @@ class TestHTTPUserAuthTicket:
         )
         assert response.status_code // 100 == 2
         assert response.json()["path"] == "/some/path"
+
+    def test_non_http_ticket_opens_no_session(self, shared_wg: WarpgateProcess):
+        url = f"https://localhost:{shared_wg.http_port}"
+        with admin_client(url) as api:
+            user, role = create_password_user(api)
+            target = create_postgres_target(api, role, 1, require_approval=False)
+            ticket = api.create_ticket(sdk.CreateTicketRequest(
+                target_name=target.name, username=user.username, number_of_uses=1,
+            ))
+
+            session = requests.Session()
+            session.verify = False
+            response = session.get(
+                f"{url}/some/path?warpgate-ticket={ticket.secret}",
+                allow_redirects=False,
+            )
+            assert response.status_code // 100 != 2
+            info = session.get(f"{url}/@warpgate/api/info").json()
+            assert info["username"] is None
+            assert not info["authorized_via_ticket"]
+            uses_left = next(
+                t.uses_left for t in api.get_tickets() if t.id == ticket.ticket.id
+            )
+            assert uses_left == 1

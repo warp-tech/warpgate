@@ -1,31 +1,19 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use poem_openapi::Object;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use tokio::sync::Mutex;
-use url::Url;
-use warpgate_common::SessionId;
-use warpgate_core::recordings::{Recorder, RecordingWriter, SessionRecordings, TerminalRecorder};
+use warpgate_common::TargetSessionId;
+use warpgate_core::recordings::{
+    NDJsonRecordingWriter, Recorder, RecordingWriterOpener, SessionRecordings, TerminalRecorder,
+};
 use warpgate_db_entities::Recording::RecordingKind;
 
-#[derive(Debug, Object)]
-#[oai(rename = "KubernetesRecordingItem")]
-pub struct KubernetesRecordingItemApiObject {
-    pub timestamp: OffsetDateTime,
-    pub request_method: String,
-    pub request_path: String,
-    pub request_body: serde_json::Value,
-    pub response_status: Option<u16>,
-    pub response_body: serde_json::Value,
-}
-
+/// One recorded Kubernetes API request/response as stored in a data NDJSON line
 #[derive(Serialize, Deserialize, Debug)]
 pub struct KubernetesRecordingItem {
+    #[serde(with = "time::serde::rfc3339")]
     pub timestamp: OffsetDateTime,
     pub request_method: String,
     pub request_path: String,
@@ -36,39 +24,12 @@ pub struct KubernetesRecordingItem {
     pub response_body: Option<Vec<u8>>,
 }
 
-impl From<KubernetesRecordingItem> for KubernetesRecordingItemApiObject {
-    fn from(item: KubernetesRecordingItem) -> Self {
-        Self {
-            timestamp: item.timestamp,
-            request_method: item.request_method,
-            request_path: item.request_path,
-            request_body: serde_json::from_slice(&item.request_body[..])
-                .unwrap_or(serde_json::Value::Null),
-            response_status: item.response_status,
-            response_body: item
-                .response_body
-                .and_then(|body| serde_json::from_slice(&body[..]).ok())
-                .unwrap_or(serde_json::Value::Null),
-        }
-    }
-}
-
+/// Recorder for Kubernetes API sessions
 pub struct KubernetesRecorder {
-    writer: RecordingWriter,
+    writer: NDJsonRecordingWriter,
 }
 
 impl KubernetesRecorder {
-    async fn write_item(
-        &self,
-        item: &KubernetesRecordingItem,
-    ) -> Result<(), warpgate_core::recordings::Error> {
-        let mut serialized_item =
-            serde_json::to_vec(&item).map_err(warpgate_core::recordings::Error::Serialization)?;
-        serialized_item.push(b'\n');
-        self.writer.write(&serialized_item).await?;
-        Ok(())
-    }
-
     pub async fn record_response(
         &self,
         method: &str,
@@ -78,16 +39,18 @@ impl KubernetesRecorder {
         status: u16,
         response_body: &[u8],
     ) -> Result<(), warpgate_core::recordings::Error> {
-        self.write_item(&KubernetesRecordingItem {
-            timestamp: OffsetDateTime::now_utc(),
-            request_method: method.to_string(),
-            request_path: path.to_string(),
-            request_headers: headers,
-            request_body: Bytes::from(request_body.to_vec()),
-            response_status: Some(status),
-            response_body: Some(response_body.to_vec()),
-        })
-        .await
+        self.writer
+            .write_json_line(&KubernetesRecordingItem {
+                timestamp: OffsetDateTime::now_utc(),
+                request_method: method.to_string(),
+                request_path: path.to_string(),
+                request_headers: headers,
+                request_body: Bytes::from(request_body.to_vec()),
+                response_status: Some(status),
+                response_body: Some(response_body.to_vec()),
+            })
+            .await?;
+        Ok(())
     }
 }
 
@@ -96,8 +59,10 @@ impl Recorder for KubernetesRecorder {
         RecordingKind::Kubernetes
     }
 
-    fn new(writer: RecordingWriter) -> Self {
-        Self { writer }
+    async fn new(opener: &RecordingWriterOpener) -> warpgate_core::recordings::Result<Self> {
+        Ok(Self {
+            writer: opener.open_ndjson_data().await?,
+        })
     }
 }
 
@@ -112,26 +77,40 @@ pub enum SessionRecordingMetadata {
     Exec {
         namespace: String,
         pod: String,
-        container: String,
-        command: String,
+        /// Absent when the client named no container (kubectl omits it for
+        /// single-container pods and lets the API server choose).
+        container: Option<String>,
+        /// Full argv. `kubectl exec pod -- ls -la` sends one `command=` query
+        /// parameter per element, and every one of them belongs here.
+        command: Vec<String>,
     },
     #[serde(rename = "kubernetes-attach")]
     Attach {
         namespace: String,
         pod: String,
-        container: String,
+        container: Option<String>,
     },
 }
 
+/// Monotonic sequence giving every API request its own recording name.
+///
+/// `SessionRecordings::start` keys a recording by (session_id, name, kind) and
+/// reuses the existing writer for a repeated name — so a fixed name would open
+/// two `data.ndjson` writers on the same folder for concurrent requests and let
+/// them clobber each other. A process-wide counter is monotonic (never random
+/// or time-based) and is unique within any single session, which is all that is
+/// required to keep each request's recording separate.
+static API_RECORDING_SEQ: AtomicU64 = AtomicU64::new(0);
+
 pub async fn start_recording_api(
-    session_id: &SessionId,
-    recordings: &Arc<Mutex<SessionRecordings>>,
+    target_session_id: &TargetSessionId,
+    recordings: &SessionRecordings,
 ) -> anyhow::Result<KubernetesRecorder> {
-    let recordings = recordings.lock().await;
+    let seq = API_RECORDING_SEQ.fetch_add(1, Ordering::Relaxed);
     recordings
         .start::<KubernetesRecorder, _>(
-            session_id,
-            Some("api".into()),
+            target_session_id,
+            Some(format!("api-{seq}")),
             SessionRecordingMetadata::Api,
         )
         .await
@@ -139,52 +118,12 @@ pub async fn start_recording_api(
 }
 
 pub async fn start_recording_exec(
-    session_id: &SessionId,
-    recordings: &Arc<Mutex<SessionRecordings>>,
-    metadata: Option<SessionRecordingMetadata>,
+    target_session_id: &TargetSessionId,
+    recordings: &SessionRecordings,
+    metadata: SessionRecordingMetadata,
 ) -> anyhow::Result<TerminalRecorder> {
-    let recordings = recordings.lock().await;
     recordings
-        .start::<TerminalRecorder, _>(session_id, None, metadata)
+        .start::<TerminalRecorder, _>(target_session_id, None, metadata)
         .await
         .context("starting recording")
-}
-
-pub fn deduce_exec_recording_metadata(target_url: &Url) -> Option<SessionRecordingMetadata> {
-    let path = target_url.path();
-    #[allow(clippy::unwrap_used, reason = "static regex")]
-    let exec_url_regex =
-        Regex::new(r"^/api/v1/namespaces/([^/]+)/pods/([^/]+)/(exec|attach)$").unwrap();
-    if let Some(captures) = exec_url_regex.captures(path) {
-        let namespace = captures.get(1).map_or("unknown", |m| m.as_str()).into();
-        let pod = captures.get(2).map_or("unknown", |m| m.as_str()).into();
-        let operation = captures.get(3).map_or("unknown", |m| m.as_str());
-        let query = target_url.query().unwrap_or_default();
-        let parsed_query: HashMap<_, _> = url::form_urlencoded::parse(query.as_bytes()).collect();
-        let command = parsed_query
-            .get("command")
-            .cloned()
-            .unwrap_or_else(|| "unknown".into())
-            .into();
-        let container = parsed_query
-            .get("container")
-            .cloned()
-            .unwrap_or_else(|| "unknown".into())
-            .into();
-        return match operation {
-            "exec" => Some(SessionRecordingMetadata::Exec {
-                namespace,
-                pod,
-                container,
-                command,
-            }),
-            "attach" => Some(SessionRecordingMetadata::Attach {
-                namespace,
-                pod,
-                container,
-            }),
-            _ => None,
-        };
-    }
-    None
 }
