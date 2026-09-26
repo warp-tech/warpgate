@@ -9,10 +9,10 @@ use std::time::Duration;
 
 use defaults::{
     _default_audit_retention, _default_cookie_max_age, _default_database_url, _default_false,
-    _default_http_listen, _default_kubernetes_listen, _default_mysql_advertised_version,
-    _default_mysql_listen, _default_postgres_listen, _default_rdp_listen, _default_recordings_path,
-    _default_retention, _default_session_max_age, _default_ssh_inactivity_timeout,
-    _default_ssh_listen, _default_vnc_listen,
+    _default_http_listen, _default_kubernetes_listen, _default_mongo_listen,
+    _default_mysql_advertised_version, _default_mysql_listen, _default_postgres_listen,
+    _default_rdp_listen, _default_recordings_path, _default_retention, _default_session_max_age,
+    _default_ssh_inactivity_timeout, _default_ssh_listen, _default_vnc_listen,
 };
 use poem::http::uri::Authority;
 use poem_openapi::{Object, Union};
@@ -103,6 +103,8 @@ pub struct UserRequireCredentialsPolicy {
     pub mysql: Option<Vec<CredentialKind>>,
     #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub postgres: Option<Vec<CredentialKind>>,
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
+    pub mongo: Option<Vec<CredentialKind>>,
     #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub vnc: Option<Vec<CredentialKind>>,
     #[serde(skip_serializing_if = "credential_entry_is_unset")]
@@ -740,6 +742,55 @@ impl PostgresConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
+pub struct MongoConfig {
+    #[serde(default = "_default_false")]
+    pub enable: bool,
+
+    #[serde(default = "_default_mongo_listen")]
+    pub listen: ListenEndpoint,
+
+    /// Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.
+    #[serde(default)]
+    pub proxy_protocol: bool,
+
+    #[serde(default)]
+    pub external_port: Option<u16>,
+
+    #[serde(default)]
+    pub external_host: Option<String>,
+
+    #[serde(default)]
+    pub certificate: String,
+
+    #[serde(default)]
+    pub key: String,
+}
+
+impl Default for MongoConfig {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            listen: _default_mongo_listen(),
+            proxy_protocol: false,
+            external_port: None,
+            external_host: None,
+            certificate: "".into(),
+            key: "".into(),
+        }
+    }
+}
+
+impl MongoConfig {
+    pub fn external_port(&self) -> u16 {
+        self.external_port.unwrap_or_else(|| self.listen.port())
+    }
+
+    pub fn external_host(&self) -> Option<String> {
+        self.external_host.clone()
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
 pub struct VncConfig {
     #[serde(default = "_default_false")]
     pub enable: bool,
@@ -919,6 +970,9 @@ pub struct WarpgateConfigStore {
     pub postgres: PostgresConfig,
 
     #[serde(default)]
+    pub mongo: MongoConfig,
+
+    #[serde(default)]
     pub vnc: VncConfig,
 
     #[serde(default)]
@@ -940,6 +994,7 @@ impl Default for WarpgateConfigStore {
             kubernetes: <_>::default(),
             mysql: <_>::default(),
             postgres: <_>::default(),
+            mongo: <_>::default(),
             vnc: <_>::default(),
             rdp: <_>::default(),
             log: <_>::default(),

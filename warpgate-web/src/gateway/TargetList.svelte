@@ -274,6 +274,9 @@
                 {#if target.kind === TargetKind.Postgres}
                     PostgreSQL
                 {/if}
+                {#if target.kind === TargetKind.Mongo}
+                    MongoDB
+                {/if}
                 {#if target.kind === TargetKind.Kubernetes}
                     Kubernetes
                 {/if}

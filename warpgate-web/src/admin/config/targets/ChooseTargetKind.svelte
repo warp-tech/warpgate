@@ -30,6 +30,12 @@
             description: 'Expose access to a database server',
         },
         {
+            name: 'MongoDB',
+            value: TargetKind.Mongo,
+            description: 'Expose access to a database server',
+            experimental: true,
+        },
+        {
             name: 'Kubernetes',
             value: TargetKind.Kubernetes,
             description:

@@ -129,6 +129,30 @@ export function makeExamplePostgreSQLURI(opt: ConnectionOptions): string {
     return `postgresql://${makePostgreSQLUsername(opt)}${pwSuffix}@${protocolHost(opt, 'postgres')}:${protocolPortString(opt, 'postgres')}/${dbName}?sslmode=require`
 }
 
+export const makeMongoDBUsername = makeMySQLUsername
+
+export function makeExampleMongoDBCommand(opt: ConnectionOptions): string {
+    let cmd = shellEscape([
+        'mongosh',
+        `mongodb://${protocolHost(opt, 'mongo')}:${protocolPortString(opt, 'mongo')}/`,
+        '--authenticationDatabase',
+        'admin',
+        '--authenticationMechanism',
+        'PLAIN',
+        '-u',
+        makeMongoDBUsername(opt),
+    ])
+    if (!opt.ticketSecret) {
+        cmd += ' -p'
+    }
+    return cmd
+}
+
+export function makeExampleMongoDBURI(opt: ConnectionOptions): string {
+    const pwSuffix = opt.ticketSecret ? '' : ':<password>'
+    return `mongodb://${encodeURIComponent(makeMongoDBUsername(opt))}${pwSuffix}@${protocolHost(opt, 'mongo')}:${protocolPortString(opt, 'mongo')}/?tls=true&authMechanism=PLAIN`
+}
+
 export function makeTargetURL(opt: ConnectionOptions): string {
     const host = `${opt.targetExternalHost ?? protocolHost(opt, 'http')}:${protocolPort(opt, 'http') ?? 443}`
 
@@ -155,6 +179,7 @@ export const possibleCredentials: Record<string, Set<CredentialKind>> = {
         CredentialKind.Password,
         CredentialKind.WebUserApproval,
     ]),
+    mongo: new Set([CredentialKind.Password]),
     kubernetes: new Set([
         CredentialKind.Certificate,
         CredentialKind.WebUserApproval,
@@ -313,6 +338,7 @@ export const PROTOCOL_PROPERTIES: Record<string, ProtocolProperties> = {
     HTTP: { sessionsCanBeClosed: true },
     MySQL: { sessionsCanBeClosed: true },
     PostgreSQL: { sessionsCanBeClosed: true },
+    MongoDB: { sessionsCanBeClosed: true },
     Kubernetes: { sessionsCanBeClosed: false },
     VNC: { sessionsCanBeClosed: true },
     RDP: { sessionsCanBeClosed: true },
@@ -323,6 +349,7 @@ export type ProtocolID =
     | 'ssh'
     | 'mysql'
     | 'postgres'
+    | 'mongo'
     | 'kubernetes'
     | 'vnc'
     | 'rdp'
