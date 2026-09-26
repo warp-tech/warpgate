@@ -9,8 +9,9 @@ use tracing::error;
 use warpgate_common::auth::{AuthResult, AuthState, CredentialKind, CredentialPolicy};
 use warpgate_common::helpers::ipnet::WarpgateIpNet;
 use warpgate_common::helpers::username::username_eq_ci;
-use warpgate_common::{NodeId, Protocol, User, UserSessionId, WarpgateError};
+use warpgate_common::{Protocol, User, UserSessionId, WarpgateError};
 
+use crate::cluster::{Cluster, ClusterNotification};
 use crate::login_protection::{FailedAttemptInfo, LoginProtectionService};
 use crate::{ConfigProvider, ConfigProviderEnum};
 
@@ -163,12 +164,11 @@ async fn wait_for_auth_completion_within(
 #[derive(Clone)]
 pub struct ApprovalRequestSink {
     pub db: DatabaseConnection,
-    pub node_id: NodeId,
+    pub cluster: Arc<Cluster>,
 }
 
 pub struct AuthStateStore {
     store: HashMap<UserSessionId, (Arc<Mutex<AuthState>>, Instant)>,
-    web_auth_request_signal: broadcast::Sender<UserSessionId>,
     request_sink: Option<ApprovalRequestSink>,
 }
 
@@ -176,7 +176,6 @@ impl AuthStateStore {
     pub fn new(request_sink: ApprovalRequestSink) -> Self {
         Self {
             store: HashMap::new(),
-            web_auth_request_signal: broadcast::channel(100).0,
             request_sink: Some(request_sink),
         }
     }
@@ -185,7 +184,6 @@ impl AuthStateStore {
     pub(crate) fn without_request_recording() -> Self {
         Self {
             store: HashMap::new(),
-            web_auth_request_signal: broadcast::channel(100).0,
             request_sink: None,
         }
     }
@@ -206,10 +204,6 @@ impl AuthStateStore {
 
     pub fn get(&self, id: &UserSessionId) -> Option<Arc<Mutex<AuthState>>> {
         self.store.get(id).map(|x| x.0.clone())
-    }
-
-    pub fn subscribe_web_auth_request(&self) -> broadcast::Receiver<UserSessionId> {
-        self.web_auth_request_signal.subscribe()
     }
 
     /// Resolves the user record and credential policy for an authentication
@@ -308,8 +302,8 @@ impl AuthStateStore {
         let state_arc = Arc::new(Mutex::new(state));
         self.store.insert(id, (state_arc.clone(), Instant::now()));
 
-        let web_auth_request_signal = self.web_auth_request_signal.clone();
         let request_sink = self.request_sink.clone();
+        let user_id = user.id;
 
         // avoid keeping the state alive
         let watched = Arc::downgrade(&state_arc);
@@ -323,14 +317,23 @@ impl AuthStateStore {
                     break;
                 };
 
-                if let Some(sink) = &request_sink
-                    && let Err(error) =
-                        crate::approvals::advertise_user_request(&sink.db, sink.node_id, &watched)
-                            .await
+                let Some(sink) = &request_sink else {
+                    continue;
+                };
+                if let Err(error) = crate::approvals::advertise_user_request(
+                    &sink.db,
+                    sink.cluster.node_id,
+                    &watched,
+                )
+                .await
                 {
                     error!(%error, "Failed to record a session approval request");
                 }
-                let _ = web_auth_request_signal.send(id);
+                sink.cluster
+                    .notify_global(ClusterNotification::WebAuthRequested {
+                        session_id: id,
+                        user_id,
+                    });
             }
         });
 

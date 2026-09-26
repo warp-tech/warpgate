@@ -204,7 +204,7 @@ export function abbreviatePublicKey(key: string): string {
 
 export function makeKubernetesContext(opt: ConnectionOptions): string {
     if (opt.ticketSecret) {
-        return `ticket-${opt.ticketSecret}`
+        return 'warpgate-ticket'
     }
     return `${opt.username ?? 'username'}:${opt.targetName ?? 'target'}`
 }
@@ -215,6 +215,9 @@ export function makeKubernetesNamespace(_opt: ConnectionOptions): string {
 
 export function makeKubernetesClusterUrl(opt: ConnectionOptions): string {
     const baseUrl = `https://${protocolHost(opt, 'kubernetes')}:${protocolPortString(opt, 'kubernetes')}`
+    if (opt.ticketSecret) {
+        return baseUrl
+    }
     return `${baseUrl}/${encodeURIComponent(opt.targetName ?? 'target')}`
 }
 
@@ -242,7 +245,7 @@ current-context: ${JSON.stringify(context)}
 users:
 - name: ${JSON.stringify(context)}
   user:
-    token: ${opt.ticketSecret}
+    token: ${JSON.stringify(`ticket-${opt.ticketSecret}`)}
 `
     } else {
         // Certificate-based authentication

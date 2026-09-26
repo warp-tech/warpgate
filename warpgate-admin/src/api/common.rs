@@ -71,7 +71,7 @@ pub async fn require_cluster_or_admin_permission(
     ctx: &warpgate_common_http::AuthenticatedRequestContext,
     permission: AdminPermission,
 ) -> Result<(), WarpgateError> {
-    if matches!(ctx.auth, RequestAuthorization::ClusterToken) {
+    if ctx.auth.is_cluster_peer() {
         return Ok(());
     }
     require_admin_permission(ctx, Some(permission)).await

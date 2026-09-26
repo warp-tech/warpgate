@@ -6,6 +6,7 @@ use sea_orm::{
 };
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, Secret, WarpgateError};
+use warpgate_common_http::errors::bad_request;
 use warpgate_db_entities::{LdapServer, Parameters};
 use warpgate_ldap::LdapUsernameAttribute;
 use warpgate_tls::TlsMode;
@@ -323,8 +324,8 @@ impl ListApi {
         admin.require(AdminPermission::ConfigEdit)?;
 
         if body.name.is_empty() {
-            return Ok(CreateLdapServerResponse::BadRequest(Json(
-                "Name cannot be empty".into(),
+            return Ok(CreateLdapServerResponse::BadRequest(bad_request(
+                "Name cannot be empty",
             )));
         }
 
@@ -652,7 +653,7 @@ impl QueryApi {
         let users = match warpgate_ldap::list_users(&ldap_config).await {
             Ok(users) => users,
             Err(e) => {
-                return Ok(GetLdapUsersResponse::BadRequest(Json(format!(
+                return Ok(GetLdapUsersResponse::BadRequest(bad_request(format!(
                     "Failed to query users: {e}"
                 ))));
             }

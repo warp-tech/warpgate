@@ -8,6 +8,7 @@ use uuid::Uuid;
 use warpgate_common::{
     AdminPermission, Role as RoleConfig, Target as TargetConfig, User as UserConfig, WarpgateError,
 };
+use warpgate_common_http::errors::invalid_field;
 use warpgate_db_entities::{Role, Target, TargetRoleAssignment, User, UserRoleAssignment};
 
 use super::AdminContext;
@@ -71,7 +72,10 @@ impl ListApi {
         admin.require(AdminPermission::AccessRolesCreate)?;
 
         if body.name.is_empty() {
-            return Ok(CreateRoleResponse::BadRequest(Json("name".into())));
+            return Ok(CreateRoleResponse::BadRequest(invalid_field(
+                "name",
+                "role name is empty",
+            )));
         }
 
         let db = &admin.services().db;

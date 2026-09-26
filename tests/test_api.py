@@ -282,10 +282,97 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         expected_statuses={200},
     ),
     AdminApiTestCase(
+        id="import_ssh_own_key_reference",
+        permission="config_edit",
+        call=lambda api, r: api.import_ssh_own_key_reference_with_http_info(
+            sdk.ImportSshClientKeyReferenceRequest(
+                label=f"key-{uuid4()}",
+                reference="secret://not-configured/secret/key#private_key",
+                is_default=False,
+            )
+        ),
+        expected_statuses={400},
+    ),
+    AdminApiTestCase(
+        id="get_secret_backends",
+        permission="config_edit",
+        call=lambda api, r: api.get_secret_backends_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_secret_backends_summary",
+        permission=None,
+        call=lambda api, r: api.get_secret_backends_summary_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_secret_reference_usage",
+        permission="targets_edit",
+        call=lambda api, r: api.get_secret_reference_usage_with_http_info(str(uuid4())),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="create_secret_backend",
+        permission="config_edit",
+        call=lambda api, r: api.create_secret_backend_with_http_info(
+            sdk.SecretBackendRequest(
+                name=f"vault-{uuid4().hex[:8]}",
+                backend_type="vault",
+                address="https://vault.invalid:8200",
+                auth=sdk.SecretBackendAuth(
+                    sdk.SecretBackendAuthVaultTokenAuth(method="Token", token="test")
+                ),
+            )
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="get_secret_backend",
+        permission=None,
+        call=lambda api, r: api.get_secret_backend_with_http_info(str(uuid4())),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="update_secret_backend",
+        permission="config_edit",
+        call=lambda api, r: api.update_secret_backend_with_http_info(
+            str(uuid4()),
+            sdk.SecretBackendRequest(
+                name="vault-missing",
+                backend_type="vault",
+                address="https://vault.invalid:8200",
+                auth=sdk.SecretBackendAuth(sdk.SecretBackendAuthVaultTokenAuth(method="Token", token="")),
+            ),
+        ),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="delete_secret_backend",
+        permission="config_edit",
+        call=lambda api, r: api.delete_secret_backend_with_http_info(str(uuid4())),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="check_secret_backend_health",
+        permission="config_edit",
+        call=lambda api, r: api.check_secret_backend_health_with_http_info(str(uuid4())),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="test_secret_resolve",
+        permission="targets_edit",
+        call=lambda api, r: api.test_secret_resolve_with_http_info(
+            sdk.TestResolveRequest(
+                reference="secret://not-configured/secret/x#password"
+            )
+        ),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
         id="import_ssh_own_key",
         permission="config_edit",
         call=lambda api, r: api.import_ssh_own_key_with_http_info(
-            sdk.ImportSSHClientKeyRequest(
+            sdk.ImportSshClientKeyRequest(
                 label=f"key-{uuid4()}",
                 secret_key=open("ssh-keys/id_ed25519").read(),
                 is_default=False,
@@ -885,7 +972,9 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     AdminApiTestCase(
         id="unblock_ip",
         permission="config_edit",
-        call=lambda api, r: api.unblock_ip_with_http_info(sdk.UnblockIpRequest(ip="127.0.0.1")),
+        call=lambda api, r: api.unblock_ip_with_http_info(
+            sdk.UnblockIpRequest(ip="127.0.0.1")
+        ),
         expected_statuses={200},
     ),
     AdminApiTestCase(
@@ -1107,12 +1196,12 @@ def test_admin_api_permission_enforcement(
     with new_admin_client(url, token) as allowed_api:
         try:
             response = case.call(allowed_api, api_test_resources)
-            (status, body) = response.status_code, response.data
+            status, body = response.status_code, response.data
         except sdk.ApiException as e:
-            (status, body) = e.status, e.body
-        assert status in case.expected_statuses, (
-            f"{case.id} expected {case.expected_statuses} but got {status}: {body}"
-        )
+            status, body = e.status, e.body
+        assert (
+            status in case.expected_statuses
+        ), f"{case.id} expected {case.expected_statuses} but got {status}: {body}"
 
     if case.permission:
         denied_role = _create_admin_role(
@@ -1127,12 +1216,13 @@ def test_admin_api_permission_enforcement(
     with new_admin_client(url, denied_token) as denied_api:
         try:
             response = case.call(denied_api, api_test_resources)
-            (status, body) = response.status_code, response.data
+            status, body = response.status_code, response.data
         except sdk.ApiException as e:
-            (status, body) = e.status, e.body
-        assert status in {401, 403}, (
-            f"{case.id} should be forbidden without {case.permission}, got {status}: {body}"
-        )
+            status, body = e.status, e.body
+        assert status in {
+            401,
+            403,
+        }, f"{case.id} should be forbidden without {case.permission}, got {status}: {body}"
 
 
 def test_update_target_must_state_the_approval_gate(
@@ -1153,16 +1243,14 @@ def test_update_target_must_state_the_approval_gate(
     session.headers["X-Warpgate-Token"] = "token-value"
     body = admin_client.get_target(target.id).to_dict()
     del body["require_approval"]
-    silent = session.put(
-        f"{url}/@warpgate/admin/api/targets/{target.id}", json=body
-    )
+    silent = session.put(f"{url}/@warpgate/admin/api/targets/{target.id}", json=body)
     assert silent.status_code == 400, (
         "an update that says nothing about the gate must be refused, "
         f"got {silent.status_code}"
     )
-    assert admin_client.get_target(target.id).require_approval, (
-        "and must not have touched it"
-    )
+    assert admin_client.get_target(
+        target.id
+    ).require_approval, "and must not have touched it"
 
     # Turning it off is an ordinary, explicit edit.
     off = _ssh_target_request(target.name)
@@ -1192,17 +1280,17 @@ def test_approval_parameters_can_be_cleared_and_reject_nonsense(
     assert admin_client.get_parameters().admin_approval_grace_period_seconds == 300
 
     assert put(admin_approval_grace_period_seconds=None).status_code // 100 == 2
-    assert admin_client.get_parameters().admin_approval_grace_period_seconds is None, (
-        "an explicit null must turn approval caching off, not be ignored"
-    )
+    assert (
+        admin_client.get_parameters().admin_approval_grace_period_seconds is None
+    ), "an explicit null must turn approval caching off, not be ignored"
 
     for field in (
         "admin_approval_grace_period_seconds",
         "admin_approval_timeout_seconds",
     ):
-        assert put(**{field: -1}).status_code == 400, (
-            f"{field} must reject a negative window"
-        )
+        assert (
+            put(**{field: -1}).status_code == 400
+        ), f"{field} must reject a negative window"
 
 
 def test_update_target_rejects_duplicate_name(admin_client: sdk.DefaultApi):

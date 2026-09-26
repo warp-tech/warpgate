@@ -13,10 +13,11 @@ mod otp;
 use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Result, bail};
 pub use hold_screen::{
-    Deadline, HoldEvent, HoldFrame, HoldInputSource, HoldPainter, run_hold_screen,
+    Deadline, HoldEvent, HoldFrame, HoldInputSource, HoldPainter, hold_while, run_hold_screen,
 };
 pub use otp::{MAX_OTP_ATTEMPTS, OtpAction, OtpActionApplyOutcome, OtpEntry};
 use tokio::sync::Mutex;
@@ -239,12 +240,29 @@ pub async fn finalize_user_auth<O: TargetOptionsVariant>(
     Ok(authorization)
 }
 
+/// Hold state (either waiting for admin approval or connecting)
+#[derive(Default)]
+pub struct AdmissionHold {
+    awaiting_approval: AtomicBool,
+}
+
+impl AdmissionHold {
+    pub fn frame(&self) -> HoldFrame<'static> {
+        if self.awaiting_approval.load(Ordering::Relaxed) {
+            HoldFrame::AwaitingApproval
+        } else {
+            HoldFrame::Connecting
+        }
+    }
+}
+
 /// Start a target session, holding for approval if needed
 pub async fn admit_desktop_session<O: Send + Sync>(
     services: &Services,
     server_handle: &Arc<Mutex<WarpgateServerHandle>>,
     authorization: TargetAuthorization<O>,
     remote_ip: Option<IpAddr>,
+    hold: &AdmissionHold,
 ) -> Result<AdmittedTarget<O>, WarpgateError> {
     let session_id = server_handle.lock().await.user_session_id();
     let state = services.auth_state_store.lock().await.get(&session_id);
@@ -260,6 +278,10 @@ pub async fn admit_desktop_session<O: Send + Sync>(
         GatedConnection {
             remote_ip,
             credentials,
+        },
+        || async {
+            hold.awaiting_approval.store(true, Ordering::Relaxed);
+            Ok(())
         },
     )
     .await

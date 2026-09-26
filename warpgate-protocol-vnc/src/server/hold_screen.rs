@@ -7,7 +7,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 use tokio::io::AsyncWrite;
 use tokio::sync::{Mutex, mpsc};
 use tokio::time::sleep;
@@ -15,37 +15,30 @@ use warpgate_common::UserSessionId;
 use warpgate_core::{AuthorizedIdentity, Services};
 use warpgate_db_entities::Parameters;
 use warpgate_desktop_auth::{
-    Deadline, HoldEvent, HoldFrame, HoldInputSource, HoldPainter, OtpAction, run_hold_screen,
+    Deadline, HoldEvent, HoldFrame, HoldInputSource, HoldPainter, OtpAction, hold_while,
+    run_hold_screen,
 };
 use warpgate_desktop_ui as ui;
 
 use super::RenderState;
 use super::protocol::{ClientEvent, write_server_cut_text};
 
-/// Render the hold screen while awaiting future
+/// Await `wait` while rendering hold UI, see [hold_while]
 pub(super) async fn render_while<W, F>(
     viewer_wr: &mut W,
     events_rx: &mut mpsc::UnboundedReceiver<ClientEvent>,
-    state: &mut RenderState,
+    render: &mut RenderState,
     wait: F,
+    frame: impl Fn() -> HoldFrame<'static>,
 ) -> Result<F::Output>
 where
-    W: AsyncWrite + Unpin,
+    W: AsyncWrite + Unpin + Send,
     F: Future,
 {
-    tokio::pin!(wait);
-    loop {
-        tokio::select! {
-            out = &mut wait => return Ok(out),
-            event = events_rx.recv(), if !state.reader_done => {
-                state.note_event(event.as_ref());
-            }
-            // Only render when asked to
-            () = sleep(SPINNER_INTERVAL), if state.pending_request => {
-                state.paint(viewer_wr, ui::render_connecting).await?;
-            }
-        }
-    }
+    let mut hold = VncHold::new(viewer_wr, events_rx, render);
+    let result = hold_while(wait, &mut hold.input, &mut hold.painter, frame).await;
+    hold.finish(render).await;
+    result?.ok_or_else(|| anyhow!("VNC viewer disconnected while held"))
 }
 
 /// ui animation frame interval while connecting to the backend
@@ -105,35 +98,53 @@ pub(super) async fn collect_additional_credentials<W>(
 where
     W: AsyncWrite + Unpin + Send,
 {
-    // The hold-screen input and painter are separate objects (so the driver can await input
-    // and paint without aliasing one `&mut` across its `select!`); they share the viewer
-    // render state through a lock, seeded from `render` and copied back once done.
-    let shared = Arc::new(Mutex::new(render.clone()));
-    let mut input = VncHoldInput {
-        events_rx,
-        render: shared.clone(),
-    };
-    let mut painter = VncHoldPainter {
-        viewer_wr,
-        render: shared.clone(),
-    };
-
+    let mut hold = VncHold::new(viewer_wr, events_rx, render);
     let result = run_hold_screen(
         services,
         state_id,
         crate::PROTOCOL_NAME,
         username,
         remote_ip,
-        &mut input,
-        &mut painter,
+        &mut hold.input,
+        &mut hold.painter,
         Deadline::until_auth_state_expires(),
     )
     .await;
-
-    *render = shared.lock().await.clone();
+    hold.finish(render).await;
     match result? {
         Some(identity) => Ok(identity),
         None => bail!("VNC interactive authentication was not completed"),
+    }
+}
+
+struct VncHold<'a, W> {
+    input: VncHoldInput<'a>,
+    painter: VncHoldPainter<'a, W>,
+    shared: Arc<Mutex<RenderState>>,
+}
+
+impl<'a, W> VncHold<'a, W> {
+    fn new(
+        viewer_wr: &'a mut W,
+        events_rx: &'a mut mpsc::UnboundedReceiver<ClientEvent>,
+        render: &RenderState,
+    ) -> Self {
+        let shared = Arc::new(Mutex::new(render.clone()));
+        Self {
+            input: VncHoldInput {
+                events_rx,
+                render: shared.clone(),
+            },
+            painter: VncHoldPainter {
+                viewer_wr,
+                render: shared.clone(),
+            },
+            shared,
+        }
+    }
+
+    async fn finish(self, render: &mut RenderState) {
+        *render = self.shared.lock().await.clone();
     }
 }
 
@@ -180,16 +191,9 @@ impl<W: AsyncWrite + Unpin + Send> HoldPainter for VncHoldPainter<'_, W> {
         if !render.pending_request {
             return Ok(());
         }
-        match frame {
-            HoldFrame::Prompt(prompt) => {
-                render
-                    .paint(self.viewer_wr, |screen, tick| {
-                        ui::render_authentication(screen, tick, prompt)
-                    })
-                    .await
-            }
-            HoldFrame::Connecting => render.paint(self.viewer_wr, ui::render_connecting).await,
-        }
+        render
+            .paint(self.viewer_wr, |screen, tick| frame.render(screen, tick))
+            .await
     }
 
     async fn present_web_approval_url(&mut self, url: Option<&str>) -> Result<()> {

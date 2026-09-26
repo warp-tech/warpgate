@@ -141,7 +141,7 @@
         </header>
         <main>
             {#if $serverInfo?.configWarnings?.length}
-                <Alert color="warning" fade={false}>
+                <Alert color="warning" fade={false} class="mb-3">
                     <strong>Issues found:</strong>
                     <ul class="mb-0 mt-2">
                         {#each $serverInfo.configWarnings as warning (warning)}
@@ -169,7 +169,7 @@
                 <Fa icon={faBriefcase} class="text-muted" />
                 <a
                     target="_blank"
-                    href="https://warpgate.null.page/for-business/"
+                    href="https://warpgate.null.page/for-business/?utm_source=app&utm_content=footer"
                 >
                     Professional support
                 </a>

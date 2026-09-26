@@ -1,17 +1,19 @@
 from uuid import uuid4
+import http.server
 import os
 import paramiko
 import requests
 import socket
 import subprocess
 import tempfile
+import threading
 import time
 import pytest
 from textwrap import dedent
 
 from .api_client import admin_client, sdk
 from .conftest import ProcessManager, WarpgateProcess
-from .util import wait_port, alloc_port
+from .util import read_until, wait_port, alloc_port
 
 
 @pytest.fixture(scope="session")
@@ -132,6 +134,68 @@ class Test:
         assert ssh_target.name.encode() in output
         assert b"hello\r\n" in output
 
+    def test_unknown_host_key_prompts_before_the_target_is_reached(
+        self,
+        processes: ProcessManager,
+        timeout,
+        wg_c_ed25519_pubkey,
+        shared_wg: WarpgateProcess,
+    ):
+        # The trust prompt is shown on the client's own PTY channel, and the
+        # host key is checked while the target connection is being dialed — so
+        # the channel has to be open and carrying a PTY by then, before
+        # anything of the target's exists. A session that only confirms its
+        # channels once the target is up has nowhere to ask, and #1286 is back:
+        # the connection is dropped instead of prompting.
+        user, ssh_target = setup_user_and_target(
+            processes, shared_wg, wg_c_ed25519_pubkey
+        )
+        url = f"https://localhost:{shared_wg.http_port}"
+        with admin_client(url) as api:
+            api.update_parameters(
+                sdk.ParameterUpdate(
+                    ssh_host_key_verification=sdk.SshHostKeyVerificationMode.PROMPT
+                )
+            )
+        try:
+            ssh_client = processes.start_ssh_client(
+                # -tt: force a pty even though our stdin is a pipe, otherwise
+                # there is no channel to prompt on.
+                "-tt",
+                f"{user.username}:{ssh_target.name}@localhost",
+                "-p",
+                str(shared_wg.ssh_port),
+                "-o",
+                "IdentityFile=ssh-keys/id_ed25519",
+                "-o",
+                "PreferredAuthentications=publickey",
+                stderr=subprocess.STDOUT,
+            )
+
+            prompt = read_until(
+                ssh_client.stdout, b"Trust this key?", time.monotonic() + timeout
+            )
+            assert b"Trust this key?" in prompt, prompt
+
+            # The answer is matched as a single-byte console input, so nothing
+            # else may ride along in the same packet.
+            ssh_client.stdin.write(b"y")
+            ssh_client.stdin.flush()
+            time.sleep(1)
+
+            # Typed before the target is necessarily up: early stdin is
+            # buffered by the remote client and replayed into the shell.
+            ssh_client.stdin.write(b"echo host-key-marker\nexit\n")
+            ssh_client.stdin.flush()
+            assert b"host-key-marker" in ssh_client.communicate(timeout=timeout)[0]
+        finally:
+            with admin_client(url) as api:
+                api.update_parameters(
+                    sdk.ParameterUpdate(
+                        ssh_host_key_verification=sdk.SshHostKeyVerificationMode.AUTOACCEPT
+                    )
+                )
+
     def test_signals(
         self,
         processes: ProcessManager,
@@ -162,6 +226,32 @@ class Test:
         shared_wg: WarpgateProcess,
         timeout,
     ):
+        # The destination is served by this test rather than a public site: a
+        # public HTTPS site answered with a redirect, which requests followed
+        # over a direct connection, so the asserted response never crossed
+        # the tunnel. The body spans several SSH packets and carries a per-run
+        # nonce, so only a complete forward reproduces it. Plain HTTP is
+        # enough — the byte stream is under test, not TLS.
+        nonce = uuid4().hex
+        body = nonce.encode() * 4096
+        served = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                served.append(self.path)
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        # All interfaces: the target container reaches the runner through the
+        # Docker host gateway, not through loopback.
+        server = http.server.ThreadingHTTPServer(("0.0.0.0", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+
         user, ssh_target = setup_user_and_target(
             processes, shared_wg, wg_c_ed25519_pubkey
         )
@@ -173,21 +263,30 @@ class Test:
             "-v",
             *common_args,
             "-L",
-            f"{local_port}:github.com:443",
+            f"{local_port}:host.docker.internal:{server.server_address[1]}",
             "-N",
             password="123",
         )
+        try:
+            time.sleep(10)
 
-        time.sleep(10)
+            wait_port(local_port, recv=False)
 
-        wait_port(local_port, recv=False)
-
-        s = requests.Session()
-        retries = requests.adapters.Retry(total=5, backoff_factor=1)
-        s.mount("https://", requests.adapters.HTTPAdapter(max_retries=retries))
-        response = s.get(f"https://localhost:{local_port}", timeout=timeout, verify=False)
-        assert response.status_code == 200
-        ssh_client.kill()
+            s = requests.Session()
+            retries = requests.adapters.Retry(total=5, backoff_factor=1)
+            s.mount("http://", requests.adapters.HTTPAdapter(max_retries=retries))
+            response = s.get(
+                f"http://localhost:{local_port}/{nonce}",
+                timeout=timeout,
+                allow_redirects=False,
+            )
+            assert response.status_code == 200
+            assert response.content == body
+            assert f"/{nonce}" in served
+        finally:
+            ssh_client.kill()
+            server.shutdown()
+            server.server_close()
 
     # https://github.com/warp-tech/warpgate/issues/2328
     def test_direct_tcpip_server_speaks_first(

@@ -6,6 +6,7 @@ members = [
     "warpgate-admin",
     "warpgate-aws",
     "warpgate-common",
+    "warpgate-secrets-vault",
     "warpgate-common-http",
     "warpgate-tls",
     "warpgate-core",
@@ -36,6 +37,7 @@ exclude = [
     "vendor/vnc-rs",
     "vendor/ironrdp-async",
     "vendor/ironrdp-connector",
+    "vendor/ironrdp-server",
     "vendor/ironrdp-session",
     "vendor/picky",
     "vendor/sspi",
@@ -50,6 +52,7 @@ resolver = "2"
 [patch.crates-io]
 ironrdp-async = { path = "vendor/ironrdp-async" }
 ironrdp-connector = { path = "vendor/ironrdp-connector" }
+ironrdp-server = { path = "vendor/ironrdp-server" }
 ironrdp-session = { path = "vendor/ironrdp-session" }
 picky = { path = "vendor/picky" }
 sspi = { path = "vendor/sspi" }

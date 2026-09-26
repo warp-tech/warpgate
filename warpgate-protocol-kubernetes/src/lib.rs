@@ -6,6 +6,7 @@ use warpgate_common::{ListenEndpoint, Protocol};
 use warpgate_core::{ProtocolServer, Services};
 use warpgate_tls::TlsCertificateAndPrivateKey;
 
+mod audit;
 mod correlator;
 pub mod recording;
 mod server;

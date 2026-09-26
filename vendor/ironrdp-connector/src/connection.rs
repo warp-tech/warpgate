@@ -752,7 +752,9 @@ fn respond_to_connect_time_autodetect(
     user_channel_id: u16,
     output: &mut WriteBuf,
 ) -> ConnectorResult<Written> {
-    use ironrdp_pdu::rdp::autodetect::{AutoDetectRequest, AutoDetectResponse, AutoDetectRspPdu};
+    use ironrdp_pdu::rdp::autodetect::{
+        AutoDetectRequest, AutoDetectResponse, AutoDetectRspPdu, BW_RESULTS_CONNECT_TIME,
+    };
 
     match request {
         AutoDetectRequest::RttRequest { sequence_number, .. } => {
@@ -760,14 +762,34 @@ fn respond_to_connect_time_autodetect(
             let written = encode_send_data_request(user_channel_id, message_channel_id, &response, output)?;
             Written::from_size(written)
         }
-        // Only RTT is answered at connect time. A connect-time Bandwidth Measure
-        // Stop ([MS-RDPBCGR] 2.2.14.1.4) is defined to warrant a Bandwidth Measure
-        // Results reply, and the Network Characteristics Result is informational.
-        // We deliberately send neither: connect-time auto-detect is informational
-        // and the server proceeds to licensing whether or not it receives them, so
-        // skipping them does not stall the sequence. Full connect-time bandwidth
-        // measurement (replying to Bandwidth Measure Stop with Bandwidth Measure
-        // Results) is left for a follow-up.
+        // A connect-time Bandwidth Measure Stop ([MS-RDPBCGR] 2.2.14.1.4) warrants a
+        // Bandwidth Measure Results reply ([MS-RDPBCGR] 2.2.14.2.2). This reply must
+        // be sent: FreeRDP-based servers (for example GNOME Remote Desktop) block in
+        // their AWAIT_BW_RESULT state until they receive it and never proceed to
+        // licensing without it, so omitting it stalls the whole connection. We do not
+        // run a stateful connect-time measurement, so we report the payload the
+        // server handed us over a nominal interval; the figure is an informational
+        // QoS hint and the server proceeds on receipt. A precise measurement (timing
+        // the Start/Payload/Stop window) can refine the reported bandwidth later.
+        AutoDetectRequest::BandwidthMeasureStop {
+            sequence_number,
+            payload,
+            ..
+        } => {
+            let byte_count = payload
+                .as_ref()
+                .map_or(0, |p| u32::try_from(p.len()).unwrap_or(u32::MAX));
+            let response = AutoDetectRspPdu::new(AutoDetectResponse::BandwidthMeasureResults {
+                sequence_number,
+                response_type: BW_RESULTS_CONNECT_TIME,
+                time_delta_ms: 1,
+                byte_count,
+            });
+            let written = encode_send_data_request(user_channel_id, message_channel_id, &response, output)?;
+            Written::from_size(written)
+        }
+        // Bandwidth Measure Start and Payload carry no client reply, and the Network
+        // Characteristics Result is informational; nothing to send for those.
         _ => Ok(Written::Nothing),
     }
 }

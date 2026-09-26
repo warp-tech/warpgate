@@ -11,19 +11,20 @@ use super::defaults::{
     _default_ssh_port, _default_username, _default_vnc_port,
 };
 use crate::encryption::EncryptionError;
-use crate::{Protocol, Secret, StoredSecret};
+use crate::secrets::{MaybeSecretRef, SecretRef};
+use crate::{Protocol, Secret};
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct KubernetesTargetCertificateAuth {
     pub certificate: Secret<String>,
-    pub private_key: StoredSecret,
+    pub private_key: MaybeSecretRef,
 }
 
 impl Default for KubernetesTargetCertificateAuth {
     fn default() -> Self {
         Self {
             certificate: Secret::new(String::new()),
-            private_key: StoredSecret::default(),
+            private_key: MaybeSecretRef::default(),
         }
     }
 }
@@ -57,7 +58,7 @@ pub enum SSHTargetAuth {
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct SshTargetPasswordAuth {
-    pub password: StoredSecret,
+    pub password: MaybeSecretRef,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
@@ -128,7 +129,7 @@ pub enum DatabaseTargetAuth {
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
 pub struct DatabaseTargetPasswordAuth {
     #[serde(default)]
-    pub password: StoredSecret,
+    pub password: MaybeSecretRef,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
@@ -249,7 +250,7 @@ pub struct VncTargetNoneAuth {}
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct VncTargetPasswordAuth {
-    pub password: StoredSecret,
+    pub password: MaybeSecretRef,
 }
 
 impl Default for VncTargetAuth {
@@ -330,13 +331,13 @@ pub enum RdpTargetAuth {
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct RdpTargetPasswordAuth {
-    pub password: StoredSecret,
+    pub password: MaybeSecretRef,
 }
 
 impl Default for RdpTargetAuth {
     fn default() -> Self {
         Self::Password(RdpTargetPasswordAuth {
-            password: StoredSecret::default(),
+            password: MaybeSecretRef::default(),
         })
     }
 }
@@ -367,7 +368,7 @@ pub enum KubernetesTargetAuth {
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct KubernetesTargetTokenAuth {
-    pub token: StoredSecret,
+    pub token: MaybeSecretRef,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
@@ -420,6 +421,14 @@ pub enum TargetOptions {
 }
 
 impl TargetOptions {
+    /// Every external secret reference among the credentials
+    pub fn secret_references(&self) -> Vec<SecretRef> {
+        self.secrets()
+            .into_iter()
+            .filter_map(|s| s.as_reference().cloned())
+            .collect()
+    }
+
     pub fn protocol(&self) -> Protocol {
         match self {
             TargetOptions::Ssh(_) => Protocol::Ssh,
@@ -451,7 +460,93 @@ impl TargetOptions {
     }
 }
 
-/// JSON path towards every possible credential within *serialized* TargetOptions
+/// List refs to all credential slots of a target
+pub trait TargetSecrets {
+    fn secrets(&self) -> Vec<&MaybeSecretRef>;
+}
+
+impl TargetSecrets for TargetSSHOptions {
+    fn secrets(&self) -> Vec<&MaybeSecretRef> {
+        match &self.auth {
+            SSHTargetAuth::Password(auth) => vec![&auth.password],
+            SSHTargetAuth::PublicKey(_) | SSHTargetAuth::IamRole(_) => vec![],
+        }
+    }
+}
+
+impl TargetSecrets for TargetHTTPOptions {
+    fn secrets(&self) -> Vec<&MaybeSecretRef> {
+        vec![]
+    }
+}
+
+impl TargetSecrets for TargetKubernetesOptions {
+    fn secrets(&self) -> Vec<&MaybeSecretRef> {
+        match &self.auth {
+            KubernetesTargetAuth::Token(auth) => vec![&auth.token],
+            KubernetesTargetAuth::Certificate(auth) => vec![&auth.private_key],
+            KubernetesTargetAuth::IamRole(_) => vec![],
+        }
+    }
+}
+
+impl TargetSecrets for DatabaseTargetAuth {
+    fn secrets(&self) -> Vec<&MaybeSecretRef> {
+        match self {
+            Self::Password(auth) => vec![&auth.password],
+            Self::IamRole(_) => vec![],
+        }
+    }
+}
+
+impl TargetSecrets for TargetMySqlOptions {
+    fn secrets(&self) -> Vec<&MaybeSecretRef> {
+        self.auth.secrets()
+    }
+}
+
+impl TargetSecrets for TargetPostgresOptions {
+    fn secrets(&self) -> Vec<&MaybeSecretRef> {
+        self.auth.secrets()
+    }
+}
+impl TargetSecrets for TargetMongoOptions {
+    fn secrets(&self) -> Vec<&MaybeSecretRef> {
+        self.auth.secrets()
+    }
+}
+
+impl TargetSecrets for TargetVncOptions {
+    fn secrets(&self) -> Vec<&MaybeSecretRef> {
+        match &self.auth {
+            VncTargetAuth::Password(auth) => vec![&auth.password],
+            VncTargetAuth::None(_) => vec![],
+        }
+    }
+}
+
+impl TargetSecrets for TargetRdpOptions {
+    fn secrets(&self) -> Vec<&MaybeSecretRef> {
+        let RdpTargetAuth::Password(auth) = &self.auth;
+        vec![&auth.password]
+    }
+}
+
+impl TargetSecrets for TargetOptions {
+    fn secrets(&self) -> Vec<&MaybeSecretRef> {
+        match self {
+            TargetOptions::Ssh(o) => o.secrets(),
+            TargetOptions::Http(o) => o.secrets(),
+            TargetOptions::Kubernetes(o) => o.secrets(),
+            TargetOptions::MySql(o) => o.secrets(),
+            TargetOptions::Postgres(o) => o.secrets(),
+            TargetOptions::Mongo(o) => o.secrets(),
+            TargetOptions::Vnc(o) => o.secrets(),
+            TargetOptions::Rdp(o) => o.secrets(),
+        }
+    }
+}
+
 /// Update for new protocols
 const SECRET_PATHS: &[&[&str]] = &[
     &["ssh", "auth", "password"],
@@ -465,7 +560,7 @@ const SECRET_PATHS: &[&[&str]] = &[
 ];
 
 /// Rewrite every secret in a serialized TargetOptions
-pub fn map_target_secrets(
+pub fn map_stored_target_secrets(
     options: &mut serde_json::Value,
     f: &mut dyn FnMut(&str) -> Result<String, EncryptionError>,
 ) -> Result<(), EncryptionError> {
@@ -478,8 +573,14 @@ pub fn map_target_secrets(
 
     for path in SECRET_PATHS {
         // Only a string is a credential - a missing path, a `null` auth block or an
-        // unexpected shape is left exactly as it was found.
-        if let Some(serde_json::Value::String(value)) = resolve(options, path) {
+        // unexpected shape is left exactly as it was found. A reference into a secret
+        // backend names where the credential lives rather than being one, and stays
+        // readable so it can be classified and edited.
+        if let Some(serde_json::Value::String(value)) = resolve(options, path)
+            && MaybeSecretRef::from_stored(value.clone())
+                .as_reference()
+                .is_none()
+        {
             let replacement = f(value)?;
             *value = replacement;
         }
@@ -490,17 +591,100 @@ pub fn map_target_secrets(
 /// Blanks out every secret in a serialized TargetOptions or Target (same JSON paths as options are serde(flatten))
 pub fn redact_target_secrets(value: &mut serde_json::Value) {
     // The closure is infallible, so the walk is too.
-    let _ = map_target_secrets(value, &mut |_| Ok(String::new()));
+    let _ = map_stored_target_secrets(value, &mut |_| Ok(String::new()));
 }
 
 #[cfg(test)]
 mod tests {
+
     use super::{
-        DatabaseTargetAuth, DatabaseTargetPasswordAuth, PostgresProtocolVersion,
-        RdpTargetCompression, RdpTlsSecurity, TargetHTTPOptions, TargetKubernetesOptions,
-        TargetMongoOptions, TargetMySqlOptions, TargetPostgresOptions, TargetRdpOptions,
-        TargetSSHOptions, Tls,
+        DatabaseTargetAuth, DatabaseTargetIamRoleAuth, DatabaseTargetPasswordAuth, MaybeSecretRef,
+        PostgresProtocolVersion, RdpTargetCompression, RdpTlsSecurity, SSHTargetAuth, SecretRef,
+        SshTargetIamRoleAuth, SshTargetPasswordAuth, SshTargetPublicKeyAuth, TargetHTTPOptions,
+        TargetKubernetesOptions, TargetMongoOptions, TargetMySqlOptions, TargetOptions,
+        TargetPostgresOptions, TargetRdpOptions, TargetSSHOptions, Tls,
     };
+    use crate::TargetSecrets;
+
+    const REFERENCE: &str = "secret://vault-prod/secret/db#password";
+
+    fn ssh_options(auth: SSHTargetAuth) -> TargetOptions {
+        let mut options: TargetSSHOptions = serde_json::from_str(r#"{"host":"h"}"#).unwrap();
+        options.auth = auth;
+        TargetOptions::Ssh(options)
+    }
+
+    fn reference() -> MaybeSecretRef {
+        SecretRef {
+            backend: "vault-prod".into(),
+            mount: "secret".into(),
+            path: "db".into(),
+            field: "password".into(),
+        }
+        .into()
+    }
+
+    fn db_password_auth(password: MaybeSecretRef) -> DatabaseTargetAuth {
+        DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth { password })
+    }
+
+    #[test]
+    fn password_references_are_collected() {
+        let ssh = ssh_options(SSHTargetAuth::Password(SshTargetPasswordAuth {
+            password: reference(),
+        }));
+        let mut mysql: TargetMySqlOptions = serde_json::from_str("{}").unwrap();
+        mysql.auth = db_password_auth(reference());
+        let mut postgres: TargetPostgresOptions = serde_json::from_str("{}").unwrap();
+        postgres.auth = db_password_auth(reference());
+
+        for options in [
+            ssh,
+            TargetOptions::MySql(mysql),
+            TargetOptions::Postgres(postgres),
+        ] {
+            let refs = options
+                .secrets()
+                .into_iter()
+                .filter_map(|s| s.as_reference().cloned())
+                .collect::<Vec<_>>();
+            assert_eq!(refs.len(), 1);
+            assert_eq!(refs[0].to_string(), REFERENCE);
+        }
+    }
+
+    #[test]
+    fn inline_and_non_password_credentials_are_not_references() {
+        let mut mysql: TargetMySqlOptions = serde_json::from_str("{}").unwrap();
+        mysql.auth = DatabaseTargetAuth::IamRole(DatabaseTargetIamRoleAuth::default());
+        let mut postgres: TargetPostgresOptions = serde_json::from_str("{}").unwrap();
+        postgres.auth = db_password_auth(MaybeSecretRef::default());
+        let cases = [
+            ssh_options(SSHTargetAuth::Password(SshTargetPasswordAuth {
+                password: MaybeSecretRef::default(),
+            })),
+            ssh_options(SSHTargetAuth::PublicKey(SshTargetPublicKeyAuth::default())),
+            ssh_options(SSHTargetAuth::IamRole(SshTargetIamRoleAuth::default())),
+            TargetOptions::MySql(mysql),
+            TargetOptions::Postgres(postgres),
+            TargetOptions::Http(serde_json::from_str(r#"{"url":"http://x"}"#).unwrap()),
+            TargetOptions::Kubernetes(serde_json::from_str("{}").unwrap()),
+        ];
+        for options in cases {
+            assert!(options.secret_references().is_empty());
+        }
+    }
+
+    /// A reference names where a credential lives; encrypting it would hide which
+    /// backend a target uses from both the UI and the resolver.
+    #[test]
+    fn references_are_not_mapped() {
+        let original =
+            serde_json::json!({"ssh": {"auth": {"kind": "password", "password": REFERENCE}}});
+        let mut mapped = original.clone();
+        wrap(&mut mapped, "X");
+        assert_eq!(mapped, original);
+    }
 
     /// The two ways of saying "nothing specified" — an absent `tls` block and an
     /// empty one — must both resolve to verifying.
@@ -557,7 +741,66 @@ mod tests {
     }
 
     fn wrap(v: &mut serde_json::Value, prefix: &str) {
-        super::map_target_secrets(v, &mut |s| Ok(format!("{prefix}{s}"))).unwrap();
+        super::map_stored_target_secrets(v, &mut |s| Ok(format!("{prefix}{s}"))).unwrap();
+    }
+
+    /// Fails when a credential slot is reachable through one of the two walkers
+    /// but not the other: `secrets` (typed, used for the usage report) and
+    /// `SECRET_PATHS` (JSON, used for encryption at rest).
+    #[test]
+    fn secret_paths_match_the_typed_walker() {
+        use std::str::FromStr;
+
+        use super::{
+            KubernetesTargetAuth, KubernetesTargetCertificateAuth, KubernetesTargetTokenAuth,
+            MaybeSecretRef, RdpTargetAuth, RdpTargetPasswordAuth, SSHTargetAuth,
+            SshTargetPasswordAuth, TargetOptions, TargetSecrets, VncTargetAuth,
+            VncTargetPasswordAuth,
+        };
+
+        let secret = || MaybeSecretRef::from_str("s").unwrap();
+        let mut ssh: TargetSSHOptions = serde_json::from_str(r#"{"host":"h"}"#).unwrap();
+        ssh.auth = SSHTargetAuth::Password(SshTargetPasswordAuth { password: secret() });
+        let mut mysql: TargetMySqlOptions = serde_json::from_str("{}").unwrap();
+        mysql.auth =
+            DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth { password: secret() });
+        let mut postgres: TargetPostgresOptions = serde_json::from_str("{}").unwrap();
+        postgres.auth =
+            DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth { password: secret() });
+        let mut vnc: super::TargetVncOptions = serde_json::from_str(r#"{"host":"h"}"#).unwrap();
+        vnc.auth = VncTargetAuth::Password(VncTargetPasswordAuth { password: secret() });
+        let mut rdp: TargetRdpOptions = serde_json::from_str("{}").unwrap();
+        rdp.auth = RdpTargetAuth::Password(RdpTargetPasswordAuth { password: secret() });
+        let mut k8s_token: TargetKubernetesOptions = serde_json::from_str("{}").unwrap();
+        k8s_token.auth = KubernetesTargetAuth::Token(KubernetesTargetTokenAuth { token: secret() });
+        let mut k8s_cert: TargetKubernetesOptions = serde_json::from_str("{}").unwrap();
+        k8s_cert.auth = KubernetesTargetAuth::Certificate(KubernetesTargetCertificateAuth {
+            certificate: "c".to_string().into(),
+            private_key: secret(),
+        });
+
+        for options in [
+            TargetOptions::Ssh(ssh),
+            TargetOptions::MySql(mysql),
+            TargetOptions::Postgres(postgres),
+            TargetOptions::Vnc(vnc),
+            TargetOptions::Rdp(rdp),
+            TargetOptions::Kubernetes(k8s_token),
+            TargetOptions::Kubernetes(k8s_cert),
+            TargetOptions::Http(serde_json::from_str(r#"{"url":"http://t"}"#).unwrap()),
+        ] {
+            let typed = options.secrets().len();
+            let mut json = serde_json::to_value(&options).unwrap();
+            let rendered = json.to_string();
+            let mut walked = 0;
+            super::map_stored_target_secrets(&mut json, &mut |s| {
+                walked += 1;
+                assert_eq!(s, "s", "walked a non-secret field in {rendered}");
+                Ok(s.to_owned())
+            })
+            .unwrap();
+            assert_eq!(walked, typed, "{rendered}");
+        }
     }
 
     /// The reason encryption walks the JSON instead of `TargetOptions`: a
@@ -580,7 +823,7 @@ mod tests {
         wrap(&mut mapped, "X");
         assert_eq!(mapped["mysql"]["auth"]["password"], "Xcurrent");
 
-        super::map_target_secrets(&mut mapped, &mut |s| {
+        super::map_stored_target_secrets(&mut mapped, &mut |s| {
             Ok(s.strip_prefix('X').unwrap_or(s).to_owned())
         })
         .unwrap();

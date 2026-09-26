@@ -1,5 +1,5 @@
 [bumpver]
-current_version = "0.28.5"
+current_version = "0.29.1"
 version_pattern = "MAJOR.MINOR.PATCH[-TAG[.INC0]]"
 commit = true
 tag = false
@@ -52,6 +52,9 @@ push = false
     '^version = "{version}"'
 ]
 "warpgate-tls/Cargo.toml" = [
+    '^version = "{version}"'
+]
+"warpgate-secrets-vault/Cargo.toml" = [
     '^version = "{version}"'
 ]
 "warpgate-sso/Cargo.toml" = [

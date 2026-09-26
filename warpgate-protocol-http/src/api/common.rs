@@ -4,7 +4,7 @@ use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse, Response};
 use sea_orm::{DatabaseConnection, EntityTrait};
 use tracing::info;
 use uuid::Uuid;
-use warpgate_admin::api::cluster_proxy::{Owner, forward_websocket, node_owner};
+use warpgate_admin::api::cluster_proxy::{Owner, forward_websocket};
 use warpgate_common::{Protocol, TargetOptions, UserSessionId, WarpgateError};
 use warpgate_common_http::auth::{
     AuthenticatedRequestContext, FullUserAuthorization, web_reauth_required,
@@ -133,7 +133,7 @@ pub async fn web_client_session_owner(
     else {
         return Ok(Owner::Local);
     };
-    node_owner(ctx, row.node_id).await.map_err(Into::into)
+    Ok(ctx.services().cluster.owner(row.node_id).await?)
 }
 
 /// Wraps a web-client websocket endpoint (`:session_id` in its path) with
@@ -157,7 +157,7 @@ pub fn forward_ws_to_session_owner<E: Endpoint + 'static>(
             Owner::Local => ep.call(req).await.map(IntoResponse::into_response),
             Owner::Remote(remote) => {
                 let ws = WebSocket::from_request_without_body(&req).await?;
-                forward_websocket(&ctx, &req, ws, remote, &ctx.services().cluster_token).await
+                forward_websocket(&ctx, &req, ws, remote).await
             }
         }
     })
