@@ -1,3 +1,4 @@
+import pytest
 import requests
 from uuid import uuid4
 
@@ -29,7 +30,13 @@ def _disable_self_service(url):
 
 
 class TestTicketRequests:
-    def _setup_user_and_target(self, api, echo_server_port):
+    def _setup_user_and_target(
+        self,
+        api,
+        echo_server_port,
+        *,
+        ticket_max_duration_seconds=None,
+    ):
         """Create a user with role-based access to an HTTP target."""
         role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
         user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
@@ -43,6 +50,7 @@ class TestTicketRequests:
                 require_approval=False,
                 ticket_requests_disabled=False,
                 ticket_require_approval=False,
+                ticket_max_duration_seconds=ticket_max_duration_seconds,
                 options=sdk.TargetOptions(
                     sdk.TargetOptionsTargetHTTPOptions(
                         kind="Http",
@@ -68,6 +76,95 @@ class TestTicketRequests:
         )
         assert resp.status_code // 100 == 2
         return session
+
+    def test_request_targets_expose_effective_duration_limit(
+        self,
+        echo_server_port,
+        shared_wg: WarpgateProcess,
+    ):
+        """The request form receives the selected target's effective cap."""
+        url = f"https://localhost:{shared_wg.http_port}"
+        with admin_client(url) as api:
+            user, target, _ = self._setup_user_and_target(
+                api,
+                echo_server_port,
+                ticket_max_duration_seconds=1800,
+            )
+            api.update_parameters(
+                _default_params(
+                    ticket_self_service_enabled=True,
+                    ticket_max_duration_seconds=7200,
+                )
+            )
+
+        try:
+            session = self._login(url, user.username)
+            response = session.get(f"{url}/@warpgate/api/ticket-request-targets")
+            response.raise_for_status()
+            returned_target = next(
+                item for item in response.json() if item["id"] == str(target.id)
+            )
+            assert returned_target["ticket_max_duration_seconds"] == 1800
+        finally:
+            _disable_self_service(url)
+
+    @pytest.mark.parametrize(
+        "target_limit,global_limit,expected",
+        [
+            pytest.param(7200, 1800, 7200, id="target_limit_above_global"),
+            pytest.param(None, 3600, 3600, id="no_target_limit_falls_back_to_global"),
+            pytest.param(None, None, None, id="no_limit_anywhere_is_null"),
+        ],
+    )
+    def test_request_targets_effective_duration_limit_precedence(
+        self,
+        echo_server_port,
+        shared_wg: WarpgateProcess,
+        target_limit,
+        global_limit,
+        expected,
+    ):
+        """The effective cap follows target-then-global precedence, or is
+        null when neither sets one."""
+        url = f"https://localhost:{shared_wg.http_port}"
+        with admin_client(url) as api:
+            user, target, _ = self._setup_user_and_target(
+                api,
+                echo_server_port,
+                ticket_max_duration_seconds=target_limit,
+            )
+            api.update_parameters(_default_params(ticket_self_service_enabled=True))
+
+            # The generated SDK omits a `None` field instead of sending JSON
+            # `null` (see test_api.py's
+            # test_approval_parameters_can_be_cleared_and_reject_nonsense),
+            # so it can only set the global cap, never clear one left behind
+            # by an earlier case/test. Send the field over raw JSON instead,
+            # which round-trips `global_limit` whether it's a number or None.
+            admin_session = requests.Session()
+            admin_session.verify = False
+            admin_session.headers["X-Warpgate-Token"] = "token-value"
+            body = api.get_parameters().to_dict()
+            body["ticket_max_duration_seconds"] = global_limit
+            put_resp = admin_session.put(
+                f"{url}/@warpgate/admin/api/parameters", json=body
+            )
+            put_resp.raise_for_status()
+            assert api.get_parameters().ticket_max_duration_seconds == global_limit, (
+                "the global duration cap must actually be set/cleared before "
+                "checking the target's effective limit"
+            )
+
+        try:
+            session = self._login(url, user.username)
+            response = session.get(f"{url}/@warpgate/api/ticket-request-targets")
+            response.raise_for_status()
+            returned_target = next(
+                item for item in response.json() if item["id"] == str(target.id)
+            )
+            assert returned_target["ticket_max_duration_seconds"] == expected
+        finally:
+            _disable_self_service(url)
 
     def test_self_service_disabled_by_default(
         self,
