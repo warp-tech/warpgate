@@ -55,6 +55,15 @@
     let openingTarget: TargetSnapshot | undefined = $state()
     let openError: string | undefined = $state()
 
+    // Only the row whose menu is open mounts a Dropdown. The other rows render
+    // a plain button that looks the same.
+    let menuTargetId: string | undefined = $state()
+    let menuToggle: HTMLElement | undefined = $state()
+
+    $effect(() => {
+        menuToggle?.focus()
+    })
+
     const canEditTargets = $derived(
         $serverInfo?.adminPermissions?.targetsEdit ?? false,
     )
@@ -292,60 +301,83 @@
                     <Fa icon={faArrowRight} fw />
                 </Button>
             {/if}
-            <Dropdown>
-                <DropdownToggle
-                    color="link"
-                    size="sm"
-                    onclick={e => {
+            {#if menuTargetId === target.id}
+                <Dropdown
+                    isOpen={true}
+                    toggle={() => {
+                    menuTargetId = undefined
+                }}
+                >
+                    <DropdownToggle
+                        color="link"
+                        size="sm"
+                        bind:inner={menuToggle}
+                        onclick={e => {
                     e.preventDefault()
                     e.stopPropagation()
                 }}
-                >
-                    <Fa icon={faEllipsisV} fw />
-                </DropdownToggle>
-                <DropdownMenu end>
-                    {#if target.kind === TargetKind.Ssh && webClientsEnabled}
-                        <DropdownItem
-                            onclick={e => {
+                    >
+                        <Fa icon={faEllipsisV} fw />
+                    </DropdownToggle>
+                    <DropdownMenu end>
+                        {#if target.kind === TargetKind.Ssh && webClientsEnabled}
+                            <DropdownItem
+                                onclick={e => {
                             void openInBrowser(target, () =>
                                 openWebSshSession(target.id))
                             e.preventDefault()
                             e.stopPropagation()
                         }}
-                        >
-                            Web terminal
-                        </DropdownItem>
-                    {/if}
-                    {#if (target.kind === TargetKind.Vnc || target.kind === TargetKind.Rdp) && webClientsEnabled}
-                        <DropdownItem
-                            onclick={e => {
+                            >
+                                Web terminal
+                            </DropdownItem>
+                        {/if}
+                        {#if (target.kind === TargetKind.Vnc || target.kind === TargetKind.Rdp) && webClientsEnabled}
+                            <DropdownItem
+                                onclick={e => {
                             openWebDesktopSession(target.id)
                             e.preventDefault()
                             e.stopPropagation()
                         }}
-                        >
-                            Web desktop
-                        </DropdownItem>
-                    {/if}
-                    <DropdownItem
-                        onclick={e => {
+                            >
+                                Web desktop
+                            </DropdownItem>
+                        {/if}
+                        <DropdownItem
+                            onclick={e => {
                         showInstructions(target)
                         e.preventDefault()
                         e.stopPropagation()
                     }}
-                    >
-                        Connection instructions
-                    </DropdownItem>
-                    {#if canEditTargets}
-                        <DropdownItem
-                            href={`/@warpgate/admin#/config/targets/${target.id}`}
-                            onclick={e => e.stopPropagation()}
                         >
-                            Edit target
+                            Connection instructions
                         </DropdownItem>
-                    {/if}
-                </DropdownMenu>
-            </Dropdown>
+                        {#if canEditTargets}
+                            <DropdownItem
+                                href={`/@warpgate/admin#/config/targets/${target.id}`}
+                                onclick={e => e.stopPropagation()}
+                            >
+                                Edit target
+                            </DropdownItem>
+                        {/if}
+                    </DropdownMenu>
+                </Dropdown>
+            {:else}
+                <div class="dropdown">
+                    <button
+                        type="button"
+                        class="btn btn-link btn-sm"
+                        aria-expanded="false"
+                        onclick={e => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            menuTargetId = target.id
+                        }}
+                    >
+                        <Fa icon={faEllipsisV} fw />
+                    </button>
+                </div>
+            {/if}
         </a>
     {/snippet}
 </ItemList>
