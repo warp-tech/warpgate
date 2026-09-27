@@ -108,7 +108,8 @@
         "inactivity_timeout": "5m",
         "keepalive_interval": null,
         "listen": "[::]:2222",
-        "proxy_protocol": false
+        "proxy_protocol": false,
+        "target_handshake_timeout": "30s"
       }
     },
     "sso_providers": {
@@ -503,6 +504,11 @@
           "description": "Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.",
           "type": "boolean",
           "default": false
+        },
+        "target_handshake_timeout": {
+          "description": "How long to wait for a target to finish the SSH handshake. Some targets\naccept the connection and then never reply. Set to `0s` to wait forever.",
+          "type": "string",
+          "default": "30s"
         }
       }
     },

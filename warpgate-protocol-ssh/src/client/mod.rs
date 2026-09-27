@@ -75,6 +75,11 @@ pub enum ConnectionError {
     #[error("Jump host target not found")]
     JumpHostTargetNotFound,
 
+    #[error("SSH handshake timed out after {timeout:?}")]
+    HandshakeTimeout {
+        timeout: Duration
+    },
+
     #[error(transparent)]
     Warpgate(#[from] WarpgateError),
 }
@@ -826,16 +831,39 @@ impl Connector {
     where
         Fut: Future<Output = Result<Handle<ClientHandler>, ClientHandlerError>>,
     {
+        let handshake_timeout = {
+            self.services
+                .config
+                .lock()
+                .await
+                .store
+                .ssh
+                .target_handshake_timeout
+        };
+
         pin_mut!(fut_connect);
+
+        let deadline = tokio::time::sleep(handshake_timeout);
+        pin_mut!(deadline);
+
+        // A host key prompt means the target has answered and shown its key, so
+        // the deadline has done its job. The rest of the wait is the user's.
+        let mut host_key_prompted = false;
 
         loop {
             tokio::select! {
+                () = &mut deadline, if !handshake_timeout.is_zero() && !host_key_prompted => {
+                    let error = ConnectionError::HandshakeTimeout { timeout: handshake_timeout };
+                    error!(?error, host=%ssh_options.host, port=ssh_options.port, "Connection error");
+                    return Err(error);
+                }
                 Some(event) = event_rx.recv() => {
                     match event {
                         ClientHandlerEvent::HostKeyReceived(key) => {
                             self.tx.send(RCEvent::HostKeyReceived(key, ssh_options.host.clone(), ssh_options.port)).await.map_err(|_| ConnectionError::Internal)?;
                         }
                         ClientHandlerEvent::HostKeyUnknown(key, reply) => {
+                            host_key_prompted = true;
                             self.tx.send(RCEvent::HostKeyUnknown(key, ssh_options.host.clone(), ssh_options.port, reply)).await.map_err(|_| ConnectionError::Internal)?;
                         }
                         _ => {}
