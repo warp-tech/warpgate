@@ -9,7 +9,7 @@ use serde_json::Value;
 use warpgate_aws::{S3Credentials, S3Storage};
 use warpgate_azure::AzureBlobStorage;
 use warpgate_common::{
-    AdminPermission, PasswordPolicy, UserRequireCredentialsPolicy, WarpgateError,
+    AdminPermission, PasswordPolicy, StoredSecret, UserRequireCredentialsPolicy, WarpgateError,
 };
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::RecordingsStorageConfig;
@@ -29,31 +29,58 @@ fn parse_nullable<T: ParseFromJSON>(value: Option<Value>) -> ParseResult<Option<
     })
 }
 
-/// The stored S3 secret is never sent to the browser.
+/// The stored backend secret is never sent to the browser.
 fn redact_secret(mut config: RecordingsStorageConfig) -> RecordingsStorageConfig {
-    if let RecordingsStorageConfig::S3(s3) = &mut config
-        && let S3Credentials::Static(creds) = &mut s3.credentials
-    {
-        creds.secret_access_key = None;
+    match &mut config {
+        RecordingsStorageConfig::S3(s3) => {
+            if let S3Credentials::Static(creds) = &mut s3.credentials {
+                creds.secret_access_key = None;
+            }
+        }
+        // Blank rather than absent: the field is required, and blank is what an
+        // untouched form sends back to mean "keep what is stored".
+        RecordingsStorageConfig::Azure(azure) => {
+            if let Some(secret) = azure.credentials.stored_secret_mut() {
+                *secret = StoredSecret::default();
+            }
+        }
+        RecordingsStorageConfig::Disk(_) => {}
     }
     config
 }
 
-/// A `None` incoming secret keeps the one already stored (the UI never sees it,
-/// so it round-trips the redacted `None` unless the admin types a new value).
+/// An empty incoming secret keeps the one already stored (the UI never sees it,
+/// so it round-trips the redacted value unless the admin types a new one).
 fn merge_secret(
     mut incoming: RecordingsStorageConfig,
     current: &RecordingsStorageConfig,
 ) -> RecordingsStorageConfig {
-    if let RecordingsStorageConfig::S3(s3) = &mut incoming
-        && let S3Credentials::Static(creds) = &mut s3.credentials
-        && creds.secret_access_key.is_none()
-        && let RecordingsStorageConfig::S3(current_s3) = current
-        && let S3Credentials::Static(current_creds) = &current_s3.credentials
-    {
-        creds
-            .secret_access_key
-            .clone_from(&current_creds.secret_access_key);
+    match (&mut incoming, current) {
+        (
+            RecordingsStorageConfig::S3(s3),
+            RecordingsStorageConfig::S3(current_s3),
+        ) => {
+            if let S3Credentials::Static(creds) = &mut s3.credentials
+                && creds.secret_access_key.is_none()
+                && let S3Credentials::Static(current_creds) = &current_s3.credentials
+            {
+                creds
+                    .secret_access_key
+                    .clone_from(&current_creds.secret_access_key);
+            }
+        }
+        (
+            RecordingsStorageConfig::Azure(azure),
+            RecordingsStorageConfig::Azure(current_azure),
+        ) => {
+            if let Some(secret) = azure.credentials.stored_secret_mut()
+                && secret.stored_value().is_empty()
+                && let Some(current_secret) = current_azure.credentials.stored_secret()
+            {
+                *secret = current_secret.clone();
+            }
+        }
+        _ => {}
     }
     incoming
 }
@@ -454,8 +481,72 @@ impl Api {
 mod tests {
     use poem_openapi::types::ParseFromJSON;
     use serde_json::json;
+    use warpgate_azure::{AzureBlobConfig, AzureCredentials, ServicePrincipalCredentials};
 
-    use super::ParameterUpdate;
+    use super::{ParameterUpdate, RecordingsStorageConfig, merge_secret, redact_secret};
+
+    fn azure_with_secret(secret: &str) -> RecordingsStorageConfig {
+        RecordingsStorageConfig::Azure(AzureBlobConfig {
+            account: "acct".into(),
+            container: "recordings".into(),
+            endpoint: None,
+            prefix: String::new(),
+            serve_through_warpgate: true,
+            credentials: AzureCredentials::ServicePrincipal(ServicePrincipalCredentials {
+                tenant_id: "tenant".into(),
+                client_id: "client".into(),
+                client_secret: secret.to_owned().into(),
+            }),
+        })
+    }
+
+    fn azure_secret_of(config: &RecordingsStorageConfig) -> &str {
+        match config {
+            RecordingsStorageConfig::Azure(azure) => azure
+                .credentials
+                .stored_secret()
+                .expect("a service principal carries a secret")
+                .stored_value(),
+            _ => panic!("expected the Azure variant"),
+        }
+    }
+
+    /// The admin API handed the service-principal secret back in plaintext
+    /// until this was covered: `redact_secret` only knew about S3.
+    #[test]
+    fn the_azure_client_secret_never_leaves_the_server() {
+        let redacted = redact_secret(azure_with_secret("real-secret"));
+        assert_eq!(azure_secret_of(&redacted), "");
+    }
+
+    /// The form posts back what it was given, so an untouched secret arrives
+    /// blank and has to be restored rather than saved over the stored one.
+    #[test]
+    fn a_blank_azure_secret_keeps_the_stored_one() {
+        let merged = merge_secret(azure_with_secret(""), &azure_with_secret("real-secret"));
+        assert_eq!(azure_secret_of(&merged), "real-secret");
+    }
+
+    #[test]
+    fn a_supplied_azure_secret_replaces_the_stored_one() {
+        let merged = merge_secret(
+            azure_with_secret("new-secret"),
+            &azure_with_secret("old-secret"),
+        );
+        assert_eq!(azure_secret_of(&merged), "new-secret");
+    }
+
+    /// Switching backends must not carry a secret across from the old one.
+    #[test]
+    fn merging_across_different_backends_changes_nothing() {
+        let merged = merge_secret(
+            azure_with_secret(""),
+            &RecordingsStorageConfig::Disk(warpgate_db_entities::Parameters::RecordingsDiskConfig {
+                path: "./data/recordings".into(),
+            }),
+        );
+        assert_eq!(azure_secret_of(&merged), "");
+    }
 
     fn parse_rate_limit(value: serde_json::Value) -> Option<Option<u32>> {
         match ParameterUpdate::parse_from_json(Some(value)) {

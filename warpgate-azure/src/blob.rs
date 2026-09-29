@@ -137,6 +137,15 @@ impl AzureCredentials {
             _ => None,
         }
     }
+
+    /// The stored secret, for redacting it on the way out or restoring it on
+    /// the way back in.
+    pub const fn stored_secret_mut(&mut self) -> Option<&mut StoredSecret> {
+        match self {
+            Self::ServicePrincipal(sp) => Some(&mut sp.client_secret),
+            _ => None,
+        }
+    }
 }
 
 /// Everything needed to reach one blob container. Serves as both the stored
