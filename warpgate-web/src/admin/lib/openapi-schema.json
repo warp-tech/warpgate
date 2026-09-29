@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.29.0-19-g263fa7ca-modified"
+    "version": "v0.29.1-9-g59c3c32b"
   },
   "servers": [
     {
@@ -5269,6 +5269,161 @@
         "type": "object",
         "title": "AutoCredentials"
       },
+      "AzureBlobConfig": {
+        "type": "object",
+        "title": "AzureBlobConfig",
+        "description": "Everything needed to reach one blob container. Serves as both the stored\n(serde) and admin-API (poem-openapi) representation.",
+        "required": [
+          "account",
+          "container",
+          "prefix",
+          "credentials"
+        ],
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "Storage account name, e.g. `mywarpgatestorage`."
+          },
+          "container": {
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "Custom service endpoint (sovereign clouds, emulators); `None` = public Azure."
+          },
+          "prefix": {
+            "type": "string",
+            "description": "Blob-name prefix prepended to every recording path."
+          },
+          "credentials": {
+            "$ref": "#/components/schemas/AzureCredentials"
+          },
+          "serve_through_warpgate": {
+            "type": "boolean",
+            "description": "Stream recordings through Warpgate instead of redirecting the browser to\na SAS URL.\n\nRedirecting is cheaper — the bytes never touch Warpgate — but it needs\nthe container to carry a CORS policy allowing this origin to issue Range\nrequests, and it needs the browser to be able to reach the storage\naccount at all, which it cannot when the account sits behind a private\nendpoint. Streaming always works, so it is the default.",
+            "default": true
+          }
+        }
+      },
+      "AzureCredentials": {
+        "type": "object",
+        "description": "How a client authenticates to Azure Storage.\n\nEvery mode is Entra ID, because that is all the SDK has: `azure_storage_blob`\n1.x accepts an `Option<Arc<dyn TokenCredential>>` and ships no shared-key\ncredential, so a storage-account key cannot be used to authenticate here.\n`ServicePrincipal` is the way to hand Warpgate explicit credentials.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/AzureCredentials_ManagedIdentityCredentials"
+          },
+          {
+            "$ref": "#/components/schemas/AzureCredentials_WorkloadIdentityCredentials"
+          },
+          {
+            "$ref": "#/components/schemas/AzureCredentials_ServicePrincipalCredentials"
+          },
+          {
+            "$ref": "#/components/schemas/AzureCredentials_DeveloperToolsCredentials"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "mode",
+          "mapping": {
+            "ManagedIdentity": "#/components/schemas/AzureCredentials_ManagedIdentityCredentials",
+            "WorkloadIdentity": "#/components/schemas/AzureCredentials_WorkloadIdentityCredentials",
+            "ServicePrincipal": "#/components/schemas/AzureCredentials_ServicePrincipalCredentials",
+            "DeveloperTools": "#/components/schemas/AzureCredentials_DeveloperToolsCredentials"
+          }
+        }
+      },
+      "AzureCredentials_DeveloperToolsCredentials": {
+        "description": "How a client authenticates to Azure Storage.\n\nEvery mode is Entra ID, because that is all the SDK has: `azure_storage_blob`\n1.x accepts an `Option<Arc<dyn TokenCredential>>` and ships no shared-key\ncredential, so a storage-account key cannot be used to authenticate here.\n`ServicePrincipal` is the way to hand Warpgate explicit credentials.",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "DeveloperTools"
+                ],
+                "example": "DeveloperTools"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/DeveloperToolsCredentials"
+          }
+        ]
+      },
+      "AzureCredentials_ManagedIdentityCredentials": {
+        "description": "How a client authenticates to Azure Storage.\n\nEvery mode is Entra ID, because that is all the SDK has: `azure_storage_blob`\n1.x accepts an `Option<Arc<dyn TokenCredential>>` and ships no shared-key\ncredential, so a storage-account key cannot be used to authenticate here.\n`ServicePrincipal` is the way to hand Warpgate explicit credentials.",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "ManagedIdentity"
+                ],
+                "example": "ManagedIdentity"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/ManagedIdentityCredentials"
+          }
+        ]
+      },
+      "AzureCredentials_ServicePrincipalCredentials": {
+        "description": "How a client authenticates to Azure Storage.\n\nEvery mode is Entra ID, because that is all the SDK has: `azure_storage_blob`\n1.x accepts an `Option<Arc<dyn TokenCredential>>` and ships no shared-key\ncredential, so a storage-account key cannot be used to authenticate here.\n`ServicePrincipal` is the way to hand Warpgate explicit credentials.",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "ServicePrincipal"
+                ],
+                "example": "ServicePrincipal"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/ServicePrincipalCredentials"
+          }
+        ]
+      },
+      "AzureCredentials_WorkloadIdentityCredentials": {
+        "description": "How a client authenticates to Azure Storage.\n\nEvery mode is Entra ID, because that is all the SDK has: `azure_storage_blob`\n1.x accepts an `Option<Arc<dyn TokenCredential>>` and ships no shared-key\ncredential, so a storage-account key cannot be used to authenticate here.\n`ServicePrincipal` is the way to hand Warpgate explicit credentials.",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "WorkloadIdentity"
+                ],
+                "example": "WorkloadIdentity"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/WorkloadIdentityCredentials"
+          }
+        ]
+      },
       "BackendType": {
         "type": "string",
         "enum": [
@@ -5579,6 +5734,10 @@
             "type": "string"
           }
         }
+      },
+      "DeveloperToolsCredentials": {
+        "type": "object",
+        "title": "DeveloperToolsCredentials"
       },
       "ExistingCertificateCredential": {
         "type": "object",
@@ -6188,6 +6347,16 @@
           },
           "related_admin_roles": {
             "type": "string"
+          }
+        }
+      },
+      "ManagedIdentityCredentials": {
+        "type": "object",
+        "title": "ManagedIdentityCredentials",
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "description": "Client ID of a user-assigned identity; `None` selects the system-assigned one."
           }
         }
       },
@@ -6871,15 +7040,42 @@
           },
           {
             "$ref": "#/components/schemas/RecordingsStorageConfig_S3StorageConfig"
+          },
+          {
+            "$ref": "#/components/schemas/RecordingsStorageConfig_AzureBlobConfig"
           }
         ],
         "discriminator": {
           "propertyName": "kind",
           "mapping": {
             "Disk": "#/components/schemas/RecordingsStorageConfig_RecordingsDiskConfig",
-            "S3": "#/components/schemas/RecordingsStorageConfig_S3StorageConfig"
+            "S3": "#/components/schemas/RecordingsStorageConfig_S3StorageConfig",
+            "Azure": "#/components/schemas/RecordingsStorageConfig_AzureBlobConfig"
           }
         }
+      },
+      "RecordingsStorageConfig_AzureBlobConfig": {
+        "description": "Where session recordings are stored, and everything that backend needs.\nServes as both the stored (serde) and admin-API (poem-openapi)\nrepresentation, so only valid field combinations can exist (e.g. no S3\nsettings while on disk).",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Azure"
+                ],
+                "example": "Azure"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/AzureBlobConfig"
+          }
+        ]
       },
       "RecordingsStorageConfig_RecordingsDiskConfig": {
         "description": "Where session recordings are stored, and everything that backend needs.\nServes as both the stored (serde) and admin-API (poem-openapi)\nrepresentation, so only valid field combinations can exist (e.g. no S3\nsettings while on disk).",
@@ -7584,6 +7780,29 @@
           "failed_attempts_last_24h": {
             "type": "integer",
             "format": "uint64"
+          }
+        }
+      },
+      "ServicePrincipalCredentials": {
+        "type": "object",
+        "title": "ServicePrincipalCredentials",
+        "required": [
+          "tenant_id",
+          "client_id",
+          "client_secret"
+        ],
+        "properties": {
+          "tenant_id": {
+            "type": "string",
+            "description": "Directory (tenant) ID."
+          },
+          "client_id": {
+            "type": "string",
+            "description": "Application (client) ID."
+          },
+          "client_secret": {
+            "type": "string",
+            "description": "Blank in responses; blank in an update keeps the stored secret."
           }
         }
       },
@@ -9066,6 +9285,10 @@
             "type": "string"
           }
         }
+      },
+      "WorkloadIdentityCredentials": {
+        "type": "object",
+        "title": "WorkloadIdentityCredentials"
       }
     },
     "securitySchemes": {

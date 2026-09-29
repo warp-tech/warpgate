@@ -36,28 +36,58 @@
         if (!parameters) {
             return
         }
-        parameters.recordingsStorage =
-            kind === 'S3'
-                ? {
-                      kind: 'S3',
-                      bucket: '',
-                      region: 'us-east-1',
-                      pathStyle: false,
-                      prefix: '',
-                      credentials: { mode: 'Auto' },
-                  }
-                : { kind: 'Disk', path: './data/recordings' }
+        if (kind === 'S3') {
+            parameters.recordingsStorage = {
+                kind: 'S3',
+                bucket: '',
+                region: 'us-east-1',
+                pathStyle: false,
+                prefix: '',
+                credentials: { mode: 'Auto' },
+            }
+        } else if (kind === 'Azure') {
+            parameters.recordingsStorage = {
+                kind: 'Azure',
+                account: '',
+                container: '',
+                prefix: '',
+                credentials: { mode: 'ManagedIdentity' },
+                serveThroughWarpgate: true,
+            }
+        } else {
+            parameters.recordingsStorage = {
+                kind: 'Disk',
+                path: './data/recordings',
+            }
+        }
     }
 
     function setCredentialMode(mode: string): void {
-        if (parameters?.recordingsStorage.kind !== 'S3') {
-            return
+        const storage = parameters?.recordingsStorage
+        if (storage?.kind === 'S3') {
+            // Omit secretAccessKey so an untouched field keeps the stored secret.
+            storage.credentials =
+                mode === 'Static'
+                    ? { mode: 'Static', accessKeyId: '' }
+                    : { mode: 'Auto' }
+        } else if (storage?.kind === 'Azure') {
+            // Only a service principal carries anything to fill in; the other
+            // modes resolve their credential from the environment.
+            if (mode === 'ServicePrincipal') {
+                storage.credentials = {
+                    mode: 'ServicePrincipal',
+                    tenantId: '',
+                    clientId: '',
+                    clientSecret: '',
+                }
+            } else if (mode === 'WorkloadIdentity') {
+                storage.credentials = { mode: 'WorkloadIdentity' }
+            } else if (mode === 'DeveloperTools') {
+                storage.credentials = { mode: 'DeveloperTools' }
+            } else {
+                storage.credentials = { mode: 'ManagedIdentity' }
+            }
         }
-        // Omit secretAccessKey so an untouched field keeps the stored secret.
-        parameters.recordingsStorage.credentials =
-            mode === 'Static'
-                ? { mode: 'Static', accessKeyId: '' }
-                : { mode: 'Auto' }
     }
     let updateError: string | undefined = $state()
     let testResult: { success: boolean; error?: string } | undefined = $state()
@@ -65,12 +95,13 @@
     // Sends the edited config as-is; an untouched secret round-trips as
     // undefined and the server refills it from the stored value.
     async function testStorage(): Promise<void> {
-        if (parameters?.recordingsStorage.kind !== 'S3') {
+        const storage = parameters?.recordingsStorage
+        if (!storage || (storage.kind !== 'S3' && storage.kind !== 'Azure')) {
             return
         }
         testResult = undefined
         testResult = await api.testRecordingsStorage({
-            recordingsStorageConfig: parameters.recordingsStorage,
+            recordingsStorageConfig: storage,
         })
         if (!testResult.success) {
             throw new Error(testResult.error ?? 'Connection failed')
@@ -992,6 +1023,9 @@
                                         <option value="S3">
                                             S3 / S3-compatible
                                         </option>
+                                        <option value="Azure">
+                                            Azure Blob Storage
+                                        </option>
                                     </select>
                                 </FormGroup>
 
@@ -1131,7 +1165,167 @@
                                             >
                                         </FormGroup>
                                     {/if}
+                                {:else if parameters.recordingsStorage.kind === 'Azure'}
+                                    {@const azure = parameters.recordingsStorage}
+                                    <FormGroup floating label="Storage account">
+                                        <input
+                                            type="text"
+                                            class="form-control"
+                                            placeholder="mywarpgatestorage"
+                                            required
+                                            bind:value={azure.account}
+                                        >
+                                    </FormGroup>
+                                    <FormGroup floating label="Container">
+                                        <input
+                                            type="text"
+                                            class="form-control"
+                                            required
+                                            bind:value={azure.container}
+                                        >
+                                    </FormGroup>
+                                    <FormGroup
+                                        floating
+                                        label="Endpoint (blank = public Azure)"
+                                    >
+                                        <input
+                                            type="text"
+                                            class="form-control"
+                                            placeholder="https://myaccount.blob.core.windows.net"
+                                            value={azure.endpoint ?? ''}
+                                            oninput={e => azure.endpoint = e.currentTarget.value || undefined}
+                                        >
+                                    </FormGroup>
+                                    <HelpText>
+                                        Set this for sovereign clouds or a
+                                        storage emulator.
+                                    </HelpText>
+                                    <FormGroup floating label="Blob prefix">
+                                        <input
+                                            type="text"
+                                            class="form-control"
+                                            bind:value={azure.prefix}
+                                        >
+                                    </FormGroup>
 
+                                    <label
+                                        for="recordingsAzureServeThrough"
+                                        class="d-flex align-items-center mb-2"
+                                    >
+                                        <Input
+                                            id="recordingsAzureServeThrough"
+                                            class="mb-0 me-2"
+                                            type="switch"
+                                            bind:checked={azure.serveThroughWarpgate}
+                                        />
+                                        <div>
+                                            Serve recordings through Warpgate
+                                        </div>
+                                    </label>
+                                    <HelpText>
+                                        Leave this on unless the browser can
+                                        reach the storage account directly.
+                                        Turning it off redirects playback to the
+                                        account, which is cheaper but needs a
+                                        CORS policy allowing this origin to
+                                        issue GET requests with a Range header,
+                                        and does not work when the account is
+                                        behind a private endpoint.
+                                    </HelpText>
+
+                                    <FormGroup floating label="Credentials">
+                                        <select
+                                            id="recordingsAzureCredentialMode"
+                                            class="form-select"
+                                            value={azure.credentials.mode}
+                                            onchange={e => setCredentialMode(e.currentTarget.value)}
+                                        >
+                                            <option value="ManagedIdentity">
+                                                Managed identity
+                                            </option>
+                                            <option value="WorkloadIdentity">
+                                                Workload identity (AKS)
+                                            </option>
+                                            <option value="ServicePrincipal">
+                                                Service principal
+                                            </option>
+                                            <option value="DeveloperTools">
+                                                Azure CLI (development)
+                                            </option>
+                                        </select>
+                                    </FormGroup>
+                                    <HelpText>
+                                        A storage account key cannot be used:
+                                        the Azure SDK authenticates with Entra
+                                        ID only.
+                                    </HelpText>
+
+                                    {#if azure.credentials.mode === 'ManagedIdentity'}
+                                        {@const creds = azure.credentials}
+                                        <FormGroup
+                                            floating
+                                            label="Client ID (blank = system-assigned)"
+                                        >
+                                            <input
+                                                type="text"
+                                                class="form-control"
+                                                autocomplete="off"
+                                                value={creds.clientId ?? ''}
+                                                oninput={e => creds.clientId = e.currentTarget.value || undefined}
+                                            >
+                                        </FormGroup>
+                                        <HelpText>
+                                            Set this only for a user-assigned
+                                            identity.
+                                        </HelpText>
+                                    {:else if azure.credentials.mode === 'WorkloadIdentity'}
+                                        <HelpText>
+                                            Taken from the pod environment:
+                                            AZURE_TENANT_ID, AZURE_CLIENT_ID and
+                                            AZURE_FEDERATED_TOKEN_FILE.
+                                        </HelpText>
+                                    {:else if azure.credentials.mode === 'ServicePrincipal'}
+                                        {@const creds = azure.credentials}
+                                        <FormGroup floating label="Tenant ID">
+                                            <input
+                                                type="text"
+                                                class="form-control"
+                                                autocomplete="off"
+                                                required
+                                                bind:value={creds.tenantId}
+                                            >
+                                        </FormGroup>
+                                        <FormGroup floating label="Client ID">
+                                            <input
+                                                type="text"
+                                                class="form-control"
+                                                autocomplete="off"
+                                                required
+                                                bind:value={creds.clientId}
+                                            >
+                                        </FormGroup>
+                                        <FormGroup
+                                            floating
+                                            label="Client secret"
+                                        >
+                                            <input
+                                                type="password"
+                                                class="form-control"
+                                                autocomplete="off"
+                                                placeholder="********"
+                                                bind:value={creds.clientSecret}
+                                            >
+                                        </FormGroup>
+                                    {:else}
+                                        <HelpText>
+                                            Uses the Azure CLI sign-in of the
+                                            user running Warpgate. For
+                                            development only.
+                                        </HelpText>
+                                    {/if}
+                                {/if}
+
+                                {#if parameters.recordingsStorage.kind !== 'Disk'}
                                     <AsyncButton
                                         type="button"
                                         color="secondary"
