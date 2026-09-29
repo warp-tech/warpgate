@@ -10,4 +10,9 @@ pub enum AzureError {
     /// on commit, so the recording that outgrew the limit is named.
     #[error("recording {key} exceeds the {limit} block limit for one blob")]
     TooManyBlocks { key: String, limit: usize },
+    /// The requested range starts at or past the end of the blob. Distinct from
+    /// a transport failure because it answers HTTP 416 rather than 500, which
+    /// is how a player learns it has reached the end of a recording.
+    #[error("requested range is past the end of a {total} byte recording")]
+    RangeNotSatisfiable { total: u64 },
 }
