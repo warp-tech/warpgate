@@ -27,4 +27,6 @@ futures.workspace = true
 warpgate-common = { path = "../warpgate-common", default-features = false }
 
 [dev-dependencies]
+reqwest.workspace = true
 serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
