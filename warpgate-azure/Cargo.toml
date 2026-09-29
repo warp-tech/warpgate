@@ -6,11 +6,15 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
-azure_core = { version = "1.1", default-features = false }
-azure_identity = { version = "1.0", default-features = false }
-azure_storage_blob = { version = "1.1", default-features = false }
-azure_storage_common = { version = "1.0", default-features = false }
-azure_storage_sas = { version = "1.0", default-features = false }
+# Default features carry the reqwest-backed HTTP client. Turning them off still
+# compiles, and then panics on the first request with "the reqwest feature is
+# required to use the default HTTP client" -- a runtime failure on a tokio
+# worker, reachable from the admin UI's Test connection button.
+azure_core = "1.1"
+azure_identity = "1.0"
+azure_storage_blob = "1.1"
+azure_storage_common = "1.0"
+azure_storage_sas = "1.0"
 time.workspace = true
 http.workspace = true
 poem-openapi.workspace = true
