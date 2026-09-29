@@ -206,6 +206,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/EdMcBane"><img src="https://avatars.githubusercontent.com/u/8511142?v=4?s=100" width="100px;" alt="Francesco Degrassi"/><br /><sub><b>Francesco Degrassi</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=EdMcBane" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="http://betterspace.top"><img src="https://avatars.githubusercontent.com/u/141388234?v=4?s=100" width="100px;" alt="Yuzhong Zhang"/><br /><sub><b>Yuzhong Zhang</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=BetterAndBetterII" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://fergusean.com"><img src="https://avatars.githubusercontent.com/u/1029297?v=4?s=100" width="100px;" alt="Sean Ferguson"/><br /><sub><b>Sean Ferguson</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=fergusean" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/sthalbert"><img src="https://avatars.githubusercontent.com/u/79840652?v=4?s=100" width="100px;" alt="Steve ALBERT"/><br /><sub><b>Steve ALBERT</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=sthalbert" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>
