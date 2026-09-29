@@ -1,15 +1,21 @@
 use std::sync::Arc;
 
-use azure_core::{credentials::TokenCredential, http::RequestContent};
-use futures::TryStreamExt;
-use azure_identity::{DeveloperToolsCredential, ManagedIdentityCredential,
-                     ManagedIdentityCredentialOptions, UserAssignedId};
+use azure_core::{
+    credentials::{Secret, TokenCredential},
+    http::RequestContent,
+};
+use azure_identity::{
+    ClientSecretCredential, DeveloperToolsCredential, ManagedIdentityCredential,
+    ManagedIdentityCredentialOptions, UserAssignedId, WorkloadIdentityCredential,
+};
 use azure_storage_blob::{
     BlobContainerClient, BlobServiceClient, BlockBlobClient, models::BlockLookupList,
 };
+use futures::TryStreamExt;
 use poem_openapi::{Object, Union};
 use serde::{Deserialize, Serialize};
 use tracing::error;
+use warpgate_common::StoredSecret;
 
 use crate::AzureError;
 
@@ -36,15 +42,28 @@ const MAX_BLOCKS: usize = 50_000;
 
 /// How a client authenticates to Azure Storage.
 ///
-/// Entra ID is the only mechanism on offer: `azure_storage_blob` 1.x accepts an
-/// `Option<Arc<dyn TokenCredential>>` and ships no shared-key credential, so
-/// account-key and connection-string auth cannot be expressed here at all.
+/// Every mode is Entra ID, because that is all the SDK has: `azure_storage_blob`
+/// 1.x accepts an `Option<Arc<dyn TokenCredential>>` and ships no shared-key
+/// credential, so a storage-account key cannot be used to authenticate here.
+/// `ServicePrincipal` is the way to hand Warpgate explicit credentials.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Union)]
 #[serde(tag = "mode")]
 #[oai(discriminator_name = "mode", one_of)]
 pub enum AzureCredentials {
-    /// Managed identity — how a deployed Warpgate authenticates.
+    /// Managed identity — how a Warpgate on a VM or App Service authenticates.
     ManagedIdentity(ManagedIdentityCredentials),
+    /// Federated workload identity, configured entirely by environment:
+    /// `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_FEDERATED_TOKEN_FILE`.
+    /// This is how a Warpgate pod on AKS authenticates.
+    WorkloadIdentity(WorkloadIdentityCredentials),
+    /// An explicit service principal — tenant, client and secret supplied here.
+    ///
+    /// The fallback for a Warpgate that cannot use an identity assigned to it,
+    /// and the only mode that works from outside Azure. It is also the only one
+    /// that puts a long-lived secret in the database, which is precisely what
+    /// the identity-based modes above exist to avoid; prefer them where the
+    /// host can provide an identity.
+    ServicePrincipal(ServicePrincipalCredentials),
     /// Azure CLI / azd sign-in — for running Warpgate on a workstation.
     DeveloperTools(DeveloperToolsCredentials),
 }
@@ -56,19 +75,59 @@ pub struct ManagedIdentityCredentials {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Object, Default)]
+pub struct WorkloadIdentityCredentials {}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Object)]
+pub struct ServicePrincipalCredentials {
+    /// Directory (tenant) ID.
+    pub tenant_id: String,
+    /// Application (client) ID.
+    pub client_id: String,
+    /// Blank in responses; blank in an update keeps the stored secret.
+    pub client_secret: StoredSecret,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Object, Default)]
 pub struct DeveloperToolsCredentials {}
 
 impl AzureCredentials {
     fn build(&self) -> Result<Arc<dyn TokenCredential>, AzureError> {
         match self {
             Self::ManagedIdentity(mi) => {
-                let options = mi.client_id.as_ref().map(|id| ManagedIdentityCredentialOptions {
-                    user_assigned_id: Some(UserAssignedId::ClientId(id.clone())),
-                    ..Default::default()
-                });
+                let options = mi
+                    .client_id
+                    .as_ref()
+                    .map(|id| ManagedIdentityCredentialOptions {
+                        user_assigned_id: Some(UserAssignedId::ClientId(id.clone())),
+                        ..Default::default()
+                    });
                 Ok(ManagedIdentityCredential::new(options)?)
             }
+            Self::WorkloadIdentity(_) => Ok(WorkloadIdentityCredential::new(None)?),
+            Self::ServicePrincipal(sp) => {
+                let secret = sp
+                    .client_secret
+                    .reveal()
+                    .map_err(|e| AzureError::Config(format!("client secret: {e}")))?;
+                Ok(ClientSecretCredential::new(
+                    &sp.tenant_id,
+                    sp.client_id.clone(),
+                    Secret::new(secret.expose_secret().clone()),
+                    None,
+                )?)
+            }
             Self::DeveloperTools(_) => Ok(DeveloperToolsCredential::new(None)?),
+        }
+    }
+
+    /// Whether this mode carries a secret Warpgate has to store.
+    ///
+    /// The other three resolve their credential from the environment, so there
+    /// is nothing to redact on the way out or refill on the way back in.
+    pub const fn stored_secret(&self) -> Option<&StoredSecret> {
+        match self {
+            Self::ServicePrincipal(sp) => Some(&sp.client_secret),
+            _ => None,
         }
     }
 }
@@ -324,6 +383,48 @@ mod tests {
     fn block_id_width_covers_the_block_limit() {
         assert!(BLOCK_ID_WIDTH >= MAX_BLOCKS.to_string().len());
         assert_eq!(block_id(MAX_BLOCKS - 1).len(), block_id(0).len());
+    }
+
+    /// Only the service principal carries something Warpgate stores. The other
+    /// three resolve from the environment, so the admin API has nothing to
+    /// redact on the way out or refill on the way back in.
+    #[test]
+    fn only_the_service_principal_carries_a_stored_secret() {
+        assert!(
+            AzureCredentials::ManagedIdentity(ManagedIdentityCredentials::default())
+                .stored_secret()
+                .is_none()
+        );
+        assert!(
+            AzureCredentials::WorkloadIdentity(WorkloadIdentityCredentials {})
+                .stored_secret()
+                .is_none()
+        );
+        assert!(
+            AzureCredentials::DeveloperTools(DeveloperToolsCredentials {})
+                .stored_secret()
+                .is_none()
+        );
+        assert!(
+            AzureCredentials::ServicePrincipal(ServicePrincipalCredentials {
+                tenant_id: "t".into(),
+                client_id: "c".into(),
+                client_secret: "s".to_owned().into(),
+            })
+            .stored_secret()
+            .is_some()
+        );
+    }
+
+    /// The discriminator is what the stored JSON and the admin API agree on, so
+    /// a renamed variant silently orphans every existing configuration.
+    #[test]
+    fn credential_modes_serialise_under_their_discriminator() {
+        let json = serde_json::to_string(&AzureCredentials::WorkloadIdentity(
+            WorkloadIdentityCredentials {},
+        ))
+        .unwrap();
+        assert!(json.contains(r#""mode":"WorkloadIdentity""#), "{json}");
     }
 
     #[test]

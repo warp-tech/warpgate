@@ -17,3 +17,7 @@ tracing.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 futures.workspace = true
+warpgate-common = { path = "../warpgate-common", default-features = false }
+
+[dev-dependencies]
+serde_json.workspace = true

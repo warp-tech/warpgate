@@ -9414,10 +9414,12 @@ dependencies = [
  "http 1.5.0",
  "poem-openapi",
  "serde",
+ "serde_json",
  "thiserror 2.0.20",
  "tokio",
  "tokio-util",
  "tracing",
+ "warpgate-common",
 ]
 
 [[package]]
