@@ -7,6 +7,7 @@ use sea_orm::{EntityTrait, IntoActiveModel, Set};
 use serde::Serialize;
 use serde_json::Value;
 use warpgate_aws::{S3Credentials, S3Storage};
+use warpgate_azure::AzureBlobStorage;
 use warpgate_common::{
     AdminPermission, PasswordPolicy, UserRequireCredentialsPolicy, WarpgateError,
 };
@@ -429,6 +430,10 @@ impl Api {
 
         let error = match config {
             RecordingsStorageConfig::S3(s3) => match S3Storage::new(&s3).await {
+                Ok(storage) => storage.test().await.err().map(|e| e.to_string()),
+                Err(e) => Some(e.to_string()),
+            },
+            RecordingsStorageConfig::Azure(azure) => match AzureBlobStorage::new(&azure).await {
                 Ok(storage) => storage.test().await.err().map(|e| e.to_string()),
                 Err(e) => Some(e.to_string()),
             },

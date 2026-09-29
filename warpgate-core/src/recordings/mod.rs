@@ -98,6 +98,9 @@ pub enum Error {
 
     #[error("Storage backend: {0}")]
     Aws(#[from] warpgate_aws::AwsError),
+
+    #[error(transparent)]
+    Azure(#[from] warpgate_azure::AzureError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

@@ -32,6 +32,7 @@ tokio-tungstenite.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 warpgate-aws = { path = "../warpgate-aws" }
+warpgate-azure = { path = "../warpgate-azure" }
 warpgate-ca = { path = "../warpgate-ca" }
 warpgate-common = { path = "../warpgate-common" }
 warpgate-common-http = { path = "../warpgate-common-http" }

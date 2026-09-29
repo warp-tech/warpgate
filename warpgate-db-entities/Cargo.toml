@@ -17,6 +17,7 @@ time.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 warpgate-aws = { path = "../warpgate-aws" }
+warpgate-azure = { path = "../warpgate-azure" }
 warpgate-common = { path = "../warpgate-common", default-features = false }
 warpgate-ldap = { path = "../warpgate-ldap", default-features = false }
 warpgate-tls = { path = "../warpgate-tls", default-features = false }
