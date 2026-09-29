@@ -1015,6 +1015,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "azure_identity"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32edf96b356ca7c51d7590c4925cc36efc3947a5da4468e8e0b25c56ecbb3de5"
+dependencies = [
+ "async-lock",
+ "async-trait",
+ "azure_core",
+ "futures",
+ "pin-project",
+ "serde",
+ "serde_json",
+ "time",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "azure_storage_blob"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9390,11 +9408,16 @@ name = "warpgate-azure"
 version = "0.28.5"
 dependencies = [
  "azure_core",
+ "azure_identity",
  "azure_storage_blob",
+ "futures",
  "http 1.5.0",
  "poem-openapi",
  "serde",
  "thiserror 2.0.20",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]

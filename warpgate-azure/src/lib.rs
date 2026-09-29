@@ -2,6 +2,7 @@ mod blob;
 mod error;
 
 pub use blob::{
-    AutoCredentials, AzureBlobConfig, AzureBlobStorage, AzureBlockUpload, AzureCredentials,
+    AzureBlobConfig, AzureBlobStorage, AzureBlockUpload, AzureCredentials,
+    DeveloperToolsCredentials, ManagedIdentityCredentials,
 };
 pub use error::AzureError;
