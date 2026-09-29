@@ -26,10 +26,10 @@ use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
 use crate::audit::{StreamOperation, classify_mutating, classify_stream};
 use crate::correlator::{AdmittedSession, RequestCorrelator, correlated_authorization};
 use crate::recording::{start_recording_api, start_recording_exec};
+use crate::server::UpstreamClientCache;
 use crate::server::auth::{
     KubernetesIdentity, authenticate_kubernetes_user, create_authenticated_client,
 };
-use crate::server::client_cache::UpstreamClientCache;
 
 /// A client-supplied impersonation header (`Impersonate-User`,
 /// `Impersonate-Group`, `Impersonate-Uid`, `Impersonate-Extra-*`). These let a
@@ -105,7 +105,7 @@ pub async fn handle_api_request(
     req: &Request,
     body: Body,
     correlator: Data<&Arc<Mutex<RequestCorrelator>>>,
-    upstream_clients: Data<&Arc<UpstreamClientCache>>,
+    upstream_clients: Data<&UpstreamClientCache>,
     ctx: Data<&UnauthenticatedRequestContext>,
 ) -> Result<Response, poem::Error> {
     debug!(
@@ -238,12 +238,11 @@ async fn _handle_normal_request_inner(
     audit_subject: &KubernetesAuditSubject,
     services: &Services,
 ) -> Result<Response, WarpgateError> {
-    let user_info = admitted.user_info();
     let k8s_options = admitted.options();
     let target_id = admitted.target().id;
     let client = upstream_clients
-        .get_or_build(target_id, k8s_options, || async {
-            create_authenticated_client(k8s_options, Some(&user_info.username), services)
+        .get_or_build(&target_id, k8s_options, || async {
+            create_authenticated_client(k8s_options, services)
                 .await?
                 .build()
                 .context("building reqwest client")
@@ -370,7 +369,7 @@ async fn _handle_normal_request_inner(
     // The cached client's credential may have been rotated or expired upstream;
     // build a fresh one for the next request.
     if status == http::StatusCode::UNAUTHORIZED {
-        upstream_clients.evict(target_id);
+        upstream_clients.remove(&target_id);
     }
 
     // Emitted after the response so a refused `kubectl debug` is audited as
@@ -508,7 +507,6 @@ async fn _handle_websocket_request_inner(
     audit_subject: &KubernetesAuditSubject,
     services: &Services,
 ) -> anyhow::Result<impl IntoResponse> {
-    let user_info = admitted.user_info();
     let k8s_options = admitted.options();
     let mut full_url = construct_target_url(req, api_path, k8s_options)?;
     if full_url.scheme() == "https" {
@@ -517,7 +515,7 @@ async fn _handle_websocket_request_inner(
         let _ = full_url.set_scheme("ws");
     }
 
-    let client = create_authenticated_client(k8s_options, Some(&user_info.username), services)
+    let client = create_authenticated_client(k8s_options, services)
         .await?
         .http1_only()
         .build()?;

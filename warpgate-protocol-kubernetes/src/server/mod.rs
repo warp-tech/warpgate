@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use futures::FutureExt;
@@ -7,24 +8,29 @@ use poem::listener::Listener;
 use poem::{EndpointExt, Route, Server};
 use rustls::ServerConfig;
 use tracing::info;
-use warpgate_common::ListenEndpoint;
 use warpgate_common::helpers::proxy_protocol::MaybeProxyProtocolAcceptor;
+use warpgate_common::{ListenEndpoint, TargetKubernetesOptions};
+use warpgate_common_http::ClientCache;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_core::Services;
 use warpgate_tls::{SingleCertResolver, TlsCertificateAndPrivateKey};
 
 use crate::correlator::RequestCorrelator;
-use crate::server::client_cache::UpstreamClientCache;
 use crate::server::client_certs::{AcceptAnyClientCert, certificate_capturing_acceptor};
 use crate::server::handlers::handle_api_request;
 
 pub mod auth;
-mod client_cache;
 mod client_certs;
 mod handlers;
 
 use client_certs::CertificateExtractorMiddleware;
 use warpgate_common_http::errors::render_errors;
+
+/// Cached client reuse time limit, itself limited by the credential lifetime (e.g. EKS token)
+const UPSTREAM_CLIENT_MAX_AGE: Duration = Duration::from_mins(5);
+
+/// Key = target ID
+type UpstreamClientCache = ClientCache<uuid::Uuid, TargetKubernetesOptions, reqwest::Client>;
 
 pub async fn bind_server(
     services: Services,
@@ -33,6 +39,7 @@ pub async fn bind_server(
     tls: Vec<TlsCertificateAndPrivateKey>,
 ) -> Result<BoxFuture<'static, Result<()>>> {
     let correlator = RequestCorrelator::new(&services);
+    let upstream_clients = UpstreamClientCache::new(UPSTREAM_CLIENT_MAX_AGE);
 
     let app = Route::new()
         .at("/", handle_api_request)
@@ -41,7 +48,7 @@ pub async fn bind_server(
         .with(CertificateExtractorMiddleware)
         .data(UnauthenticatedRequestContext::new(services.clone()).await)
         .data(correlator)
-        .data(Arc::new(UpstreamClientCache::default()))
+        .data(upstream_clients)
         .around(render_errors);
 
     info!(?address, "Kubernetes protocol listening");
