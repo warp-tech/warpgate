@@ -441,7 +441,6 @@ async fn user_for_username(services: &Services, username: &str) -> poem::Result<
 
 pub async fn create_authenticated_client(
     k8s_options: &TargetKubernetesOptions,
-    _auth_user: Option<&String>,
     services: &Services,
 ) -> anyhow::Result<reqwest::ClientBuilder> {
     debug!(
