@@ -1063,6 +1063,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "azure_storage_sas"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18f889297f05be1a9afa0d907007c8b02d048514fa940ba3b704c95c0793c7dc"
+dependencies = [
+ "azure_core",
+ "azure_storage_common",
+ "base64 0.22.1",
+ "hmac 0.12.1",
+ "percent-encoding",
+ "sha2 0.10.9",
+ "time",
+]
+
+[[package]]
 name = "base16ct"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9410,12 +9425,15 @@ dependencies = [
  "azure_core",
  "azure_identity",
  "azure_storage_blob",
+ "azure_storage_common",
+ "azure_storage_sas",
  "futures",
  "http 1.5.0",
  "poem-openapi",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
+ "time",
  "tokio",
  "tokio-util",
  "tracing",

@@ -1,19 +1,24 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use azure_core::{
     credentials::{Secret, TokenCredential},
     http::RequestContent,
+    time::OffsetDateTime,
 };
 use azure_identity::{
     ClientSecretCredential, DeveloperToolsCredential, ManagedIdentityCredential,
     ManagedIdentityCredentialOptions, UserAssignedId, WorkloadIdentityCredential,
 };
 use azure_storage_blob::{
-    BlobContainerClient, BlobServiceClient, BlockBlobClient, models::BlockLookupList,
+    BlobContainerClient, BlobServiceClient, BlockBlobClient,
+    models::{BlockLookupList, KeyInfo},
 };
+use azure_storage_common::models::UserDelegationKey;
+use azure_storage_sas::SasBuilder;
 use futures::TryStreamExt;
 use poem_openapi::{Object, Union};
 use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
 use tracing::error;
 use warpgate_common::StoredSecret;
 
@@ -161,14 +166,37 @@ impl AzureBlobConfig {
     }
 }
 
+/// How long a fetched user-delegation key is requested for.
+///
+/// Seven days is Azure's maximum. The key is only the signing material — each
+/// SAS minted from it carries its own, much shorter expiry.
+const DELEGATION_KEY_TTL: time::Duration = time::Duration::days(7);
+
+/// How long before expiry a cached delegation key is replaced, so a SAS is
+/// never signed with a key that lapses mid-playback.
+const DELEGATION_KEY_MARGIN: time::Duration = time::Duration::hours(1);
+
+/// A user-delegation key together with the moment it stops being usable.
+struct CachedDelegationKey {
+    key: UserDelegationKey,
+    expires: OffsetDateTime,
+}
+
 /// A configured blob client scoped to one container + prefix.
 ///
 /// `BlobContainerClient` is not `Clone`, so it is held behind an `Arc` to keep
 /// this type as cheap to clone as `S3Storage`.
 #[derive(Clone)]
 pub struct AzureBlobStorage {
+    service: Arc<BlobServiceClient>,
     container: Arc<BlobContainerClient>,
+    /// Needed verbatim when signing a SAS; the service URL is not a substitute
+    /// because a custom endpoint does not carry the account name.
+    account: String,
+    container_name: String,
     prefix: String,
+    /// Shared across clones so one fetch serves every session on this node.
+    delegation_key: Arc<RwLock<Option<CachedDelegationKey>>>,
 }
 
 impl AzureBlobStorage {
@@ -179,10 +207,15 @@ impl AzureBlobStorage {
             .map_err(|e| AzureError::Config(format!("invalid service URL: {e}")))?;
 
         let service = BlobServiceClient::new(url, Some(config.credentials.build()?), None)?;
+        let container = service.blob_container_client(&config.container);
 
         Ok(Self {
-            container: Arc::new(service.blob_container_client(&config.container)),
+            service: Arc::new(service),
+            container: Arc::new(container),
+            account: config.account.clone(),
+            container_name: config.container.clone(),
             prefix: config.prefix.clone(),
+            delegation_key: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -235,6 +268,73 @@ impl AzureBlobStorage {
             .body
             .map_err(|e| std::io::Error::other(e.to_string()));
         Ok(Box::new(tokio_util::io::StreamReader::new(stream)))
+    }
+
+    /// A user-delegation key, fetched on first use and reused until it nears
+    /// expiry.
+    ///
+    /// Signing needs a key the service issues, so without caching every
+    /// recording playback would pay a round trip before the redirect. The
+    /// double-check under the write lock keeps a burst of concurrent playbacks
+    /// to a single fetch.
+    async fn delegation_key(&self) -> Result<UserDelegationKey, AzureError> {
+        let usable_until = OffsetDateTime::now_utc() + DELEGATION_KEY_MARGIN;
+
+        if let Some(cached) = self.delegation_key.read().await.as_ref()
+            && cached.expires > usable_until
+        {
+            return Ok(cached.key.clone());
+        }
+
+        let mut guard = self.delegation_key.write().await;
+        if let Some(cached) = guard.as_ref()
+            && cached.expires > usable_until
+        {
+            return Ok(cached.key.clone());
+        }
+
+        let start = OffsetDateTime::now_utc();
+        let expiry = start + DELEGATION_KEY_TTL;
+        let info = KeyInfo {
+            start: Some(start),
+            expiry: Some(expiry),
+            ..Default::default()
+        };
+        let key = self
+            .service
+            .get_user_delegation_key(info.try_into()?, None)
+            .await?
+            .into_model()?;
+
+        *guard = Some(CachedDelegationKey {
+            key: key.clone(),
+            expires: expiry,
+        });
+        Ok(key)
+    }
+
+    /// A read-only SAS URL the browser can fetch directly.
+    ///
+    /// The Azure counterpart of `S3Storage::presign_get`, and used the same way:
+    /// the admin API redirects to it rather than proxying the recording.
+    pub async fn sas_url(&self, path: &str, ttl: Duration) -> Result<String, AzureError> {
+        let ttl = time::Duration::try_from(ttl)
+            .map_err(|e| AzureError::Config(format!("invalid SAS lifetime: {e}")))?;
+        let key = self.delegation_key().await?;
+        let blob_name = self.blob_name(path);
+
+        let token = SasBuilder::new(
+            self.account.as_str(),
+            &key,
+            OffsetDateTime::now_utc() + ttl,
+        )?
+        .blob(&self.container_name, &blob_name)
+        .read()
+        .build();
+
+        let mut url = self.container.blob_client(&blob_name).url().clone();
+        url.set_query(Some(&token));
+        Ok(url.into())
     }
 
     pub fn start_upload(&self, path: &str) -> AzureBlockUpload {
@@ -425,6 +525,31 @@ mod tests {
         ))
         .unwrap();
         assert!(json.contains(r#""mode":"WorkloadIdentity""#), "{json}");
+    }
+
+    /// A key is replaced before it expires, not as it expires. Signing with a
+    /// key that lapses moments later would mint a SAS the service rejects part
+    /// way through a playback.
+    #[test]
+    fn a_key_is_refreshed_before_it_expires() {
+        let now = OffsetDateTime::now_utc();
+        let usable_until = now + DELEGATION_KEY_MARGIN;
+
+        let expiring_inside_the_margin = now + DELEGATION_KEY_MARGIN / 2;
+        assert!(
+            expiring_inside_the_margin <= usable_until,
+            "a key inside the margin must be treated as stale"
+        );
+
+        let fresh = now + DELEGATION_KEY_TTL;
+        assert!(fresh > usable_until, "a newly fetched key must be usable");
+    }
+
+    /// Azure caps a delegation key at seven days; asking for more is refused.
+    #[test]
+    fn the_key_lifetime_is_within_what_azure_allows() {
+        assert!(DELEGATION_KEY_TTL <= time::Duration::days(7));
+        assert!(DELEGATION_KEY_MARGIN < DELEGATION_KEY_TTL);
     }
 
     #[test]

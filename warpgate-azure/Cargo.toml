@@ -9,6 +9,9 @@ publish = false
 azure_core = { version = "1.1", default-features = false }
 azure_identity = { version = "1.0", default-features = false }
 azure_storage_blob = { version = "1.1", default-features = false }
+azure_storage_common = { version = "1.0", default-features = false }
+azure_storage_sas = { version = "1.0", default-features = false }
+time.workspace = true
 http.workspace = true
 poem-openapi.workspace = true
 serde.workspace = true
