@@ -18,7 +18,8 @@ use tracing::error;
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_core::recordings::{LiveChunk, RecordingFile};
+use warpgate_azure::AzureError;
+use warpgate_core::recordings::{Error as RecordingsError, LiveChunk, RecordingFile};
 use warpgate_db_entities::Recording::{self, RecordingKind};
 use warpgate_db_entities::TargetSession;
 
@@ -190,25 +191,26 @@ async fn stream_recording_file(
     let requested = range.and_then(parse_byte_range);
     let start = requested.map_or(0, |(start, _)| start);
 
-    let read = access
-        .open_read_from(start)
-        .await
-        .map_err(InternalServerError)?
-        .ok_or_else(|| {
-            InternalServerError(std::io::Error::other(
-                "recording file access has neither an external URL nor a local path",
-            ))
-        })?;
-
     // A range starting at or past the end is unsatisfiable, and the player
-    // depends on the 416 to know it has reached the end of the recording.
-    if requested.is_some() && start >= read.total && read.total > 0 {
-        return Ok(poem::Response::builder()
-            .status(poem::http::StatusCode::RANGE_NOT_SATISFIABLE)
-            .header("content-range", format!("bytes */{}", read.total))
-            .header("accept-ranges", "bytes")
-            .finish());
+    // depends on the 416 to know it has reached the end of the recording. The
+    // backend reports it rather than the caller pre-checking, because finding
+    // out costs a round trip either way and only the backend knows for certain.
+    let read = match access.open_read_from(start).await {
+        Ok(read) => read,
+        Err(RecordingsError::Azure(AzureError::RangeNotSatisfiable { total })) => {
+            return Ok(poem::Response::builder()
+                .status(poem::http::StatusCode::RANGE_NOT_SATISFIABLE)
+                .header("content-range", format!("bytes */{total}"))
+                .header("accept-ranges", "bytes")
+                .finish());
+        }
+        Err(e) => return Err(InternalServerError(e)),
     }
+    .ok_or_else(|| {
+        InternalServerError(std::io::Error::other(
+            "recording file access has neither an external URL nor a local path",
+        ))
+    })?;
 
     let Some((_, end)) = requested else {
         return Ok(poem::Response::builder()

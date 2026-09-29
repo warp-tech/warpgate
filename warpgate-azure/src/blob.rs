@@ -319,6 +319,11 @@ impl AzureBlobStorage {
     /// The size comes from the response rather than a second `get_properties`
     /// call: for a range starting at `offset`, the returned content length is
     /// what remains, so the total is the two added together.
+    ///
+    /// An offset at or past the end is [`AzureError::RangeNotSatisfiable`]
+    /// rather than a transport failure, because the players seek by asking for
+    /// a range they cannot know is out of bounds and read the refusal as the
+    /// end of the recording.
     pub async fn get_reader_from(
         &self,
         path: &str,
@@ -328,11 +333,22 @@ impl AzureBlobStorage {
             range: Some((offset..).into()),
             ..Default::default()
         };
-        let response = self
+        let response = match self
             .container
             .blob_client(&self.blob_name(path))
             .download(Some(options))
-            .await?;
+            .await
+        {
+            Ok(response) => response,
+            Err(e) if is_range_not_satisfiable(&e) => {
+                // The size is worth a second call here: this is once per
+                // playback, at the end, and the 416 needs the total to report.
+                return Err(AzureError::RangeNotSatisfiable {
+                    total: self.len(path).await?,
+                });
+            }
+            Err(e) => return Err(e.into()),
+        };
 
         let len = response.properties.content_length.unwrap_or(0);
         let stream = response
@@ -499,6 +515,15 @@ impl AzureBlockUpload {
             .inspect_err(|error| error!(%error, key = %self.key, "Failed to commit recording blocks"))?;
         Ok(())
     }
+}
+
+/// Whether the service refused a range as unsatisfiable (HTTP 416).
+fn is_range_not_satisfiable(error: &azure_core::Error) -> bool {
+    matches!(
+        error.kind(),
+        azure_core::error::ErrorKind::HttpResponse { status, .. }
+            if *status == azure_core::http::StatusCode::RequestedRangeNotSatisfiable
+    )
 }
 
 /// A fixed-width block ID.
