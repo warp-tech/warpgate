@@ -1904,3 +1904,59 @@ All three came from reviewing against populated mockups. Worth adopting the
 brief's recommendation: once a seed script exists, walk every migrated screen
 at zero, one and realistic volumes. Zero is covered by the Phase 2 empty
 states. One is the gap.
+
+## Upstream v0.29.1, three screens, and the compose rename
+
+### The sync took a feature this fork cannot yet draw
+
+Upstream #2185 adds Vault / OpenBao secret references — a target password or an
+SSH client key can be `secret://backend/path#key`, resolved at use time. The
+backend merged intact; its three UI components are sveltestrap and did not.
+Recorded as UPSTREAM-ISSUES #9 with the exact cost and the route back in.
+
+The deciding factor was not the line count. It is credential-handling code,
+the generated admin client could not be regenerated on this machine — no Java
+for `openapi-generator-cli`, no Rust for the schema step — so none of a port
+could have been type-checked. A half-ported credential path is worse than an
+absent one.
+
+Worth noting for future syncs: the generated clients are gitignored and rebuilt
+by `just openapi` during the Docker build, so a stale local client never ships.
+It only blocks local verification, which is exactly what it did here.
+
+### The roles matrix: two opposite bug reports
+
+The sparse-data pass made the scroll container hug its table, because one role
+and one target had drawn a page-wide bordered box around a single checkbox.
+This pass asked for the opposite — that the table span the container, because
+four roles bunched into 6rem columns against the left edge of an empty page.
+
+Both reports are correct. They are different data volumes, so they get
+different rules rather than one compromise that suits neither: the table is
+`width: 100%` and the target column takes a 28% share, except when the existing
+`sparse` flag is set, where the container hugs as before. Swapping one rule for
+the other would have moved the bug rather than fixed it.
+
+### Approval requests: the alignment was a structural difference
+
+Approve and Reject did not line up between the two kinds of request because
+the branches were not the same shape — a session wrapped its buttons in an
+extra flex div, a ticket used `ms-auto` — and both leaned on the Bootstrap
+compat bridge. Now one `icon | body | actions` grid serves both.
+
+`min-width: 0` on the body is the load-bearing line: a grid item defaults to
+min-content width, so without it a long target name refuses to shrink and
+shoves the buttons off the right edge instead of ellipsing.
+
+### compose.yaml -> docker-compose.yml
+
+Renamed as asked. `docker compose up` is unaffected: Compose auto-discovers
+`compose.yaml`, `compose.yml`, `docker-compose.yaml` and `docker-compose.yml`
+alike, and `docker compose config` was run afterwards to confirm it still
+resolves with no `-f`.
+
+References updated in `.env.example`, `docker/Dockerfile` and
+`docker/docker-compose.dev.yml`. `docker/local-testing/README.md` also says
+"docker-compose.yml" but means its own file in that folder, so it was left
+alone. The entries above in this log still say `compose.yaml` where they
+describe what was done at the time, which is what a decision log is for.

@@ -258,8 +258,8 @@
         </p>
     {/if}
 
-    <div class="matrix-scroll">
-        <table class="matrix">
+    <div class="matrix-scroll" class:matrix-scroll-sparse={sparse}>
+        <table class="matrix" class:matrix-sparse={sparse}>
             <caption class="sr-only">
                 Targets by role. Each cell grants or revokes one role's access
                 to one target.
@@ -365,14 +365,16 @@
         max-height: 70vh;
         border: var(--wg-border-width) solid var(--wg-border);
         border-radius: var(--wg-radius-panel);
-        /*
-         * Hug the table. As a plain block this stretched to the full content
-         * width whatever was inside it, so one role and one target drew a
-         * page-wide bordered box around a single checkbox — which is what made
-         * the sparse case look like a rendering fault rather than a small
-         * table. fit-content keeps the border tight to the content; the
-         * max-width keeps the dense case scrolling rather than overflowing.
-         */
+    }
+
+    /*
+     * Sparse only. A plain block stretches to the full content width whatever
+     * is inside it, so one role and one target drew a page-wide bordered box
+     * around a single checkbox. Hugging is right THERE and wrong everywhere
+     * else, where it leaves the columns bunched at the left of an empty page —
+     * hence the flag rather than a single rule for both.
+     */
+    .matrix-scroll-sparse {
         width: fit-content;
         max-width: 100%;
     }
@@ -381,6 +383,20 @@
         border-collapse: separate;
         border-spacing: 0;
         font: var(--wg-text-body-md);
+        /*
+         * Fill the container. Left to size itself the table takes only what
+         * its content needs, so four roles sat in four 6rem columns bunched
+         * against the left edge with the rest of the page blank. At 100% the
+         * role columns divide the leftover width between them and the header
+         * labels stop being squeezed into their min-width.
+         */
+        width: 100%;
+    }
+
+    /* Sparse: let it size to content, so a 1x1 grid is a small table rather
+       than one checkbox stretched across the viewport. */
+    .matrix-sparse {
+        width: auto;
     }
 
     .matrix th,
@@ -396,10 +412,18 @@
         top: 0;
         z-index: 2;
         background: var(--wg-surface-container);
+        /*
+         * Centred, because every cell under a role column is a centred
+         * checkbox and a left-aligned label over a centred control reads as a
+         * misalignment. The corner overrides this back to left, since the
+         * column under IT is text.
+         */
         text-align: center;
         white-space: nowrap;
         font: var(--wg-text-label-md);
         color: var(--wg-text-muted);
+        /* Role headers carry a name over a count, so they are two lines;
+           bottom alignment keeps every label on the same baseline. */
         vertical-align: bottom;
         padding-bottom: var(--wg-space-xs);
     }
@@ -437,6 +461,18 @@
     .cell {
         text-align: center;
         min-width: 6rem;
+    }
+
+    /*
+     * The target name column is the one with real text in it, so it takes a
+     * fixed share and the role columns divide what is left. Without this the
+     * browser hands the extra width to whichever column has the longest single
+     * word, which is usually a target name and makes the checkbox columns look
+     * squeezed next to it.
+     */
+    .matrix:not(.matrix-sparse) .corner,
+    .matrix:not(.matrix-sparse) .target-col {
+        width: 28%;
     }
 
     /* Centres the checkbox, which is an inline-flex label */

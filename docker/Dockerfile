@@ -30,7 +30,7 @@ WORKDIR /opt/warpgate
 # features, same stripping.
 #
 # `--profile release` is what `--release` expands to, so the default leaves CI
-# and the published image byte-identical. compose.yaml opts into the other one.
+# and the published image byte-identical. docker-compose.yml opts into the other one.
 #
 # cargo names the output directory after the profile, so the binary is copied
 # to a fixed path and the runtime stage copies from there.

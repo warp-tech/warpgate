@@ -1,11 +1,11 @@
 # Review environment: run Warpgate from source with no host toolchain.
 #
 # For just RUNNING Warpgate, use `docker compose up` from the repository root;
-# compose.yaml there builds a release image and needs no arguments. This file
+# docker-compose.yml there builds a release image and needs no arguments. This file
 # is for the thing that is bad at: rebuilding the frontend over and over
 # without rebuilding an image.
 #
-# Stands alone — do not combine it with the root compose.yaml.
+# Stands alone — do not combine it with the root docker-compose.yml.
 #
 #   docker compose -f docker/docker-compose.dev.yml build       # once
 #   docker compose -f docker/docker-compose.dev.yml run --rm dev bootstrap

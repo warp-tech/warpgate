@@ -192,12 +192,14 @@
             <EmptyState title="Nothing right now" />
         {/if}
 
-        <div class="list-group list-group-flush">
+        <div class="request-list">
             {#each entries as entry (entry.key)}
-                <div class="list-group-item d-flex align-items-center gap-4">
+                <div class="request-row">
                     {#if entry.kind === 'session'}
-                        <Fa icon={faComputer} fw />
-                        <div>
+                        <span class="request-icon">
+                            <Fa icon={faComputer} fw />
+                        </span>
+                        <div class="request-body">
                             <div>
                                 <strong>{entry.session.username}</strong>
                                 <span class="text-muted">
@@ -214,7 +216,7 @@
                             </div>
                         </div>
 
-                        <div class="ms-auto d-flex align-items-center">
+                        <div class="request-actions">
                             <div class="btn-row">
                                 {#if entry.session.cachingGraceSeconds}
                                     <Button
@@ -279,8 +281,10 @@
                             </div>
                         </div>
                     {:else}
-                        <Fa icon={faTicket} fw />
-                        <div>
+                        <span class="request-icon">
+                            <Fa icon={faTicket} fw />
+                        </span>
+                        <div class="request-body">
                             <div>
                                 <strong>
                                     {entry.ticket.username ?? entry.ticket.userId}
@@ -307,23 +311,25 @@
                             </div>
                         </div>
 
-                        <div class="btn-row ms-auto">
-                            <Button
-                                variant="primary"
-                                click={() => approveTicket(entry.ticket)}
-                            >
-                                Approve
-                            </Button>
-                            <Button
-                                variant="destructive"
-                                onclick={() => {
-                                    denyModalRequest = entry.ticket
-                                    denyReason = ''
-                                    denyError = undefined
-                                }}
-                            >
-                                Reject
-                            </Button>
+                        <div class="request-actions">
+                            <div class="btn-row">
+                                <Button
+                                    variant="primary"
+                                    click={() => approveTicket(entry.ticket)}
+                                >
+                                    Approve
+                                </Button>
+                                <Button
+                                    variant="destructive"
+                                    onclick={() => {
+                                        denyModalRequest = entry.ticket
+                                        denyReason = ''
+                                        denyError = undefined
+                                    }}
+                                >
+                                    Reject
+                                </Button>
+                            </div>
                         </div>
                     {/if}
                 </div>
@@ -375,6 +381,56 @@
 </Modal>
 
 <style>
+    .request-list {
+        display: flex;
+        flex-direction: column;
+    }
+
+    /*
+     * icon | body | actions. A grid rather than flex so the icon column is the
+     * same width on every row whatever glyph it holds, which is what keeps the
+     * usernames on one left edge.
+     */
+    .request-row {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: var(--wg-space-lg);
+        padding: var(--wg-space-md) 0;
+        border-bottom: var(--wg-border-width) solid var(--wg-border);
+    }
+
+    .request-row:last-child {
+        border-bottom: 0;
+    }
+
+    .request-icon {
+        display: flex;
+        align-items: center;
+        color: var(--wg-text-muted);
+    }
+
+    /*
+     * min-width: 0 is the load-bearing line. A grid item defaults to
+     * min-content width, so without it a long target name refuses to shrink
+     * and pushes the actions off the right edge instead of ellipsing.
+     */
+    .request-body {
+        min-width: 0;
+    }
+
+    /*
+     * Both branches end here, so Approve and Reject land in the same place
+     * whether the row is a session or a ticket. Previously a session wrapped
+     * them in an extra flex div and a ticket used ms-auto, and the two did not
+     * line up.
+     */
+    .request-actions {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+    }
+
     .btn-row {
         display: flex;
         align-items: center;

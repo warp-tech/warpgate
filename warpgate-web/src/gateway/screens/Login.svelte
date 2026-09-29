@@ -261,249 +261,293 @@
 
 <Loadable promise={initPromise}>
     <div class="login">
-        <h1>{atStart ? 'Welcome' : 'Continue signing in'}</h1>
+        <div class="login-card">
+            <h1>{atStart ? 'Welcome' : 'Continue signing in'}</h1>
 
-        {#if authState === ApiAuthState.OtpNeeded}
-            <form
-                class="otp-form"
-                onsubmit={e => {
+            {#if authState === ApiAuthState.OtpNeeded}
+                <form
+                    class="otp-form"
+                    onsubmit={e => {
                     e.preventDefault()
                     login()
                 }}
-            >
-                <div class="otp-field">
+                >
+                    <div class="otp-field">
+                        <Input
+                            label="One-time password"
+                            name="otp"
+                            required
+                            autofocus
+                            mono
+                            inputmode="numeric"
+                            pattern={OTP_PATTERN}
+                            autocomplete="one-time-code"
+                            disabled={busy}
+                            bind:value={otp}
+                            bind:inner={otpInput}
+                            hint="6 digits from your authenticator, or a recovery code."
+                        />
+                    </div>
+                    <Button variant="primary" type="submit" disabled={busy}>
+                        Continue
+                    </Button>
+                </form>
+            {/if}
+
+            {#if passwordFormVisible}
+                <form
+                    class="wg-field-stack"
+                    autocomplete="on"
+                    onsubmit={e => {
+                    e.preventDefault()
+                    login()
+                }}
+                >
                     <Input
-                        label="One-time password"
-                        name="otp"
+                        label="Username"
+                        name="username"
+                        autocomplete="username"
                         required
                         autofocus
-                        mono
-                        inputmode="numeric"
-                        pattern={OTP_PATTERN}
-                        autocomplete="one-time-code"
                         disabled={busy}
-                        bind:value={otp}
-                        bind:inner={otpInput}
-                        hint="6 digits from your authenticator, or a recovery code."
+                        bind:value={username}
                     />
+
+                    <Input
+                        label="Password"
+                        name="password"
+                        type="password"
+                        autocomplete="current-password"
+                        required
+                        disabled={busy}
+                        bind:value={password}
+                    />
+
+                    <Button
+                        variant="primary"
+                        type="submit"
+                        disabled={busy}
+                        block
+                    >
+                        Sign in
+                    </Button>
+                </form>
+            {/if}
+
+            {#if reauthRequired}
+                <div class="message">
+                    <Callout tone="warning" title="Sign in again to continue">
+                        The security policy requires you to sign in again before
+                        using this function.
+                    </Callout>
                 </div>
-                <Button variant="primary" type="submit" disabled={busy}>
-                    Continue
-                </Button>
-            </form>
-        {/if}
+            {/if}
+            {#if credentialRejected || authState === ApiAuthState.Failed}
+                <div class="message">
+                    <Callout tone="danger" title="Incorrect credentials">
+                        Check the username and password and try again.
+                    </Callout>
+                </div>
+            {/if}
+            {#if authState === ApiAuthState.IpRejected}
+                <div class="message">
+                    <Callout
+                        tone="danger"
+                        title="Sign-in denied from this address"
+                    >
+                        Your IP address is not in the allowed range for this
+                        user. Either you are connecting from somewhere new, or
+                        someone else is using your username. Contact your
+                        administrator through a channel that does not go through
+                        Warpgate.
+                    </Callout>
+                </div>
+            {/if}
+            {#if serverErrorMessage}
+                <div class="message">
+                    <Callout tone="danger" title="Sign-in failed">
+                        {serverErrorMessage}
+                    </Callout>
+                </div>
+            {/if}
+            {#if error}
+                <div class="message">
+                    <Callout tone="danger" title="Something went wrong">
+                        {error}
+                    </Callout>
+                </div>
+            {/if}
 
-        {#if passwordFormVisible}
-            <form
-                class="wg-field-stack"
-                autocomplete="on"
-                onsubmit={e => {
-                    e.preventDefault()
-                    login()
-                }}
-            >
-                <Input
-                    label="Username"
-                    name="username"
-                    autocomplete="username"
-                    required
-                    autofocus
-                    disabled={busy}
-                    bind:value={username}
-                />
+            {#if showSsoSection}
+                <Loadable promise={ssoProvidersPromise}>
+                    {#snippet children(ssoProviders)}
+                        {#if ssoProviders.length && passwordFormVisible}
+                            <div class="separator"><span>or</span></div>
+                        {/if}
 
-                <Input
-                    label="Password"
-                    name="password"
-                    type="password"
-                    autocomplete="current-password"
-                    required
-                    disabled={busy}
-                    bind:value={password}
-                />
+                        <div class="sso-buttons">
+                            {#each ssoProviders as ssoProvider (ssoProvider.name)}
+                                <Button
+                                    block
+                                    disabled={busy}
+                                    onclick={() => startSSO(ssoProvider)}
+                                >
+                                    {#if ssoProvider.kind === SsoProviderKind.Google}
+                                        <svg
+                                            viewBox="0 0 16 16"
+                                            width="14"
+                                            height="14"
+                                            aria-hidden="true"
+                                        >
+                                            <path
+                                                d="M14.5 8.16c0-.47-.04-.92-.12-1.35H8v2.55h3.64a3.11 3.11 0 0 1-1.35 2.04v1.7h2.18c1.28-1.18 2.03-2.92 2.03-4.94z"
+                                                fill="currentColor"
+                                            />
+                                            <path
+                                                d="M8 15c1.83 0 3.36-.6 4.47-1.64l-2.18-1.7c-.6.41-1.38.65-2.29.65-1.76 0-3.25-1.19-3.79-2.79H1.96v1.75A6.75 6.75 0 0 0 8 15z"
+                                                fill="currentColor"
+                                                opacity="0.7"
+                                            />
+                                            <path
+                                                d="M4.21 9.52a4.05 4.05 0 0 1 0-2.58V5.19H1.96a6.75 6.75 0 0 0 0 6.08l2.25-1.75z"
+                                                fill="currentColor"
+                                                opacity="0.5"
+                                            />
+                                            <path
+                                                d="M8 4.15c.99 0 1.88.34 2.58 1.01l1.94-1.93A6.75 6.75 0 0 0 1.96 5.19l2.25 1.75c.54-1.6 2.03-2.79 3.79-2.79z"
+                                                fill="currentColor"
+                                                opacity="0.85"
+                                            />
+                                        </svg>
+                                    {:else if ssoProvider.kind === SsoProviderKind.Azure}
+                                        <svg
+                                            viewBox="0 0 16 16"
+                                            width="14"
+                                            height="14"
+                                            aria-hidden="true"
+                                        >
+                                            <rect
+                                                x="1.5"
+                                                y="1.5"
+                                                width="5.8"
+                                                height="5.8"
+                                                fill="currentColor"
+                                            />
+                                            <rect
+                                                x="8.7"
+                                                y="1.5"
+                                                width="5.8"
+                                                height="5.8"
+                                                fill="currentColor"
+                                                opacity="0.75"
+                                            />
+                                            <rect
+                                                x="1.5"
+                                                y="8.7"
+                                                width="5.8"
+                                                height="5.8"
+                                                fill="currentColor"
+                                                opacity="0.75"
+                                            />
+                                            <rect
+                                                x="8.7"
+                                                y="8.7"
+                                                width="5.8"
+                                                height="5.8"
+                                                fill="currentColor"
+                                                opacity="0.5"
+                                            />
+                                        </svg>
+                                    {:else if ssoProvider.kind === SsoProviderKind.Apple}
+                                        <svg
+                                            viewBox="0 0 16 16"
+                                            width="14"
+                                            height="14"
+                                            aria-hidden="true"
+                                        >
+                                            <path
+                                                d="M11.1 8.5c0-1.5 1.2-2.2 1.3-2.3-.7-1-1.8-1.2-2.2-1.2-.9-.1-1.8.6-2.3.6s-1.2-.6-2-.5c-1 0-2 .6-2.5 1.5-1.1 1.9-.3 4.6.8 6.1.5.7 1.1 1.5 1.9 1.5s1.1-.5 2-.5 1.2.5 2 .5 1.3-.7 1.8-1.4c.6-.8.8-1.6.8-1.6s-1.6-.6-1.6-2.7zM9.8 3.8c.4-.5.7-1.2.6-1.9-.6 0-1.4.4-1.8.9-.4.5-.7 1.2-.6 1.9.7.1 1.4-.4 1.8-.9z"
+                                                fill="currentColor"
+                                            />
+                                        </svg>
+                                    {/if}
+                                    {ssoProvider.label || ssoProvider.name}
+                                </Button>
+                            {/each}
+                        </div>
 
-                <Button variant="primary" type="submit" disabled={busy} block>
-                    Sign in
-                </Button>
-            </form>
-        {/if}
+                        {#if ssoProviders.length && canShowPasswordForm && passwordLoginMinimized && !showPasswordLogin}
+                            <div class="separator"><span>or</span></div>
+                        {/if}
+                    {/snippet}
+                </Loadable>
+            {/if}
 
-        {#if reauthRequired}
-            <div class="message">
-                <Callout tone="warning" title="Sign in again to continue">
-                    The security policy requires you to sign in again before
-                    using this function.
-                </Callout>
-            </div>
-        {/if}
-        {#if credentialRejected || authState === ApiAuthState.Failed}
-            <div class="message">
-                <Callout tone="danger" title="Incorrect credentials">
-                    Check the username and password and try again.
-                </Callout>
-            </div>
-        {/if}
-        {#if authState === ApiAuthState.IpRejected}
-            <div class="message">
-                <Callout tone="danger" title="Sign-in denied from this address">
-                    Your IP address is not in the allowed range for this user.
-                    Either you are connecting from somewhere new, or someone
-                    else is using your username. Contact your administrator
-                    through a channel that does not go through Warpgate.
-                </Callout>
-            </div>
-        {/if}
-        {#if serverErrorMessage}
-            <div class="message">
-                <Callout tone="danger" title="Sign-in failed">
-                    {serverErrorMessage}
-                </Callout>
-            </div>
-        {/if}
-        {#if error}
-            <div class="message">
-                <Callout tone="danger" title="Something went wrong">
-                    {error}
-                </Callout>
-            </div>
-        {/if}
+            {#if canShowPasswordForm && passwordLoginMinimized && !showPasswordLogin}
+                <div class="disclosure">
+                    <Button
+                        variant="ghost"
+                        onclick={() => (showPasswordLogin = true)}
+                    >
+                        Sign in with a password
+                    </Button>
+                </div>
+            {/if}
 
-        {#if showSsoSection}
-            <Loadable promise={ssoProvidersPromise}>
-                {#snippet children(ssoProviders)}
-                    {#if ssoProviders.length && passwordFormVisible}
-                        <div class="separator"><span>or</span></div>
-                    {/if}
-
-                    <div class="sso-buttons">
-                        {#each ssoProviders as ssoProvider (ssoProvider.name)}
-                            <Button
-                                block
-                                disabled={busy}
-                                onclick={() => startSSO(ssoProvider)}
-                            >
-                                {#if ssoProvider.kind === SsoProviderKind.Google}
-                                    <svg
-                                        viewBox="0 0 16 16"
-                                        width="14"
-                                        height="14"
-                                        aria-hidden="true"
-                                    >
-                                        <path
-                                            d="M14.5 8.16c0-.47-.04-.92-.12-1.35H8v2.55h3.64a3.11 3.11 0 0 1-1.35 2.04v1.7h2.18c1.28-1.18 2.03-2.92 2.03-4.94z"
-                                            fill="currentColor"
-                                        />
-                                        <path
-                                            d="M8 15c1.83 0 3.36-.6 4.47-1.64l-2.18-1.7c-.6.41-1.38.65-2.29.65-1.76 0-3.25-1.19-3.79-2.79H1.96v1.75A6.75 6.75 0 0 0 8 15z"
-                                            fill="currentColor"
-                                            opacity="0.7"
-                                        />
-                                        <path
-                                            d="M4.21 9.52a4.05 4.05 0 0 1 0-2.58V5.19H1.96a6.75 6.75 0 0 0 0 6.08l2.25-1.75z"
-                                            fill="currentColor"
-                                            opacity="0.5"
-                                        />
-                                        <path
-                                            d="M8 4.15c.99 0 1.88.34 2.58 1.01l1.94-1.93A6.75 6.75 0 0 0 1.96 5.19l2.25 1.75c.54-1.6 2.03-2.79 3.79-2.79z"
-                                            fill="currentColor"
-                                            opacity="0.85"
-                                        />
-                                    </svg>
-                                {:else if ssoProvider.kind === SsoProviderKind.Azure}
-                                    <svg
-                                        viewBox="0 0 16 16"
-                                        width="14"
-                                        height="14"
-                                        aria-hidden="true"
-                                    >
-                                        <rect
-                                            x="1.5"
-                                            y="1.5"
-                                            width="5.8"
-                                            height="5.8"
-                                            fill="currentColor"
-                                        />
-                                        <rect
-                                            x="8.7"
-                                            y="1.5"
-                                            width="5.8"
-                                            height="5.8"
-                                            fill="currentColor"
-                                            opacity="0.75"
-                                        />
-                                        <rect
-                                            x="1.5"
-                                            y="8.7"
-                                            width="5.8"
-                                            height="5.8"
-                                            fill="currentColor"
-                                            opacity="0.75"
-                                        />
-                                        <rect
-                                            x="8.7"
-                                            y="8.7"
-                                            width="5.8"
-                                            height="5.8"
-                                            fill="currentColor"
-                                            opacity="0.5"
-                                        />
-                                    </svg>
-                                {:else if ssoProvider.kind === SsoProviderKind.Apple}
-                                    <svg
-                                        viewBox="0 0 16 16"
-                                        width="14"
-                                        height="14"
-                                        aria-hidden="true"
-                                    >
-                                        <path
-                                            d="M11.1 8.5c0-1.5 1.2-2.2 1.3-2.3-.7-1-1.8-1.2-2.2-1.2-.9-.1-1.8.6-2.3.6s-1.2-.6-2-.5c-1 0-2 .6-2.5 1.5-1.1 1.9-.3 4.6.8 6.1.5.7 1.1 1.5 1.9 1.5s1.1-.5 2-.5 1.2.5 2 .5 1.3-.7 1.8-1.4c.6-.8.8-1.6.8-1.6s-1.6-.6-1.6-2.7zM9.8 3.8c.4-.5.7-1.2.6-1.9-.6 0-1.4.4-1.8.9-.4.5-.7 1.2-.6 1.9.7.1 1.4-.4 1.8-.9z"
-                                            fill="currentColor"
-                                        />
-                                    </svg>
-                                {/if}
-                                {ssoProvider.label || ssoProvider.name}
-                            </Button>
-                        {/each}
-                    </div>
-
-                    {#if ssoProviders.length && canShowPasswordForm && passwordLoginMinimized && !showPasswordLogin}
-                        <div class="separator"><span>or</span></div>
-                    {/if}
-                {/snippet}
-            </Loadable>
-        {/if}
-
-        {#if canShowPasswordForm && passwordLoginMinimized && !showPasswordLogin}
-            <div class="disclosure">
-                <Button
-                    variant="ghost"
-                    onclick={() => (showPasswordLogin = true)}
-                >
-                    Sign in with a password
-                </Button>
-            </div>
-        {/if}
-
-        {#if showCancel}
-            <div class="cancel">
-                <Button block click={cancel}>Cancel</Button>
-            </div>
-        {/if}
+            {#if showCancel}
+                <div class="cancel">
+                    <Button block click={cancel}>Cancel</Button>
+                </div>
+            {/if}
+        </div>
     </div>
 </Loadable>
 
 <style>
+    /*
+     * The viewport. Centres the card on both axes; the portal column it sits
+     * in is 48rem wide, which is a fine measure for a target list and far too
+     * wide for a pair of credential fields.
+     */
     .login {
         display: flex;
         flex-direction: column;
         justify-content: center;
+        align-items: center;
         flex-grow: 1;
         padding-bottom: var(--wg-space-3xl);
     }
 
+    /*
+     * 22rem is the measure a username and a password want. Wider and the
+     * fields stop reading as a pair; narrower and long SSO provider names
+     * wrap. The surface is one step up from the page so the form has an edge
+     * without a shadow doing the work.
+     */
+    .login-card {
+        width: 100%;
+        max-width: 22rem;
+        padding: var(--wg-space-2xl);
+        background: var(--wg-surface-container);
+        border: var(--wg-border-width) solid var(--wg-border);
+        border-radius: var(--wg-radius-panel);
+    }
+
+    /*
+     * headline-md, not headline-lg: 32px over a 22rem card is a banner rather
+     * than a heading, and it pushes the fields below the fold on a laptop.
+     */
     h1 {
         margin: 0 0 var(--wg-space-xl);
-        font: var(--wg-text-headline-lg);
+        font: var(--wg-text-headline-md);
+    }
+
+    /* The card supplies the gutter on narrow screens, so it should not also
+       inherit the page's. */
+    @media (max-width: 30rem) {
+        .login-card {
+            padding: var(--wg-space-xl);
+        }
     }
 
     .otp-form {
