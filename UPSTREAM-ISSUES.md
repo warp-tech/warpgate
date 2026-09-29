@@ -383,3 +383,44 @@ server log, though the console line would remain.
 
 **Not changed in this fork.** It is an API response-shape change, and this
 redesign is scoped to presentation. Reported rather than fixed.
+
+## 9. Vault / OpenBao secret-management UI is not ported to this fork
+
+Upstream #2185 (`7311279e`) adds secret references — a target password, an SSH
+client key or an LDAP bind password can be `secret://backend/path#key` instead
+of a stored value, resolved at use time from HashiCorp Vault or OpenBao. For a
+PAM product that is a significant feature.
+
+**The backend is fully merged.** The Rust implementation, the database
+migrations, the API and `openapi-schema.json` all came across intact, so
+backends and references work through the config file and the API.
+
+**Three UI components did not.** `common/SecretRefInput.svelte` (369 lines),
+`admin/config/secret-backends/SecretBackends.svelte` (175) and
+`SecretBackendModal.svelte` (206) are built on `@sveltestrap/sveltestrap`,
+which this fork removed in `e0135fd3`. They are deleted here rather than left
+in the tree, because an unported file still breaks `svelte-check` whether or
+not anything imports it.
+
+What that costs, precisely:
+
+- no admin screen for adding or editing a secret backend — note that this was
+  already unreachable in this fork, since the old `Config.svelte` routed it and
+  that file is deleted
+- the target option screens keep a plain password field, where upstream now
+  offers a reference picker
+- `SSHKeys` does not branch to `importSshOwnKeyReference` for a pasted
+  `secret://` value, and does not show which backend a key resolves from
+
+**Why it was not done here.** It is a ~750-line port of security-sensitive
+code across six screens, plus a new route, plus regenerating the admin client
+for nine new operations — and the generated client cannot be regenerated on
+this machine (no Java for `openapi-generator-cli`, no Rust for the schema
+step), so none of it could be type-checked locally. Half-porting a credential
+path is worse than not porting it.
+
+**To pick it up:** regenerate the admin client from the merged schema, then
+redraw the three components on `ui/` primitives — `SecretRefInput` is mostly
+logic with a thin sveltestrap shell (Button, FormGroup, Modal, Tooltip), and
+its module-level exports are pure functions that carry over unchanged. Route
+`SecretBackends` from `admin/AppNew.svelte` under `/config/secret-backends`.

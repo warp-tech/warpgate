@@ -68,7 +68,7 @@ impl SpecificTarget<TargetOptions> {
     }
 
     pub fn narrow<O: TargetOptionsVariant>(self) -> Result<SpecificTarget<O>, WarpgateError> {
-        match O::extract(&self.target.options) {
+        match O::extract(&self.options) {
             Some(options) => {
                 let options = options.clone();
                 Ok(SpecificTarget {

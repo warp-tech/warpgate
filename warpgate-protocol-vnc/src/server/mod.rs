@@ -275,6 +275,7 @@ async fn negotiate_and_authorize(
     // The viewer is held under the hold screen for the whole gate: VNC only paints when
     // asked, so without it the viewer's frame requests would go unanswered and its screen
     // would sit frozen for as long as the administrator takes to decide.
+    let hold = warpgate_desktop_auth::AdmissionHold::default();
     let admitted = render_while(
         &mut viewer_wr,
         &mut events_rx,
@@ -284,7 +285,9 @@ async fn negotiate_and_authorize(
             server_handle,
             authorization,
             Some(remote_address.ip()),
+            &hold,
         ),
+        || hold.frame(),
     )
     .await??;
 
@@ -301,7 +304,7 @@ async fn negotiate_and_authorize(
     // A single backend client connection decodes every update (Tight/JPEG included, see
     // PROXY_ENCODINGS); we both record it and re-encode it toward the viewer as RFB Raw.
     debug!(host = %admitted.options().host, port = admitted.options().port, "connecting to backend");
-    let mut backend = crate::client::connect_for_proxy(admitted)?;
+    let mut backend = crate::client::connect_for_proxy(admitted, services.secret_backends.clone())?;
 
     // Wait under the hold screen for the backend's initial geometry, recording every
     // event consumed so nothing is dropped from the recording.
@@ -310,6 +313,7 @@ async fn negotiate_and_authorize(
         &mut events_rx,
         &mut render,
         wait_for_backend_size(&mut backend.event_rx, recorder.as_ref()),
+        || warpgate_desktop_auth::HoldFrame::Connecting,
     )
     .await??;
 

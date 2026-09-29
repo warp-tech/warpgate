@@ -1,0 +1,68 @@
+[package]
+name = "ironrdp-server"
+version = "0.13.0"
+readme = "README.md"
+description = "Extendable skeleton for implementing custom RDP servers"
+edition.workspace = true
+rust-version = "1.89"
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+doctest = true
+test = false
+
+[features]
+default = ["rayon", "qoi", "qoiz"]
+helper = ["dep:x509-cert", "dep:rustls-pemfile"]
+rayon = ["dep:rayon"]
+qoi = ["dep:qoicoubeh", "ironrdp-pdu/qoi"]
+qoiz = ["dep:zstd-safe", "qoi", "ironrdp-pdu/qoiz"]
+egfx = ["dep:ironrdp-egfx"]
+# Opt-in NSCodec encoder. Off by default so consumers that don't need a legacy
+# bitmap codec fallback (e.g., RemoteFX-only or H.264-capable clients) don't
+# pay the extra build cost.
+nscodec = ["dep:ironrdp-nscodec"]
+
+# Internal (PRIVATE!) features used to aid testing.
+# Don't rely on these whatsoever. They may disappear at any time.
+__bench = ["dep:visibility"]
+
+[dependencies]
+anyhow = "1.0"
+tokio = { version = "1", features = ["net", "macros", "sync", "rt"] } # public
+tokio-rustls = "0.26" # public
+async-trait = "0.1"
+ironrdp-async = { path = "../ironrdp-async", version = "0.10" }
+ironrdp-ainput = { path = "../ironrdp-ainput", version = "0.8" }
+ironrdp-core = { path = "../ironrdp-core", version = "0.2" }
+ironrdp-egfx = { path = "../ironrdp-egfx", version = "0.3", optional = true }
+ironrdp-nscodec = { path = "../ironrdp-nscodec", version = "0.2", optional = true, features = ["encoder"] }
+ironrdp-pdu = { path = "../ironrdp-pdu", version = "0.9" } # public
+ironrdp-svc = { path = "../ironrdp-svc", version = "0.8" } # public
+ironrdp-cliprdr = { path = "../ironrdp-cliprdr", version = "0.7" } # public
+ironrdp-displaycontrol = { path = "../ironrdp-displaycontrol", version = "0.8" } # public
+ironrdp-echo = { path = "../ironrdp-echo", version = "0.4" } # public
+ironrdp-dvc = { path = "../ironrdp-dvc", version = "0.8" } # public
+ironrdp-tokio = { path = "../ironrdp-tokio", version = "0.10", features = ["reqwest"] }
+ironrdp-acceptor = { path = "../ironrdp-acceptor", version = "0.10" } # public
+ironrdp-graphics = { path = "../ironrdp-graphics", version = "0.9" } # public
+ironrdp-rdpsnd = { path = "../ironrdp-rdpsnd", version = "0.9" } # public
+tracing = { version = "0.1", features = ["log"] }
+x509-cert = { version = "0.2", optional = true }
+rustls-pemfile = { version = "2.2", optional = true }
+rayon = { version = "1.12", optional = true }
+bytes = "1"
+visibility = { version = "0.1", optional = true }
+qoicoubeh = { version = "0.5", optional = true }
+zstd-safe = { version = "7.2", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["sync"] }
+
+[lints]
+workspace = true

@@ -7,8 +7,11 @@ use tracing::{error, info};
 use warpgate_common::encryption::{
     Keyring, env_keyring, idempotent_maybe_decrypt, maybe_reencrypt_str,
 };
-use warpgate_common::{SshHostKeyKind, WarpgateError, emit_runtime_warning, map_target_secrets};
-use warpgate_db_entities::{Parameters, SshClientKey, Target};
+use warpgate_common::{
+    MaybeSecretRef, SshHostKeyKind, StoredSecret, WarpgateError, emit_runtime_warning,
+    map_stored_target_secrets,
+};
+use warpgate_db_entities::{Parameters, SecretBackend, SshClientKey, Target};
 
 use crate::cluster::alive_nodes;
 
@@ -172,14 +175,24 @@ async fn probe_undecryptable(db: &DatabaseConnection) -> Result<Vec<String>, War
 
     for target in Target::Entity::find().all(db).await? {
         let mut probe = target.options.clone();
-        if map_target_secrets(&mut probe, &mut |secret| idempotent_maybe_decrypt(secret)).is_err() {
+        if map_stored_target_secrets(&mut probe, &mut |secret| idempotent_maybe_decrypt(secret)).is_err() {
             undecryptable.push(format!("target `{}`", target.name));
         }
     }
 
     for key in SshClientKey::Entity::find().all(db).await? {
-        if idempotent_maybe_decrypt(&key.secret_key).is_err() {
+        if matches!(&key.secret_key, MaybeSecretRef::Inline(stored) if stored.reveal().is_err()) {
             undecryptable.push(format!("SSH client key `{}`", key.label));
+        }
+    }
+
+    for backend in SecretBackend::Entity::find().all(db).await? {
+        if backend
+            .auth
+            .secret()
+            .is_some_and(|stored| stored.reveal().is_err())
+        {
+            undecryptable.push(format!("secret backend `{}`", backend.name));
         }
     }
 
@@ -219,7 +232,7 @@ async fn rewrite_all(db: &DatabaseConnection) -> Result<usize, WarpgateError> {
 
     for target in Target::Entity::find().all(db).await? {
         let mut options = target.options.clone();
-        if map_target_secrets(&mut options, &mut |secret| maybe_reencrypt_str(secret)).is_err() {
+        if map_stored_target_secrets(&mut options, &mut |secret| maybe_reencrypt_str(secret)).is_err() {
             continue;
         }
         if options != target.options {
@@ -230,12 +243,31 @@ async fn rewrite_all(db: &DatabaseConnection) -> Result<usize, WarpgateError> {
     }
 
     for key in SshClientKey::Entity::find().all(db).await? {
-        let Ok(secret_key) = maybe_reencrypt_str(&key.secret_key) else {
+        let MaybeSecretRef::Inline(stored) = &key.secret_key else {
             continue;
         };
-        if secret_key != key.secret_key {
+        let Ok(secret_key) = maybe_reencrypt_str(stored.stored_value()) else {
+            continue;
+        };
+        if secret_key != stored.stored_value() {
             let mut model: SshClientKey::ActiveModel = key.into();
-            model.secret_key = Set(secret_key);
+            model.secret_key = Set(MaybeSecretRef::Inline(StoredSecret::from(secret_key)));
+            rewritten += update_unless_deleted(model.update(db).await)?;
+        }
+    }
+
+    for backend in SecretBackend::Entity::find().all(db).await? {
+        let mut auth = backend.auth.clone();
+        let Some(stored) = auth.secret_mut() else {
+            continue;
+        };
+        let Ok(reencrypted) = maybe_reencrypt_str(stored.stored_value()) else {
+            continue;
+        };
+        if reencrypted != stored.stored_value() {
+            *stored = StoredSecret::from(reencrypted);
+            let mut model: SecretBackend::ActiveModel = backend.into();
+            model.auth = Set(auth);
             rewritten += update_unless_deleted(model.update(db).await)?;
         }
     }

@@ -95,21 +95,24 @@ pub enum WebApprovalScopeKey {
     Target(String),
 }
 
-/// A non-empty, sorted, deduplicated, equatable set of the stored credentials
-/// an authentication was made with — what a "remember approval" decision is
+/// A sorted, deduplicated, equatable set of the stored credentials an
+/// authentication was made with — what a "remember approval" decision is
 /// keyed on.
 ///
 /// A web approval cannot appear here by construction: the set is built through
-/// [`ValidCredential::stored`], and an approval has no stored row.
+/// [`ValidCredential::stored`], and an approval has no stored row. A login
+/// whose only factor is the approval itself therefore keys on the empty set,
+/// which leaves the remembered grant scoped by origin, protocol and username —
+/// the same scope the approval prompt offers to remember.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StoredCredentials(Vec<StoredCredential>);
 
 impl StoredCredentials {
     #[must_use]
-    pub fn new(mut credentials: Vec<StoredCredential>) -> Option<Self> {
+    pub fn new(mut credentials: Vec<StoredCredential>) -> Self {
         credentials.sort_unstable();
         credentials.dedup();
-        (!credentials.is_empty()).then_some(Self(credentials))
+        Self(credentials)
     }
 
     /// A stable digest for the credential set (for matching)
@@ -133,14 +136,15 @@ impl StoredCredentials {
 pub enum RememberApprovalBy {
     /// Approval can be reused if this credential set matches
     Credentials(StoredCredentials),
-    /// Cannot be remembered because there are no credentials to match
+    /// Never remembered: the connection has no auth state to key on (ticket
+    /// logins, gateway web clients).
     Nothing,
 }
 
 impl RememberApprovalBy {
     #[must_use]
     pub fn from_credentials(credentials: Vec<StoredCredential>) -> Self {
-        StoredCredentials::new(credentials).map_or(Self::Nothing, Self::Credentials)
+        Self::Credentials(StoredCredentials::new(credentials))
     }
 
     #[must_use]
@@ -548,7 +552,7 @@ mod tests {
 
     fn fingerprints(byte: u8) -> StoredCredentials {
         #[allow(clippy::expect_used)]
-        StoredCredentials::new(vec![stored_credential(byte)]).expect("non-empty")
+        StoredCredentials::new(vec![stored_credential(byte)])
     }
 
     fn identity() -> WebApprovalIdentity {
@@ -598,16 +602,20 @@ mod tests {
         }
     }
 
-    /// The whole point of the type: a session with nothing to pin a grant to
-    /// must produce no key, not a key that matches on origin and username
-    /// alone. A policy whose only factor is the approval itself lands here.
+    /// A policy whose only factor is the approval itself lands here: the grant
+    /// is still rememberable, keyed on the empty set, and that key is its own —
+    /// it must not match a login that did present a credential.
     #[test]
-    fn an_empty_credential_set_is_not_remembered() {
+    fn an_empty_credential_set_is_remembered_as_its_own_key() {
+        let empty = RememberApprovalBy::from_credentials(vec![]);
         assert_eq!(
-            RememberApprovalBy::from_credentials(vec![]),
-            RememberApprovalBy::Nothing
+            empty,
+            RememberApprovalBy::Credentials(StoredCredentials::new(vec![]))
         );
-        assert!(StoredCredentials::new(vec![]).is_none());
+        assert_ne!(
+            StoredCredentials::new(vec![]).digest(),
+            fingerprints(1).digest()
+        );
     }
 
     #[test]

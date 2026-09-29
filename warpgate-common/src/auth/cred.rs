@@ -265,10 +265,7 @@ mod tests {
     use crate::auth::StoredCredentials;
 
     fn digest(credential: StoredCredential) -> String {
-        #[allow(clippy::expect_used)]
-        StoredCredentials::new(vec![credential])
-            .expect("non-empty")
-            .digest()
+        StoredCredentials::new(vec![credential]).digest()
     }
 
     fn base() -> StoredCredential {

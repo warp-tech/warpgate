@@ -49,6 +49,15 @@ pub fn render_connecting(screen: Screen, tick: u64) -> Result<Vec<u8>, Infallibl
     render(screen, tick, "Connecting", None)
 }
 
+pub fn render_awaiting_approval(screen: Screen, tick: u64) -> Result<Vec<u8>, Infallible> {
+    render(
+        screen,
+        tick,
+        "Waiting for an administrator\nto approve this session...",
+        None,
+    )
+}
+
 /// The login banner, shown until the viewer acknowledges it with any key or click.
 pub fn render_banner(screen: Screen, tick: u64, banner: &str) -> Result<Vec<u8>, Infallible> {
     render(

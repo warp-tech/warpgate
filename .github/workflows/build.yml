@@ -43,7 +43,7 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: rlespinasse/github-slug-action@ef93b2ea4b6405d06fd8684fc3ff795d262ecae8
+      - uses: rlespinasse/github-slug-action@0e3299190dac9a700da92a90de4556116ea965ed
 
       - name: Add Rust target
         run: rustup target add ${{ matrix.target }}
@@ -149,7 +149,7 @@ jobs:
           fi
 
       - name: Upload release
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           draft: true

@@ -91,7 +91,7 @@
     }
 </script>
 
-<div class="container-max-md">
+<div>
     {#if error}
         <Callout tone="danger" title="Something went wrong">{error}</Callout>
     {/if}

@@ -7,7 +7,9 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_aws::S3StorageConfig;
 use warpgate_common::auth::CredentialKind;
-use warpgate_common::{PasswordPolicy, Protocol, UserAuthCredential, UserRequireCredentialsPolicy};
+use warpgate_common::{
+    PasswordPolicy, Protocol, UserAuthCredential, UserRequireCredentialsPolicy,
+};
 
 #[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]

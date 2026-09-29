@@ -34,7 +34,7 @@ cdx.xml
 node_modules
 
 .github
-*.md
+/*.md
 .env
 
 rustc-ice-*.txt
