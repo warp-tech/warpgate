@@ -624,6 +624,49 @@ mod tests {
         assert!(json.contains(r#""mode":"WorkloadIdentity""#), "{json}");
     }
 
+    /// Every mode survives the trip through stored JSON.
+    ///
+    /// The discriminator is the contract between what is written to the
+    /// parameters row and what is read back, so a renamed variant orphans
+    /// every configuration already saved under the old name.
+    #[test]
+    fn every_credential_mode_round_trips_through_json() {
+        for original in [
+            AzureCredentials::ManagedIdentity(ManagedIdentityCredentials { client_id: None }),
+            AzureCredentials::ManagedIdentity(ManagedIdentityCredentials {
+                client_id: Some("a-user-assigned-id".into()),
+            }),
+            AzureCredentials::WorkloadIdentity(WorkloadIdentityCredentials {}),
+            AzureCredentials::DeveloperTools(DeveloperToolsCredentials {}),
+            AzureCredentials::ServicePrincipal(ServicePrincipalCredentials {
+                tenant_id: "t".into(),
+                client_id: "c".into(),
+                client_secret: "s".to_owned().into(),
+            }),
+        ] {
+            let json = serde_json::to_string(&original).expect("serialising");
+            let parsed: AzureCredentials =
+                serde_json::from_str(&json).unwrap_or_else(|e| panic!("{json} did not parse: {e}"));
+            assert_eq!(parsed, original, "round trip changed {json}");
+        }
+    }
+
+    /// Workload identity takes its whole configuration from the environment.
+    ///
+    /// The credential reads AZURE_TENANT_ID, AZURE_CLIENT_ID and
+    /// AZURE_FEDERATED_TOKEN_FILE itself, so this variant deliberately carries
+    /// no fields. A field appearing here would be one Warpgate has to read,
+    /// validate and keep in step with the SDK, and the reason the AKS path
+    /// needs no coverage of ours is that there is nothing of ours in it.
+    #[test]
+    fn workload_identity_carries_no_configuration() {
+        let json = serde_json::to_string(&AzureCredentials::WorkloadIdentity(
+            WorkloadIdentityCredentials {},
+        ))
+        .expect("serialising");
+        assert_eq!(json, r#"{"mode":"WorkloadIdentity"}"#);
+    }
+
     /// A key is replaced before it expires, not as it expires. Signing with a
     /// key that lapses moments later would mint a SAS the service rejects part
     /// way through a playback.
