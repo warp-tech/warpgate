@@ -1960,3 +1960,51 @@ References updated in `.env.example`, `docker/Dockerfile` and
 "docker-compose.yml" but means its own file in that folder, so it was left
 alone. The entries above in this log still say `compose.yaml` where they
 describe what was done at the time, which is what a decision log is for.
+
+## The stale-client blind spot, caught the expensive way
+
+The merge commit warned that the generated API clients could not be
+regenerated on this machine and so nothing could be type-checked locally. That
+warning came true four minutes into a Docker build:
+
+```
+src/admin/config/SSHKeys.svelte:67
+Error: 'importSSHClientKeyRequest' does not exist in type 'ImportSshOwnKeyRequest'.
+       Did you mean to write 'importSshClientKeyRequest'?
+```
+
+Upstream v0.29.1 renamed one schema component, `ImportSSHClientKeyRequest` ->
+`ImportSshClientKeyRequest`. The local generated client still had the old name,
+so `svelte-check` passed here against types that no longer describe the API.
+
+**The schemas are committed even though the clients are not**, so the drift was
+always detectable without running the generator. Comparing the pre-merge and
+post-merge schemas found exactly one rename and zero operationId changes, and
+`GenerateSSHClientKeyRequest` and `UpdateSSHClientKeyRequest` were confirmed
+still present — so it was one line, not a family of them. Worth doing before
+the fix rather than after: each Docker round-trip to that error is four
+minutes.
+
+### schemacheck.mjs
+
+Derives, from the committed schemas, the two name families the generator
+produces — camelCased operationIds and camelCased component names — and checks
+every `api.x()` call and every `xRequest:` key in `src/` against them. A
+near-miss that differs only by case is reported with the correct spelling,
+which is exactly the shape this bug had.
+
+Proved by reproduction: with the old name restored it reports
+`SSHKeys.svelte:67 importSSHClientKeyRequest: should be
+importSshClientKeyRequest:` and exits 1; with the fix it reports no drift.
+
+### The local checks now disagree, and that is correct
+
+`svelte-check` reports 1 error against the stale client; `schemacheck` reports
+none against the committed schema. **The schema is the authority** — Docker
+regenerates from it, so the Docker build is the one that matters, and it will
+now pass where it previously failed.
+
+Until the client is regenerated, treat `svelte-check`'s baseline on this branch
+as "1 known error at SSHKeys.svelte:67", not zero, and re-baseline after any
+regeneration. The honest reading of a local green tick here is "nothing new
+broke", not "the API contract holds" — that second question is schemacheck's.

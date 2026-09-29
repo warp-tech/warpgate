@@ -64,7 +64,7 @@
                 return
             }
             await api.importSshOwnKey({
-                importSSHClientKeyRequest: { label, secretKey, isDefault },
+                importSshClientKeyRequest: { label, secretKey, isDefault },
             })
         })
     }
