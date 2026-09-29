@@ -91,7 +91,7 @@ pub async fn api_get_recording_tcpdump(
     let recording = find_recording(&ctx, id.0, Some(RecordingKind::Traffic)).await?;
     let owner = recording_owner(&ctx, &recording).await?;
     proxy_or_serve(&ctx, req, owner, None::<&()>, || {
-        serve_recording_file(&ctx, &recording, RecordingFile::TcpDumpData, static_req)
+        serve_recording_file(&ctx, &recording, RecordingFile::TcpDumpData, static_req, req.header("Range"))
     })
     .await
 }
@@ -108,7 +108,7 @@ pub async fn api_get_recording_data(
     let recording = find_recording(&ctx, id.0, None).await?;
     let owner = recording_owner(&ctx, &recording).await?;
     proxy_or_serve(&ctx, req, owner, None::<&()>, || {
-        serve_recording_file(&ctx, &recording, RecordingFile::NDJsonData, static_req)
+        serve_recording_file(&ctx, &recording, RecordingFile::NDJsonData, static_req, req.header("Range"))
     })
     .await
 }
@@ -125,7 +125,7 @@ pub async fn api_get_recording_index(
     let recording = find_recording(&ctx, id.0, None).await?;
     let owner = recording_owner(&ctx, &recording).await?;
     proxy_or_serve(&ctx, req, owner, None::<&()>, || {
-        serve_recording_file(&ctx, &recording, RecordingFile::Index, static_req)
+        serve_recording_file(&ctx, &recording, RecordingFile::Index, static_req, req.header("Range"))
     })
     .await
 }
@@ -135,6 +135,7 @@ async fn serve_recording_file(
     recording: &Recording::Model,
     file: RecordingFile,
     static_req: StaticFileRequest,
+    range: Option<&str>,
 ) -> poem::Result<poem::Response> {
     let access = ctx
         .services()
@@ -155,10 +156,83 @@ async fn serve_recording_file(
             .with_content_type(file.mime_type())
             .into_response())
     } else {
-        Err(InternalServerError(std::io::Error::other(
-            "recording file access has neither an external URL nor a local path",
-        )))
+        stream_recording_file(&access, file, range).await
     }
+}
+
+/// The start and optional inclusive end of a single byte range.
+///
+/// Only the first range of a `Range` header is honoured: a multipart response
+/// is not something the players ask for.
+fn parse_byte_range(header: &str) -> Option<(u64, Option<u64>)> {
+    let spec = header.trim().strip_prefix("bytes=")?;
+    let (start, end) = spec.split(',').next()?.split_once('-')?;
+    let start = start.trim().parse().ok()?;
+    let end = end.trim();
+    let end = if end.is_empty() {
+        None
+    } else {
+        Some(end.parse().ok()?)
+    };
+    Some((start, end))
+}
+
+/// Serve a recording's bytes through Warpgate rather than redirecting.
+///
+/// The players fetch with `Range: bytes=N-` and seek by reopening at a new
+/// offset (`rangeStream.ts`), so a backend served this way has to answer 206
+/// and 416 the way the static-file handler does for the disk backend.
+async fn stream_recording_file(
+    access: &warpgate_core::recordings::FileAccess,
+    file: RecordingFile,
+    range: Option<&str>,
+) -> poem::Result<poem::Response> {
+    let requested = range.and_then(parse_byte_range);
+    let start = requested.map_or(0, |(start, _)| start);
+
+    let read = access
+        .open_read_from(start)
+        .await
+        .map_err(InternalServerError)?
+        .ok_or_else(|| {
+            InternalServerError(std::io::Error::other(
+                "recording file access has neither an external URL nor a local path",
+            ))
+        })?;
+
+    // A range starting at or past the end is unsatisfiable, and the player
+    // depends on the 416 to know it has reached the end of the recording.
+    if requested.is_some() && start >= read.total && read.total > 0 {
+        return Ok(poem::Response::builder()
+            .status(poem::http::StatusCode::RANGE_NOT_SATISFIABLE)
+            .header("content-range", format!("bytes */{}", read.total))
+            .header("accept-ranges", "bytes")
+            .finish());
+    }
+
+    let Some((_, end)) = requested else {
+        return Ok(poem::Response::builder()
+            .status(poem::http::StatusCode::OK)
+            .content_type(file.mime_type())
+            .header("accept-ranges", "bytes")
+            .header("content-length", read.total.to_string())
+            .body(poem::Body::from_async_read(read.reader)));
+    };
+
+    // The end is inclusive on the wire; clamp it to the last byte that exists.
+    let last = end.unwrap_or(read.total.saturating_sub(1)).min(read.total.saturating_sub(1));
+    let len = last.saturating_sub(start) + 1;
+
+    Ok(poem::Response::builder()
+        .status(poem::http::StatusCode::PARTIAL_CONTENT)
+        .content_type(file.mime_type())
+        .header("accept-ranges", "bytes")
+        .header("content-length", len.to_string())
+        .header(
+            "content-range",
+            format!("bytes {start}-{last}/{}", read.total),
+        )
+        .body(poem::Body::from_async_read(read.reader.take(len))))
 }
 
 /// Messages pushed to a recording live-view WebSocket, serialised with a `type`
@@ -417,6 +491,34 @@ mod tests {
     use futures::StreamExt;
 
     use super::*;
+
+    /// The shape the players actually send (`rangeStream.ts`): an open-ended
+    /// range from the offset it wants to resume at.
+    #[test]
+    fn an_open_ended_range_is_read_as_a_start_offset() {
+        assert_eq!(parse_byte_range("bytes=0-"), Some((0, None)));
+        assert_eq!(parse_byte_range("bytes=4096-"), Some((4096, None)));
+    }
+
+    #[test]
+    fn a_closed_range_keeps_its_inclusive_end() {
+        assert_eq!(parse_byte_range("bytes=10-19"), Some((10, Some(19))));
+    }
+
+    /// Only the first range is honoured; a multipart response is not something
+    /// the players ask for, so the rest is ignored rather than mishandled.
+    #[test]
+    fn only_the_first_range_of_a_set_is_taken() {
+        assert_eq!(parse_byte_range("bytes=0-9,20-29"), Some((0, Some(9))));
+    }
+
+    #[test]
+    fn a_malformed_range_is_declined_rather_than_guessed() {
+        assert_eq!(parse_byte_range("items=0-9"), None);
+        assert_eq!(parse_byte_range("bytes=abc-"), None);
+        assert_eq!(parse_byte_range("bytes="), None);
+        assert_eq!(parse_byte_range(""), None);
+    }
 
     /// `replay_scratch_span_awaiting` replays exactly the complete lines in `sent..target`,
     /// with each offset being the line's end position in the file.

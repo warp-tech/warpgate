@@ -11,7 +11,9 @@ use azure_identity::{
 };
 use azure_storage_blob::{
     BlobContainerClient, BlobServiceClient, BlockBlobClient,
-    models::{BlockLookupList, KeyInfo},
+    models::{
+        BlobClientDownloadOptions, BlobClientGetPropertiesResultHeaders, BlockLookupList, KeyInfo,
+    },
 };
 use azure_storage_common::models::UserDelegationKey;
 use azure_storage_sas::SasBuilder;
@@ -149,6 +151,21 @@ pub struct AzureBlobConfig {
     /// Blob-name prefix prepended to every recording path.
     pub prefix: String,
     pub credentials: AzureCredentials,
+    /// Stream recordings through Warpgate instead of redirecting the browser to
+    /// a SAS URL.
+    ///
+    /// Redirecting is cheaper — the bytes never touch Warpgate — but it needs
+    /// the container to carry a CORS policy allowing this origin to issue Range
+    /// requests, and it needs the browser to be able to reach the storage
+    /// account at all, which it cannot when the account sits behind a private
+    /// endpoint. Streaming always works, so it is the default.
+    #[serde(default = "default_true")]
+    #[oai(default = "default_true")]
+    pub serve_through_warpgate: bool,
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 impl AzureBlobConfig {
@@ -195,8 +212,19 @@ pub struct AzureBlobStorage {
     account: String,
     container_name: String,
     prefix: String,
+    serve_through_warpgate: bool,
     /// Shared across clones so one fetch serves every session on this node.
     delegation_key: Arc<RwLock<Option<CachedDelegationKey>>>,
+}
+
+/// A ranged read: the bytes from the requested offset, and how big the whole
+/// blob is, which an HTTP 206 needs for its `Content-Range`.
+pub struct RangedRead {
+    pub reader: Box<dyn tokio::io::AsyncRead + Send + Unpin>,
+    /// Bytes in this response.
+    pub len: u64,
+    /// Bytes in the whole blob.
+    pub total: u64,
 }
 
 impl AzureBlobStorage {
@@ -215,8 +243,14 @@ impl AzureBlobStorage {
             account: config.account.clone(),
             container_name: config.container.clone(),
             prefix: config.prefix.clone(),
+            serve_through_warpgate: config.serve_through_warpgate,
             delegation_key: Arc::new(RwLock::new(None)),
         })
+    }
+
+    /// Whether playback streams through Warpgate rather than redirecting.
+    pub const fn serves_through_warpgate(&self) -> bool {
+        self.serve_through_warpgate
     }
 
     fn blob_name(&self, path: &str) -> String {
@@ -268,6 +302,49 @@ impl AzureBlobStorage {
             .body
             .map_err(|e| std::io::Error::other(e.to_string()));
         Ok(Box::new(tokio_util::io::StreamReader::new(stream)))
+    }
+
+    /// Stream a recording from `offset` to its end, reporting the blob's full
+    /// size so the caller can answer a Range request.
+    ///
+    /// The size comes from the response rather than a second `get_properties`
+    /// call: for a range starting at `offset`, the returned content length is
+    /// what remains, so the total is the two added together.
+    pub async fn get_reader_from(
+        &self,
+        path: &str,
+        offset: u64,
+    ) -> Result<RangedRead, AzureError> {
+        let options = BlobClientDownloadOptions {
+            range: Some((offset..).into()),
+            ..Default::default()
+        };
+        let response = self
+            .container
+            .blob_client(&self.blob_name(path))
+            .download(Some(options))
+            .await?;
+
+        let len = response.properties.content_length.unwrap_or(0);
+        let stream = response
+            .body
+            .map_err(|e| std::io::Error::other(e.to_string()));
+
+        Ok(RangedRead {
+            reader: Box::new(tokio_util::io::StreamReader::new(stream)),
+            len,
+            total: offset + len,
+        })
+    }
+
+    /// Size of a recording in bytes.
+    pub async fn len(&self, path: &str) -> Result<u64, AzureError> {
+        let props = self
+            .container
+            .blob_client(&self.blob_name(path))
+            .get_properties(None)
+            .await?;
+        Ok(props.content_length()?.unwrap_or(0))
     }
 
     /// A user-delegation key, fetched on first use and reused until it nears
@@ -435,6 +512,7 @@ mod tests {
             endpoint: endpoint.map(Into::into),
             prefix: String::new(),
             credentials: AzureCredentials::ManagedIdentity(ManagedIdentityCredentials::default()),
+            serve_through_warpgate: true,
         }
     }
 

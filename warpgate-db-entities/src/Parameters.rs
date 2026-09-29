@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_aws::S3StorageConfig;
+use warpgate_azure::AzureBlobConfig;
 use warpgate_common::auth::CredentialKind;
 use warpgate_common::{
     PasswordPolicy, Protocol, StoredSecret, UserAuthCredential, UserRequireCredentialsPolicy,
@@ -133,6 +134,7 @@ pub enum AnalyticsConsent {
 pub enum RecordingsStorageConfig {
     Disk(RecordingsDiskConfig),
     S3(S3StorageConfig),
+    Azure(AzureBlobConfig),
 }
 
 impl Default for RecordingsStorageConfig {
