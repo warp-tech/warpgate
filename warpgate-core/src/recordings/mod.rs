@@ -25,7 +25,7 @@ pub use storage::FileAccess;
 use storage::Storage;
 pub use terminal::*;
 pub use traffic::*;
-use writer::WriterShutdown;
+use writer::{ConstructionHold, RecordingCompletion, WriterShutdown};
 pub use writer::{LiveChunk, NDJsonRecordingWriter, RawRecordingWriter};
 
 /// How long `SessionRecordings::shutdown` waits
@@ -110,6 +110,7 @@ pub struct RecordingWriterOpener {
     params: GlobalParams,
     shutdown: CancellationToken,
     shutdown_tracker: TaskTracker,
+    completion: Arc<Mutex<RecordingCompletion>>,
 }
 
 impl RecordingWriterOpener {
@@ -149,6 +150,7 @@ impl RecordingWriterOpener {
                 token: self.shutdown.clone(),
                 tracker: self.shutdown_tracker.clone(),
             },
+            self.completion.clone(),
         )
         .await
     }
@@ -208,7 +210,9 @@ impl SessionRecordings {
         Ok(Parameters::Entity::get(&self.db).await?.recordings_enable)
     }
 
-    /// Starting a recording with the same name again will append to it
+    /// Starting a recording with the same name again will append to it. On S3
+    /// storage this is not supported: each start completes its own upload of the
+    /// same keys, and `ended` is not reset on append.
     pub async fn start<T, M>(
         &self,
         id: &TargetSessionId,
@@ -270,6 +274,9 @@ impl SessionRecordings {
             }
         };
 
+        let id = model.id;
+        let completion = Arc::<Mutex<RecordingCompletion>>::default();
+        let hold = ConstructionHold::new(completion.clone()).await;
         let opener = RecordingWriterOpener {
             storage,
             model,
@@ -278,9 +285,12 @@ impl SessionRecordings {
             params: self.params.clone(),
             shutdown: self.shutdown.clone(),
             shutdown_tracker: self.shutdown_tracker.clone(),
+            completion: completion.clone(),
         };
 
-        T::new(&opener).await
+        let recorder = T::new(&opener).await?;
+        hold.open(&self.db, id).await;
+        Ok(recorder)
     }
 
     pub async fn subscribe_live(&self, id: &Uuid) -> Option<broadcast::Receiver<LiveChunk>> {
@@ -301,5 +311,400 @@ impl SessionRecordings {
         file: RecordingFile,
     ) -> Result<FileAccess> {
         Ok(self.storage().await?.access(recording, file))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    use poem::http::{Method, StatusCode};
+    use poem::listener::{Acceptor, Listener, TcpListener};
+    use poem::{Request, Response};
+    use sea_orm::ActiveValue::Set;
+    use sea_orm::{Database, IntoActiveModel};
+    use warpgate_aws::{S3Credentials, S3Storage, S3StorageConfig, StaticCredentials};
+    use warpgate_db_entities::Parameters::{
+        ConfigMigrationValues, RecordingsStorageConfig, set_config_migration_values,
+    };
+    use warpgate_db_migrations::migrate_database;
+
+    use super::storage::RecordingSink;
+    use super::*;
+
+    /// A recording made of two files, like a terminal recording's data + index.
+    struct TwoFiles {
+        data: RawRecordingWriter,
+        index: RawRecordingWriter,
+    }
+
+    impl Recorder for TwoFiles {
+        fn kind() -> RecordingKind {
+            RecordingKind::Terminal
+        }
+
+        async fn new(opener: &RecordingWriterOpener) -> Result<Self> {
+            Ok(Self {
+                data: opener.open(RecordingFile::NDJsonData).await?,
+                index: opener.open(RecordingFile::Index).await?,
+            })
+        }
+    }
+
+    /// Just enough of the S3 multipart API, with a failure knob per call.
+    #[derive(Default)]
+    struct FakeS3 {
+        fail_create: Option<&'static str>,
+        fail_part: Option<(&'static str, u32)>,
+        failed_parts: Vec<String>,
+        completed: Vec<String>,
+    }
+
+    impl FakeS3 {
+        fn handle(&mut self, method: &Method, path: &str, query: &str) -> Response {
+            let part = query
+                .split('&')
+                .find_map(|pair| pair.strip_prefix("partNumber="))
+                .and_then(|n| n.parse::<u32>().ok());
+            let ok = |body: &str| Response::builder().body(body.to_string());
+            let fail = || {
+                Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body("<Error><Code>InvalidRequest</Code><Message>injected</Message></Error>")
+            };
+            match (method, part) {
+                (&Method::POST, _) if query.split('&').any(|q| q.starts_with("uploads")) => {
+                    if self.fail_create.is_some_and(|f| path.ends_with(f)) {
+                        return fail();
+                    }
+                    ok(
+                        "<InitiateMultipartUploadResult><UploadId>u</UploadId></InitiateMultipartUploadResult>",
+                    )
+                }
+                (&Method::PUT, Some(n)) => {
+                    if self
+                        .fail_part
+                        .is_some_and(|(f, fail_n)| path.ends_with(f) && n == fail_n)
+                    {
+                        self.failed_parts.push(path.into());
+                        return fail();
+                    }
+                    Response::builder()
+                        .header("ETag", format!("\"{n}\""))
+                        .body("")
+                }
+                (&Method::POST, _) => {
+                    self.completed.push(path.into());
+                    ok(
+                        "<CompleteMultipartUploadResult><ETag>\"e\"</ETag></CompleteMultipartUploadResult>",
+                    )
+                }
+                (&Method::DELETE, _) => Response::builder().status(StatusCode::NO_CONTENT).body(""),
+                _ => fail(),
+            }
+        }
+    }
+
+    struct Harness {
+        db: DatabaseConnection,
+        recordings: SessionRecordings,
+        root: PathBuf,
+        session_id: TargetSessionId,
+        s3: Arc<std::sync::Mutex<FakeS3>>,
+        s3_config: Option<S3StorageConfig>,
+    }
+
+    impl Harness {
+        async fn new(s3: Option<FakeS3>) -> Self {
+            set_config_migration_values(ConfigMigrationValues::default());
+            let db = Database::connect("sqlite::memory:").await.unwrap();
+            migrate_database(&db).await.unwrap();
+            let root = std::env::temp_dir().join(format!("wg-recordings-{}", Uuid::new_v4()));
+            std::fs::create_dir_all(&root).unwrap();
+
+            let use_s3 = s3.is_some();
+            let s3 = Arc::new(std::sync::Mutex::new(s3.unwrap_or_default()));
+            let s3_config = if use_s3 {
+                Some(S3StorageConfig {
+                    bucket: "recordings".into(),
+                    region: "us-east-1".into(),
+                    endpoint: Some(format!("http://{}", serve(s3.clone()).await)),
+                    path_style: true,
+                    prefix: String::new(),
+                    credentials: S3Credentials::Static(StaticCredentials {
+                        access_key_id: "test".into(),
+                        secret_access_key: Some("test".into()),
+                    }),
+                    scratch_path: Some(root.join("scratch").to_string_lossy().into_owned()),
+                })
+            } else {
+                None
+            };
+
+            let mut parameters = Parameters::Entity::get(&db)
+                .await
+                .unwrap()
+                .into_active_model();
+            parameters.recordings_enable = Set(true);
+            if let Some(config) = &s3_config {
+                parameters.recordings_storage = Set(serde_json::to_string(
+                    &RecordingsStorageConfig::S3(config.clone()),
+                )
+                .unwrap());
+            }
+            parameters.update(&db).await.unwrap();
+
+            let params = GlobalParams::new(root.join("warpgate.yaml"), false).unwrap();
+            let recordings = SessionRecordings::new(db.clone(), &params);
+
+            let session_id = TargetSessionId(Uuid::new_v4());
+            warpgate_db_entities::TargetSession::ActiveModel {
+                id: Set(session_id),
+                user_session_id: Set(warpgate_common::UserSessionId(Uuid::new_v4())),
+                target_snapshot: Set("{}".into()),
+                target_id: Set(Uuid::new_v4()),
+                started: Set(OffsetDateTime::now_utc()),
+                ..Default::default()
+            }
+            .insert(&db)
+            .await
+            .unwrap();
+
+            Self {
+                db,
+                recordings,
+                root,
+                session_id,
+                s3,
+                s3_config,
+            }
+        }
+
+        async fn wait_for_writers(&self, remaining: usize) {
+            tokio::time::timeout(Duration::from_secs(10), async {
+                while self.recordings.shutdown_tracker.len() != remaining {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+        }
+
+        async fn recording(&self) -> Recording::Model {
+            Recording::Entity::find()
+                .one(&self.db)
+                .await
+                .unwrap()
+                .unwrap()
+        }
+
+        async fn ended(&self) -> Option<OffsetDateTime> {
+            self.recording().await.ended
+        }
+
+        async fn scratch(&self, file: RecordingFile) -> PathBuf {
+            let recording = self.recording().await;
+            self.root
+                .join("scratch")
+                .join(recording.session_id.to_string())
+                .join(recording.name)
+                .join(file.filename())
+        }
+
+        fn s3(&self) -> std::sync::MutexGuard<'_, FakeS3> {
+            self.s3.lock().unwrap()
+        }
+    }
+
+    impl Drop for Harness {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    async fn serve(s3: Arc<std::sync::Mutex<FakeS3>>) -> std::net::SocketAddr {
+        let acceptor = TcpListener::bind("127.0.0.1:0")
+            .into_acceptor()
+            .await
+            .unwrap();
+        let address = acceptor
+            .local_addr()
+            .into_iter()
+            .find_map(|address| address.0.as_socket_addr().copied())
+            .unwrap();
+        let app = poem::endpoint::make(move |mut request: Request| {
+            let s3 = s3.clone();
+            async move {
+                let _ = request.take_body().into_vec().await;
+                let uri = request.uri();
+                s3.lock().unwrap().handle(
+                    request.method(),
+                    uri.path(),
+                    uri.query().unwrap_or_default(),
+                )
+            }
+        });
+        tokio::spawn(poem::Server::new_with_acceptor(acceptor).run(app));
+        address
+    }
+
+    fn exists(path: &Path) -> bool {
+        path.try_exists().unwrap()
+    }
+
+    /// Readers switch a recording to S3 as soon as it is ended, so a file that
+    /// finishes first must not end it while another is still uploading.
+    #[tokio::test]
+    async fn a_recording_ends_only_after_its_last_file_is_finalized() {
+        let h = Harness::new(None).await;
+
+        let recording: TwoFiles = h.recordings.start(&h.session_id, None, ()).await.unwrap();
+        h.wait_for_writers(2).await;
+
+        drop(recording.index);
+        h.wait_for_writers(1).await;
+        assert_eq!(h.ended().await, None, "ended while data.ndjson was open");
+
+        drop(recording.data);
+        h.wait_for_writers(0).await;
+        assert!(h.ended().await.is_some(), "never ended");
+    }
+
+    /// The data file is already uploaded when the index fails to open; ending
+    /// the recording then would point readers at an index that does not exist.
+    #[tokio::test]
+    async fn a_recorder_that_fails_to_open_all_files_does_not_end() {
+        let h = Harness::new(Some(FakeS3 {
+            fail_create: Some("index.ndjson"),
+            ..Default::default()
+        }))
+        .await;
+
+        let started = h
+            .recordings
+            .start::<TwoFiles, _>(&h.session_id, None, ())
+            .await;
+        assert!(started.is_err());
+        h.wait_for_writers(0).await;
+
+        assert_eq!(h.s3().completed.len(), 1, "data.ndjson was never finalized");
+        assert_eq!(h.ended().await, None);
+        assert!(exists(&h.scratch(RecordingFile::NDJsonData).await));
+    }
+
+    /// The upload of what was written still succeeds, but it is missing data.
+    #[tokio::test]
+    async fn a_failed_local_write_does_not_end() {
+        let h = Harness::new(Some(FakeS3::default())).await;
+        let model = Recording::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            started: Set(OffsetDateTime::now_utc()),
+            session_id: Set(h.session_id),
+            name: Set("broken".into()),
+            kind: Set(RecordingKind::Terminal),
+            metadata: Set("{}".into()),
+            generation: Set(RECORDING_GENERATION),
+            ..Default::default()
+        }
+        .insert(&h.db)
+        .await
+        .unwrap();
+
+        let scratch = h.scratch(RecordingFile::NDJsonData).await;
+        std::fs::create_dir_all(scratch.parent().unwrap()).unwrap();
+        std::fs::write(&scratch, b"").unwrap();
+        let s3 = S3Storage::new(h.s3_config.as_ref().unwrap()).await.unwrap();
+        let sink = RecordingSink::S3 {
+            // Read-only, so writing to it fails.
+            scratch: tokio::fs::File::open(&scratch).await.unwrap(),
+            scratch_path: scratch.clone(),
+            upload: Some(s3.start_multipart("broken/data.ndjson").await.unwrap()),
+        };
+        let writer = RawRecordingWriter::new(
+            sink,
+            model,
+            h.db.clone(),
+            None,
+            WriterShutdown {
+                token: h.recordings.shutdown.clone(),
+                tracker: h.recordings.shutdown_tracker.clone(),
+            },
+            Arc::default(),
+        )
+        .await
+        .unwrap();
+        writer.write(b"first\n").await.unwrap();
+        writer.write(b"second\n").await.unwrap();
+        drop(writer);
+        h.wait_for_writers(0).await;
+
+        assert_eq!(h.s3().completed.len(), 1, "data.ndjson was never finalized");
+        assert_eq!(h.ended().await, None);
+        assert!(exists(&scratch));
+    }
+
+    /// S3 accepts a multipart upload with a gap in its part numbers, so a lost
+    /// part would otherwise complete into a silently truncated object.
+    #[tokio::test]
+    async fn a_failed_s3_part_does_not_end() {
+        let h = Harness::new(Some(FakeS3 {
+            fail_part: Some(("data.ndjson", 1)),
+            ..Default::default()
+        }))
+        .await;
+
+        let recording: TwoFiles = h.recordings.start(&h.session_id, None, ()).await.unwrap();
+        let data = vec![b'x'; 6 * 1024 * 1024];
+        recording.data.write(&data).await.unwrap();
+        drop(recording);
+        h.wait_for_writers(0).await;
+
+        let scratch = h.scratch(RecordingFile::NDJsonData).await;
+        assert_eq!(h.s3().failed_parts.len(), 1, "no part was uploaded");
+        assert!(
+            h.s3()
+                .completed
+                .iter()
+                .all(|key| !key.ends_with("data.ndjson")),
+            "completed with a missing part"
+        );
+        assert_eq!(h.ended().await, None);
+        assert_eq!(
+            std::fs::metadata(&scratch).unwrap().len(),
+            data.len() as u64
+        );
+    }
+
+    /// Opens its data file, then never finishes opening the rest.
+    struct Stalls;
+
+    impl Recorder for Stalls {
+        fn kind() -> RecordingKind {
+            RecordingKind::Terminal
+        }
+
+        async fn new(opener: &RecordingWriterOpener) -> Result<Self> {
+            let _data = opener.open(RecordingFile::NDJsonData).await?;
+            std::future::pending().await
+        }
+    }
+
+    /// A start abandoned half-way (e.g. its session went away) is as incomplete
+    /// as one that failed.
+    #[tokio::test]
+    async fn a_recorder_cancelled_while_opening_its_files_does_not_end() {
+        let h = Harness::new(Some(FakeS3::default())).await;
+
+        tokio::select! {
+            _ = h.recordings.start::<Stalls, _>(&h.session_id, None, ()) => {
+                panic!("construction finished");
+            }
+            () = h.wait_for_writers(1) => {}
+        }
+        h.wait_for_writers(0).await;
+
+        assert_eq!(h.s3().completed.len(), 1, "data.ndjson was never finalized");
+        assert_eq!(h.ended().await, None);
+        assert!(exists(&h.scratch(RecordingFile::NDJsonData).await));
     }
 }
