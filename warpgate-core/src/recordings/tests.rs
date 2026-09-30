@@ -7,7 +7,8 @@ use poem::http::{Method, StatusCode};
 use poem::listener::{Acceptor, Listener, TcpListener};
 use poem::{Request, Response};
 use sea_orm::ActiveValue::Set;
-use sea_orm::{Database, IntoActiveModel};
+use sea_orm::{ConnectionTrait, Database, IntoActiveModel};
+use tokio::io::AsyncReadExt;
 use warpgate_aws::{S3Credentials, S3Storage, S3StorageConfig, StaticCredentials};
 use warpgate_db_entities::Parameters::{
     ConfigMigrationValues, RecordingsStorageConfig, set_config_migration_values,
@@ -43,11 +44,13 @@ struct FakeS3 {
     fail_part: Option<(&'static str, u32)>,
     fail_complete: Option<&'static str>,
     created: Vec<String>,
+    failed_creates: Vec<String>,
     failed_parts: Vec<String>,
     /// (key, part number, body length) of every accepted part.
     parts: Vec<(String, u32, usize)>,
     failed_completes: Vec<String>,
     completed: Vec<String>,
+    aborted: Vec<String>,
 }
 
 impl FakeS3 {
@@ -65,6 +68,7 @@ impl FakeS3 {
         match (method, part) {
             (&Method::POST, _) if query.split('&').any(|q| q.starts_with("uploads")) => {
                 if self.fail_create.is_some_and(|f| path.ends_with(f)) {
+                    self.failed_creates.push(path.into());
                     return fail();
                 }
                 self.created.push(path.into());
@@ -95,7 +99,10 @@ impl FakeS3 {
                     "<CompleteMultipartUploadResult><ETag>\"e\"</ETag></CompleteMultipartUploadResult>",
                 )
             }
-            (&Method::DELETE, _) => Response::builder().status(StatusCode::NO_CONTENT).body(""),
+            (&Method::DELETE, _) => {
+                self.aborted.push(path.into());
+                Response::builder().status(StatusCode::NO_CONTENT).body("")
+            }
             _ => fail(),
         }
     }
@@ -337,6 +344,11 @@ async fn a_recorder_that_fails_to_open_all_files_does_not_end() {
         started.is_err(),
         "index.ndjson opened despite the injected failure"
     );
+    let failed_creates = h.s3().failed_creates.clone();
+    assert!(
+        matches!(failed_creates.as_slice(), [key] if key.ends_with("index.ndjson")),
+        "start failed, but not on the injected index.ndjson create: {failed_creates:?}"
+    );
     h.wait_for_writers(0).await;
 
     assert!(
@@ -447,6 +459,60 @@ async fn a_failed_s3_part_does_not_end() {
         "data.ndjson completed={completed} with {uploaded} of {} bytes, ended={ended:?}",
         data.len(),
     );
+    let aborted = h.s3().aborted.clone();
+    assert!(
+        matches!(aborted.as_slice(), [key] if key.ends_with("data.ndjson")),
+        "expected one abort of data.ndjson: {aborted:?}"
+    );
+
+    let mut scratch = Vec::new();
+    h.recordings
+        .access(&h.recording().await, RecordingFile::NDJsonData)
+        .await
+        .unwrap()
+        .open_read()
+        .await
+        .unwrap()
+        .read_to_end(&mut scratch)
+        .await
+        .unwrap();
+    assert_eq!(scratch.len(), data.len(), "the scratch is not complete");
+}
+
+/// Both files are uploaded but storing `ended` fails, so the recording is
+/// still read from its scratch, which must therefore still be there.
+#[tokio::test]
+async fn a_failed_ended_update_keeps_the_scratch() {
+    let h = Harness::new(Some(FakeS3::default())).await;
+
+    let recording: TwoFiles = h.recordings.start(&h.session_id, None, ()).await.unwrap();
+    recording.data.write(b"data\n").await.unwrap();
+    recording.index.write(b"index\n").await.unwrap();
+    drop(recording.index);
+    h.wait_for_writers(1).await;
+
+    h.db.execute_unprepared("ALTER TABLE recordings RENAME TO recordings_hidden")
+        .await
+        .unwrap();
+    assert!(
+        Recording::Entity::find().one(&h.db).await.is_err(),
+        "the recordings table is still reachable"
+    );
+    drop(recording.data);
+    h.wait_for_writers(0).await;
+    h.db.execute_unprepared("ALTER TABLE recordings_hidden RENAME TO recordings")
+        .await
+        .unwrap();
+
+    assert!(
+        h.s3().completed("data.ndjson") && h.s3().completed("index.ndjson"),
+        "a file was never finalized"
+    );
+    assert_eq!(h.ended().await, None);
+    for file in [RecordingFile::NDJsonData, RecordingFile::Index] {
+        let path = h.scratch(file).await;
+        assert!(exists(&path), "{path:?} is gone");
+    }
 }
 
 /// Opens its data file, then never finishes opening the rest.

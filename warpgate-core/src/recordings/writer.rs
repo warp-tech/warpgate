@@ -246,15 +246,17 @@ mod completion {
             use sea_orm::ActiveValue::Set;
 
             let completion = &self.completion;
-            let scratch_guards = {
+            {
                 let mut state = completion.state.lock().await;
                 state.scratch_guards.extend(guard);
                 state.open_writers = state.open_writers.saturating_sub(1);
                 if state.open_writers > 0 {
                     return Ok(());
                 }
-                std::mem::take(&mut state.scratch_guards)
-            };
+            }
+
+            // The guards stay in the state until `ended` is stored, so a database
+            // error leaves them to be kept on drop.
 
             let recording = Recording::Entity::find_by_id(completion.recording_id)
                 .one(&completion.db)
@@ -266,7 +268,7 @@ mod completion {
             model.ended = Set(Some(OffsetDateTime::now_utc()));
             model.update(&completion.db).await?;
 
-            drop(scratch_guards);
+            completion.state.lock().await.scratch_guards.clear();
             Ok(())
         }
     }
