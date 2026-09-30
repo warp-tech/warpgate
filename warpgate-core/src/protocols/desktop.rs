@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use bytes::Bytes;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedSender};
+use warpgate_common::{SecretError, UserFacingReason, WarpgateError};
 
 pub const DESKTOP_INPUT_CHANNEL_CAPACITY: usize = 256;
 
@@ -122,9 +123,23 @@ impl DesktopEvent {
     /// One conversion point for both RDP and VNC. The top-level cause only,
     /// not the `{:#}` chain: a target host or a config detail can sit behind
     /// `.context(...)` several layers down. The caller logs the full chain.
+    ///
+    /// Even the top level is only shown when it is a literal from our own
+    /// source or has a user-facing reason: a credential resolved with a bare
+    /// `?` puts a `WarpgateError` on top, whose `Display` carries the secret
+    /// backend's own text and the configured secret path.
     #[must_use]
     pub fn backend_error(error: &anyhow::Error) -> Self {
-        Self::Error(error.to_string())
+        let shown = if let Some(message) = error.downcast_ref::<&'static str>() {
+            (*message).to_owned()
+        } else if let Some(error) = error.downcast_ref::<WarpgateError>() {
+            error.user_facing_reason()
+        } else if let Some(error) = error.downcast_ref::<SecretError>() {
+            error.user_facing_reason()
+        } else {
+            "Internal error in the target connection".to_owned()
+        };
+        Self::Error(shown)
     }
 }
 
@@ -199,5 +214,57 @@ mod tests {
         let shown = format!("{:?}", DesktopEvent::backend_error(&wrapped));
         assert!(shown.contains("connecting to target"));
         assert!(!shown.contains("connection refused"));
+    }
+
+    const CANARY: &str = "permission denied on kv/app#token";
+
+    fn shown(error: &anyhow::Error) -> String {
+        // Asserted first, or a fixture that stopped carrying the text would
+        // make the absence below prove nothing.
+        assert!(error.to_string().contains(CANARY), "{error}");
+        match DesktopEvent::backend_error(error) {
+            DesktopEvent::Error(shown) => shown,
+            other => format!("{other:?}"),
+        }
+    }
+
+    fn secret_errors() -> [SecretError; 3] {
+        [
+            SecretError::Backend(CANARY.into()),
+            SecretError::NotFound {
+                path: CANARY.into(),
+            },
+            SecretError::PathNotAllowed {
+                backend: "vault".into(),
+                path: CANARY.into(),
+            },
+        ]
+    }
+
+    #[test]
+    fn a_secret_error_on_top_shows_its_reason_not_its_text() {
+        for error in secret_errors() {
+            let reason = error.user_facing_reason();
+            let shown = shown(&anyhow::Error::from(error));
+            assert!(!shown.contains(CANARY), "{shown}");
+            assert_eq!(shown, reason);
+        }
+    }
+
+    /// The shape a bare `?` on `MaybeSecretRef::resolve` actually produces.
+    #[test]
+    fn a_resolved_credential_s_failure_shows_its_reason_not_its_text() {
+        for error in secret_errors() {
+            let reason = error.user_facing_reason();
+            let shown = shown(&anyhow::Error::from(WarpgateError::from(error)));
+            assert!(!shown.contains(CANARY), "{shown}");
+            assert_eq!(shown, reason);
+        }
+    }
+
+    #[test]
+    fn an_unrecognised_error_on_top_falls_back() {
+        let shown = shown(&anyhow::anyhow!("backend said: {CANARY}"));
+        assert!(!shown.contains(CANARY), "{shown}");
     }
 }
