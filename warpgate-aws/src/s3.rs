@@ -232,18 +232,12 @@ impl S3MultipartUpload {
         &self.key
     }
 
-    /// Once a part has failed the upload can only fail, so later data is not
-    /// buffered and [`Self::finish`] reports the loss.
     pub async fn push(&mut self, data: &[u8]) -> Result<(), AwsError> {
-        if self.lost_part {
-            return Ok(());
-        }
         self.buf.extend_from_slice(data);
         while self.buf.len() >= PART_SIZE {
             let chunk = self.buf.drain(..PART_SIZE).collect::<Vec<u8>>();
             if let Err(error) = self.upload_part(chunk).await {
                 self.lost_part = true;
-                self.buf.clear();
                 return Err(error);
             }
         }

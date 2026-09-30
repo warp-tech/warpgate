@@ -82,6 +82,7 @@ impl RawRecordingWriter {
         }
 
         tracker.spawn(async move {
+            let mut written = true;
             try_block!(async {
                 let mut last_flush = Instant::now();
                 loop {
@@ -107,14 +108,20 @@ impl RawRecordingWriter {
                 }
                 Ok::<(), anyhow::Error>(())
             } catch (error: anyhow::Error) {
+                written = false;
                 error!(%error, "Failed to write recording");
             });
 
             // On upload failure the local scratch is kept and `ended` is never set
-            // (the recording is at least not lost).
+            // (the recording is at least not lost). The same goes for a failed
+            // write, whose upload is missing what did not reach the scratch.
             try_block!(async {
                 let cleanup_guard = sink.finalize().await?;
-                ticket.finished(cleanup_guard).await?;
+                if written {
+                    ticket.finished(Some(cleanup_guard)).await?;
+                } else {
+                    cleanup_guard.keep();
+                }
                 Ok::<(), Error>(())
             } catch (error: Error) {
                 error!(%error, "Failed to finalize recording");
@@ -195,6 +202,16 @@ mod completion {
         scratch_guards: Vec<RecordingSinkCleanupGuard>,
     }
 
+    impl Drop for CompletionState {
+        /// Still holding guards here means a ticket never finished, so the
+        /// recording stays unended and is read from its scratch.
+        fn drop(&mut self) {
+            self.scratch_guards
+                .drain(..)
+                .for_each(RecordingSinkCleanupGuard::keep);
+        }
+    }
+
     impl RecordingCompletion {
         pub fn new(db: DatabaseConnection, recording_id: Uuid) -> Arc<Self> {
             Arc::new(Self {
@@ -212,6 +229,7 @@ mod completion {
         }
     }
 
+    /// A ticket dropped without [`Self::finished`] keeps its recording from ever ending.
     #[must_use]
     pub struct WriterTicket {
         completion: Arc<RecordingCompletion>,
@@ -224,13 +242,13 @@ mod completion {
 
         /// Takes over the scratch guard and then drops them all together and finalizes recording
         /// once the last ticket is closed
-        pub async fn finished(self, guard: RecordingSinkCleanupGuard) -> Result<()> {
+        pub async fn finished(self, guard: Option<RecordingSinkCleanupGuard>) -> Result<()> {
             use sea_orm::ActiveValue::Set;
 
             let completion = &self.completion;
             let scratch_guards = {
                 let mut state = completion.state.lock().await;
-                state.scratch_guards.push(guard);
+                state.scratch_guards.extend(guard);
                 state.open_writers = state.open_writers.saturating_sub(1);
                 if state.open_writers > 0 {
                     return Ok(());
