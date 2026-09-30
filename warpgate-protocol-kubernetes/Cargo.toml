@@ -33,9 +33,9 @@ tracing.workspace = true
 url.workspace = true
 uuid.workspace = true
 warpgate-aws = { path = "../warpgate-aws", default-features = false }
-warpgate-common-cache = { path = "../warpgate-common-cache" }
 warpgate-ca = { path = "../warpgate-ca", default-features = false }
 warpgate-common = { path = "../warpgate-common", default-features = false }
+warpgate-common-cache = { path = "../warpgate-common-cache" }
 warpgate-common-http = { path = "../warpgate-common-http", default-features = false }
 warpgate-core = { path = "../warpgate-core", default-features = false }
 warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }
