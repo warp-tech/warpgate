@@ -94,22 +94,24 @@
             }),
             debounceTime(200),
         ),
-    ]).pipe(
-        distinctUntilChanged(),
-        switchMap(([p, f]) => {
-            page = p
-            loaded = false
-            return load({
-                search: f,
-                offset: p * (pageSize ?? 0),
-                limit: pageSize,
-            })
-        }),
-    ).subscribe(response => {
-        loaded = true
-        list = response.items
-        total = response.total
-    })
+    ])
+        .pipe(
+            distinctUntilChanged(),
+            switchMap(([p, f]) => {
+                page = p
+                loaded = false
+                return load({
+                    search: f,
+                    offset: p * (pageSize ?? 0),
+                    limit: pageSize,
+                })
+            }),
+        )
+        .subscribe(response => {
+            loaded = true
+            list = response.items
+            total = response.total
+        })
 
     type Entry =
         | { kind: 'group'; group: G; key: GK; collapsed: boolean }
