@@ -6,11 +6,9 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
-anyhow.workspace = true
 html-escape.workspace = true
 poem.workspace = true
 poem-openapi.workspace = true
-quick_cache.workspace = true
 serde.workspace = true
 subtle.workspace = true
 tokio.workspace = true
@@ -22,4 +20,5 @@ warpgate-core = { path = "../warpgate-core" }
 warpgate-db-entities = { path = "../warpgate-db-entities" }
 
 [dev-dependencies]
+anyhow.workspace = true
 thiserror.workspace = true
