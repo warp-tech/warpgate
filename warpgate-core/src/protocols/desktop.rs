@@ -221,7 +221,10 @@ mod tests {
     fn shown(error: &anyhow::Error) -> String {
         // Asserted first, or a fixture that stopped carrying the text would
         // make the absence below prove nothing.
-        assert!(error.to_string().contains(CANARY), "{error}");
+        assert!(
+            error.to_string().contains(CANARY),
+            "the fixture error must carry the canary"
+        );
         match DesktopEvent::backend_error(error) {
             DesktopEvent::Error(shown) => shown,
             other => format!("{other:?}"),
@@ -246,8 +249,14 @@ mod tests {
         for error in secret_errors() {
             let reason = error.user_facing_reason();
             let shown = shown(&anyhow::Error::from(error));
-            assert!(!shown.contains(CANARY), "{shown}");
-            assert_eq!(shown, reason);
+            assert!(
+                !shown.contains(CANARY),
+                "viewer output must not contain the canary"
+            );
+            assert!(
+                shown == reason,
+                "viewer output must equal the public reason"
+            );
         }
     }
 
@@ -257,14 +266,23 @@ mod tests {
         for error in secret_errors() {
             let reason = error.user_facing_reason();
             let shown = shown(&anyhow::Error::from(WarpgateError::from(error)));
-            assert!(!shown.contains(CANARY), "{shown}");
-            assert_eq!(shown, reason);
+            assert!(
+                !shown.contains(CANARY),
+                "viewer output must not contain the canary"
+            );
+            assert!(
+                shown == reason,
+                "viewer output must equal the public reason"
+            );
         }
     }
 
     #[test]
     fn an_unrecognised_error_on_top_falls_back() {
         let shown = shown(&anyhow::anyhow!("backend said: {CANARY}"));
-        assert!(!shown.contains(CANARY), "{shown}");
+        assert!(
+            !shown.contains(CANARY),
+            "viewer output must not contain the canary"
+        );
     }
 }

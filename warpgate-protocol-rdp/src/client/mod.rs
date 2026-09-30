@@ -822,14 +822,23 @@ mod tests {
         .await
         .unwrap_err();
         // Or a path that never reached the resolver would pass this too.
-        assert!(error.to_string().contains(CANARY), "{error}");
+        assert!(
+            error.to_string().contains(CANARY),
+            "the fixture error must carry the canary"
+        );
 
         let shown = match DesktopEvent::backend_error(&error) {
             DesktopEvent::Error(shown) => shown,
             other => format!("{other:?}"),
         };
-        assert!(!shown.contains(CANARY), "{shown}");
-        assert_eq!(shown, "Secret backend error");
+        assert!(
+            !shown.contains(CANARY),
+            "viewer output must not contain the canary"
+        );
+        assert!(
+            shown == "Secret backend error",
+            "viewer output must equal the public reason"
+        );
     }
 
     #[test]
