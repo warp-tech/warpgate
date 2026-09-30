@@ -749,11 +749,97 @@ async fn connect(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
     use ironrdp::graphics::image_processing::PixelFormat;
     use ironrdp::session::image::DecodedImage;
-    use warpgate_core::{DesktopEvent, DesktopRect};
+    use tokio::sync::mpsc::{channel, unbounded_channel};
+    use uuid::Uuid;
+    use warpgate_common::{
+        MaybeSecretRef, RdpTargetAuth, RdpTargetCompression, RdpTargetPasswordAuth, RdpTlsSecurity,
+        Secret, SecretError, SecretRef, SecretResolver, TargetRdpOptions, TargetSessionId,
+    };
+    use warpgate_core::{DesktopEvent, DesktopRect, LogonState};
 
-    use super::{connector, encode_resized_keyframe};
+    use super::{LogonWatcher, connector, encode_resized_keyframe, run};
+
+    const CANARY: &str = "permission denied on kv/app#token";
+
+    struct FailingBackend;
+
+    #[async_trait]
+    impl SecretResolver for FailingBackend {
+        async fn resolve(&self, _: &SecretRef) -> Result<Secret<String>, SecretError> {
+            Err(SecretError::Backend(CANARY.into()))
+        }
+    }
+
+    /// `run` resolves the password with a bare `?` before it opens a socket,
+    /// so this needs no target and reaches the viewer with the error in the
+    /// shape `connect` hands to `DesktopEvent::backend_error`.
+    #[tokio::test]
+    async fn a_secret_backend_s_words_never_reach_the_viewer() {
+        let options = TargetRdpOptions {
+            host: "127.0.0.1".into(),
+            port: 1,
+            username: "user".into(),
+            domain: None,
+            auth: RdpTargetAuth::Password(RdpTargetPasswordAuth {
+                password: MaybeSecretRef::Reference(SecretRef {
+                    backend: "vault".into(),
+                    mount: "kv".into(),
+                    path: "app".into(),
+                    field: "token".into(),
+                }),
+            }),
+            verify_tls: false,
+            compression: RdpTargetCompression::default(),
+            interactive_logon: false,
+            tls_security: RdpTlsSecurity::default(),
+        };
+        let (event_tx, _event_rx) = channel(16);
+        let (_input_tx, input_rx) = channel(16);
+        let (_abort_tx, abort_rx) = unbounded_channel();
+        let logon = LogonWatcher {
+            target_session_id: TargetSessionId(Uuid::new_v4()),
+            target_id: Uuid::new_v4(),
+            target_name: "target".into(),
+            user_id: Uuid::new_v4(),
+            username: "alice".into(),
+            sign_in: LogonState::logged_on(),
+        };
+
+        let error = run(
+            options,
+            (800, 600),
+            event_tx,
+            input_rx,
+            abort_rx,
+            logon,
+            Arc::new(FailingBackend),
+        )
+        .await
+        .unwrap_err();
+        // Or a path that never reached the resolver would pass this too.
+        assert!(
+            error.to_string().contains(CANARY),
+            "the fixture error must carry the canary"
+        );
+
+        let shown = match DesktopEvent::backend_error(&error) {
+            DesktopEvent::Error(shown) => shown,
+            other => format!("{other:?}"),
+        };
+        assert!(
+            !shown.contains(CANARY),
+            "viewer output must not contain the canary"
+        );
+        assert!(
+            shown == "Secret backend error",
+            "viewer output must equal the public reason"
+        );
+    }
 
     #[test]
     fn resized_keyframe_covers_the_new_desktop() {
