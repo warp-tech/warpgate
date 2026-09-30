@@ -25,8 +25,8 @@ pub use storage::FileAccess;
 use storage::Storage;
 pub use terminal::*;
 pub use traffic::*;
-use writer::WriterShutdown;
 pub use writer::{LiveChunk, NDJsonRecordingWriter, RawRecordingWriter};
+use writer::{RecordingCompletion, WriterShutdown};
 
 /// How long `SessionRecordings::shutdown` waits
 /// (just under kubernetes default)
@@ -110,6 +110,7 @@ pub struct RecordingWriterOpener {
     params: GlobalParams,
     shutdown: CancellationToken,
     shutdown_tracker: TaskTracker,
+    completion: Arc<RecordingCompletion>,
 }
 
 impl RecordingWriterOpener {
@@ -142,13 +143,12 @@ impl RecordingWriterOpener {
 
         RawRecordingWriter::new(
             sink,
-            self.model.clone(),
-            self.db.clone(),
             live,
             WriterShutdown {
                 token: self.shutdown.clone(),
                 tracker: self.shutdown_tracker.clone(),
             },
+            self.completion.register_writer().await,
         )
         .await
     }
@@ -272,6 +272,7 @@ impl SessionRecordings {
 
         let opener = RecordingWriterOpener {
             storage,
+            completion: RecordingCompletion::new(self.db.clone(), model.id),
             model,
             db: self.db.clone(),
             live: self.live.clone(),
