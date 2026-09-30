@@ -56,3 +56,6 @@ openssl-tls = [
     "dep:openssl",
     "dep:tokio-openssl",
 ]
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

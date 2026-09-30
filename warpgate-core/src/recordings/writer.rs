@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
+use sea_orm::{ActiveModelTrait, DatabaseConnection, DbErr, EntityTrait};
 use serde::Serialize;
 use time::OffsetDateTime;
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
@@ -11,97 +11,11 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::error;
 use uuid::Uuid;
+use warpgate_common::try_block;
 use warpgate_db_entities::Recording;
 
 use super::storage::{RecordingSink, RecordingSinkCleanupGuard};
 use super::{Error, LiveMap, Result};
-
-pub struct WriterShutdown {
-    pub token: CancellationToken,
-    pub tracker: TaskTracker,
-}
-
-/// A recording's files (e.g. `data.ndjson` and `index.ndjson`) each finalize in
-/// their own writer task, but `ended` is one flag for all of them and readers
-/// switch to S3 on it. So only the last writer to finish may set it, and every
-/// scratch copy has to outlive it.
-#[derive(Default)]
-pub struct RecordingCompletion {
-    /// Writers still running, plus any recorder still opening its files: a
-    /// recorder that fails half-way must not let its first file end the recording.
-    open_writers: usize,
-    failed: bool,
-    cleanup: Vec<RecordingSinkCleanupGuard>,
-}
-
-impl RecordingCompletion {
-    const fn hold(&mut self) {
-        self.open_writers += 1;
-    }
-}
-
-/// Keeps a recording from ending while its recorder opens its files. Only
-/// [`Self::open`] gives the hold back: dropped any other way (the recorder
-/// failed, its future was cancelled or panicked) the recording can never end,
-/// so it stays unended with its scratch kept.
-pub struct ConstructionHold(Arc<Mutex<RecordingCompletion>>);
-
-impl ConstructionHold {
-    pub async fn new(completion: Arc<Mutex<RecordingCompletion>>) -> Self {
-        completion.lock().await.hold();
-        Self(completion)
-    }
-
-    pub async fn open(self, db: &DatabaseConnection, id: Uuid) {
-        release(&self.0, false, None, db, id).await;
-    }
-}
-
-impl Drop for RecordingCompletion {
-    /// A recording that never ended is read from its scratch, so keep it.
-    fn drop(&mut self) {
-        self.cleanup
-            .drain(..)
-            .for_each(RecordingSinkCleanupGuard::keep);
-    }
-}
-
-/// Give up a [`RecordingCompletion::hold`]. The last one out marks the
-/// recording ended, unless anything failed.
-pub async fn release(
-    completion: &Mutex<RecordingCompletion>,
-    failed: bool,
-    cleanup: Option<RecordingSinkCleanupGuard>,
-    db: &DatabaseConnection,
-    id: Uuid,
-) {
-    let mut completion = completion.lock().await;
-    completion.open_writers = completion.open_writers.saturating_sub(1);
-    completion.failed |= failed;
-    completion.cleanup.extend(cleanup);
-    if completion.open_writers > 0 || completion.failed {
-        return;
-    }
-
-    let ended = async {
-        use sea_orm::ActiveValue::Set;
-
-        let recording = Recording::Entity::find_by_id(id)
-            .one(db)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Recording not found"))?;
-        let mut model: Recording::ActiveModel = recording.into();
-        model.ended = Set(Some(OffsetDateTime::now_utc()));
-        model.update(db).await?;
-        Ok::<(), anyhow::Error>(())
-    }
-    .await;
-
-    match ended {
-        Ok(()) => completion.cleanup.clear(),
-        Err(error) => error!(%error, "Failed to write recording"),
-    }
-}
 
 /// Capacity of both the disk-write queue and the live broadcast ring. They must
 /// stay equal: the live-stream lag heal relies on any item dropped from the
@@ -139,13 +53,11 @@ pub struct RawRecordingWriter {
 impl RawRecordingWriter {
     pub(crate) async fn new(
         mut sink: RecordingSink,
-        model: Recording::Model,
-        db: DatabaseConnection,
         live: Option<LiveMap>,
         shutdown: WriterShutdown,
-        completion: Arc<Mutex<RecordingCompletion>>,
+        ticket: WriterTicket,
     ) -> Result<Self> {
-        completion.lock().await.hold();
+        let recording_id = ticket.recording_id();
         let (sender, mut receiver) = mpsc::channel::<Bytes>(RECORDING_QUEUE_CAPACITY);
         let (drop_signal, mut drop_receiver) = mpsc::channel(1);
         let WriterShutdown { token, tracker } = shutdown;
@@ -157,10 +69,10 @@ impl RawRecordingWriter {
         if let Some(live) = live {
             {
                 let mut live = live.lock().await;
-                live.insert(model.id, live_sender.clone());
+                live.insert(recording_id, live_sender.clone());
             }
             tokio::spawn({
-                let id = model.id;
+                let id = recording_id;
                 async move {
                     let _ = drop_receiver.recv().await;
                     let mut live = live.lock().await;
@@ -170,7 +82,7 @@ impl RawRecordingWriter {
         }
 
         tracker.spawn(async move {
-            let written = async {
+            try_block!(async {
                 let mut last_flush = Instant::now();
                 loop {
                     if last_flush.elapsed() > Duration::from_secs(5) {
@@ -193,28 +105,20 @@ impl RawRecordingWriter {
                 while let Ok(bytes) = receiver.try_recv() {
                     sink.write_all(&bytes).await?;
                 }
-                Ok::<(), Error>(())
-            }
-            .await;
-            if let Err(error) = &written {
+                Ok::<(), anyhow::Error>(())
+            } catch (error: anyhow::Error) {
                 error!(%error, "Failed to write recording");
-            }
+            });
 
-            // Complete the S3 object before the recording is marked ended, so a
-            // reader that switches to S3 on `ended` always finds the object. On
-            // failure the local scratch is kept (the recording is at least not lost).
-            let finalized = sink.finalize().await;
-            if let Err(error) = &finalized {
-                error!(%error, "Failed to write recording");
-            }
-            release(
-                &completion,
-                written.is_err() || finalized.is_err(),
-                finalized.ok(),
-                &db,
-                model.id,
-            )
-            .await;
+            // On upload failure the local scratch is kept and `ended` is never set
+            // (the recording is at least not lost).
+            try_block!(async {
+                let cleanup_guard = sink.finalize().await?;
+                ticket.finished(cleanup_guard).await?;
+                Ok::<(), Error>(())
+            } catch (error: Error) {
+                error!(%error, "Failed to finalize recording");
+            });
         });
 
         Ok(Self {
@@ -268,3 +172,86 @@ impl NDJsonRecordingWriter {
         Ok(buf.len())
     }
 }
+
+mod completion {
+    use super::*;
+
+    pub struct WriterShutdown {
+        pub token: CancellationToken,
+        pub tracker: TaskTracker,
+    }
+
+    /// One completion struct shared by multiple writers (index, data) of one recording
+    /// Writers get completion tickets via register_writer and the last ticket to close finalizes the DB entry
+    pub struct RecordingCompletion {
+        db: DatabaseConnection,
+        recording_id: Uuid,
+        state: Mutex<CompletionState>,
+    }
+
+    #[derive(Default)]
+    struct CompletionState {
+        open_writers: usize,
+        scratch_guards: Vec<RecordingSinkCleanupGuard>,
+    }
+
+    impl RecordingCompletion {
+        pub fn new(db: DatabaseConnection, recording_id: Uuid) -> Arc<Self> {
+            Arc::new(Self {
+                db,
+                recording_id,
+                state: Mutex::default(),
+            })
+        }
+
+        pub async fn register_writer(self: &Arc<Self>) -> WriterTicket {
+            self.state.lock().await.open_writers += 1;
+            WriterTicket {
+                completion: self.clone(),
+            }
+        }
+    }
+
+    #[must_use]
+    pub struct WriterTicket {
+        completion: Arc<RecordingCompletion>,
+    }
+
+    impl WriterTicket {
+        pub fn recording_id(&self) -> Uuid {
+            self.completion.recording_id
+        }
+
+        /// Takes over the scratch guard and then drops them all together and finalizes recording
+        /// once the last ticket is closed
+        pub async fn finished(self, guard: RecordingSinkCleanupGuard) -> Result<()> {
+            use sea_orm::ActiveValue::Set;
+
+            let completion = &self.completion;
+            let scratch_guards = {
+                let mut state = completion.state.lock().await;
+                state.scratch_guards.push(guard);
+                state.open_writers = state.open_writers.saturating_sub(1);
+                if state.open_writers > 0 {
+                    return Ok(());
+                }
+                std::mem::take(&mut state.scratch_guards)
+            };
+
+            let recording = Recording::Entity::find_by_id(completion.recording_id)
+                .one(&completion.db)
+                .await?
+                .ok_or_else(|| {
+                    DbErr::RecordNotFound(format!("recording {}", completion.recording_id))
+                })?;
+            let mut model: Recording::ActiveModel = recording.into();
+            model.ended = Set(Some(OffsetDateTime::now_utc()));
+            model.update(&completion.db).await?;
+
+            drop(scratch_guards);
+            Ok(())
+        }
+    }
+}
+
+pub use completion::{RecordingCompletion, WriterShutdown, WriterTicket};

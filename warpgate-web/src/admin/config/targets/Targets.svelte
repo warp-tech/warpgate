@@ -145,6 +145,7 @@
             showSearch={true}
             groupObject={groupInfoFromTarget}
             groupKey={group => group.id}
+            virtual
             bind:collapsedGroups={$collapsedGroups}
         >
             {#snippet header(_items, groupControls)}
