@@ -313,7 +313,7 @@ class ProcessManager:
 
         return port
 
-    def start_minio(self, user, password):
+    def start_s3(self, access_key, secret_key):
         port = alloc_port()
         self.start(
             [
@@ -321,14 +321,15 @@ class ProcessManager:
                 "run",
                 "--rm",
                 "-p",
-                f"{port}:9000",
+                f"{port}:8333",
                 "-e",
-                f"MINIO_ROOT_USER={user}",
+                f"AWS_ACCESS_KEY_ID={access_key}",
                 "-e",
-                f"MINIO_ROOT_PASSWORD={password}",
-                "quay.io/minio/minio",
+                f"AWS_SECRET_ACCESS_KEY={secret_key}",
+                "chrislusf/seaweedfs",
                 "server",
-                "/data",
+                "-s3",
+                "-dir=/data",
             ]
         )
         return port

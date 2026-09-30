@@ -156,6 +156,7 @@ tokio = { version = "1.52", features = [
     "io-util",
 ], default-features = false }
 tokio-util = { version = "0.7", features = ["rt"] }
+quick_cache = "0.7.0"
 governor = { version = "0.10.0", default-features = false, features = [
     "std",
     "quanta",
