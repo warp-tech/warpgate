@@ -69,6 +69,12 @@ pub enum Error {
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("Creating recording directory {}: {source}", path.display())]
+    CreateDirectory {
+        path: std::path::PathBuf,
+        source: std::io::Error,
+    },
+
     #[error("Database: {0}")]
     Database(#[from] sea_orm::DbErr),
 
@@ -224,7 +230,12 @@ impl SessionRecordings {
         // On S3 this folder is a scratch copy, live-readable while the session runs and
         // dropped once each file finishes uploading.
         let folder = storage.recording_folder(id, &name);
-        tokio::fs::create_dir_all(&folder).await?;
+        tokio::fs::create_dir_all(&folder)
+            .await
+            .map_err(|source| Error::CreateDirectory {
+                path: folder.clone(),
+                source,
+            })?;
         if self.params.should_secure_files() {
             secure_directory(&folder)?;
         }

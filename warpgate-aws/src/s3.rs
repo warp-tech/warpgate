@@ -64,6 +64,9 @@ pub struct S3StorageConfig {
     /// Key prefix prepended to every object path.
     pub prefix: String,
     pub credentials: S3Credentials,
+    /// Local directory buffering recordings before upload, resolved against the
+    /// config file's directory unless absolute. Defaults to `data/recordings-scratch`.
+    pub scratch_path: Option<String>,
 }
 
 impl S3StorageConfig {
@@ -318,6 +321,7 @@ mod tests {
             path_style,
             prefix: String::new(),
             credentials: S3Credentials::Auto(AutoCredentials {}),
+            scratch_path: None,
         }
     }
 
