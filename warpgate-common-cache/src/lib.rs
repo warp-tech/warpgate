@@ -3,8 +3,7 @@ use std::hash::Hash;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
-use quick_cache::sync::{Cache, EntryAction, EntryResult};
+use quick_cache::sync::{Cache as QuickCache, EntryAction, EntryResult};
 
 // LRU cache limit
 const CAPACITY: usize = 1024;
@@ -12,18 +11,18 @@ const CAPACITY: usize = 1024;
 #[derive(Clone)]
 struct Cached<C, V> {
     config: C,
-    client: V,
+    value: V,
     created: Instant,
 }
 
-/// Cache of reusable HTTP clients
+/// This quick_cache based cache locks entries while inserting them preventing race between two async inserts and adds max_age
 #[derive(Clone)]
-pub struct ClientCache<K, C, V> {
-    cache: Arc<Cache<K, Cached<C, V>>>,
+pub struct Cache<K, C, V> {
+    cache: Arc<QuickCache<K, Cached<C, V>>>,
     max_age: Duration,
 }
 
-impl<K, C, V> ClientCache<K, C, V>
+impl<K, C, V> Cache<K, C, V>
 where
     K: Clone + Eq + Hash,
     C: Clone + PartialEq,
@@ -31,41 +30,40 @@ where
 {
     pub fn new(max_age: Duration) -> Self {
         Self {
-            cache: Arc::new(Cache::new(CAPACITY)),
+            cache: Arc::new(QuickCache::new(CAPACITY)),
             max_age,
         }
     }
 
-    pub async fn get_or_build<F, Fut>(&self, key: &K, config: &C, build: F) -> Result<V>
+    pub async fn get_or_build<F, Fut, E>(&self, key: &K, config: &C, build: F) -> Result<V, E>
     where
         F: FnOnce() -> Fut,
-        Fut: Future<Output = Result<V>>,
+        Fut: Future<Output = Result<V, E>>,
     {
         let guard = match self
             .cache
             .entry_async(key, |_, cached| {
                 if cached.config == *config && cached.created.elapsed() < self.max_age {
-                    EntryAction::Retain(cached.client.clone())
+                    EntryAction::Retain(cached.value.clone())
                 } else {
                     EntryAction::ReplaceWithGuard
                 }
             })
             .await
         {
-            EntryResult::Retained(client) => return Ok(client),
+            EntryResult::Retained(value) => return Ok(value),
             EntryResult::Vacant(guard) | EntryResult::Replaced(guard, _) => guard,
-            EntryResult::Removed(..) | EntryResult::Timeout => {
-                anyhow::bail!("client cache entry vanished")
-            }
+            // Not produced by the callback above; build uncached.
+            EntryResult::Removed(..) | EntryResult::Timeout => return build().await,
         };
 
-        let client = build().await?;
+        let value = build().await?;
         let _ = guard.insert(Cached {
             config: config.clone(),
-            client: client.clone(),
+            value: value.clone(),
             created: Instant::now(),
         });
-        Ok(client)
+        Ok(value)
     }
 
     pub fn remove(&self, key: &K) {
@@ -79,12 +77,12 @@ mod tests {
 
     use super::*;
 
-    type TestCache = ClientCache<u32, &'static str, usize>;
+    type TestCache = Cache<u32, &'static str, usize>;
 
     async fn get(cache: &TestCache, key: u32, config: &'static str, builds: &AtomicUsize) {
         cache
             .get_or_build(&key, &config, || async {
-                Ok(builds.fetch_add(1, Ordering::SeqCst))
+                Ok::<_, ()>(builds.fetch_add(1, Ordering::SeqCst))
             })
             .await
             .unwrap();
@@ -117,7 +115,7 @@ mod tests {
             for _ in 0..3 {
                 tokio::task::yield_now().await;
             }
-            Ok(n)
+            Ok::<_, ()>(n)
         };
 
         let (a, b) = tokio::join!(
@@ -142,7 +140,7 @@ mod tests {
     async fn failed_build_is_not_cached() {
         let cache = TestCache::new(Duration::MAX);
         let failed = cache
-            .get_or_build(&1, &"a", || async { anyhow::bail!("no credential") })
+            .get_or_build(&1, &"a", || async { Err::<usize, _>("no credential") })
             .await;
         assert!(failed.is_err());
 

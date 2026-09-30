@@ -9308,7 +9308,6 @@ dependencies = [
  "aws-sigv4",
  "aws-smithy-runtime-api",
  "aws-smithy-types",
- "dashmap",
  "data-encoding",
  "http 1.5.0",
  "poem-openapi",
@@ -9318,6 +9317,7 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+ "warpgate-common-cache",
 ]
 
 [[package]]
@@ -9397,6 +9397,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "warpgate-common-cache"
+version = "0.29.1"
+dependencies = [
+ "quick_cache",
+ "tokio",
+]
+
+[[package]]
 name = "warpgate-common-http"
 version = "0.29.1"
 dependencies = [
@@ -9404,7 +9412,6 @@ dependencies = [
  "html-escape",
  "poem",
  "poem-openapi",
- "quick_cache",
  "serde",
  "subtle",
  "thiserror 2.0.20",
@@ -9461,6 +9468,7 @@ dependencies = [
  "warpgate-aws",
  "warpgate-ca",
  "warpgate-common",
+ "warpgate-common-cache",
  "warpgate-db-entities",
  "warpgate-db-migrations",
  "warpgate-ldap",
@@ -9599,6 +9607,7 @@ dependencies = [
  "warpgate-aws",
  "warpgate-ca",
  "warpgate-common",
+ "warpgate-common-cache",
  "warpgate-common-http",
  "warpgate-core",
  "warpgate-db-entities",
@@ -9645,6 +9654,7 @@ dependencies = [
  "warpgate-aws",
  "warpgate-ca",
  "warpgate-common",
+ "warpgate-common-cache",
  "warpgate-common-http",
  "warpgate-core",
  "warpgate-db-entities",
@@ -9841,6 +9851,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "warpgate-common-cache",
  "yup-oauth2",
 ]
 

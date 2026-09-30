@@ -5,6 +5,7 @@ members = [
     "warpgate",
     "warpgate-admin",
     "warpgate-aws",
+    "warpgate-common-cache",
     "warpgate-common",
     "warpgate-secrets-vault",
     "warpgate-common-http",

@@ -1,6 +1,3 @@
-use std::sync::OnceLock;
-
-use dashmap::DashMap;
 use tokio::sync::OnceCell;
 
 mod ec2;
@@ -27,13 +24,6 @@ static EC2_DETECTION: OnceCell<bool> = OnceCell::const_new();
 
 /// Cached IMDS region
 static IMDS_REGION: OnceCell<Option<String>> = OnceCell::const_new();
-
-/// Cached IP -> Ec2InstanceInfo
-static INSTANCE_CACHE: OnceLock<DashMap<String, Ec2InstanceInfo>> = OnceLock::new();
-
-fn instance_cache() -> &'static DashMap<String, Ec2InstanceInfo> {
-    INSTANCE_CACHE.get_or_init(DashMap::new)
-}
 
 /// Check if running on EC2 (cached, 1s timeout on first call)
 pub async fn check_ec2() -> bool {
