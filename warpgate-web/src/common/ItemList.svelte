@@ -35,18 +35,16 @@
         combineLatest,
         debounceTime,
         distinctUntilChanged,
-        map,
         type Observable,
         Subject,
-        share,
         switchMap,
         tap,
     } from 'rxjs'
     import { onDestroy, onMount, type Snippet } from 'svelte'
-    import { observe } from 'svelte-observable'
     import DelayedSpinner from './DelayedSpinner.svelte'
     import EmptyState from './EmptyState.svelte'
     import Pagination from './Pagination.svelte'
+    import VirtualList from './VirtualList.svelte'
 
     interface Props {
         page?: number
@@ -61,6 +59,7 @@
         empty?: Snippet<[]>
         groupHeader?: Snippet<[G, GroupState]>
         collapsedGroups?: GK[]
+        virtual?: boolean
     }
 
     let {
@@ -76,15 +75,18 @@
         empty,
         groupHeader,
         collapsedGroups = $bindable([]),
+        virtual = false,
     }: Props = $props()
 
     let filter = $state('')
     let loaded = $state(false)
+    let list = $state.raw<T[] | null>(null)
+    let total = $state(0)
 
     const page$ = new Subject<number>()
     const filter$ = new Subject<string>()
 
-    const responses = combineLatest([
+    const subscription = combineLatest([
         page$,
         filter$.pipe(
             tap(() => {
@@ -103,63 +105,55 @@
                 limit: pageSize,
             })
         }),
-        share(),
-        tap(() => {
-            loaded = true
-        }),
-    )
+    ).subscribe(response => {
+        loaded = true
+        list = response.items
+        total = response.total
+    })
 
-    const total = observe<number>(responses.pipe(map(x => x.total)), 0)
-    const items = observe<T[] | null>(responses.pipe(map(x => x.items)), null)
+    type Entry =
+        | { kind: 'group'; group: G; key: GK; collapsed: boolean }
+        | { kind: 'item'; item: T }
 
-    interface Row {
-        item: T
-        group?: G
-        key?: GK
-        groupStart: boolean
-        collapsed: boolean
-    }
-
-    interface Rows {
-        rows: Row[]
-        keys: GK[]
-    }
+    const built = $derived(buildEntries(list ?? []))
 
     // Groups are detected by adjacency, so the caller is expected to hand us
-    // items already sorted by group.
-    function buildRows(list: T[]): Rows {
+    // items already sorted by group. Items of collapsed groups are left out.
+    function buildEntries(items: T[]): { entries: Entry[]; keys: GK[] } {
         const getGroup = groupObject
         const getKey = groupKey
 
         if (!getGroup || !getKey) {
             return {
-                rows: list.map(_item => ({
-                    item: _item,
-                    groupStart: false,
-                    collapsed: false,
-                })),
+                entries: items.map(_item => ({ kind: 'item', item: _item })),
                 keys: [],
             }
         }
 
-        const entries = list.map(_item => {
-            const group = getGroup(_item)
-            return { item: _item, group, key: getKey(group) }
-        })
-
         // An active search expands everything, so that matches can't hide
         // inside a collapsed group - without touching the persisted state.
         const hidden = filter ? new Set<GK>() : new Set(collapsedGroups)
+        const entries: Entry[] = []
+        const keys: GK[] = []
 
-        return {
-            keys: [...new Set(entries.map(entry => entry.key))],
-            rows: entries.map((entry, _index) => ({
-                ...entry,
-                groupStart:
-                    _index === 0 || entry.key !== entries[_index - 1]?.key,
-                collapsed: hidden.has(entry.key),
-            })),
+        for (const _item of items) {
+            const group = getGroup(_item)
+            const key = getKey(group)
+            if (!keys.length || keys.at(-1) !== key) {
+                keys.push(key)
+                entries.push({
+                    kind: 'group',
+                    group,
+                    key,
+                    collapsed: hidden.has(key),
+                })
+            }
+            if (!hidden.has(key)) {
+                entries.push({ kind: 'item', item: _item })
+            }
         }
+
+        return { entries, keys }
     }
 
     // Keys of groups that no longer exist are dropped on every write, so the
@@ -180,6 +174,7 @@
     })
 
     onDestroy(() => {
+        subscription.unsubscribe()
         page$.complete()
         filter$.complete()
     })
@@ -196,67 +191,63 @@
     })
 </script>
 
-{#await $items}
+{#snippet row(entry: Entry)}
+    {#if entry.kind === 'item'}
+        {@render item?.(entry.item)}
+    {:else if groupHeader}
+        {@render groupHeader(entry.group, {
+            collapsed: entry.collapsed,
+            collapsible: !filter,
+            toggle: () => toggleGroup(entry.key, built.keys),
+        })}
+    {/if}
+{/snippet}
+
+{#if !list}
     <DelayedSpinner />
-{:then _items}
-    {@const _built = buildRows(_items ?? [])}
+{:else}
     <div class="d-flex align-items-center mb-2" hidden={!loaded}>
         <!-- either filtering or not filtering and there are at least some items at all -->
-        {#if showSearch && (filter || !!_items?.length)}
+        {#if showSearch && (filter || !!list.length)}
             <Input
                 bind:value={filter}
                 placeholder="Search..."
                 class="flex-grow-1"
             />
         {/if}
-        {@render header?.(_items, {
-            available: _built.keys.length > 0 && !filter,
+        {@render header?.(list, {
+            available: built.keys.length > 0 && !filter,
             collapseAll: () => {
-                collapsedGroups = _built.keys
+                collapsedGroups = built.keys
             },
             expandAll: () => {
                 collapsedGroups = []
             },
         })}
     </div>
-    {#if _items}
-        <div class="list-group list-group-flush mb-3">
-            {#each _built.rows as _row (_row.item)}
-                {#if _row.groupStart && groupHeader && _row.group !== undefined && _row.key !== undefined}
-                    {@const _key = _row.key}
-                    {@render groupHeader(_row.group, {
-                        collapsed: _row.collapsed,
-                        collapsible: !filter,
-                        toggle: () => toggleGroup(_key, _built.keys),
-                    })}
-                {/if}
-                {#if !_row.collapsed}
-                    {@render item?.(_row.item)}
-                {/if}
+    {#if virtual}
+        <VirtualList items={built.entries} {row} />
+    {:else}
+        <div
+            class="list-group list-group-flush mb-3"
+            hidden={!built.entries.length}
+        >
+            {#each built.entries as _entry (_entry.kind === 'item' ? _entry.item : _entry.key)}
+                {@render row(_entry)}
             {/each}
         </div>
-        {@render footer?.(_items)}
-    {:else}
-        <DelayedSpinner />
     {/if}
+    {@render footer?.(list)}
 
-    {#if loaded && !_items?.length}
+    {#if loaded && !list.length}
         {#if filter}
             <EmptyState title="Nothing found" />
         {:else}
             {@render empty?.()}
         {/if}
     {/if}
-{/await}
+{/if}
 
-{#await $total then _total}
-    {#if pageSize && _total > pageSize}
-        <Pagination total={_total} bind:page {pageSize} />
-    {/if}
-{/await}
-
-<style lang="scss">
-    .list-group:empty {
-        display: none;
-    }
-</style>
+{#if pageSize && total > pageSize}
+    <Pagination {total} bind:page {pageSize} />
+{/if}
