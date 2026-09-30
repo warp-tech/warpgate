@@ -4,7 +4,7 @@ use std::sync::Arc;
 use sea_orm::sea_query::IntoCondition;
 use sea_orm::{EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
-use tracing::warn;
+use tracing::{error, warn};
 use warpgate_common::auth::{ApprovalKind, RememberApprovalBy};
 use warpgate_common::{UserSessionId, WarpgateError};
 use warpgate_db_entities::SessionApprovalRequest;
@@ -168,15 +168,30 @@ impl Services {
         )
         .await?
         {
-            DecisionWaitOutcome::Decided(decision) => {
-                guard.decided();
+            DecisionWaitOutcome::Decided(decision, started) => {
+                guard.decided(started);
                 decision
             }
-            DecisionWaitOutcome::TimedOut => {
-                guard.timed_out();
-                subject.emit_timed_out_event();
-                return Ok(GateOutcome::Expired);
-            }
+            DecisionWaitOutcome::TimedOut => match guard.close_timed_out().await {
+                Ok(TimeoutClose::Closed) => {
+                    subject.emit_timed_out_event();
+                    return Ok(GateOutcome::Expired);
+                }
+                // A decision that beat the close stands, so the session gets what
+                // the record says
+                Ok(TimeoutClose::Decided(decision)) => decision,
+                Ok(TimeoutClose::Ended) => return Ok(GateOutcome::Expired),
+                // The deadline has passed regardless; the guard's drop retries the close
+                Err(error) => {
+                    error!(
+                        %error,
+                        %session_id,
+                        target = %subject.target_name,
+                        "Failed to close a timed-out approval request"
+                    );
+                    return Ok(GateOutcome::Expired);
+                }
+            },
             DecisionWaitOutcome::Ended => return Ok(GateOutcome::Expired),
         };
 
@@ -273,7 +288,7 @@ impl Services {
                 Ok(PolledGate::Pending)
             }
             RowState::Decided(decision) => {
-                mark_consumed(&self.db, key).await?;
+                mark_consumed(&self.db, key, row.started).await?;
                 match decision {
                     ApprovalDecision::Approved(_) => {
                         Ok(PolledGate::Approved(ApprovedTarget::new(authorization)))

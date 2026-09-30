@@ -449,14 +449,24 @@ pub async fn settle_request(
 }
 
 /// mark a decision as acknowledged by its session
-pub async fn mark_consumed(db: &DatabaseConnection, which: Key) -> Result<(), WarpgateError> {
-    Entity::update_many()
+///
+/// Only the asking it was read from (`started`), and only once decided: a
+/// consumed approval can be remembered, so a late acknowledgement must not
+/// land on a newer asking under the same key.
+pub async fn mark_consumed(
+    db: &DatabaseConnection,
+    which: Key,
+    started: OffsetDateTime,
+) -> Result<bool, WarpgateError> {
+    let result = Entity::update_many()
         .col_expr(Column::ConsumedAt, OffsetDateTime::now_utc().into())
         .filter(which.into_condition())
+        .filter(Column::Started.eq(started))
+        .filter(Column::Status.is_in(ApprovalRequestStatus::DECIDED))
         .filter(Column::ConsumedAt.is_null())
         .exec(db)
         .await?;
-    Ok(())
+    Ok(result.rows_affected > 0)
 }
 
 pub async fn abandon_requests_for_session(
