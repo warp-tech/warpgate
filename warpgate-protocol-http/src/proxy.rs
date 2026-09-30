@@ -31,7 +31,7 @@ use warpgate_core::AdmittedTarget;
 use warpgate_tls::{TlsMode, configure_tls_connector};
 use warpgate_web::lookup_built_file;
 
-use crate::client_cache::HttpClientCache;
+use crate::client_cache::{HttpClientCache, build_client};
 use crate::common::{SESSION_COOKIE_NAME, SessionExt};
 
 static X_WARPGATE_USERNAME: HeaderName = HeaderName::from_static("x-warpgate-username");
@@ -328,7 +328,9 @@ pub async fn proxy_normal_request(
     tracing::debug!("URI: {:?}", uri);
 
     let client = client_cache
-        .client_for(&admitted.target().name, &options)
+        .get_or_build(&admitted.target().name, &options, || async {
+            build_client(&options)
+        })
         .await?;
 
     let (authorization_header, uri) = extract_basic_auth(uri)?;
