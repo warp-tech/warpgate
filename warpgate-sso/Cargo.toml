@@ -25,6 +25,7 @@ subtle.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+warpgate-common-cache = { path = "../warpgate-common-cache" }
 yup-oauth2 = { version = "12", default-features = false, features = [
     "service-account",
     "hyper-rustls",
