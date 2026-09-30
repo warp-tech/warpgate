@@ -38,7 +38,6 @@ aws-smithy-runtime-api = { version = "1", default-features = false }
 aws-smithy-types = { version = "1", default-features = false, features = [
     "rt-tokio",
 ] }
-dashmap = { version = "6.2", default-features = false }
 data-encoding.workspace = true
 http.workspace = true
 poem-openapi.workspace = true
@@ -48,3 +47,4 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 url.workspace = true
+warpgate-common-cache = { path = "../warpgate-common-cache" }

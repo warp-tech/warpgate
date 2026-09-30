@@ -30,3 +30,4 @@ yup-oauth2 = { version = "12", default-features = false, features = [
     "hyper-rustls",
     "ring",
 ] }
+warpgate-common-cache = { path = "../warpgate-common-cache" }

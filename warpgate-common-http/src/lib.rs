@@ -1,5 +1,4 @@
 pub mod auth;
-mod client_cache;
 pub mod errors;
 pub mod ext;
 pub mod internal_page;
@@ -8,7 +7,6 @@ pub mod logging;
 mod request;
 
 pub use auth::{AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization};
-pub use client_cache::ClientCache;
 pub use keepalive::{SessionKeepalive, SessionKeepaliveGuard};
 use poem::Request;
 use subtle::ConstantTimeEq;
