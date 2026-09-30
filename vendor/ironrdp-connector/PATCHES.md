@@ -30,3 +30,11 @@ Both are in upstream IronRDP after 0.10.0 and drop out on re-vendor:
 `Cargo.toml` additionally sets `[lints.rust] warnings = { level = "allow", priority = 1 }`
 so this vendored path dependency's warnings don't surface in Warpgate's builds. This is
 not in `warpgate.patch` (which is source-only); re-apply it by hand on re-vendor.
+
+## `Config::support_dyn_vc_gfx_protocol`
+
+Backport of upstream #1237: an opt-in flag that sets
+`RNS_UD_CS_SUPPORT_DYNVC_GFX_PROTOCOL` in the Client Core Data early capability flags,
+which servers require before they open the Graphics Pipeline channel. Warpgate sets it
+together with registering `GraphicsPipelineClient` (never one without the other).
+Drops out on re-vendor from an upstream release that contains #1237.

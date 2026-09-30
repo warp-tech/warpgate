@@ -1,0 +1,3107 @@
+diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
+--- ironrdp-egfx-0.3.0/src/client.rs	2006-07-24 02:21:28.000000000 +0100
++++ base/src/client.rs	2026-09-23 00:40:54.080370363 +0100
+@@ -1,7 +1,7 @@
+ //! Client-side EGFX implementation
+ //!
+ //! This module provides client-side support for the Graphics Pipeline Extension
+-//! ([MS-RDPEGFX]), including H.264 AVC420 decode and surface management.
++//! ([MS-RDPEGFX]), including H.264 AVC420 decode, ClearCodec decode, and surface management.
+ //!
+ //! # Protocol Compliance
+ //!
+@@ -24,7 +24,7 @@
+ //!    |                                       |
+ //!    |  (For each frame:)                    |
+ //!    |--- StartFrame ----------------------->|
+-//!    |--- WireToSurface1 (H.264) ----------->|  -> H264Decoder::decode()
++//!    |--- WireToSurface1 (codec) ----------->|  -> H264/ClearCodec decode
+ //!    |--- EndFrame ------------------------->|  -> FrameAcknowledge
+ //!    |                                       |
+ //!    |<---------- FrameAcknowledge ----------|
+@@ -57,12 +57,16 @@
+ 
+ use ironrdp_core::{Decode as _, ReadCursor, impl_as_any};
+ use ironrdp_dvc::{DvcClientProcessor, DvcMessage, DvcProcessor};
++use ironrdp_graphics::clearcodec::ClearCodecDecoder;
++use ironrdp_graphics::progressive::{ProgressiveDecoder, TILE_BYTES_PER_PIXEL, TILE_DIM};
++use ironrdp_graphics::rdp6::BitmapStreamDecoder;
+ use ironrdp_graphics::zgfx;
+-use ironrdp_pdu::geometry::{ExclusiveRectangle, Rectangle as _};
++use ironrdp_pdu::geometry::ExclusiveRectangle;
+ use ironrdp_pdu::{PduResult, decode_cursor, decode_err, pdu_other_err};
+ use tracing::{debug, trace, warn};
+ 
+ use crate::CHANNEL_NAME;
++use crate::compositor::{Compositor, OutputUpdate};
+ use crate::decode::H264Decoder;
+ use crate::pdu::{
+     Avc420BitmapStream, CacheImportReplyPdu, CacheToSurfacePdu, CapabilitiesAdvertisePdu, CapabilitiesV8Flags,
+@@ -182,7 +186,7 @@
+ /// Decoded bitmap data for a surface region
+ ///
+ /// Delivered to [`GraphicsPipelineHandler::on_bitmap_updated`] when
+-/// a `WireToSurface1` PDU is processed with decoded pixel data.
++/// a `WireToSurface1` or `WireToSurface2` PDU is processed with decoded pixel data.
+ #[derive(Debug)]
+ #[non_exhaustive]
+ pub struct BitmapUpdate {
+@@ -190,7 +194,9 @@
+     pub surface_id: u16,
+     /// Destination rectangle within the surface (exclusive `right`/`bottom`)
+     pub destination_rectangle: ExclusiveRectangle,
+-    /// Codec that produced this update
++    /// Codec associated with this update
++    ///
++    /// RFX Progressive tiles use [`Codec1Type::Uncompressed`] after decoding to RGBA.
+     pub codec_id: Codec1Type,
+     /// RGBA pixel data (4 bytes per pixel), row-major
+     ///
+@@ -217,18 +223,25 @@
+ pub trait GraphicsPipelineHandler: Send {
+     /// Returns the capability sets to advertise to the server
+     ///
+-    /// The default advertises V10.7 (AVC420+AVC444), V8.1 (AVC420 only),
+-    /// and V8 (no AVC) as fallback.
++    /// The default advertises V8.1 (AVC420) and V8 (no AVC) as fallback.
++    ///
++    /// V10.x is deliberately absent. Those versions signal AVC444 support
++    /// unless `AVC_DISABLED` is set, and [`GraphicsPipelineClient`] has no
++    /// AVC444 decoder: [`Codec1Type::Avc444`] and [`Codec1Type::Avc444v2`]
++    /// reach [`GraphicsPipelineHandler::on_unhandled_pdu`] instead of being
++    /// decoded. The server picks one of the advertised sets ([capability
++    /// negotiation]) and prefers the most capable, so offering AVC444 makes a
++    /// host that supports it send nothing the client can paint. Add V10.7 back
++    /// once AVC444 decodes.
+     ///
+     /// Note: AVC-capable versions are automatically filtered out at
+     /// advertisement time if no H.264 decoder is configured on the
+     /// [`GraphicsPipelineClient`]. If all returned sets require AVC
+     /// and no decoder is available, a V8-only fallback is used.
++    ///
++    /// [capability negotiation]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpegfx/31c6e2b1-335b-4a75-9454-bb2309958c21
+     fn capabilities(&self) -> Vec<CapabilitySet> {
+         vec![
+-            CapabilitySet::V10_7 {
+-                flags: CapabilitiesV107Flags::SMALL_CACHE,
+-            },
+             CapabilitySet::V8_1 {
+                 flags: CapabilitiesV81Flags::AVC420_ENABLED | CapabilitiesV81Flags::SMALL_CACHE,
+             },
+@@ -244,6 +257,9 @@
+     /// Called when the server resets the graphics output buffer
+     fn on_reset_graphics(&mut self, _width: u32, _height: u32) {}
+ 
++    /// Called when a graphics-output reset has invalid dimensions or exceeds the output allocation limit.
++    fn on_reset_graphics_rejected(&mut self, _width: u32, _height: u32) {}
++
+     /// Called when a surface is created by the server
+     fn on_surface_created(&mut self, _surface: &Surface) {}
+ 
+@@ -328,11 +344,13 @@
+     /// [MS-RDPEGFX 2.2.2.23]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpegfx/22fc0ec7-38ce-4d9d-ad6d-93a0e9f3c38c
+     fn on_map_surface_to_scaled_window(&mut self, _pdu: &MapSurfaceToScaledWindowPdu) {}
+ 
+-    /// Called for progressive codec (RFX Progressive) bitmap data
++    /// Called when the server sends an RFX Progressive bitmap PDU
++    ///
++    /// Implement [`GraphicsPipelineHandler::on_bitmap_updated`] to render its decoded tiles.
+     ///
+-    /// Per [MS-RDPEGFX 3.3.5.3].
++    /// Per [MS-RDPEGFX 3.3.5.2].
+     ///
+-    /// [MS-RDPEGFX 3.3.5.3]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpegfx/e6dbb3a7-3de0-44a5-a1ee-9de90f75e7e0
++    /// [MS-RDPEGFX 3.3.5.2]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpegfx/9791fc34-7644-4279-844f-7728ae9959c2
+     fn on_wire_to_surface2(&mut self, _pdu: &WireToSurface2Pdu) {}
+ 
+     /// Called when the server deletes a progressive encoding context
+@@ -377,12 +395,19 @@
+ /// Client for the Graphics Pipeline Virtual Channel (EGFX)
+ ///
+ /// This client handles capability negotiation, surface tracking,
+-/// H.264 AVC420 decode, and frame acknowledgment per [MS-RDPEGFX].
++/// H.264 AVC420 and RFX Progressive decode, and frame acknowledgment per [MS-RDPEGFX].
+ ///
+ /// [MS-RDPEGFX]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpegfx/da5c75f9-cd99-450c-98c4-014a496942b0
+ pub struct GraphicsPipelineClient {
+     handler: Box<dyn GraphicsPipelineHandler>,
+     h264_decoder: Option<Box<dyn H264Decoder>>,
++    /// Built on first use via [`Self::decode_clearcodec`]. `None` means no ClearCodec
++    /// frame has arrived yet, not that the codec is unsupported: keeping the ~1.37 MiB
++    /// V-bar and glyph cache spine (see `ClearCodecDecoder::new`) unallocated saves that
++    /// much per session for the common case of a server that never sends ClearCodec.
++    clearcodec_decoder: Option<ClearCodecDecoder>,
++    planar_decoder: BitmapStreamDecoder,
++    progressive_decoder: ProgressiveDecoder,
+ 
+     decompressor: zgfx::Decompressor,
+     decompressed_buffer: Vec<u8>,
+@@ -392,28 +417,38 @@
+     codec_caps: CodecCapabilities,
+ 
+     surfaces: BTreeMap<u16, Surface>,
++    compositor: Compositor,
+     current_frame_id: Option<u32>,
+     frames_queued: u32,
+     total_frames_decoded: u32,
++    pending_output_reset: Option<(u16, u16)>,
+ }
+ 
+ impl GraphicsPipelineClient {
+     /// Create a new `GraphicsPipelineClient`
+     ///
+     /// If `h264_decoder` is `None`, AVC420 frames are logged and skipped.
++    /// ClearCodec decoding is always available (no external decoder required)
++    /// and its cache spine is allocated lazily, on the first ClearCodec frame,
++    /// rather than up front for a codec the session may never use.
+     pub fn new(handler: Box<dyn GraphicsPipelineHandler>, h264_decoder: Option<Box<dyn H264Decoder>>) -> Self {
+         Self {
+             handler,
+             h264_decoder,
++            clearcodec_decoder: None,
++            planar_decoder: BitmapStreamDecoder::default(),
++            progressive_decoder: ProgressiveDecoder::new(),
+             decompressor: zgfx::Decompressor::new(),
+             decompressed_buffer: Vec::new(),
+             state: ClientState::WaitingForConfirm,
+             negotiated_caps: None,
+             codec_caps: CodecCapabilities::default(),
+             surfaces: BTreeMap::new(),
++            compositor: Compositor::default(),
+             current_frame_id: None,
+             frames_queued: 0,
+             total_frames_decoded: 0,
++            pending_output_reset: None,
+         }
+     }
+ 
+@@ -451,6 +486,27 @@
+         self.total_frames_decoded
+     }
+ 
++    /// Take the output-buffer regions that changed in completed frames.
++    ///
++    /// The client-side compositor applies every surface command (`WireToSurface1`
++    /// decodes, `SolidFill`, `SurfaceToSurface`, and the bitmap cache) into
++    /// persistent RGBA8888 surfaces and maps them onto the graphics output. This
++    /// drains the accumulated output-space deltas, committed per `EndFrame` and
++    /// ready to blit into a framebuffer. Each call empties the queue.
++    #[must_use]
++    pub fn drain_output(&mut self) -> Vec<OutputUpdate> {
++        self.compositor.drain_output()
++    }
++
++    /// Take the most recent graphics-output extent announced by `ResetGraphics`.
++    ///
++    /// The returned dimensions satisfy the protocol's output limit and the
++    /// compositor's output-framebuffer allocation limit and are reported once.
++    #[must_use]
++    pub fn take_output_reset(&mut self) -> Option<(u16, u16)> {
++        self.pending_output_reset.take()
++    }
++
+     // ========================================================================
+     // PDU Handlers
+     // ========================================================================
+@@ -462,7 +518,7 @@
+                 Ok(vec![])
+             }
+             GfxPdu::ResetGraphics(reset) => {
+-                self.handle_reset_graphics(reset.width, reset.height);
++                self.handle_reset_graphics(reset.width, reset.height)?;
+                 Ok(vec![])
+             }
+             GfxPdu::CreateSurface(create) => {
+@@ -480,6 +536,7 @@
+             GfxPdu::StartFrame(start) => {
+                 self.current_frame_id = Some(start.frame_id);
+                 self.frames_queued = self.frames_queued.saturating_add(1);
++                self.progressive_decoder.begin_frame();
+                 trace!(frame_id = start.frame_id, "StartFrame");
+                 Ok(vec![])
+             }
+@@ -490,6 +547,7 @@
+             GfxPdu::WireToSurface2(pdu) => {
+                 trace!("WireToSurface2 (progressive codec)");
+                 self.handler.on_wire_to_surface2(&pdu);
++                self.handle_wire_to_surface2(pdu)?;
+                 Ok(vec![])
+             }
+             GfxPdu::EndFrame(end) => self.handle_end_frame(end.frame_id),
+@@ -497,6 +555,8 @@
+             // Surface operations
+             GfxPdu::SolidFill(pdu) => {
+                 trace!(surface_id = pdu.surface_id, "SolidFill");
++                self.compositor
++                    .solid_fill(pdu.surface_id, &pdu.fill_pixel, &pdu.rectangles);
+                 self.handler.on_solid_fill(&pdu);
+                 Ok(vec![])
+             }
+@@ -506,6 +566,12 @@
+                     dst = pdu.destination_surface_id,
+                     "SurfaceToSurface"
+                 );
++                self.compositor.surface_to_surface(
++                    pdu.source_surface_id,
++                    pdu.destination_surface_id,
++                    &pdu.source_rectangle,
++                    &pdu.destination_points,
++                );
+                 self.handler.on_surface_to_surface(&pdu);
+                 Ok(vec![])
+             }
+@@ -517,6 +583,8 @@
+                     cache_slot = pdu.cache_slot,
+                     "SurfaceToCache"
+                 );
++                self.compositor
++                    .surface_to_cache(pdu.surface_id, pdu.cache_slot, &pdu.source_rectangle);
+                 self.handler.on_surface_to_cache(&pdu);
+                 Ok(vec![])
+             }
+@@ -526,11 +594,14 @@
+                     surface_id = pdu.surface_id,
+                     "CacheToSurface"
+                 );
++                self.compositor
++                    .cache_to_surface(pdu.cache_slot, pdu.surface_id, &pdu.destination_points);
+                 self.handler.on_cache_to_surface(&pdu);
+                 Ok(vec![])
+             }
+             GfxPdu::EvictCacheEntry(pdu) => {
+                 trace!(cache_slot = pdu.cache_slot, "EvictCacheEntry");
++                self.compositor.evict_cache_entry(pdu.cache_slot);
+                 self.handler.on_evict_cache_entry(&pdu);
+                 Ok(vec![])
+             }
+@@ -552,6 +623,7 @@
+             }
+             GfxPdu::MapSurfaceToScaledOutput(pdu) => {
+                 trace!(surface_id = pdu.surface_id, "MapSurfaceToScaledOutput");
++                self.handle_map_surface_to_scaled_output(&pdu);
+                 self.handler.on_map_surface_to_scaled_output(&pdu);
+                 Ok(vec![])
+             }
+@@ -568,6 +640,8 @@
+                     codec_context_id = pdu.codec_context_id,
+                     "DeleteEncodingContext"
+                 );
++                self.progressive_decoder
++                    .delete_context(pdu.surface_id, pdu.codec_context_id);
+                 self.handler.on_delete_encoding_context(&pdu);
+                 Ok(vec![])
+             }
+@@ -616,9 +690,13 @@
+         self.handler.on_capabilities_confirmed(cap);
+     }
+ 
+-    fn handle_reset_graphics(&mut self, width: u32, height: u32) {
++    fn handle_reset_graphics(&mut self, width: u32, height: u32) -> PduResult<()> {
++        let output_size = Compositor::materializable_output_size(width, height);
++
+         // Per spec, ResetGraphics implicitly destroys all surfaces
+         self.surfaces.clear();
++        self.compositor.reset(width, height);
++        self.pending_output_reset = output_size;
+ 
+         // Reset frame tracking state so subsequent FrameAcknowledge PDUs
+         // don't report stale queue depth from a previous stream.
+@@ -632,9 +710,28 @@
+         if let Some(ref mut decoder) = self.h264_decoder {
+             decoder.reset();
+         }
+-
+-        debug!(width, height, "Graphics reset");
+-        self.handler.on_reset_graphics(width, height);
++        // The Progressive decoder is deliberately NOT reset here either. Its context lifetime
++        // is driven by DeleteEncodingContext and DeleteSurface; MS-RDPEGFX 3.3.5.14 only
++        // resizes the Graphics Output Buffer. Windows establishes a codec context once and
++        // never re-sends SYNC + CONTEXT afterwards, so dropping it here makes every later
++        // payload fail with MissingBlock("CONTEXT").
++        // The ClearCodec decoder is deliberately NOT reset here. MS-RDPEGFX 3.3.5.14 only
++        // resizes the Graphics Output Buffer; cache lifetime is driven by the stream instead,
++        // through CLEARCODEC_FLAG_CACHE_RESET (2.2.4.1), which ClearCodecDecoder::decode
++        // already honors by resetting the V-bar cursors. Dropping the decoder here would also
++        // drop the glyph cache, so a legitimate post-reset GLYPH_HIT would fail unless the
++        // server redundantly re-sent every glyph.
++
++        if output_size.is_some() {
++            debug!(width, height, "Graphics reset");
++            self.handler.on_reset_graphics(width, height);
++            Ok(())
++        } else {
++            self.handler.on_reset_graphics_rejected(width, height);
++            Err(pdu_other_err!(
++                "reset graphics output dimensions exceed compositor limits"
++            ))
++        }
+     }
+ 
+     fn handle_create_surface(&mut self, surface_id: u16, width: u16, height: u16, pixel_format: PixelFormat) {
+@@ -654,12 +751,15 @@
+         };
+ 
+         debug!(surface_id, width, height, ?pixel_format, "Surface created");
++        self.compositor.create_surface(surface_id, width, height);
+         self.handler.on_surface_created(&surface);
+         self.surfaces.insert(surface_id, surface);
+     }
+ 
+     fn handle_delete_surface(&mut self, surface_id: u16) {
++        self.progressive_decoder.delete_surface(surface_id);
+         if self.surfaces.remove(&surface_id).is_some() {
++            self.compositor.delete_surface(surface_id);
+             debug!(surface_id, "Surface deleted");
+             self.handler.on_surface_deleted(surface_id);
+         } else {
+@@ -672,6 +772,7 @@
+             surface.is_mapped = true;
+             surface.output_origin_x = origin_x;
+             surface.output_origin_y = origin_y;
++            self.compositor.map_surface(surface_id, origin_x, origin_y);
+             debug!(surface_id, origin_x, origin_y, "Surface mapped to output");
+             self.handler.on_surface_mapped(surface_id, origin_x, origin_y);
+         } else {
+@@ -679,6 +780,36 @@
+         }
+     }
+ 
++    fn handle_map_surface_to_scaled_output(&mut self, pdu: &MapSurfaceToScaledOutputPdu) {
++        if let Some(surface) = self.surfaces.get_mut(&pdu.surface_id) {
++            surface.is_mapped = true;
++            surface.output_origin_x = pdu.output_origin_x;
++            surface.output_origin_y = pdu.output_origin_y;
++            self.compositor.map_surface_scaled(
++                pdu.surface_id,
++                pdu.output_origin_x,
++                pdu.output_origin_y,
++                pdu.target_width,
++                pdu.target_height,
++            );
++            debug!(
++                surface_id = pdu.surface_id,
++                origin_x = pdu.output_origin_x,
++                origin_y = pdu.output_origin_y,
++                target_width = pdu.target_width,
++                target_height = pdu.target_height,
++                "Surface mapped to scaled output"
++            );
++            self.handler
++                .on_surface_mapped(pdu.surface_id, pdu.output_origin_x, pdu.output_origin_y);
++        } else {
++            warn!(
++                surface_id = pdu.surface_id,
++                "MapSurfaceToScaledOutput for unknown surface"
++            );
++        }
++    }
++
+     fn handle_wire_to_surface1(&mut self, pdu: crate::pdu::WireToSurface1Pdu) -> PduResult<()> {
+         let surface = self
+             .surfaces
+@@ -720,6 +851,12 @@
+                 debug!("AVC444 codec not yet implemented, forwarding to handler");
+                 self.handler.on_unhandled_pdu(&GfxPdu::WireToSurface1(pdu));
+             }
++            Codec1Type::ClearCodec => {
++                self.decode_clearcodec(pdu.surface_id, &pdu.destination_rectangle, &pdu.bitmap_data)?;
++            }
++            Codec1Type::Planar => {
++                self.decode_planar(pdu.surface_id, &pdu.destination_rectangle, &pdu.bitmap_data)?;
++            }
+             Codec1Type::Uncompressed => {
+                 self.handle_uncompressed(pdu);
+             }
+@@ -732,6 +869,95 @@
+         Ok(())
+     }
+ 
++    /// Decode RemoteFX Progressive bitmap data, applying each decoded tile to the
++    /// persistent surface before delivering the same RGBA update to the handler.
++    fn handle_wire_to_surface2(&mut self, pdu: WireToSurface2Pdu) -> PduResult<()> {
++        let surface = self
++            .surfaces
++            .get(&pdu.surface_id)
++            .ok_or_else(|| pdu_other_err!("unknown surface in WireToSurface2"))?;
++        let (surface_width, surface_height) = (surface.width, surface.height);
++
++        let tiles = self
++            .progressive_decoder
++            .decode_bitmap(
++                pdu.surface_id,
++                pdu.codec_context_id,
++                surface_width,
++                surface_height,
++                &pdu.bitmap_data,
++            )
++            .map_err(|error| {
++                warn!(?error, "rfx progressive decode failed");
++                pdu_other_err!("rfx progressive decode failed")
++            })?;
++
++        for tile in tiles {
++            let tile_left = tile.x_idx.saturating_mul(TILE_DIM);
++            let tile_top = tile.y_idx.saturating_mul(TILE_DIM);
++            let tile_width = surface_width.saturating_sub(tile_left).min(TILE_DIM);
++            let tile_height = surface_height.saturating_sub(tile_top).min(TILE_DIM);
++            if tile_width == 0 || tile_height == 0 {
++                continue;
++            }
++
++            let tile_rectangle = ExclusiveRectangle {
++                left: tile_left,
++                top: tile_top,
++                right: tile_left + tile_width,
++                bottom: tile_top + tile_height,
++            };
++            let mut emit_update = |destination_rectangle: ExclusiveRectangle, data: Vec<u8>| {
++                let width = destination_rectangle.right - destination_rectangle.left;
++                let height = destination_rectangle.bottom - destination_rectangle.top;
++                let update = BitmapUpdate {
++                    surface_id: pdu.surface_id,
++                    destination_rectangle,
++                    codec_id: Codec1Type::Uncompressed,
++                    data,
++                    width,
++                    height,
++                };
++                self.compositor
++                    .apply_bitmap(update.surface_id, &update.destination_rectangle, &update.data);
++                self.handler.on_bitmap_updated(&update);
++            };
++
++            if tile.update_rectangles.len() == 1 && tile.update_rectangles[0] == tile_rectangle {
++                let data = if tile_width == TILE_DIM && tile_height == TILE_DIM {
++                    tile.pixels
++                } else {
++                    crop_decoded_frame(
++                        &tile.pixels,
++                        u32::from(TILE_DIM),
++                        u32::from(TILE_DIM),
++                        tile_width,
++                        tile_height,
++                    )
++                };
++                emit_update(tile_rectangle, data);
++                continue;
++            }
++
++            for destination_rectangle in tile.update_rectangles {
++                let width = destination_rectangle.right - destination_rectangle.left;
++                let height = destination_rectangle.bottom - destination_rectangle.top;
++                let source_x = usize::from(destination_rectangle.left - tile_left);
++                let source_y = usize::from(destination_rectangle.top - tile_top);
++                let source_stride = usize::from(TILE_DIM) * TILE_BYTES_PER_PIXEL;
++                let row_bytes = usize::from(width) * TILE_BYTES_PER_PIXEL;
++                let mut data = Vec::with_capacity(row_bytes * usize::from(height));
++                for row in 0..usize::from(height) {
++                    let source_start = (source_y + row) * source_stride + source_x * TILE_BYTES_PER_PIXEL;
++                    data.extend_from_slice(&tile.pixels[source_start..source_start + row_bytes]);
++                }
++                emit_update(destination_rectangle, data);
++            }
++        }
++
++        Ok(())
++    }
++
+     fn decode_avc420(&mut self, surface_id: u16, dest_rect: &ExclusiveRectangle, bitmap_data: &[u8]) -> PduResult<()> {
+         let mut cursor = ReadCursor::new(bitmap_data);
+         let stream = Avc420BitmapStream::decode(&mut cursor).map_err(|e| decode_err!(e))?;
+@@ -745,8 +971,10 @@
+             .decode(stream.data)
+             .map_err(|e| pdu_other_err!("H.264 decode", source: e))?;
+ 
+-        let dest_width = dest_rect.width();
+-        let dest_height = dest_rect.height();
++        // MS-RDPEGFX 2.2.1.4.1: RDPGFX_RECT16 right/bottom are exclusive (one-past-end),
++        // so dimensions are right-left / bottom-top despite the parsed type's name.
++        let dest_width = dest_rect.right - dest_rect.left;
++        let dest_height = dest_rect.bottom - dest_rect.top;
+ 
+         // Decoded frame must be at least as large as the destination rectangle.
+         // Larger is expected (macroblock alignment) and handled by cropping.
+@@ -773,13 +1001,94 @@
+             height: dest_height,
+         };
+ 
++        self.compositor.apply_bitmap(surface_id, dest_rect, &update.data);
++        self.handler.on_bitmap_updated(&update);
++        Ok(())
++    }
++
++    fn decode_clearcodec(
++        &mut self,
++        surface_id: u16,
++        dest_rect: &ExclusiveRectangle,
++        bitmap_data: &[u8],
++    ) -> PduResult<()> {
++        // MS-RDPEGFX 2.2.1.4.1: see decode_avc420 above for wire-format note.
++        let dest_width = dest_rect.right - dest_rect.left;
++        let dest_height = dest_rect.bottom - dest_rect.top;
++
++        let bgra = self
++            .clearcodec_decoder
++            .get_or_insert_with(ClearCodecDecoder::new)
++            .decode(bitmap_data, dest_width, dest_height)
++            .map_err(|e| pdu_other_err!("ClearCodec decode", source: e))?;
++
++        // ClearCodec outputs BGRA; convert to RGBA for the uniform BitmapUpdate format
++        let rgba = convert_bgra_to_rgba(&bgra);
++
++        let update = BitmapUpdate {
++            surface_id,
++            destination_rectangle: dest_rect.clone(),
++            codec_id: Codec1Type::ClearCodec,
++            data: rgba,
++            width: dest_width,
++            height: dest_height,
++        };
++
++        self.compositor.apply_bitmap(surface_id, dest_rect, &update.data);
++        self.handler.on_bitmap_updated(&update);
++        Ok(())
++    }
++
++    /// Decode an RDP 6.0 Planar bitmap ([MS-RDPEGFX] `RDPGFX_CODECID_PLANAR`, 0x000A).
++    ///
++    /// The payload is an `RDP6_BITMAP_STREAM` ([MS-RDPEGDI] 2.2.2.5.1), the same
++    /// structure the fast-path bitmap route already decodes, so this reuses
++    /// `ironrdp-graphics`' decoder rather than adding a second implementation.
++    fn decode_planar(&mut self, surface_id: u16, dest_rect: &ExclusiveRectangle, bitmap_data: &[u8]) -> PduResult<()> {
++        // MS-RDPEGFX 2.2.2.1: destRect gives both the target point and "the
++        // dimensions (width and height) of the bitmap data". It is only a bounding
++        // rectangle for the AVC codecs, so for Planar these are exact.
++        let dest_width = dest_rect.right - dest_rect.left;
++        let dest_height = dest_rect.bottom - dest_rect.top;
++
++        let mut rgb24 = Vec::new();
++        self.planar_decoder
++            .decode_bitmap_stream_to_rgb24(
++                bitmap_data,
++                &mut rgb24,
++                usize::from(dest_width),
++                usize::from(dest_height),
++            )
++            .map_err(|e| pdu_other_err!("Planar decode", source: e))?;
++
++        // The decoder emits RGB24 top-down row-major, which is the order surfaces
++        // are stored in, so no vertical flip is needed.
++        //
++        // Opacity is not carried here. An `RDP6_BITMAP_STREAM` can include an alpha
++        // plane (FormatHeader NA bit clear), but EGFX conveys per-pixel opacity in a
++        // separate `RDPGFX_CODECID_ALPHA` (0x000C) command carrying an
++        // `ALPHACODEC_BITMAP_STREAM` ([MS-RDPEGFX] 2.2.4.3), so a Planar command
++        // contributes color only and the pixels are opaque.
++        let rgba = convert_rgb24_to_rgba(&rgb24);
++
++        let update = BitmapUpdate {
++            surface_id,
++            destination_rectangle: dest_rect.clone(),
++            codec_id: Codec1Type::Planar,
++            data: rgba,
++            width: dest_width,
++            height: dest_height,
++        };
++
++        self.compositor.apply_bitmap(surface_id, dest_rect, &update.data);
+         self.handler.on_bitmap_updated(&update);
+         Ok(())
+     }
+ 
+     fn handle_uncompressed(&mut self, pdu: crate::pdu::WireToSurface1Pdu) {
+-        let dest_width = pdu.destination_rectangle.width();
+-        let dest_height = pdu.destination_rectangle.height();
++        // MS-RDPEGFX 2.2.1.4.1: see decode_avc420 above for wire-format note.
++        let dest_width = pdu.destination_rectangle.right - pdu.destination_rectangle.left;
++        let dest_height = pdu.destination_rectangle.bottom - pdu.destination_rectangle.top;
+ 
+         // Convert wire-format pixels to RGBA.
+         // BitmapUpdate.data is always RGBA8888 regardless of codec -- this is
+@@ -796,6 +1105,8 @@
+             height: dest_height,
+         };
+ 
++        self.compositor
++            .apply_bitmap(update.surface_id, &update.destination_rectangle, &update.data);
+         self.handler.on_bitmap_updated(&update);
+     }
+ 
+@@ -805,9 +1116,16 @@
+         self.current_frame_id = None;
+         self.frames_queued = self.frames_queued.saturating_sub(1);
+ 
++        self.progressive_decoder.end_frame();
++
++        // Commit the frame's compositor deltas so `drain_output` can surface them.
++        self.compositor.end_frame();
++
+         self.handler.on_frame_complete(frame_id);
+ 
+-        // Per [3.3.5.12]: client MUST send FrameAcknowledge after EndFrame
++        // Per [3.3.5.12]: client MUST send FrameAcknowledge after EndFrame.
++        // We send the actual queue depth (not Unavailable / 0xFFFFFFFF as FreeRDP does);
++        // the real value gives the server backpressure information for frame pacing.
+         let ack = GfxPdu::FrameAcknowledge(FrameAcknowledgePdu {
+             queue_depth: QueueDepth::from_u32(self.frames_queued),
+             frame_id,
+@@ -896,6 +1214,33 @@
+ // Frame Cropping
+ // ============================================================================
+ 
++/// Convert BGRA pixel data to RGBA8888
++///
++/// ClearCodec produces BGRA output per [MS-RDPEGFX 2.2.4.1]. Reorder to
++/// [R, G, B, A] for the uniform `BitmapUpdate` pixel format.
++/// Widen tightly-packed RGB24 to RGBA, marking every pixel opaque.
++///
++/// The RDP 6.0 Planar decoder emits three bytes per pixel; `BitmapUpdate` carries
++/// four. See `decode_planar` for why the alpha byte is synthesized rather than
++/// taken from the stream.
++fn convert_rgb24_to_rgba(src: &[u8]) -> Vec<u8> {
++    debug_assert!(src.len().is_multiple_of(3), "RGB24 input length not aligned to 3 bytes");
++    let mut dst = Vec::with_capacity(src.len() / 3 * 4);
++    for pixel in src.chunks_exact(3) {
++        dst.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 0xFF]);
++    }
++    dst
++}
++
++fn convert_bgra_to_rgba(src: &[u8]) -> Vec<u8> {
++    debug_assert!(src.len().is_multiple_of(4), "BGRA input length not aligned to 4 bytes");
++    let mut dst = Vec::with_capacity(src.len());
++    for pixel in src.chunks_exact(4) {
++        dst.extend_from_slice(&[pixel[2], pixel[1], pixel[0], pixel[3]]);
++    }
++    dst
++}
++
+ /// Convert uncompressed 32bpp little-endian pixels to RGBA8888
+ ///
+ /// The wire format for uncompressed graphics is 0xAARRGGBB in a 32-bit
+@@ -971,6 +1316,8 @@
+ /// Integration tests exercising the public DVC API are in ironrdp-testsuite-core/tests/egfx/client.rs.
+ #[cfg(test)]
+ mod tests {
++    use std::sync::{Arc, Mutex};
++
+     use super::*;
+ 
+     struct TestHandler;
+@@ -986,6 +1333,334 @@
+         fn on_unhandled_pdu(&mut self, _pdu: &GfxPdu) {}
+     }
+ 
++    /// Captures bitmap updates and unhandled PDUs so a test can tell decode from
++    /// fallthrough.
++    /// `(codec_id, width, height, rgba)` extracted from each update, since
++    /// `BitmapUpdate` is not `Clone` and does not need to be.
++    type CapturedUpdate = (Codec1Type, u16, u16, Vec<u8>);
++    type SurfaceMapping = (u16, u32, u32);
++    type ScaledOutputMapping = (u16, u32, u32, u32, u32);
++
++    struct CapturingHandler {
++        updates: Arc<Mutex<Vec<CapturedUpdate>>>,
++        unhandled: Arc<Mutex<usize>>,
++    }
++    impl GraphicsPipelineHandler for CapturingHandler {
++        fn on_capabilities_confirmed(&mut self, _caps: &CapabilitySet) {}
++        fn on_reset_graphics(&mut self, _width: u32, _height: u32) {}
++        fn on_surface_created(&mut self, _surface: &Surface) {}
++        fn on_surface_deleted(&mut self, _surface_id: u16) {}
++        fn on_surface_mapped(&mut self, _surface_id: u16, _x: u32, _y: u32) {}
++        fn on_bitmap_updated(&mut self, update: &BitmapUpdate) {
++            self.updates.lock().expect("updates lock").push((
++                update.codec_id,
++                update.width,
++                update.height,
++                update.data.clone(),
++            ));
++        }
++        fn on_frame_complete(&mut self, _frame_id: u32) {}
++        fn on_close(&mut self) {}
++        fn on_unhandled_pdu(&mut self, _pdu: &GfxPdu) {
++            *self.unhandled.lock().expect("unhandled lock") += 1;
++        }
++    }
++
++    struct ScaledOutputHandler {
++        mappings: Arc<Mutex<Vec<ScaledOutputMapping>>>,
++        surface_mappings: Arc<Mutex<Vec<SurfaceMapping>>>,
++    }
++
++    impl GraphicsPipelineHandler for ScaledOutputHandler {
++        fn on_capabilities_confirmed(&mut self, _caps: &CapabilitySet) {}
++        fn on_reset_graphics(&mut self, _width: u32, _height: u32) {}
++        fn on_surface_created(&mut self, _surface: &Surface) {}
++        fn on_surface_deleted(&mut self, _surface_id: u16) {}
++        fn on_surface_mapped(&mut self, surface_id: u16, x: u32, y: u32) {
++            self.surface_mappings
++                .lock()
++                .expect("surface mappings lock")
++                .push((surface_id, x, y));
++        }
++        fn on_bitmap_updated(&mut self, _update: &BitmapUpdate) {}
++        fn on_frame_complete(&mut self, _frame_id: u32) {}
++        fn on_close(&mut self) {}
++        fn on_unhandled_pdu(&mut self, _pdu: &GfxPdu) {}
++
++        fn on_map_surface_to_scaled_output(&mut self, pdu: &MapSurfaceToScaledOutputPdu) {
++            self.mappings.lock().expect("mappings lock").push((
++                pdu.surface_id,
++                pdu.output_origin_x,
++                pdu.output_origin_y,
++                pdu.target_width,
++                pdu.target_height,
++            ));
++        }
++    }
++
++    #[test]
++    fn map_surface_to_scaled_output_dispatches_to_compositor_and_handler() {
++        let mappings = Arc::new(Mutex::new(Vec::new()));
++        let surface_mappings = Arc::new(Mutex::new(Vec::new()));
++        let mut client = GraphicsPipelineClient::new(
++            Box::new(ScaledOutputHandler {
++                mappings: Arc::clone(&mappings),
++                surface_mappings: Arc::clone(&surface_mappings),
++            }),
++            None,
++        );
++        client
++            .handle_pdu(GfxPdu::ResetGraphics(crate::pdu::ResetGraphicsPdu {
++                width: 12,
++                height: 12,
++                monitors: vec![],
++            }))
++            .unwrap();
++        client
++            .handle_pdu(GfxPdu::CreateSurface(crate::pdu::CreateSurfacePdu {
++                surface_id: 1,
++                width: 2,
++                height: 2,
++                pixel_format: PixelFormat::XRgb,
++            }))
++            .unwrap();
++        client
++            .handle_pdu(GfxPdu::MapSurfaceToScaledOutput(MapSurfaceToScaledOutputPdu {
++                surface_id: 1,
++                output_origin_x: 3,
++                output_origin_y: 4,
++                target_width: 4,
++                target_height: 4,
++            }))
++            .unwrap();
++
++        assert!(client.drain_output().is_empty());
++        client
++            .handle_pdu(GfxPdu::EndFrame(crate::pdu::EndFramePdu { frame_id: 1 }))
++            .unwrap();
++
++        assert_eq!(*mappings.lock().expect("mappings lock"), vec![(1, 3, 4, 4, 4)]);
++        assert_eq!(
++            *surface_mappings.lock().expect("surface mappings lock"),
++            vec![(1, 3, 4)]
++        );
++        assert!(client.surfaces[&1].is_mapped);
++        assert_eq!(
++            (client.surfaces[&1].output_origin_x, client.surfaces[&1].output_origin_y),
++            (3, 4)
++        );
++
++        let output = client.drain_output();
++        assert_eq!(output.len(), 1);
++        assert_eq!(
++            output[0].region,
++            ExclusiveRectangle {
++                left: 3,
++                top: 4,
++                right: 7,
++                bottom: 8,
++            }
++        );
++    }
++
++    #[test]
++    fn map_surface_to_scaled_output_ignores_unknown_surface() {
++        let mut client = GraphicsPipelineClient::new(Box::new(TestHandler), None);
++        client
++            .handle_pdu(GfxPdu::MapSurfaceToScaledOutput(MapSurfaceToScaledOutputPdu {
++                surface_id: 1,
++                output_origin_x: 0,
++                output_origin_y: 0,
++                target_width: 2,
++                target_height: 2,
++            }))
++            .unwrap();
++
++        assert!(client.surfaces.is_empty());
++        assert!(client.drain_output().is_empty());
++    }
++
++    /// A Planar `WireToSurface1` decodes to the pixels that were encoded, rather
++    /// than falling through to the handler as an unsupported codec.
++    ///
++    /// The payload is built with IronRDP's own RDP6 encoder, so this exercises the
++    /// real `RDP6_BITMAP_STREAM` framing ([MS-RDPEGDI] 2.2.2.5.1) that
++    /// `RDPGFX_CODECID_PLANAR` carries, not a hand-rolled approximation.
++    #[test]
++    fn planar_wire_to_surface_decodes_to_rgba() {
++        use ironrdp_graphics::rdp6::{BitmapStreamEncoder, RgbChannels};
++
++        const W: u16 = 4;
++        const H: u16 = 2;
++
++        // Distinct per-channel values so a channel swap or row reversal fails.
++        let mut rgb = Vec::new();
++        for i in 0..u8::try_from(W).unwrap() * u8::try_from(H).unwrap() {
++            rgb.extend_from_slice(&[i, 100 + i, 200 + i]);
++        }
++
++        for rle in [false, true] {
++            let mut encoded = vec![0u8; rgb.len() * 4 + 64];
++            let len = BitmapStreamEncoder::new(usize::from(W), usize::from(H))
++                .encode_bitmap::<RgbChannels>(&rgb, &mut encoded, rle)
++                .unwrap();
++            encoded.truncate(len);
++
++            let updates = Arc::new(Mutex::new(Vec::new()));
++            let unhandled = Arc::new(Mutex::new(0));
++            let mut client = GraphicsPipelineClient::new(
++                Box::new(CapturingHandler {
++                    updates: Arc::clone(&updates),
++                    unhandled: Arc::clone(&unhandled),
++                }),
++                None,
++            );
++
++            let _ = client.handle_pdu(GfxPdu::CreateSurface(crate::pdu::CreateSurfacePdu {
++                surface_id: 1,
++                width: W,
++                height: H,
++                pixel_format: PixelFormat::XRgb,
++            }));
++
++            client
++                .handle_pdu(GfxPdu::WireToSurface1(crate::pdu::WireToSurface1Pdu {
++                    surface_id: 1,
++                    codec_id: Codec1Type::Planar,
++                    pixel_format: PixelFormat::XRgb,
++                    destination_rectangle: ExclusiveRectangle {
++                        left: 0,
++                        top: 0,
++                        right: W,
++                        bottom: H,
++                    },
++                    bitmap_data: encoded,
++                }))
++                .unwrap();
++
++            assert_eq!(
++                *unhandled.lock().expect("unhandled lock"),
++                0,
++                "rle={rle}: Planar must not fall through"
++            );
++            let updates = updates.lock().expect("updates lock");
++            assert_eq!(updates.len(), 1, "rle={rle}");
++            let (codec_id, width, height, data) = &updates[0];
++            assert_eq!(*codec_id, Codec1Type::Planar, "rle={rle}");
++            assert_eq!(*width, W, "rle={rle}");
++            assert_eq!(*height, H, "rle={rle}");
++
++            let expected: Vec<u8> = rgb.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 0xFF]).collect();
++            assert_eq!(*data, expected, "rle={rle}");
++        }
++    }
++
++    /// ClearCodec and Planar `WireToSurface1` decodes must also reach the compositor,
++    /// not just the handler. Before this fix, `decode_avc420` and `handle_uncompressed`
++    /// called `self.compositor.apply_bitmap`, but `decode_clearcodec` and `decode_planar`
++    /// did not, so a server sending either codec painted nothing into the compositor
++    /// surface even though the handler was correctly notified.
++    #[test]
++    fn clearcodec_and_planar_feed_the_compositor() {
++        use ironrdp_graphics::clearcodec::ClearCodecEncoder;
++        use ironrdp_graphics::rdp6::{BitmapStreamEncoder, RgbChannels};
++
++        const W: u16 = 4;
++        const H: u16 = 2;
++        const ORIGIN_X: u16 = 10;
++        const ORIGIN_Y: u16 = 20;
++
++        let dest_rect = ExclusiveRectangle {
++            left: 0,
++            top: 0,
++            right: W,
++            bottom: H,
++        };
++
++        let mut bgra = Vec::new();
++        for i in 0..u32::from(W) * u32::from(H) {
++            let i = u8::try_from(i).unwrap();
++            bgra.extend_from_slice(&[i, 100 + i, 200 + i, 0xFF]);
++        }
++        let clearcodec_data = ClearCodecEncoder::new().encode(&bgra, W, H);
++
++        let mut rgb = Vec::new();
++        for i in 0..u8::try_from(W).unwrap() * u8::try_from(H).unwrap() {
++            rgb.extend_from_slice(&[i, 100 + i, 200 + i]);
++        }
++        let mut planar_encoded = vec![0u8; rgb.len() * 4 + 64];
++        let len = BitmapStreamEncoder::new(usize::from(W), usize::from(H))
++            .encode_bitmap::<RgbChannels>(&rgb, &mut planar_encoded, false)
++            .unwrap();
++        planar_encoded.truncate(len);
++
++        for (codec_id, bitmap_data) in [
++            (Codec1Type::ClearCodec, clearcodec_data),
++            (Codec1Type::Planar, planar_encoded),
++        ] {
++            let mut client = GraphicsPipelineClient::new(Box::new(TestHandler), None);
++
++            let _ = client.handle_pdu(GfxPdu::ResetGraphics(crate::pdu::ResetGraphicsPdu {
++                width: 200,
++                height: 100,
++                monitors: vec![],
++            }));
++            let _ = client.handle_pdu(GfxPdu::CreateSurface(crate::pdu::CreateSurfacePdu {
++                surface_id: 1,
++                width: W,
++                height: H,
++                pixel_format: PixelFormat::XRgb,
++            }));
++            let _ = client.handle_pdu(GfxPdu::MapSurfaceToOutput(crate::pdu::MapSurfaceToOutputPdu {
++                surface_id: 1,
++                output_origin_x: u32::from(ORIGIN_X),
++                output_origin_y: u32::from(ORIGIN_Y),
++            }));
++            // Discard the delta from the surface becoming visible: only the
++            // WireToSurface1 decode below is under test.
++            let _ = client.handle_pdu(GfxPdu::EndFrame(crate::pdu::EndFramePdu { frame_id: 0 }));
++            let _ = client.drain_output();
++
++            client
++                .handle_pdu(GfxPdu::WireToSurface1(crate::pdu::WireToSurface1Pdu {
++                    surface_id: 1,
++                    codec_id,
++                    pixel_format: PixelFormat::XRgb,
++                    destination_rectangle: dest_rect.clone(),
++                    bitmap_data,
++                }))
++                .unwrap();
++            let _ = client.handle_pdu(GfxPdu::EndFrame(crate::pdu::EndFramePdu { frame_id: 1 }));
++
++            let updates = client.drain_output();
++            assert_eq!(updates.len(), 1, "{codec_id:?}: the decode must reach the compositor");
++            let update = &updates[0];
++            assert_eq!(
++                (
++                    update.region.left,
++                    update.region.top,
++                    update.region.right,
++                    update.region.bottom
++                ),
++                (ORIGIN_X, ORIGIN_Y, ORIGIN_X + W, ORIGIN_Y + H),
++                "{codec_id:?}"
++            );
++        }
++    }
++
++    #[test]
++    fn convert_rgb24_to_rgba_widens_and_marks_opaque() {
++        let rgb = vec![
++            0x10, 0x20, 0x30, // R=16, G=32, B=48
++            0x40, 0x50, 0x60, // R=64, G=80, B=96
++        ];
++
++        assert_eq!(
++            convert_rgb24_to_rgba(&rgb),
++            vec![0x10, 0x20, 0x30, 0xFF, 0x40, 0x50, 0x60, 0xFF]
++        );
++    }
++
+     #[test]
+     fn state_transitions() {
+         let mut client = GraphicsPipelineClient::new(Box::new(TestHandler), None);
+@@ -1058,6 +1733,24 @@
+     }
+ 
+     #[test]
++    fn convert_bgra_to_rgba_reorders_channels() {
++        // BGRA input: [B, G, R, A] per pixel
++        let bgra = vec![
++            0xFF, 0x00, 0x00, 0xCC, // B=255, G=0, R=0, A=204 (blue)
++            0x00, 0xFF, 0x00, 0x80, // B=0, G=255, R=0, A=128 (green)
++        ];
++        let rgba = convert_bgra_to_rgba(&bgra);
++        // Expected: [R, G, B, A] per pixel
++        assert_eq!(
++            rgba,
++            vec![
++                0x00, 0x00, 0xFF, 0xCC, // R=0, G=0, B=255, A=204
++                0x00, 0xFF, 0x00, 0x80, // R=0, G=255, B=0, A=128
++            ]
++        );
++    }
++
++    #[test]
+     fn convert_uncompressed_bgrx_to_rgba() {
+         // Wire format: [B, G, R, A] per pixel (0xAARRGGBB little-endian)
+         let wire_pixels = vec![
+@@ -1068,4 +1761,521 @@
+         // Expected: [R, G, B, 0xFF] per pixel (alpha forced to opaque)
+         assert_eq!(rgba, vec![0xFF, 0x80, 0x00, 0xFF, 0x30, 0x20, 0x10, 0xFF]);
+     }
++
++    /// Every capability set the default advertises must correspond to a codec
++    /// `handle_wire_to_surface1` can actually decode.
++    ///
++    /// The server picks one of the advertised sets and prefers the most capable,
++    /// so a set that implies AVC444 makes the server send `Avc444`/`Avc444v2`,
++    /// which fall through to `on_unhandled_pdu` and leave the screen blank.
++    #[test]
++    fn default_capabilities_do_not_advertise_avc444() {
++        for cap in TestHandler.capabilities() {
++            assert!(
++                !CodecCapabilities::from_capability_set(&cap).avc444,
++                "advertised set implies an AVC444 decoder that does not exist: {cap:?}"
++            );
++        }
++    }
++
++    /// AVC420 must stay advertised: it is the H.264 flavour that does decode, and
++    /// dropping V10.x must not cost it.
++    #[test]
++    fn default_capabilities_still_advertise_avc420() {
++        assert!(
++            TestHandler
++                .capabilities()
++                .iter()
++                .any(|cap| CodecCapabilities::from_capability_set(cap).avc420),
++            "no advertised set enables AVC420"
++        );
++    }
++
++    #[test]
++    fn reset_graphics_reports_only_materializable_output_extents() {
++        let mut client = GraphicsPipelineClient::new(Box::new(TestHandler), None);
++        client
++            .handle_pdu(GfxPdu::ResetGraphics(crate::pdu::ResetGraphicsPdu {
++                width: 19_200,
++                height: 1080,
++                monitors: vec![],
++            }))
++            .expect("wide multimon output fits compositor limits");
++        assert_eq!(client.take_output_reset(), Some((19_200, 1080)));
++        assert_eq!(client.take_output_reset(), None);
++        client
++            .handle_pdu(GfxPdu::CreateSurface(crate::pdu::CreateSurfacePdu {
++                surface_id: 7,
++                width: 1,
++                height: 1,
++                pixel_format: PixelFormat::XRgb,
++            }))
++            .expect("create surface before rejected reset");
++
++        assert!(
++            client
++                .handle_pdu(GfxPdu::ResetGraphics(crate::pdu::ResetGraphicsPdu {
++                    width: 32_766,
++                    height: 32_766,
++                    monitors: vec![],
++                }))
++                .is_err(),
++            "an output over the memory budget must be rejected before framebuffer allocation"
++        );
++        assert!(
++            client.get_surface(7).is_none(),
++            "ResetGraphics destroys prior surfaces even when its output extent is rejected"
++        );
++        assert!(
++            client
++                .handle_pdu(GfxPdu::ResetGraphics(crate::pdu::ResetGraphicsPdu {
++                    width: 32_767,
++                    height: 1,
++                    monitors: vec![],
++                }))
++                .is_err(),
++            "an output over the protocol dimension limit must be rejected"
++        );
++        assert_eq!(client.take_output_reset(), None);
++    }
++
++    fn progressive_client() -> GraphicsPipelineClient {
++        let mut client = GraphicsPipelineClient::new(Box::new(TestHandler), None);
++        client
++            .handle_pdu(GfxPdu::ResetGraphics(crate::pdu::ResetGraphicsPdu {
++                width: 64,
++                height: 64,
++                monitors: vec![],
++            }))
++            .unwrap();
++        client
++            .handle_pdu(GfxPdu::CreateSurface(crate::pdu::CreateSurfacePdu {
++                surface_id: 1,
++                width: 64,
++                height: 64,
++                pixel_format: PixelFormat::XRgb,
++            }))
++            .unwrap();
++        client
++    }
++
++    fn wire_progressive(client: &mut GraphicsPipelineClient, bitmap_data: Vec<u8>) -> PduResult<Vec<DvcMessage>> {
++        client.handle_pdu(GfxPdu::WireToSurface2(WireToSurface2Pdu {
++            surface_id: 1,
++            codec_id: crate::pdu::Codec2Type::RemoteFxProgressive,
++            codec_context_id: 7,
++            pixel_format: PixelFormat::XRgb,
++            bitmap_data,
++        }))
++    }
++
++    fn progressive_context_stream(with_context: bool) -> Vec<u8> {
++        use ironrdp_pdu::codecs::rfx::RfxRectangle;
++        use ironrdp_pdu::codecs::rfx::progressive::{
++            ProgressiveBlock, ProgressiveContextPdu, ProgressiveFrameBeginPdu, ProgressiveFrameEndPdu,
++            ProgressiveRegion, ProgressiveSyncPdu, encode_progressive_stream,
++        };
++
++        let mut blocks = Vec::new();
++        if with_context {
++            blocks.push(ProgressiveBlock::Sync(ProgressiveSyncPdu));
++            blocks.push(ProgressiveBlock::Context(ProgressiveContextPdu {
++                context_id: 0,
++                tile_size: 0x0040,
++                flags: 0,
++            }));
++        }
++        blocks.push(ProgressiveBlock::FrameBegin(ProgressiveFrameBeginPdu {
++            frame_index: 0,
++            region_count: 1,
++        }));
++        blocks.push(ProgressiveBlock::Region(ProgressiveRegion {
++            tile_size: 0x40,
++            rects: vec![RfxRectangle {
++                x: 0,
++                y: 0,
++                width: 64,
++                height: 64,
++            }],
++            quant_vals: vec![],
++            quant_prog_vals: vec![],
++            flags: 0,
++            tiles: vec![],
++        }));
++        blocks.push(ProgressiveBlock::FrameEnd(ProgressiveFrameEndPdu));
++
++        encode_progressive_stream(&blocks).unwrap()
++    }
++
++    fn progressive_tile_stream(tile_x: u16, tile_y: u16, rect_width: u16, rect_height: u16) -> Vec<u8> {
++        use ironrdp_graphics::progressive::{COEFFICIENTS_PER_COMPONENT, encode_first_pass};
++        use ironrdp_pdu::codecs::rfx::RfxRectangle;
++        use ironrdp_pdu::codecs::rfx::progressive::{
++            ComponentCodecQuant, ProgressiveBlock, ProgressiveContextPdu, ProgressiveFrameBeginPdu,
++            ProgressiveFrameEndPdu, ProgressiveRegion, ProgressiveSyncPdu, ProgressiveTile, TileSimple,
++            encode_progressive_stream,
++        };
++
++        let base_quant = ComponentCodecQuant::LOSSLESS;
++        let mut component = [0i16; COEFFICIENTS_PER_COMPONENT];
++        let mut component_data = [0u8; 8192];
++        let component_len = encode_first_pass(
++            &mut component,
++            &mut component_data,
++            &base_quant,
++            &ComponentCodecQuant::LOSSLESS,
++            false,
++        )
++        .unwrap();
++        let component_data = &component_data[..component_len];
++
++        encode_progressive_stream(&[
++            ProgressiveBlock::Sync(ProgressiveSyncPdu),
++            ProgressiveBlock::Context(ProgressiveContextPdu {
++                context_id: 0,
++                tile_size: 0x0040,
++                flags: 0,
++            }),
++            ProgressiveBlock::FrameBegin(ProgressiveFrameBeginPdu {
++                frame_index: 0,
++                region_count: 1,
++            }),
++            ProgressiveBlock::Region(ProgressiveRegion {
++                tile_size: 0x40,
++                rects: vec![RfxRectangle {
++                    x: tile_x.saturating_mul(64),
++                    y: tile_y.saturating_mul(64),
++                    width: rect_width,
++                    height: rect_height,
++                }],
++                quant_vals: vec![base_quant],
++                quant_prog_vals: vec![],
++                flags: 0,
++                tiles: vec![ProgressiveTile::Simple(TileSimple {
++                    quant_idx_y: 0,
++                    quant_idx_cb: 0,
++                    quant_idx_cr: 0,
++                    x_idx: tile_x,
++                    y_idx: tile_y,
++                    flags: 0,
++                    y_data: component_data,
++                    cb_data: component_data,
++                    cr_data: component_data,
++                    tail_data: &[],
++                })],
++            }),
++            ProgressiveBlock::FrameEnd(ProgressiveFrameEndPdu),
++        ])
++        .unwrap()
++    }
++
++    #[test]
++    fn wire_to_surface2_renders_and_crops_progressive_edge_tile() {
++        let updates = Arc::new(Mutex::new(Vec::new()));
++        let unhandled = Arc::new(Mutex::new(0));
++        let mut client = GraphicsPipelineClient::new(
++            Box::new(CapturingHandler {
++                updates: Arc::clone(&updates),
++                unhandled,
++            }),
++            None,
++        );
++        client
++            .handle_pdu(GfxPdu::ResetGraphics(crate::pdu::ResetGraphicsPdu {
++                width: 100,
++                height: 100,
++                monitors: vec![],
++            }))
++            .unwrap();
++        client
++            .handle_pdu(GfxPdu::CreateSurface(crate::pdu::CreateSurfacePdu {
++                surface_id: 1,
++                width: 100,
++                height: 100,
++                pixel_format: PixelFormat::XRgb,
++            }))
++            .unwrap();
++        client
++            .handle_pdu(GfxPdu::MapSurfaceToOutput(crate::pdu::MapSurfaceToOutputPdu {
++                surface_id: 1,
++                output_origin_x: 0,
++                output_origin_y: 0,
++            }))
++            .unwrap();
++        client
++            .handle_pdu(GfxPdu::StartFrame(crate::pdu::StartFramePdu {
++                timestamp: crate::pdu::Timestamp {
++                    milliseconds: 0,
++                    seconds: 0,
++                    minutes: 0,
++                    hours: 0,
++                },
++                frame_id: 1,
++            }))
++            .unwrap();
++        client
++            .handle_pdu(GfxPdu::EndFrame(crate::pdu::EndFramePdu { frame_id: 1 }))
++            .unwrap();
++        let _ = client.drain_output();
++        client
++            .handle_pdu(GfxPdu::StartFrame(crate::pdu::StartFramePdu {
++                timestamp: crate::pdu::Timestamp {
++                    milliseconds: 0,
++                    seconds: 0,
++                    minutes: 0,
++                    hours: 0,
++                },
++                frame_id: 2,
++            }))
++            .unwrap();
++        wire_progressive(&mut client, progressive_tile_stream(1, 1, 36, 36)).unwrap();
++        client
++            .handle_pdu(GfxPdu::EndFrame(crate::pdu::EndFramePdu { frame_id: 2 }))
++            .unwrap();
++
++        let updates = updates.lock().expect("updates lock");
++        assert_eq!(updates.len(), 1);
++        assert_eq!(updates[0].0, Codec1Type::Uncompressed);
++        assert_eq!(updates[0].1, 36);
++        assert_eq!(updates[0].2, 36);
++        assert_eq!(updates[0].3.len(), 36 * 36 * 4);
++        assert!(updates[0].3.iter().any(|&pixel| pixel != 0));
++
++        let output = client.drain_output();
++        assert_eq!(output.len(), 1);
++        assert_eq!(
++            output[0].region,
++            ExclusiveRectangle {
++                left: 64,
++                top: 64,
++                right: 100,
++                bottom: 100,
++            }
++        );
++        assert_eq!(output[0].data.len(), 36 * 36 * 4);
++    }
++
++    fn start_frame(client: &mut GraphicsPipelineClient, frame_id: u32) {
++        client
++            .handle_pdu(GfxPdu::StartFrame(crate::pdu::StartFramePdu {
++                timestamp: crate::pdu::Timestamp {
++                    milliseconds: 0,
++                    seconds: 0,
++                    minutes: 0,
++                    hours: 0,
++                },
++                frame_id,
++            }))
++            .unwrap();
++    }
++
++    fn end_frame(client: &mut GraphicsPipelineClient, frame_id: u32) {
++        client
++            .handle_pdu(GfxPdu::EndFrame(crate::pdu::EndFramePdu { frame_id }))
++            .unwrap();
++    }
++
++    fn rect(x: u16, y: u16, width: u16, height: u16) -> ironrdp_pdu::codecs::rfx::RfxRectangle {
++        ironrdp_pdu::codecs::rfx::RfxRectangle { x, y, width, height }
++    }
++
++    #[test]
++    fn wire_to_surface2_clips_compositor_output_to_region() {
++        use ironrdp_graphics::progressive::{COEFFICIENTS_PER_COMPONENT, encode_first_pass};
++        use ironrdp_pdu::codecs::rfx::progressive::{
++            ComponentCodecQuant, ProgressiveBlock, ProgressiveContextPdu, ProgressiveFrameBeginPdu,
++            ProgressiveFrameEndPdu, ProgressiveRegion, ProgressiveSyncPdu, ProgressiveTile, TileSimple,
++            encode_progressive_stream,
++        };
++
++        // Send one real, neutral-gray TILE_SIMPLE, then reference it from a
++        // second Progressive payload in the same RDPGFX frame.
++        let (first_bitmap_data, shared_bitmap_data) = {
++            let base_quant = ComponentCodecQuant::LOSSLESS;
++            let mut component = [0i16; COEFFICIENTS_PER_COMPONENT];
++            let mut component_data = [0u8; 8192];
++            let component_len = encode_first_pass(
++                &mut component,
++                &mut component_data,
++                &base_quant,
++                &ComponentCodecQuant::LOSSLESS,
++                false,
++            )
++            .unwrap();
++            let component_data = &component_data[..component_len];
++
++            let region = ProgressiveRegion {
++                tile_size: 0x40,
++                rects: vec![rect(8, 12, 16, 20)],
++                quant_vals: vec![base_quant],
++                quant_prog_vals: vec![],
++                flags: 0,
++                tiles: vec![ProgressiveTile::Simple(TileSimple {
++                    quant_idx_y: 0,
++                    quant_idx_cb: 0,
++                    quant_idx_cr: 0,
++                    x_idx: 0,
++                    y_idx: 0,
++                    flags: 0,
++                    y_data: component_data,
++                    cb_data: component_data,
++                    cr_data: component_data,
++                    tail_data: &[],
++                })],
++            };
++            let shared_tile_region = ProgressiveRegion {
++                tile_size: 0x40,
++                rects: vec![rect(32, 40, 8, 10)],
++                quant_vals: vec![],
++                quant_prog_vals: vec![],
++                flags: 0,
++                tiles: vec![],
++            };
++
++            let first_bitmap_data = encode_progressive_stream(&[
++                ProgressiveBlock::Sync(ProgressiveSyncPdu),
++                ProgressiveBlock::Context(ProgressiveContextPdu {
++                    context_id: 0,
++                    tile_size: 0x0040,
++                    flags: 0,
++                }),
++                ProgressiveBlock::FrameBegin(ProgressiveFrameBeginPdu {
++                    frame_index: 0,
++                    region_count: 1,
++                }),
++                ProgressiveBlock::Region(region),
++                ProgressiveBlock::FrameEnd(ProgressiveFrameEndPdu),
++            ])
++            .unwrap();
++            let shared_bitmap_data = encode_progressive_stream(&[
++                ProgressiveBlock::FrameBegin(ProgressiveFrameBeginPdu {
++                    frame_index: 1,
++                    region_count: 1,
++                }),
++                ProgressiveBlock::Region(shared_tile_region),
++                ProgressiveBlock::FrameEnd(ProgressiveFrameEndPdu),
++            ])
++            .unwrap();
++
++            (first_bitmap_data, shared_bitmap_data)
++        };
++
++        let mut client = progressive_client();
++
++        // Commit and drain the initial map separately so the next output can
++        // only have been produced by WireToSurface2.
++        start_frame(&mut client, 1);
++        client
++            .handle_pdu(GfxPdu::MapSurfaceToOutput(crate::pdu::MapSurfaceToOutputPdu {
++                surface_id: 1,
++                output_origin_x: 0,
++                output_origin_y: 0,
++            }))
++            .unwrap();
++        end_frame(&mut client, 1);
++        let _ = client.drain_output();
++
++        start_frame(&mut client, 2);
++        wire_progressive(&mut client, first_bitmap_data).unwrap();
++        wire_progressive(&mut client, shared_bitmap_data.clone()).unwrap();
++        end_frame(&mut client, 2);
++
++        let output = client.drain_output();
++        assert_eq!(output.len(), 2);
++        assert_eq!(
++            output[0].region,
++            ExclusiveRectangle {
++                left: 8,
++                top: 12,
++                right: 24,
++                bottom: 32,
++            }
++        );
++        assert_eq!(output[0].data.len(), 16 * 20 * 4);
++        assert!(output[0].data.iter().any(|&value| value != 0));
++        assert_eq!(
++            output[1].region,
++            ExclusiveRectangle {
++                left: 32,
++                top: 40,
++                right: 40,
++                bottom: 50,
++            }
++        );
++        assert_eq!(output[1].data.len(), 8 * 10 * 4);
++        assert!(output[1].data.iter().any(|&value| value != 0));
++
++        // A later RDPGFX frame cannot reference tiles from this completed frame.
++        start_frame(&mut client, 3);
++        wire_progressive(&mut client, shared_bitmap_data).unwrap();
++        end_frame(&mut client, 3);
++        assert!(client.drain_output().is_empty());
++    }
++
++    fn assert_progressive_context_is_deleted(clear: impl FnOnce(&mut GraphicsPipelineClient)) {
++        let mut client = progressive_client();
++        wire_progressive(&mut client, progressive_context_stream(true)).unwrap();
++        clear(&mut client);
++        assert!(wire_progressive(&mut client, progressive_context_stream(false)).is_err());
++    }
++
++    #[test]
++    fn progressive_context_survives_graphics_reset() {
++        let mut client = progressive_client();
++        wire_progressive(&mut client, progressive_context_stream(true)).unwrap();
++
++        client
++            .handle_pdu(GfxPdu::ResetGraphics(crate::pdu::ResetGraphicsPdu {
++                width: 64,
++                height: 64,
++                monitors: vec![],
++            }))
++            .unwrap();
++        client
++            .handle_pdu(GfxPdu::CreateSurface(crate::pdu::CreateSurfacePdu {
++                surface_id: 1,
++                width: 64,
++                height: 64,
++                pixel_format: PixelFormat::XRgb,
++            }))
++            .unwrap();
++
++        // Windows never re-sends SYNC + CONTEXT after a reset, so a CONTEXT-less
++        // continuation has to keep decoding.
++        assert!(wire_progressive(&mut client, progressive_context_stream(false)).is_ok());
++    }
++
++    #[test]
++    fn progressive_context_is_deleted_with_encoding_context() {
++        let mut client = progressive_client();
++        wire_progressive(&mut client, progressive_context_stream(true)).unwrap();
++        client
++            .handle_pdu(GfxPdu::DeleteEncodingContext(DeleteEncodingContextPdu {
++                surface_id: 1,
++                codec_context_id: 7,
++            }))
++            .unwrap();
++
++        // The context's tiles are gone, but the surface survives and keeps the band layout it
++        // was given, so a payload reusing the id decodes from scratch. Windows deletes a codec
++        // context as it opens the next one and never repeats SYNC + CONTEXT.
++        assert!(wire_progressive(&mut client, progressive_context_stream(false)).is_ok());
++    }
++
++    #[test]
++    fn progressive_context_is_deleted_with_surface() {
++        assert_progressive_context_is_deleted(|client| {
++            client
++                .handle_pdu(GfxPdu::DeleteSurface(crate::pdu::DeleteSurfacePdu { surface_id: 1 }))
++                .unwrap();
++            client
++                .handle_pdu(GfxPdu::CreateSurface(crate::pdu::CreateSurfacePdu {
++                    surface_id: 1,
++                    width: 64,
++                    height: 64,
++                    pixel_format: PixelFormat::XRgb,
++                }))
++                .unwrap();
++        });
++    }
+ }
+Only in base/src: compositor.rs
+diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/decode.rs base/src/decode.rs
+--- ironrdp-egfx-0.3.0/src/decode.rs	2006-07-24 02:21:28.000000000 +0100
++++ base/src/decode.rs	2026-09-23 00:40:54.080580396 +0100
+@@ -183,6 +183,7 @@
+ 
+ #[cfg(feature = "openh264")]
+ mod openh264_impl {
++    use openh264::formats::YUVSource;
+     use tracing::warn;
+ 
+     use super::{DecodedFrame, DecoderError, DecoderResult, H264Decoder};
+@@ -241,45 +242,11 @@
+                 annex_b_buffer: Vec::new(),
+             })
+         }
+-
+-        /// Convert AVC format (4-byte BE length prefix) to Annex B (start codes)
+-        fn avc_to_annex_b(&mut self, data: &[u8]) {
+-            self.annex_b_buffer.clear();
+-            let mut offset = 0;
+-
+-            while offset + 4 <= data.len() {
+-                let nal_len = u32::from_be_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]]);
+-
+-                #[expect(clippy::as_conversions, reason = "NAL length from wire format")]
+-                let nal_len = nal_len as usize;
+-                offset += 4;
+-
+-                // Use checked addition to prevent overflow on malicious input
+-                let Some(end) = offset.checked_add(nal_len) else {
+-                    warn!(nal_len, offset, "AVC NAL length overflow, discarding remaining data");
+-                    break;
+-                };
+-                if end > data.len() {
+-                    warn!(
+-                        nal_len,
+-                        offset,
+-                        data_len = data.len(),
+-                        "AVC NAL extends beyond buffer, discarding remaining data"
+-                    );
+-                    break;
+-                }
+-
+-                // Annex B start code
+-                self.annex_b_buffer.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
+-                self.annex_b_buffer.extend_from_slice(&data[offset..offset + nal_len]);
+-                offset += nal_len;
+-            }
+-        }
+     }
+ 
+     impl H264Decoder for OpenH264Decoder {
+         fn decode(&mut self, data: &[u8]) -> DecoderResult<DecodedFrame> {
+-            self.avc_to_annex_b(data);
++            crate::pdu::avc_to_annex_b_into(data, &mut self.annex_b_buffer);
+ 
+             let yuv = self
+                 .decoder
+@@ -287,7 +254,8 @@
+                 .map_err(|e| DecoderError::new("OpenH264 decode failed", e))?
+                 .ok_or_else(|| DecoderError::msg("OpenH264 returned no picture"))?;
+ 
+-            let (width, height) = openh264::formats::YUVSource::dimensions(&yuv);
++            let (width, height) = YUVSource::dimensions(&yuv);
++            let (y_stride, u_stride, v_stride) = YUVSource::strides(&yuv);
+ 
+             #[expect(
+                 clippy::as_conversions,
+@@ -295,13 +263,43 @@
+                 reason = "H.264 frame dimensions are always within u32 range"
+             )]
+             let (w32, h32) = (width as u32, height as u32);
++            #[expect(
++                clippy::as_conversions,
++                clippy::cast_possible_truncation,
++                reason = "strides are bounded by frame dimensions, which fit in u32"
++            )]
++            let [y_stride, u_stride, v_stride] = [y_stride as u32, u_stride as u32, v_stride as u32];
+ 
++            let rgba_stride = w32
++                .checked_mul(4)
++                .ok_or_else(|| DecoderError::msg("frame dimensions too large for RGBA allocation"))?;
+             let rgba_size = width
+                 .checked_mul(height)
+                 .and_then(|s| s.checked_mul(4))
+                 .ok_or_else(|| DecoderError::msg("frame dimensions too large for RGBA allocation"))?;
+             let mut rgba = vec![0u8; rgba_size];
+-            yuv.write_rgba8(&mut rgba);
++
++            // MS-RDPEGFX AVC420 streams carry full-range BT.709 YUV420,
++            // but openh264's `write_rgba8` assumes limited-range BT.601,
++            // which distorts colors. Convert per [MS-RDPEGFX] 3.3.8.3.1.
++            let planar = yuv::YuvPlanarImage {
++                y_plane: yuv.y(),
++                y_stride,
++                u_plane: yuv.u(),
++                u_stride,
++                v_plane: yuv.v(),
++                v_stride,
++                width: w32,
++                height: h32,
++            };
++            yuv::yuv420_to_rgba(
++                &planar,
++                &mut rgba,
++                rgba_stride,
++                yuv::YuvRange::Full,
++                yuv::YuvStandardMatrix::Bt709,
++            )
++            .map_err(|e| DecoderError::new("failed to convert YUV420 to RGBA", e))?;
+ 
+             Ok(DecodedFrame::new(rgba, w32, h32))
+         }
+@@ -322,24 +320,3 @@
+ 
+ #[cfg(feature = "openh264")]
+ pub use openh264_impl::OpenH264Decoder;
+-
+-#[cfg(test)]
+-mod tests {
+-    use super::DecodedFrame;
+-
+-    #[test]
+-    fn getters_return_constructor_inputs() {
+-        let data = vec![0u8; 2 * 3 * 4];
+-        let frame = DecodedFrame::new(data.clone(), 2, 3);
+-        assert_eq!(frame.data(), data.as_slice());
+-        assert_eq!(frame.width(), 2);
+-        assert_eq!(frame.height(), 3);
+-    }
+-
+-    #[test]
+-    fn into_data_yields_owned_buffer() {
+-        let data = vec![0xAAu8; 4 * 4 * 4];
+-        let frame = DecodedFrame::new(data.clone(), 4, 4);
+-        assert_eq!(frame.into_data(), data);
+-    }
+-}
+Only in base/src: encode.rs
+diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/lib.rs base/src/lib.rs
+--- ironrdp-egfx-0.3.0/src/lib.rs	2006-07-24 02:21:28.000000000 +0100
++++ base/src/lib.rs	2026-09-23 00:40:54.080628505 +0100
+@@ -5,6 +5,8 @@
+ pub const CHANNEL_NAME: &str = "Microsoft::Windows::RDS::Graphics";
+ 
+ pub mod client;
++pub mod compositor;
+ pub mod decode;
++pub mod encode;
+ pub mod pdu;
+ pub mod server;
+diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/pdu/avc.rs base/src/pdu/avc.rs
+--- ironrdp-egfx-0.3.0/src/pdu/avc.rs	2006-07-24 02:21:28.000000000 +0100
++++ base/src/pdu/avc.rs	2026-09-23 00:40:54.080666685 +0100
+@@ -2,11 +2,12 @@
+ 
+ use bit_field::BitField as _;
+ use bitflags::bitflags;
+-use ironrdp_pdu::geometry::InclusiveRectangle;
++use ironrdp_pdu::geometry::ExclusiveRectangle;
+ use ironrdp_pdu::{
+     Decode, DecodeResult, Encode, EncodeResult, ReadCursor, WriteCursor, cast_length, ensure_fixed_part_size,
+     ensure_size, invalid_field_err,
+ };
++use tracing::warn;
+ 
+ #[derive(Debug, Clone, PartialEq, Eq)]
+ pub struct QuantQuality {
+@@ -76,7 +77,8 @@
+ #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+ #[derive(Clone, PartialEq, Eq)]
+ pub struct Avc420BitmapStream<'a> {
+-    pub rectangles: Vec<InclusiveRectangle>,
++    /// Region masks encoded as `RDPGFX_RECT16` with exclusive right/bottom bounds.
++    pub rectangles: Vec<ExclusiveRectangle>,
+     pub quant_qual_vals: Vec<QuantQuality>,
+     pub data: &'a [u8],
+ }
+@@ -137,13 +139,13 @@
+         // malicious num_regions: each region needs at least one rectangle
+         // (8 bytes) plus one QuantQuality entry (2 bytes). The actual read
+         // loop will fail with NotEnoughBytes if num_regions is bogus.
+-        let per_region = InclusiveRectangle::FIXED_PART_SIZE + QuantQuality::FIXED_PART_SIZE;
++        let per_region = ExclusiveRectangle::ENCODED_SIZE + QuantQuality::FIXED_PART_SIZE;
+         let max_possible = src.len() / per_region;
+         let bounded_capacity = num_regions_usize.min(max_possible);
+         let mut rectangles = Vec::with_capacity(bounded_capacity);
+         let mut quant_qual_vals = Vec::with_capacity(bounded_capacity);
+         for _ in 0..num_regions {
+-            rectangles.push(InclusiveRectangle::decode(src)?);
++            rectangles.push(ExclusiveRectangle::decode(src)?);
+         }
+         for _ in 0..num_regions {
+             quant_qual_vals.push(QuantQuality::decode(src)?);
+@@ -290,7 +292,7 @@
+ /// // Create a region covering a 1920x1080 frame
+ /// let region = Avc420Region::full_frame(1920, 1080, 22);
+ /// assert_eq!(region.left, 0);
+-/// assert_eq!(region.right, 1919);
++/// assert_eq!(region.right, 1920);
+ /// ```
+ #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+ #[derive(Debug, Clone, PartialEq, Eq)]
+@@ -299,9 +301,9 @@
+     pub left: u16,
+     /// Top edge of the region (inclusive)
+     pub top: u16,
+-    /// Right edge of the region (inclusive)
++    /// Right edge of the region (exclusive)
+     pub right: u16,
+-    /// Bottom edge of the region (inclusive)
++    /// Bottom edge of the region (exclusive)
+     pub bottom: u16,
+     /// H.264 quantization parameter (0-51, lower = higher quality)
+     pub quantization_parameter: u8,
+@@ -322,8 +324,8 @@
+         Self {
+             left: 0,
+             top: 0,
+-            right: width.saturating_sub(1),
+-            bottom: height.saturating_sub(1),
++            right: width,
++            bottom: height,
+             quantization_parameter: qp,
+             quality: 100,
+         }
+@@ -342,10 +344,10 @@
+         }
+     }
+ 
+-    /// Convert to `InclusiveRectangle` for PDU encoding
++    /// Convert to the exclusive `RDPGFX_RECT16` representation for PDU encoding.
+     #[must_use]
+-    pub fn to_rectangle(&self) -> InclusiveRectangle {
+-        InclusiveRectangle {
++    pub fn to_rectangle(&self) -> ExclusiveRectangle {
++        ExclusiveRectangle {
+             left: self.left,
+             top: self.top,
+             right: self.right,
+@@ -364,6 +366,86 @@
+     }
+ }
+ 
++/// Convert H.264 AVC format to Annex B format
++///
++/// OpenH264 and similar decoders consume Annex B format (start code prefixed),
++/// but MS-RDPEGFX delivers AVC format (length-prefixed NAL units). This helper
++/// converts between the two by replacing each 4-byte big-endian length prefix
++/// with the 4-byte Annex B start code `[0x00, 0x00, 0x00, 0x01]`.
++///
++/// ```text
++/// AVC:     <4-byte BE length> <NAL> <4-byte BE length> <NAL> ...
++/// Annex B: 00 00 00 01 <NAL> 00 00 00 01 <NAL> ...
++/// ```
++///
++/// On malformed input (a NAL length extending past the buffer, or arithmetic
++/// overflow on `offset + nal_len`), the conversion stops at the last
++/// well-formed NAL unit and discards the remaining bytes.
++///
++/// # Arguments
++///
++/// * `data` - H.264 bitstream in AVC format
++///
++/// # Returns
++///
++/// H.264 bitstream in Annex B format with 4-byte start codes
++///
++/// # Example
++///
++/// ```
++/// use ironrdp_egfx::pdu::avc_to_annex_b;
++///
++/// // Length-prefixed NAL unit (length 3, payload [0x67, 0x42, 0x00])
++/// let avc = [0x00, 0x00, 0x00, 0x03, 0x67, 0x42, 0x00];
++/// let annex_b = avc_to_annex_b(&avc);
++/// assert_eq!(annex_b, [0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00]);
++/// ```
++#[must_use]
++pub fn avc_to_annex_b(data: &[u8]) -> Vec<u8> {
++    let mut out = Vec::with_capacity(data.len());
++    avc_to_annex_b_into(data, &mut out);
++    out
++}
++
++/// In-place variant of [`avc_to_annex_b`] that writes the conversion result
++/// into a caller-provided buffer.
++///
++/// The caller's buffer is cleared before the conversion begins. This shape
++/// lets the caller reuse one allocation across many calls in a hot loop
++/// (for example a per-frame decoder pipeline) without per-call allocation.
++///
++/// See [`avc_to_annex_b`] for the conversion semantics.
++pub fn avc_to_annex_b_into(data: &[u8], out: &mut Vec<u8>) {
++    out.clear();
++    let mut offset = 0;
++
++    while offset + 4 <= data.len() {
++        let nal_len = u32::from_be_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]]);
++
++        #[expect(clippy::as_conversions, reason = "NAL length from wire format")]
++        let nal_len = nal_len as usize;
++        offset += 4;
++
++        let Some(end) = offset.checked_add(nal_len) else {
++            warn!(nal_len, offset, "AVC NAL length overflow, discarding remaining data");
++            break;
++        };
++        if end > data.len() {
++            warn!(
++                nal_len,
++                offset,
++                data_len = data.len(),
++                "AVC NAL extends beyond buffer, discarding remaining data"
++            );
++            break;
++        }
++
++        out.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
++        out.extend_from_slice(&data[offset..offset + nal_len]);
++        offset += nal_len;
++    }
++}
++
+ /// Convert H.264 Annex B format to AVC format
+ ///
+ /// MS-RDPEGFX requires AVC format (length-prefixed NAL units),
+@@ -486,7 +568,7 @@
+ /// Panics if internal encoding fails (should not happen with valid inputs).
+ #[must_use]
+ pub fn encode_avc420_bitmap_stream(regions: &[Avc420Region], h264_data: &[u8]) -> Vec<u8> {
+-    let rectangles: Vec<InclusiveRectangle> = regions.iter().map(Avc420Region::to_rectangle).collect();
++    let rectangles: Vec<ExclusiveRectangle> = regions.iter().map(Avc420Region::to_rectangle).collect();
+ 
+     let quant_qual_vals: Vec<QuantQuality> = regions.iter().map(Avc420Region::to_quant_quality).collect();
+ 
+@@ -508,92 +590,3 @@
+ 
+     buf
+ }
+-
+-#[cfg(test)]
+-mod tests {
+-    use super::*;
+-
+-    #[test]
+-    fn test_avc420_region_full_frame() {
+-        let region = Avc420Region::full_frame(1920, 1080, 22);
+-        assert_eq!(region.left, 0);
+-        assert_eq!(region.top, 0);
+-        assert_eq!(region.right, 1919);
+-        assert_eq!(region.bottom, 1079);
+-        assert_eq!(region.quantization_parameter, 22);
+-        assert_eq!(region.quality, 100);
+-    }
+-
+-    #[test]
+-    fn test_align_to_16() {
+-        assert_eq!(align_to_16(0), 0);
+-        assert_eq!(align_to_16(1), 16);
+-        assert_eq!(align_to_16(15), 16);
+-        assert_eq!(align_to_16(16), 16);
+-        assert_eq!(align_to_16(17), 32);
+-        assert_eq!(align_to_16(1920), 1920);
+-        assert_eq!(align_to_16(1080), 1088);
+-    }
+-
+-    #[test]
+-    fn test_annex_b_to_avc_3byte_start() {
+-        // NAL with 3-byte start code: 00 00 01 <NAL>
+-        let annex_b = [0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1E];
+-        let avc = annex_b_to_avc(&annex_b);
+-
+-        // Should be: 4-byte length (4) + NAL data
+-        assert_eq!(avc.len(), 8);
+-        assert_eq!(&avc[0..4], &[0, 0, 0, 4]); // Length = 4
+-        assert_eq!(&avc[4..8], &[0x67, 0x42, 0x00, 0x1E]);
+-    }
+-
+-    #[test]
+-    fn test_annex_b_to_avc_4byte_start() {
+-        // NAL with 4-byte start code: 00 00 00 01 <NAL>
+-        let annex_b = [0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00];
+-        let avc = annex_b_to_avc(&annex_b);
+-
+-        assert_eq!(avc.len(), 7);
+-        assert_eq!(&avc[0..4], &[0, 0, 0, 3]); // Length = 3
+-        assert_eq!(&avc[4..7], &[0x67, 0x42, 0x00]);
+-    }
+-
+-    #[test]
+-    fn test_annex_b_to_avc_multiple_nals() {
+-        // Two NAL units
+-        let annex_b = [
+-            0x00, 0x00, 0x00, 0x01, 0x67, 0x42, // SPS
+-            0x00, 0x00, 0x01, 0x68, 0xCE, // PPS with 3-byte start
+-        ];
+-        let avc = annex_b_to_avc(&annex_b);
+-
+-        // First NAL: 4 bytes length + 2 bytes data
+-        // Second NAL: 4 bytes length + 2 bytes data
+-        assert!(avc.len() >= 12);
+-    }
+-
+-    #[test]
+-    fn test_annex_b_to_avc_empty() {
+-        let avc = annex_b_to_avc(&[]);
+-        assert!(avc.is_empty());
+-    }
+-
+-    #[test]
+-    fn test_encode_avc420_bitmap_stream() {
+-        let regions = vec![Avc420Region::full_frame(1920, 1080, 22)];
+-        let h264_data = [0x00, 0x00, 0x00, 0x01, 0x67]; // Minimal H.264
+-
+-        let encoded = encode_avc420_bitmap_stream(&regions, &h264_data);
+-
+-        // Should have: 4 bytes (nRect=1) + 8 bytes (rectangle) + 2 bytes (quant) + 5 bytes (data)
+-        assert_eq!(encoded.len(), 4 + 8 + 2 + 5);
+-
+-        // Verify we can decode it back
+-        let mut cursor = ReadCursor::new(&encoded);
+-        let decoded = Avc420BitmapStream::decode(&mut cursor).expect("decode failed");
+-
+-        assert_eq!(decoded.rectangles.len(), 1);
+-        assert_eq!(decoded.quant_qual_vals.len(), 1);
+-        assert_eq!(decoded.data, &h264_data);
+-    }
+-}
+diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/pdu/cmd.rs base/src/pdu/cmd.rs
+--- ironrdp-egfx-0.3.0/src/pdu/cmd.rs	2006-07-24 02:21:28.000000000 +0100
++++ base/src/pdu/cmd.rs	2026-09-23 00:40:54.080749736 +0100
+@@ -1221,7 +1221,7 @@
+         if monitor_count > MONITOR_COUNT_MAX {
+             return Err(invalid_field_err!(
+                 "monitor_count",
+-                "invalid reset graphics monitor count"
++                "invalid reset graphics monitor count",
+             ));
+         }
+ 
+diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/pdu/mod.rs base/src/pdu/mod.rs
+--- ironrdp-egfx-0.3.0/src/pdu/mod.rs	2006-07-24 02:21:28.000000000 +0100
++++ base/src/pdu/mod.rs	2026-09-23 00:40:54.080814933 +0100
+@@ -8,6 +8,7 @@
+ //! For server implementations, the following utilities are provided:
+ //!
+ //! - [`Avc420Region`] - Region metadata for H.264 frames
++//! - [`avc_to_annex_b`] - Convert H.264 AVC format to Annex B
+ //! - [`annex_b_to_avc`] - Convert H.264 Annex B to AVC format
+ //! - [`align_to_16`] - Align dimensions to H.264 macroblock boundaries
+ //! - [`encode_avc420_bitmap_stream`] - Create AVC420 bitmap streams
+diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/server.rs base/src/server.rs
+--- ironrdp-egfx-0.3.0/src/server.rs	2006-07-24 02:21:28.000000000 +0100
++++ base/src/server.rs	2026-09-23 00:40:54.080886475 +0100
+@@ -211,6 +211,18 @@
+         self.surfaces.clear();
+     }
+ 
++    /// Clear all surfaces AND reset the surface ID allocator to 0.
++    ///
++    /// Used by the server when the client emits a mid-session
++    /// CapsAdvertise (a decoder-recovery sequence): the client has
++    /// already cleared its own surface state and expects new surface
++    /// IDs to start from 0. Distinct from [`clear`] which preserves the
++    /// counter.
++    pub fn reset_for_reinit(&mut self) {
++        self.surfaces.clear();
++        self.next_surface_id = 0;
++    }
++
+     /// Number of surfaces
+     pub fn len(&self) -> usize {
+         self.surfaces.len()
+@@ -493,6 +505,13 @@
+     total_sent: u64,
+     /// Total frames acknowledged
+     total_acked: u64,
++    /// Tracks last-emitted backpressure state for edge-triggered transition
++    /// logging. Without this, callers either log nothing (and the failure is
++    /// invisible) or log every call (and the log floods at 30+/sec). Edge
++    /// triggering gives one line on engage, one line on release.
++    last_backpressure_state: bool,
++    /// Tracks last-emitted ack_suspended state for the same reason.
++    last_ack_suspended_state: bool,
+ }
+ 
+ impl Default for FrameTracker {
+@@ -512,6 +531,53 @@
+             max_in_flight: DEFAULT_MAX_FRAMES_IN_FLIGHT,
+             total_sent: 0,
+             total_acked: 0,
++            last_backpressure_state: false,
++            last_ack_suspended_state: false,
++        }
++    }
++
++    /// Emit edge-triggered diagnostic logs when backpressure or ack_suspended
++    /// state changes. Called from begin_frame / acknowledge. Single source of
++    /// truth so callers don't need to remember to log.
++    ///
++    /// MS-RDPEGFX § 2.2.4.3 RDPGFX_FRAME_ACKNOWLEDGE_PDU defines queue_depth=0xFFFFFFFF
++    /// as SUSPEND_FRAME_ACKNOWLEDGEMENT. We surface that distinct state separately
++    /// so operators can tell "we're saturated" from "client said stop ack'ing."
++    fn emit_state_transitions(&mut self) {
++        let in_flight = self.in_flight();
++        let now_backpressure = self.should_backpressure();
++        if now_backpressure != self.last_backpressure_state {
++            if now_backpressure {
++                debug!(
++                    in_flight,
++                    max_in_flight = self.max_in_flight,
++                    ack_suspended = self.ack_suspended,
++                    client_queue_depth = self.client_queue_depth,
++                    "EGFX backpressure ENGAGED, encoder must wait for FrameAcknowledge"
++                );
++            } else {
++                debug!(
++                    in_flight,
++                    max_in_flight = self.max_in_flight,
++                    "EGFX backpressure RELEASED, encoder may proceed"
++                );
++            }
++            self.last_backpressure_state = now_backpressure;
++        }
++        if self.ack_suspended != self.last_ack_suspended_state {
++            if self.ack_suspended {
++                debug!(
++                    in_flight,
++                    "EGFX ack_suspended ENGAGED, client requested no FrameAcknowledge (queue_depth=0xFFFFFFFF per MS-RDPEGFX 2.2.4.3)"
++                );
++            } else {
++                debug!(
++                    in_flight,
++                    client_queue_depth = self.client_queue_depth,
++                    "EGFX ack_suspended RELEASED"
++                );
++            }
++            self.last_ack_suspended_state = self.ack_suspended;
+         }
+     }
+ 
+@@ -525,17 +591,25 @@
+         let frame_id = self.next_frame_id;
+         self.next_frame_id = self.next_frame_id.wrapping_add(1);
+ 
+-        self.unacknowledged.insert(
+-            frame_id,
+-            FrameInfo {
++        // A suspended client sends no acknowledgement until it opts back in
++        // ([MS-RDPEGFX] 2.2.2.13), so nothing would take this frame back out.
++        // Backpressure is off while suspended, so the entry has no work to do.
++        if !self.ack_suspended {
++            self.unacknowledged.insert(
+                 frame_id,
+-                timestamp,
+-                sent_at: Instant::now(),
+-                size_bytes: 0,
+-            },
+-        );
++                FrameInfo {
++                    frame_id,
++                    timestamp,
++                    sent_at: Instant::now(),
++                    size_bytes: 0,
++                },
++            );
++        }
+ 
+         self.total_sent += 1;
++        // Edge-trigger after insert so a frame that pushes us to max_in_flight
++        // logs the transition.
++        self.emit_state_transitions();
+         frame_id
+     }
+ 
+@@ -548,7 +622,8 @@
+ 
+     /// Handle frame acknowledgment from client
+     pub fn acknowledge(&mut self, frame_id: u32, queue_depth: u32) -> Option<FrameInfo> {
+-        if queue_depth == SUSPEND_FRAME_ACK_QUEUE_DEPTH {
++        let suspending = queue_depth == SUSPEND_FRAME_ACK_QUEUE_DEPTH;
++        if suspending {
+             self.ack_suspended = true;
+             self.client_queue_depth = 0;
+         } else {
+@@ -556,13 +631,39 @@
+             self.client_queue_depth = queue_depth;
+         }
+ 
++        // A suspending Frame Acknowledge still acknowledges: take the frame
++        // out before the clear below, since it carries the round-trip sample
++        // and byte count the QoE report is built from.
+         let info = self.unacknowledged.remove(&frame_id);
+         if info.is_some() {
+             self.total_acked += 1;
+         }
++        if suspending {
++            // [MS-RDPEGFX] 3.2.5.13: "the server MUST clear the Unacknowledged
++            // Frames ADM element and MUST NOT expect any further
++            // RDPGFX_FRAME_ACKNOWLEDGE_PDU messages from the client". The one
++            // frame this PDU acknowledges was already removed above, so its QoE
++            // sample survives.
++            self.unacknowledged.clear();
++        }
++
++        // Edge-trigger after the remove/clear so an ack that releases
++        // backpressure logs.
++        self.emit_state_transitions();
+         info
+     }
+ 
++    /// Whether `frame_id` was ever handed out by [`begin_frame`].
++    ///
++    /// Frame IDs are assigned sequentially, so any ID below the next one to
++    /// assign has been issued at some point. A `u32` frame counter does not
++    /// wrap within a session. Used to tell a benign acknowledgement for a
++    /// frame we no longer track (a resume after suspension cleared the map, or
++    /// a stale duplicate) from an acknowledgement for an ID never sent.
++    pub(crate) fn was_issued(&self, frame_id: u32) -> bool {
++        frame_id < self.next_frame_id
++    }
++
+     /// Number of frames in flight
+     #[expect(
+         clippy::cast_possible_truncation,
+@@ -703,7 +804,9 @@
+     for server_cap in server_sorted {
+         for client_cap in client_caps {
+             if core::mem::discriminant(client_cap) == core::mem::discriminant(server_cap) {
+-                return Some(intersect_flags(client_cap, server_cap));
++                return Some(sanitize_capabilities_for_confirm(intersect_flags(
++                    client_cap, server_cap,
++                )));
+             }
+         }
+     }
+@@ -711,38 +814,67 @@
+     None
+ }
+ 
+-/// Intersect flags for matching capability set versions
++/// Intersect positive flags while preserving the client AVC decoder constraint.
+ fn intersect_flags(client: &CapabilitySet, server: &CapabilitySet) -> CapabilitySet {
+     match (client, server) {
+         (CapabilitySet::V8 { flags: cf }, CapabilitySet::V8 { flags: sf }) => CapabilitySet::V8 { flags: *cf & *sf },
+         (CapabilitySet::V8_1 { flags: cf }, CapabilitySet::V8_1 { flags: sf }) => {
+             CapabilitySet::V8_1 { flags: *cf & *sf }
+         }
+-        (CapabilitySet::V10 { flags: cf }, CapabilitySet::V10 { flags: sf }) => CapabilitySet::V10 { flags: *cf & *sf },
+-        (CapabilitySet::V10_2 { flags: cf }, CapabilitySet::V10_2 { flags: sf }) => {
+-            CapabilitySet::V10_2 { flags: *cf & *sf }
+-        }
+-        (CapabilitySet::V10_3 { flags: cf }, CapabilitySet::V10_3 { flags: sf }) => {
+-            CapabilitySet::V10_3 { flags: *cf & *sf }
+-        }
+-        (CapabilitySet::V10_4 { flags: cf }, CapabilitySet::V10_4 { flags: sf }) => {
+-            CapabilitySet::V10_4 { flags: *cf & *sf }
+-        }
+-        (CapabilitySet::V10_5 { flags: cf }, CapabilitySet::V10_5 { flags: sf }) => {
+-            CapabilitySet::V10_5 { flags: *cf & *sf }
+-        }
+-        (CapabilitySet::V10_6 { flags: cf }, CapabilitySet::V10_6 { flags: sf }) => {
+-            CapabilitySet::V10_6 { flags: *cf & *sf }
++        (CapabilitySet::V10 { flags: cf }, CapabilitySet::V10 { flags: sf }) => CapabilitySet::V10 {
++            flags: (*cf & *sf) | (*cf & CapabilitiesV10Flags::AVC_DISABLED),
++        },
++        (CapabilitySet::V10_2 { flags: cf }, CapabilitySet::V10_2 { flags: sf }) => CapabilitySet::V10_2 {
++            flags: (*cf & *sf) | (*cf & CapabilitiesV10Flags::AVC_DISABLED),
++        },
++        (CapabilitySet::V10_3 { flags: cf }, CapabilitySet::V10_3 { flags: sf }) => CapabilitySet::V10_3 {
++            flags: (*cf & *sf) | (*cf & CapabilitiesV103Flags::AVC_DISABLED),
++        },
++        (CapabilitySet::V10_4 { flags: cf }, CapabilitySet::V10_4 { flags: sf }) => CapabilitySet::V10_4 {
++            flags: (*cf & *sf) | (*cf & CapabilitiesV104Flags::AVC_DISABLED),
++        },
++        (CapabilitySet::V10_5 { flags: cf }, CapabilitySet::V10_5 { flags: sf }) => CapabilitySet::V10_5 {
++            flags: (*cf & *sf) | (*cf & CapabilitiesV104Flags::AVC_DISABLED),
++        },
++        (CapabilitySet::V10_6 { flags: cf }, CapabilitySet::V10_6 { flags: sf }) => CapabilitySet::V10_6 {
++            flags: (*cf & *sf) | (*cf & CapabilitiesV104Flags::AVC_DISABLED),
++        },
++        (CapabilitySet::V10_6Err { flags: cf }, CapabilitySet::V10_6Err { flags: sf }) => CapabilitySet::V10_6Err {
++            flags: (*cf & *sf) | (*cf & CapabilitiesV104Flags::AVC_DISABLED),
++        },
++        (CapabilitySet::V10_7 { flags: cf }, CapabilitySet::V10_7 { flags: sf }) => CapabilitySet::V10_7 {
++            flags: (*cf & *sf) | (*cf & CapabilitiesV107Flags::AVC_DISABLED),
++        },
++        // V10_1 has no flags; mismatched variants return server as-is.
++        _ => server.clone(),
++    }
++}
++
++/// Ensure a capabilities confirm never combines incompatible AVC flags.
++fn sanitize_capabilities_for_confirm(mut capabilities: CapabilitySet) -> CapabilitySet {
++    match &mut capabilities {
++        CapabilitySet::V10_3 { flags } => {
++            if flags.contains(CapabilitiesV103Flags::AVC_DISABLED) {
++                flags.remove(CapabilitiesV103Flags::AVC_THIN_CLIENT);
++            }
+         }
+-        (CapabilitySet::V10_6Err { flags: cf }, CapabilitySet::V10_6Err { flags: sf }) => {
+-            CapabilitySet::V10_6Err { flags: *cf & *sf }
++        CapabilitySet::V10_4 { flags }
++        | CapabilitySet::V10_5 { flags }
++        | CapabilitySet::V10_6 { flags }
++        | CapabilitySet::V10_6Err { flags } => {
++            if flags.contains(CapabilitiesV104Flags::AVC_DISABLED) {
++                flags.remove(CapabilitiesV104Flags::AVC_THIN_CLIENT);
++            }
+         }
+-        (CapabilitySet::V10_7 { flags: cf }, CapabilitySet::V10_7 { flags: sf }) => {
+-            CapabilitySet::V10_7 { flags: *cf & *sf }
++        CapabilitySet::V10_7 { flags } => {
++            if flags.contains(CapabilitiesV107Flags::AVC_DISABLED) {
++                flags.remove(CapabilitiesV107Flags::AVC_THIN_CLIENT);
++            }
+         }
+-        // V10_1 has no flags; mismatched variants return server as-is.
+-        _ => server.clone(),
++        _ => {}
+     }
++
++    capabilities
+ }
+ 
+ // ============================================================================
+@@ -790,13 +922,38 @@
+ 
+     /// Returns the server's preferred capabilities
+     ///
+-    /// Override this to customize codec support. The default enables
+-    /// AVC420/AVC444 with V10.7 and V8.1 as fallback.
++    /// Override this to customize codec support. The default declares every
++    /// capability version this build can interpret, in priority order, with
++    /// H.264 enabled from V8.1 up (V10 and later enable AVC by the absence
++    /// of `AVC_DISABLED`). Declaring the complete ladder matters because
++    /// negotiation matches exact versions: a client advertising only a
++    /// mid-tier version (Windows App builds do) would otherwise fail to
++    /// negotiate any V10-level set and lose H.264 or the channel entirely.
+     fn preferred_capabilities(&self) -> Vec<CapabilitySet> {
+         vec![
+             CapabilitySet::V10_7 {
+                 flags: CapabilitiesV107Flags::SMALL_CACHE,
+             },
++            CapabilitySet::V10_6Err {
++                flags: CapabilitiesV104Flags::SMALL_CACHE,
++            },
++            CapabilitySet::V10_6 {
++                flags: CapabilitiesV104Flags::SMALL_CACHE,
++            },
++            CapabilitySet::V10_5 {
++                flags: CapabilitiesV104Flags::SMALL_CACHE,
++            },
++            CapabilitySet::V10_4 {
++                flags: CapabilitiesV104Flags::SMALL_CACHE,
++            },
++            CapabilitySet::V10_3 {
++                // V10.3 defines no SMALL_CACHE flag; empty means AVC enabled.
++                flags: CapabilitiesV103Flags::empty(),
++            },
++            CapabilitySet::V10_2 {
++                flags: CapabilitiesV10Flags::SMALL_CACHE,
++            },
++            CapabilitySet::V10_1,
+             CapabilitySet::V10 {
+                 flags: CapabilitiesV10Flags::SMALL_CACHE,
+             },
+@@ -1243,9 +1400,8 @@
+ 
+     /// Compute bounding rectangle from regions.
+     ///
+-    /// Avc420Region uses inclusive bounds; the wire format (RDPGFX_RECT16) is
+-    /// exclusive, so the returned ExclusiveRectangle adds 1 to the max right
+-    /// and bottom of the inclusive bounding box.
++    /// `Avc420Region` and the wire-format `RDPGFX_RECT16` both use exclusive
++    /// right and bottom bounds.
+     fn compute_dest_rect(regions: &[Avc420Region], default_width: u16, default_height: u16) -> ExclusiveRectangle {
+         if let Some(first) = regions.first() {
+             let mut left = first.left;
+@@ -1263,8 +1419,8 @@
+             ExclusiveRectangle {
+                 left,
+                 top,
+-                right: right.saturating_add(1),
+-                bottom: bottom.saturating_add(1),
++                right,
++                bottom,
+             }
+         } else {
+             ExclusiveRectangle {
+@@ -1338,6 +1494,87 @@
+         chroma_regions: Option<&[Avc420Region]>,
+         timestamp_ms: u32,
+     ) -> Option<u32> {
++        let (encoding, stream2_data, stream2_regions) =
++            if let (Some(chroma_data), Some(chroma_regions)) = (chroma_data, chroma_regions) {
++                (Encoding::LUMA_AND_CHROMA, Some(chroma_data), Some(chroma_regions))
++            } else {
++                (Encoding::LUMA, None, None)
++            };
++
++        self.send_avc444_frame_with_encoding(
++            Codec1Type::Avc444,
++            surface_id,
++            encoding,
++            luma_data,
++            luma_regions,
++            stream2_data,
++            stream2_regions,
++            timestamp_ms,
++        )
++    }
++
++    /// Queue an H.264 AVC444v2 frame for transmission.
++    ///
++    /// `encoding` selects the AVC444v2 stream layout: LC=0 carries luma in
++    /// stream 1 and chroma in stream 2, LC=1 carries luma in stream 1, and LC=2
++    /// carries chroma in stream 1.
++    ///
++    /// Returns `Some(frame_id)` if queued, `None` if the stream shape is
++    /// invalid, AVC444 is not supported, or backpressure is active.
++    ///
++    /// [2.2.4.6 RFX_AVC444V2_BITMAP_STREAM]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpegfx/3b337b87-f478-4786-a63b-97794aa72075
++    #[expect(
++        clippy::too_many_arguments,
++        reason = "the public API mirrors the two AVC444v2 streams"
++    )]
++    pub fn send_avc444v2_frame(
++        &mut self,
++        surface_id: u16,
++        encoding: Encoding,
++        stream1_data: &[u8],
++        stream1_regions: &[Avc420Region],
++        stream2_data: Option<&[u8]>,
++        stream2_regions: Option<&[Avc420Region]>,
++        timestamp_ms: u32,
++    ) -> Option<u32> {
++        self.send_avc444_frame_with_encoding(
++            Codec1Type::Avc444v2,
++            surface_id,
++            encoding,
++            stream1_data,
++            stream1_regions,
++            stream2_data,
++            stream2_regions,
++            timestamp_ms,
++        )
++    }
++
++    #[expect(
++        clippy::too_many_arguments,
++        reason = "the shared implementation receives both AVC444 streams"
++    )]
++    fn send_avc444_frame_with_encoding(
++        &mut self,
++        codec_id: Codec1Type,
++        surface_id: u16,
++        encoding: Encoding,
++        stream1_data: &[u8],
++        stream1_regions: &[Avc420Region],
++        stream2_data: Option<&[u8]>,
++        stream2_regions: Option<&[Avc420Region]>,
++        timestamp_ms: u32,
++    ) -> Option<u32> {
++        let valid_stream_shape = if encoding == Encoding::LUMA_AND_CHROMA {
++            stream2_data.is_some() && stream2_regions.is_some()
++        } else if encoding == Encoding::LUMA || encoding == Encoding::CHROMA {
++            stream2_data.is_none() && stream2_regions.is_none()
++        } else {
++            false
++        };
++        if !valid_stream_shape {
++            return None;
++        }
++
+         if !self.is_ready() {
+             return None;
+         }
+@@ -1354,29 +1591,28 @@
+         let timestamp = Self::make_timestamp(timestamp_ms);
+         let frame_id = self.frames.begin_frame(timestamp);
+ 
+-        let luma_rectangles: Vec<_> = luma_regions.iter().map(Avc420Region::to_rectangle).collect();
+-        let luma_quant_vals: Vec<_> = luma_regions.iter().map(Avc420Region::to_quant_quality).collect();
++        let stream1_rectangles: Vec<_> = stream1_regions.iter().map(Avc420Region::to_rectangle).collect();
++        let stream1_quant_vals: Vec<_> = stream1_regions.iter().map(Avc420Region::to_quant_quality).collect();
+ 
+         let stream1 = Avc420BitmapStream {
+-            rectangles: luma_rectangles,
+-            quant_qual_vals: luma_quant_vals,
+-            data: luma_data,
++            rectangles: stream1_rectangles,
++            quant_qual_vals: stream1_quant_vals,
++            data: stream1_data,
+         };
+ 
+-        let (encoding, stream2) = if let (Some(chroma), Some(chroma_regs)) = (chroma_data, chroma_regions) {
+-            let chroma_rectangles: Vec<_> = chroma_regs.iter().map(Avc420Region::to_rectangle).collect();
+-            let chroma_quant_vals: Vec<_> = chroma_regs.iter().map(Avc420Region::to_quant_quality).collect();
+-
+-            (
+-                Encoding::LUMA_AND_CHROMA,
+-                Some(Avc420BitmapStream {
+-                    rectangles: chroma_rectangles,
+-                    quant_qual_vals: chroma_quant_vals,
+-                    data: chroma,
+-                }),
+-            )
++        let stream2 = if encoding == Encoding::LUMA_AND_CHROMA {
++            let stream2_data = stream2_data?;
++            let stream2_regions = stream2_regions?;
++            let stream2_rectangles: Vec<_> = stream2_regions.iter().map(Avc420Region::to_rectangle).collect();
++            let stream2_quant_vals: Vec<_> = stream2_regions.iter().map(Avc420Region::to_quant_quality).collect();
++
++            Some(Avc420BitmapStream {
++                rectangles: stream2_rectangles,
++                quant_qual_vals: stream2_quant_vals,
++                data: stream2_data,
++            })
+         } else {
+-            (Encoding::LUMA, None)
++            None
+         };
+ 
+         let avc444_stream = Avc444BitmapStream {
+@@ -1386,14 +1622,18 @@
+         };
+ 
+         let encoded_stream = encode_avc444_bitmap_stream(&avc444_stream);
+-        let target_rect = Self::compute_dest_rect(luma_regions, surface.width, surface.height);
++        let target_rect = if let Some(stream2_regions) = stream2_regions {
++            Self::compute_dest_rect_for_streams(stream1_regions, stream2_regions, surface.width, surface.height)
++        } else {
++            Self::compute_dest_rect(stream1_regions, surface.width, surface.height)
++        };
+ 
+         self.output_queue
+             .push_back(GfxPdu::StartFrame(StartFramePdu { timestamp, frame_id }));
+ 
+         self.output_queue.push_back(GfxPdu::WireToSurface1(WireToSurface1Pdu {
+             surface_id,
+-            codec_id: Codec1Type::Avc444,
++            codec_id,
+             pixel_format: surface.pixel_format,
+             destination_rectangle: target_rect,
+             bitmap_data: encoded_stream,
+@@ -1404,6 +1644,77 @@
+         Some(frame_id)
+     }
+ 
++    fn compute_dest_rect_for_streams(
++        stream1_regions: &[Avc420Region],
++        stream2_regions: &[Avc420Region],
++        default_width: u16,
++        default_height: u16,
++    ) -> ExclusiveRectangle {
++        let stream1 = Self::compute_dest_rect(stream1_regions, default_width, default_height);
++        let stream2 = Self::compute_dest_rect(stream2_regions, default_width, default_height);
++
++        ExclusiveRectangle {
++            left: stream1.left.min(stream2.left),
++            top: stream1.top.min(stream2.top),
++            right: stream1.right.max(stream2.right),
++            bottom: stream1.bottom.max(stream2.bottom),
++        }
++    }
++
++    /// Queue a pre-encoded RDP6 Planar bitmap stream for transmission via EGFX.
++    ///
++    /// `planar_data` must represent a bitmap with the supplied destination
++    /// dimensions and use the target surface's pixel format.
++    ///
++    /// Returns `Some(frame_id)` if queued, `None` if the server is not ready,
++    /// the surface does not exist, the destination exceeds the surface, or
++    /// backpressure is active.
++    pub fn send_planar_frame(
++        &mut self,
++        surface_id: u16,
++        planar_data: &[u8],
++        dest_width: u16,
++        dest_height: u16,
++        timestamp_ms: u32,
++    ) -> Option<u32> {
++        if !self.is_ready() {
++            return None;
++        }
++        if self.should_backpressure() {
++            self.qoe.record_backpressure();
++            return None;
++        }
++
++        let surface = self.surfaces.get(surface_id)?;
++        if dest_width > surface.width || dest_height > surface.height {
++            return None;
++        }
++
++        let timestamp = Self::make_timestamp(timestamp_ms);
++        let frame_id = self.frames.begin_frame(timestamp);
++        let destination_rectangle = ExclusiveRectangle {
++            left: 0,
++            top: 0,
++            right: dest_width,
++            bottom: dest_height,
++        };
++
++        self.output_queue
++            .push_back(GfxPdu::StartFrame(StartFramePdu { timestamp, frame_id }));
++
++        self.output_queue.push_back(GfxPdu::WireToSurface1(WireToSurface1Pdu {
++            surface_id,
++            codec_id: Codec1Type::Planar,
++            pixel_format: surface.pixel_format,
++            destination_rectangle,
++            bitmap_data: planar_data.to_vec(),
++        }));
++
++        self.output_queue.push_back(GfxPdu::EndFrame(EndFramePdu { frame_id }));
++
++        Some(frame_id)
++    }
++
+     /// Queue an uncompressed bitmap frame for transmission via EGFX
+     ///
+     /// Sends raw pixel data through `WireToSurface1` with `Codec1Type::Uncompressed`.
+@@ -1502,6 +1813,52 @@
+         Some(frame_id)
+     }
+ 
++    /// Queue a ClearCodec frame for transmission.
++    ///
++    /// ClearCodec is a mandatory lossless codec for all EGFX versions. It
++    /// provides excellent compression for text, UI elements, and icons.
++    ///
++    /// `bitmap_data` should be a pre-encoded ClearCodec bitmap stream
++    /// (as produced by `ironrdp_graphics::clearcodec::ClearCodecEncoder`).
++    ///
++    /// Returns `Some(frame_id)` if queued, `None` if backpressure is active
++    /// or the server is not ready.
++    pub fn send_clearcodec_frame(
++        &mut self,
++        surface_id: u16,
++        destination_rectangle: ExclusiveRectangle,
++        bitmap_data: Vec<u8>,
++        timestamp_ms: u32,
++    ) -> Option<u32> {
++        if !self.is_ready() {
++            return None;
++        }
++        if self.should_backpressure() {
++            self.qoe.record_backpressure();
++            return None;
++        }
++
++        let surface = self.surfaces.get(surface_id)?;
++
++        let timestamp = Self::make_timestamp(timestamp_ms);
++        let frame_id = self.frames.begin_frame(timestamp);
++
++        self.output_queue
++            .push_back(GfxPdu::StartFrame(StartFramePdu { timestamp, frame_id }));
++
++        self.output_queue.push_back(GfxPdu::WireToSurface1(WireToSurface1Pdu {
++            surface_id,
++            codec_id: Codec1Type::ClearCodec,
++            pixel_format: surface.pixel_format,
++            destination_rectangle,
++            bitmap_data,
++        }));
++
++        self.output_queue.push_back(GfxPdu::EndFrame(EndFramePdu { frame_id }));
++
++        Some(frame_id)
++    }
++
+     // ========================================================================
+     // Mixed-Codec Frame Support
+     // ========================================================================
+@@ -1605,19 +1962,33 @@
+         let mode = self.compression_mode;
+         let pdus: Vec<_> = self.output_queue.drain(..).collect();
+ 
+-        pdus.into_iter()
++        // D2: ZGFX compression timing. drain_output runs synchronously on the
++        // event-dispatch thread and is held under both `this.lock()` and the
++        // SharedWriter lock — so any slowness here blocks both inbound PDU
++        // processing AND outbound writes. Sum per-PDU compress times; log
++        // INFO if the batch exceeded a budget so operators can see when ZGFX
++        // is the limiter on a slow VM.
++        let drain_start = Instant::now();
++        let mut total_uncompressed: usize = 0;
++        let mut total_compressed: usize = 0;
++        let pdu_count = pdus.len();
++
++        let messages: Vec<DvcMessage> = pdus
++            .into_iter()
+             .map(|pdu| {
+                 let pdu_name = pdu.name();
+                 let pdu_size = pdu.size();
+                 let mut pdu_bytes = vec![0u8; pdu_size];
+                 let mut cursor = WriteCursor::new(&mut pdu_bytes);
+                 pdu.encode(&mut cursor).expect("GfxPdu encoding should not fail");
++                total_uncompressed += pdu_size;
+ 
+                 let wrapped = match mode {
+                     CompressionMode::Never => wrap_uncompressed(&pdu_bytes),
+                     _ => compress_and_wrap_egfx(&pdu_bytes, &mut self.zgfx_compressor, mode)
+                         .unwrap_or_else(|_| wrap_uncompressed(&pdu_bytes)),
+                 };
++                total_compressed += wrapped.len();
+                 trace!(pdu_name, pdu_size, wrapped = wrapped.len(), mode = ?mode, "ZGFX output");
+ 
+                 Box::new(ZgfxWrappedBytes {
+@@ -1625,7 +1996,34 @@
+                     pdu_name,
+                 }) as DvcMessage
+             })
+-            .collect()
++            .collect();
++
++        // D2: log batch timing. INFO threshold at 10ms — anything above is
++        // significant for the per-frame budget. Always log at DEBUG so the
++        // ZGFX ratio is visible during normal debug sessions.
++        let elapsed = drain_start.elapsed();
++        if elapsed >= core::time::Duration::from_millis(10) {
++            tracing::info!(
++                pdu_count,
++                total_uncompressed,
++                total_compressed,
++                ratio = format!("{:.2}", total_uncompressed as f32 / total_compressed.max(1) as f32),
++                drain_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
++                mode = ?mode,
++                "EGFX drain_output (ZGFX compress) slow"
++            );
++        } else if pdu_count > 0 {
++            tracing::debug!(
++                pdu_count,
++                total_uncompressed,
++                total_compressed,
++                ratio = format!("{:.2}", total_uncompressed as f32 / total_compressed.max(1) as f32),
++                drain_us = u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX),
++                mode = ?mode,
++                "EGFX drain_output"
++            );
++        }
++        messages
+     }
+ 
+     /// Check if there are pending PDUs to send
+@@ -1639,6 +2037,31 @@
+     // ========================================================================
+ 
+     fn handle_capabilities_advertise(&mut self, pdu: CapabilitiesAdvertisePdu) {
++        // Detect mid-session re-advertise. mstsc (and likely other clients)
++        // emits a fresh CapsAdvertise as a decoder-recovery sequence under
++        // load, typically when its EGFX decoder loses sync after a long
++        // P-slice chain. Before sending CapsAdvertise the client has cleared
++        // its surface/frame/cache state, so the server must mirror that
++        // silently (no DeleteSurface PDUs, the client doesn't have those
++        // surfaces anymore and treats a stray DeleteSurface as a protocol
++        // violation, leading to TCP RST within milliseconds).
++        //
++        // Observed: macOS Windows App and mstsc on Windows 11 both initiate
++        // this sequence. MS-RDPEGFX does not document the recovery flow
++        // explicitly, but the empirical pattern is CapsAdvertise ->
++        // CacheImportOffer -> expect server to emit CapsConfirm +
++        // ResetGraphics + CreateSurface(id=0) + MapSurfaceToOutput + IDR.
++        let is_readvertise = self.state == ServerState::Ready;
++        if is_readvertise {
++            debug!(
++                "EGFX: mid-session CapsAdvertise observed, silently clearing surface and frame \
++                 state for re-initialization (no DeleteSurface PDU emitted, surface ID counter reset)"
++            );
++            self.surfaces.reset_for_reinit();
++            self.frames.clear();
++            self.reset_graphics_sent = false;
++        }
++
+         self.handler.capabilities_advertise(&pdu);
+         let server_caps = self.handler.preferred_capabilities();
+ 
+@@ -1661,14 +2084,16 @@
+         // When no version overlaps with server preferences, confirm the client's
+         // highest-priority capability to avoid confirming a version the client
+         // did not advertise.
+-        let negotiated = negotiate_capabilities(&client_caps, &server_caps).unwrap_or_else(|| {
+-            warn!("No capability match with server preferences, selecting client's highest version");
+-            let mut client_sorted = client_caps.clone();
+-            client_sorted.sort_by_key(|cap| core::cmp::Reverse(capability_priority(cap)));
+-            client_sorted.into_iter().next().unwrap_or(CapabilitySet::V8 {
+-                flags: CapabilitiesV8Flags::empty(),
+-            })
+-        });
++        let negotiated = sanitize_capabilities_for_confirm(
++            negotiate_capabilities(&client_caps, &server_caps).unwrap_or_else(|| {
++                warn!("No capability match with server preferences, selecting client's highest version");
++                let mut client_sorted = client_caps.clone();
++                client_sorted.sort_by_key(|cap| core::cmp::Reverse(capability_priority(cap)));
++                client_sorted.into_iter().next().unwrap_or(CapabilitySet::V8 {
++                    flags: CapabilitiesV8Flags::empty(),
++                })
++            }),
++        );
+ 
+         self.codec_caps = CodecCapabilities::from_capability_set(&negotiated);
+         self.state = ServerState::Ready;
+@@ -1684,12 +2109,45 @@
+ 
+     fn handle_frame_acknowledge(&mut self, pdu: FrameAcknowledgePdu) {
+         let queue_depth = pdu.queue_depth.to_u32();
++        let suspended = queue_depth == SUSPEND_FRAME_ACK_QUEUE_DEPTH;
+ 
+         if let Some(info) = self.frames.acknowledge(pdu.frame_id, queue_depth) {
+             let rtt = info.sent_at.elapsed();
+             self.qoe.record_rtt(rtt);
+             self.qoe.record_frame_ack(info.size_bytes);
+-            trace!(frame_id = pdu.frame_id, latency = ?rtt);
++            // DEBUG: visible at default log levels. FrameAcknowledge is the
++            // single most important signal in the EGFX flow-control loop —
++            // without it the server cannot decide when to release backpressure.
++            // Logging at TRACE only made the loop invisible under normal
++            // operator-friendly log levels.
++            debug!(
++                frame_id = pdu.frame_id,
++                latency_us = u64::try_from(rtt.as_micros()).unwrap_or(u64::MAX),
++                queue_depth,
++                suspended,
++                in_flight_after = self.frames.in_flight(),
++                "EGFX FrameAcknowledge received"
++            );
++        } else if self.frames.was_issued(pdu.frame_id) {
++            // Issued but no longer tracked. This is the normal resume path:
++            // while acknowledgements are suspended the server stops tracking
++            // frames ([MS-RDPEGFX] 2.2.2.13), and the client opts back in by
++            // acknowledging the END_FRAME it last decoded -- which may be one
++            // of those untracked frames -- or this is a stale/duplicate ack.
++            // Either way the frame is genuinely done, not a protocol violation.
++            debug!(
++                frame_id = pdu.frame_id,
++                queue_depth, suspended, "EGFX FrameAcknowledge for an untracked issued frame (resume or stale ack)"
++            );
++        } else {
++            // PROTOCOL COMPLIANCE: per MS-RDPEGFX 2.2.4.3 the client MUST only
++            // acknowledge frame_ids the server has sent. An ack for a frame_id
++            // the server never issued indicates client misbehavior or a session
++            // out of sync.
++            warn!(
++                frame_id = pdu.frame_id,
++                queue_depth, "EGFX FrameAcknowledge for UNKNOWN frame_id, protocol violation"
++            );
+         }
+ 
+         self.handler
+@@ -1739,6 +2197,22 @@
+     fn process(&mut self, _channel_id: u32, payload: &[u8]) -> PduResult<Vec<DvcMessage>> {
+         let pdu = decode(payload).map_err(|e| decode_err!(e))?;
+ 
++        // Single-source dispatch log. DEBUG level so operators see every
++        // client→server EGFX PDU at default debug builds without having to
++        // enable TRACE (which floods on the encode side).
++        // PROTOCOL COMPLIANCE: client-bound PDU types per MS-RDPEGFX 2.2:
++        // CapabilitiesAdvertise (2.2.1.1), FrameAcknowledge (2.2.4.3),
++        // QoeFrameAcknowledge (2.2.4.4), CacheImportOffer (2.2.2.16).
++        // Anything else lands in the `_` arm as `warn!("Unhandled")`.
++        let pdu_kind = match &pdu {
++            GfxPdu::CapabilitiesAdvertise(_) => "CapabilitiesAdvertise",
++            GfxPdu::FrameAcknowledge(_) => "FrameAcknowledge",
++            GfxPdu::QoeFrameAcknowledge(_) => "QoeFrameAcknowledge",
++            GfxPdu::CacheImportOffer(_) => "CacheImportOffer",
++            _ => "other",
++        };
++        debug!(pdu_kind, payload_len = payload.len(), "EGFX DVC PDU received");
++
+         match pdu {
+             GfxPdu::CapabilitiesAdvertise(pdu) => {
+                 self.handle_capabilities_advertise(pdu);
+@@ -1781,3 +2255,257 @@
+ 
+     buf
+ }
++
++#[cfg(test)]
++mod capability_negotiation_tests {
++    use super::*;
++
++    #[test]
++    fn preserves_client_avc_disabled_constraint() {
++        let cases = [
++            (
++                CapabilitySet::V10 {
++                    flags: CapabilitiesV10Flags::AVC_DISABLED | CapabilitiesV10Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V10 {
++                    flags: CapabilitiesV10Flags::SMALL_CACHE,
++                },
++            ),
++            (
++                CapabilitySet::V10_2 {
++                    flags: CapabilitiesV10Flags::AVC_DISABLED | CapabilitiesV10Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V10_2 {
++                    flags: CapabilitiesV10Flags::SMALL_CACHE,
++                },
++            ),
++            (
++                CapabilitySet::V10_3 {
++                    flags: CapabilitiesV103Flags::AVC_DISABLED,
++                },
++                CapabilitySet::V10_3 {
++                    flags: CapabilitiesV103Flags::empty(),
++                },
++            ),
++            (
++                CapabilitySet::V10_4 {
++                    flags: CapabilitiesV104Flags::AVC_DISABLED | CapabilitiesV104Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V10_4 {
++                    flags: CapabilitiesV104Flags::SMALL_CACHE,
++                },
++            ),
++            (
++                CapabilitySet::V10_5 {
++                    flags: CapabilitiesV104Flags::AVC_DISABLED | CapabilitiesV104Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V10_5 {
++                    flags: CapabilitiesV104Flags::SMALL_CACHE,
++                },
++            ),
++            (
++                CapabilitySet::V10_6 {
++                    flags: CapabilitiesV104Flags::AVC_DISABLED | CapabilitiesV104Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V10_6 {
++                    flags: CapabilitiesV104Flags::SMALL_CACHE,
++                },
++            ),
++            (
++                CapabilitySet::V10_6Err {
++                    flags: CapabilitiesV104Flags::AVC_DISABLED | CapabilitiesV104Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V10_6Err {
++                    flags: CapabilitiesV104Flags::SMALL_CACHE,
++                },
++            ),
++            (
++                CapabilitySet::V10_7 {
++                    flags: CapabilitiesV107Flags::AVC_DISABLED | CapabilitiesV107Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V10_7 {
++                    flags: CapabilitiesV107Flags::SMALL_CACHE,
++                },
++            ),
++        ];
++
++        for (client, server) in cases {
++            assert_eq!(
++                negotiate_capabilities(core::slice::from_ref(&client), &[server]),
++                Some(client)
++            );
++        }
++    }
++
++    #[test]
++    fn removes_avc_thin_client_from_malformed_avc_disabled_capabilities() {
++        let cases = [
++            (
++                CapabilitySet::V10_3 {
++                    flags: CapabilitiesV103Flags::AVC_DISABLED | CapabilitiesV103Flags::AVC_THIN_CLIENT,
++                },
++                CapabilitySet::V10_3 {
++                    flags: CapabilitiesV103Flags::AVC_THIN_CLIENT,
++                },
++                CapabilitySet::V10_3 {
++                    flags: CapabilitiesV103Flags::AVC_DISABLED,
++                },
++            ),
++            (
++                CapabilitySet::V10_4 {
++                    flags: CapabilitiesV104Flags::AVC_DISABLED
++                        | CapabilitiesV104Flags::AVC_THIN_CLIENT
++                        | CapabilitiesV104Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V10_4 {
++                    flags: CapabilitiesV104Flags::AVC_THIN_CLIENT | CapabilitiesV104Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V10_4 {
++                    flags: CapabilitiesV104Flags::AVC_DISABLED | CapabilitiesV104Flags::SMALL_CACHE,
++                },
++            ),
++            (
++                CapabilitySet::V10_5 {
++                    flags: CapabilitiesV104Flags::AVC_DISABLED
++                        | CapabilitiesV104Flags::AVC_THIN_CLIENT
++                        | CapabilitiesV104Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V10_5 {
++                    flags: CapabilitiesV104Flags::AVC_THIN_CLIENT | CapabilitiesV104Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V10_5 {
++                    flags: CapabilitiesV104Flags::AVC_DISABLED | CapabilitiesV104Flags::SMALL_CACHE,
++                },
++            ),
++            (
++                CapabilitySet::V10_6 {
++                    flags: CapabilitiesV104Flags::AVC_DISABLED
++                        | CapabilitiesV104Flags::AVC_THIN_CLIENT
++                        | CapabilitiesV104Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V10_6 {
++                    flags: CapabilitiesV104Flags::AVC_THIN_CLIENT | CapabilitiesV104Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V10_6 {
++                    flags: CapabilitiesV104Flags::AVC_DISABLED | CapabilitiesV104Flags::SMALL_CACHE,
++                },
++            ),
++            (
++                CapabilitySet::V10_6Err {
++                    flags: CapabilitiesV104Flags::AVC_DISABLED
++                        | CapabilitiesV104Flags::AVC_THIN_CLIENT
++                        | CapabilitiesV104Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V10_6Err {
++                    flags: CapabilitiesV104Flags::AVC_THIN_CLIENT | CapabilitiesV104Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V10_6Err {
++                    flags: CapabilitiesV104Flags::AVC_DISABLED | CapabilitiesV104Flags::SMALL_CACHE,
++                },
++            ),
++            (
++                CapabilitySet::V10_7 {
++                    flags: CapabilitiesV107Flags::AVC_DISABLED
++                        | CapabilitiesV107Flags::AVC_THIN_CLIENT
++                        | CapabilitiesV107Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V10_7 {
++                    flags: CapabilitiesV107Flags::AVC_THIN_CLIENT | CapabilitiesV107Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V10_7 {
++                    flags: CapabilitiesV107Flags::AVC_DISABLED | CapabilitiesV107Flags::SMALL_CACHE,
++                },
++            ),
++        ];
++
++        for (client, server, expected) in cases {
++            assert_eq!(sanitize_capabilities_for_confirm(client.clone()), expected);
++            assert_eq!(negotiate_capabilities(&[client], &[server]), Some(expected));
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn was_issued_separates_stale_resume_acks_from_never_sent_ids() {
++        let ts = Timestamp {
++            milliseconds: 0,
++            seconds: 0,
++            minutes: 0,
++            hours: 0,
++        };
++        let mut frames = FrameTracker::new();
++        let a = frames.begin_frame(ts);
++        let b = frames.begin_frame(ts);
++
++        // Both were handed out, so both are "issued" even after the map is
++        // cleared -- a resume ack for either is benign, not a violation.
++        frames.clear();
++        assert!(frames.was_issued(a));
++        assert!(frames.was_issued(b));
++
++        // An id the server never assigned is a real unknown frame.
++        assert!(!frames.was_issued(b.wrapping_add(1)));
++        assert!(!frames.was_issued(u32::MAX));
++    }
++
++    struct DefaultsHandler;
++
++    impl GraphicsPipelineHandler for DefaultsHandler {
++        fn capabilities_advertise(&mut self, _pdu: &CapabilitiesAdvertisePdu) {}
++        fn on_ready(&mut self, _negotiated: &CapabilitySet) {}
++    }
++
++    /// Negotiation matches exact versions, so the default ladder must declare
++    /// every version this build can interpret: a client advertising only a
++    /// mid-tier V10 variant previously fell through every rung and lost the
++    /// channel.
++    #[test]
++    fn mid_tier_only_client_negotiates_its_version() {
++        let server_caps = DefaultsHandler.preferred_capabilities();
++        let client_caps = [CapabilitySet::V10_6 {
++            flags: CapabilitiesV104Flags::empty(),
++        }];
++
++        let negotiated = negotiate_capabilities(&client_caps, &server_caps).expect("V10.6-only client negotiates");
++
++        assert!(matches!(negotiated, CapabilitySet::V10_6 { .. }));
++        assert!(CodecCapabilities::from_capability_set(&negotiated).avc444);
++    }
++
++    #[test]
++    fn higher_mid_tier_wins_when_client_advertises_several() {
++        let server_caps = DefaultsHandler.preferred_capabilities();
++        let client_caps = [
++            CapabilitySet::V10_3 {
++                flags: CapabilitiesV103Flags::empty(),
++            },
++            CapabilitySet::V10_6 {
++                flags: CapabilitiesV104Flags::empty(),
++            },
++        ];
++
++        let negotiated = negotiate_capabilities(&client_caps, &server_caps).expect("negotiates");
++
++        assert!(matches!(negotiated, CapabilitySet::V10_6 { .. }));
++    }
++
++    #[test]
++    fn every_declared_version_negotiates_as_sole_client_cap() {
++        let server_caps = DefaultsHandler.preferred_capabilities();
++
++        for cap in &server_caps {
++            let client_caps = [cap.clone()];
++            let negotiated = negotiate_capabilities(&client_caps, &server_caps)
++                .unwrap_or_else(|| panic!("ladder entry failed to negotiate: {cap:?}"));
++            assert_eq!(
++                core::mem::discriminant(&negotiated),
++                core::mem::discriminant(cap),
++                "negotiated a different version than the sole client cap"
++            );
++        }
++    }
++}
