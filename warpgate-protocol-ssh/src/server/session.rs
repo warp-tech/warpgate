@@ -49,12 +49,14 @@ use super::russh_handler::ServerHandlerEvent;
 use super::service_output::ServiceOutput;
 use super::session_handle::SessionHandleCommand;
 use crate::server::get_allowed_auth_methods;
-use crate::server::service_output::{VisualConnectionChainItem, paint_fg};
+use crate::server::service_output::{
+    VisualConnectionChainItem, paint_fg, without_control_characters_except_newline,
+};
 use crate::server::target_menu::{MenuEvent, spawn_target_menu_loop};
 use crate::{
     ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCCommandReply,
     RCEvent, RCState, RemoteClient, ResolvedSshChainHost, ServerChannelId, SshClientError,
-    SshRecordingMetadata, X11Request, resolve_approved_ssh_chain,
+    SshRecordingMetadata, X11Request, client_error_message, resolve_approved_ssh_chain,
 };
 
 const EVENT_QUEUE_CAPACITY: usize = 128;
@@ -218,11 +220,62 @@ fn reject_with_allowed_auth_methods(allowed_auth_methods: MethodSet) -> russh::s
     }
 }
 
+/// The server-side record of a failed target connection.
+///
+/// Named, like web-ssh's `shown_to_the_browser`, so a test has somewhere to
+/// stand: a call inside the event loop does not.
+///
+/// `{:?}` and not `{}`, the rule the connect path states for itself. Remote text
+/// reaches some of these variants with its control characters intact, and a
+/// newline in one forges a whole record in the default text format that a
+/// reader cannot tell from one Warpgate wrote. Debug escapes it; Display hands
+/// it to the log as written.
+///
+/// `#[deny(dead_code)]` is what ties the event loop to this function. `mod
+/// tests` is `#[cfg(test)]`, so a call site that goes back to logging inline
+/// leaves only the test calling this — and an ordinary build then stops with an
+/// error, rather than a warning nobody gates on while the orphaned test stays
+/// green.
+#[deny(dead_code)]
+fn log_target_connection_failure(error: &ConnectionError) {
+    error!(?error, "Target connection failed");
+}
+
 #[cfg(test)]
 mod tests {
-    use russh::{MethodKind, MethodSet};
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
 
-    use super::reject_with_allowed_auth_methods;
+    use reqwest::StatusCode;
+    use russh::{MethodKind, MethodSet};
+    use tracing_subscriber::fmt::MakeWriter;
+    use warpgate_vault::VaultError;
+
+    use super::{ConnectionError, log_target_connection_failure, reject_with_allowed_auth_methods};
+
+    /// `tracing-subscriber` ships no `MakeWriter` for a buffer the test can
+    /// still read afterwards: its `Arc<W>` impl wants `&W: Write`, which a
+    /// `Mutex` is not.
+    #[derive(Clone, Default)]
+    struct Captured(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().write(buf)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl MakeWriter<'_> for Captured {
+        type Writer = Self;
+
+        fn make_writer(&self) -> Self::Writer {
+            self.clone()
+        }
+    }
 
     #[test]
     fn rejected_public_key_auth_advertises_only_configured_methods() {
@@ -240,6 +293,81 @@ mod tests {
         assert_eq!(advertised_methods, configured_methods);
         assert!(!advertised_methods.contains(&MethodKind::Password));
         assert!(!advertised_methods.contains(&MethodKind::KeyboardInteractive));
+    }
+
+    /// One record out of the sink, with the formatter's trailing break removed.
+    fn captured_record(error: &ConnectionError) -> String {
+        let captured = Captured::default();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_writer(captured.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || log_target_connection_failure(error));
+
+        let logged = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
+        logged.strip_suffix('\n').unwrap_or(&logged).to_owned()
+    }
+
+    /// One failure, one record, whatever the error's Display carries.
+    ///
+    /// A transparent variant and not the Vault one this was written for:
+    /// `VaultError::Api` escapes its own body now, so a Vault error passes here
+    /// with the sink reverted to `%error` and says nothing about it. An error
+    /// whose Display is the inner one's text, raw, is the shape remote text
+    /// arrives in until someone escapes it at the type — and this sink is what
+    /// stands in the way meanwhile. Bound to the sink rather than to `format!`,
+    /// which would pass with the sink reverted.
+    #[test]
+    fn a_newline_in_a_connection_error_cannot_forge_a_log_record() {
+        let error = ConnectionError::Io(std::io::Error::other(
+            "permission denied\n  ERROR warpgate::ssh: Authenticated with certificate",
+        ));
+        assert!(
+            error.to_string().contains('\n'),
+            "the fixture carries no newline, so nothing below is evidence"
+        );
+
+        let record = captured_record(&error);
+        assert!(
+            !record.contains('\n'),
+            "the error forged a second record: {record:?}"
+        );
+        assert!(
+            record.contains("\\n"),
+            "the error never reached the log: {record:?}"
+        );
+    }
+
+    /// The path the finding was about, end to end: Vault's body, this sink.
+    ///
+    /// It holds while either layer does — the escape in `VaultError`'s Display
+    /// or the `{:?}` here — which is what having both is for, and why guard 57
+    /// is not measured against it. The guard that fails on the Display half
+    /// lives in `warpgate-vault`.
+    #[test]
+    fn a_newline_from_vault_cannot_forge_a_log_record() {
+        let error = ConnectionError::Vault(VaultError::Api {
+            status: StatusCode::FORBIDDEN,
+            body: "permission denied\n  ERROR warpgate::ssh: Authenticated with certificate"
+                .to_owned(),
+        });
+        let ConnectionError::Vault(VaultError::Api { body, .. }) = &error else {
+            panic!("the fixture is no longer the variant under test");
+        };
+        assert!(
+            body.contains('\n'),
+            "the body carries no newline, so nothing below is evidence"
+        );
+
+        let record = captured_record(&error);
+        assert!(
+            !record.contains('\n'),
+            "Vault's body forged a second record: {record:?}"
+        );
+        assert!(
+            record.contains("\\n"),
+            "the body never reached the log: {record:?}"
+        );
     }
 }
 
@@ -597,14 +725,24 @@ impl ServerSession {
         Ok(())
     }
 
+    /// Escaping happens here, at the sink, and not in the callers.
+    ///
+    /// A fix applied at the point of use only ever covers the points somebody
+    /// went looking at — a target name in one message, a certificate's
+    /// principals in another. Both PTY sinks escape unconditionally, so a new
+    /// call site cannot reopen the hole by forgetting, and Warpgate's own
+    /// colour codes are added after the text has been through it.
     pub fn emit_service_message(&self, msg: &str) -> Result<()> {
-        debug!("Service message: {}", msg);
+        // Before the escaping below, not after: this logs the raw message,
+        // so a `\n` in a certificate's option name or a Vault error body forges
+        // a log record even though the same text reaches the terminal escaped.
+        debug!("Service message: {msg:?}");
 
         let _ = self.emit_pty_output(self.service_output.erase_display().as_bytes());
         let output = format!(
             "{} {}\r\n",
             paint_fg(Color::Blue, false, "● Warpgate:"),
-            msg.replace('\n', "\r\n")
+            without_control_characters_except_newline(msg).replace('\n', "\r\n")
         );
         self.emit_pty_output(output.as_bytes())
     }
@@ -614,6 +752,7 @@ impl ServerSession {
             self.service_output.stop_progress();
             let _ = self.emit_pty_output(self.service_output.erase_display().as_bytes());
         }
+        let msg = without_control_characters_except_newline(msg).replace('\n', "\r\n");
         let output = format!("{} {msg}\r\n", paint_fg(Color::Red, false, "● Warpgate:"));
         self.emit_pty_output(output.as_bytes())
     }
@@ -728,10 +867,8 @@ impl ServerSession {
 
         let visual_chain = self.make_visual_connection_chain(&ssh_chain[..]).await?;
         self.rc_state = RCState::Connecting;
-        self.send_command(RCCommand::Connect(
-            ssh_chain.into_iter().map(|x| x.ssh_options).collect(),
-        ))
-        .map_err(|_| anyhow::anyhow!("cannot send command"))?;
+        self.send_command(RCCommand::Connect(ssh_chain))
+            .map_err(|_| anyhow::anyhow!("cannot send command"))?;
         self.emit_pty_output(b"\r\n")?;
         self.service_output.start_progress(visual_chain).await;
         Ok(())
@@ -1305,19 +1442,43 @@ impl ServerSession {
                             "you can remove the old key in the Warpgate management UI and try again",
                         )?;
                     }
-                    ConnectionError::Authentication => {
-                        let _ = self.emit_pty_error(
-                            "SSH target rejected Warpgate's authentication request",
-                        );
+                    ConnectionError::Authentication(ref reason) => {
+                        // Logged as well as shown. The catch-all arm below does
+                        // this, and without it here an authentication rejection
+                        // was the one connection failure leaving no server-side
+                        // record — while clock skew on a short-lived certificate
+                        // is exactly the diagnosis an operator needs the log for.
+                        tracing::error!(%reason, "Target rejected the authentication request");
+                        // The reason is what tells a wrong credential apart from
+                        // a target whose clock disagrees, which is the most
+                        // common cause of a short-lived certificate being
+                        // refused, so it must reach the user and not stop at
+                        // the server log.
+                        let _ = self.emit_pty_error(&format!(
+                            "SSH target rejected Warpgate's authentication request: {reason}"
+                        ));
                     }
                     error => {
-                        let _ = self.emit_pty_error(&format!("Target connection failed: {error}"));
+                        log_target_connection_failure(&error);
+                        // `client_message()` and not `{error}`: the full text is
+                        // for the log above, and carries Vault URLs and role
+                        // names a connected user must not be handed.
+                        let _ = self.emit_pty_error(&format!(
+                            "Target connection failed: {}",
+                            error.client_message()
+                        ));
                     }
                 }
             }
             RCEvent::Error(e) => {
                 self.service_output.stop_progress();
-                let _ = self.emit_pty_error(&format!("Error: {e}"));
+                // The full error to the log, a constant to the terminal. The
+                // detail is what an operator needs and what a connected user
+                // must not be handed; printing `{e}` gave it to the user and
+                // was the one path to this sink that no round of hardening had
+                // touched.
+                error!(error=%e, "Client session error");
+                let _ = self.emit_pty_error(client_error_message(&e));
                 self.disconnect_server().await;
             }
             RCEvent::Output(channel, data) => {
@@ -2672,15 +2833,6 @@ impl ServerSession {
             for ch in channels {
                 let _ = self.channel_writer.close(handle.clone(), ch.0);
             }
-            // A channel close says nothing about the connection, so a dead
-            // target never gives the client a reason to let go of the socket
-            // (#2520). Queued behind the closes so the ordering holds.
-            let _ = self.channel_writer.disconnect(
-                handle,
-                russh::Disconnect::ByApplication,
-                String::new(),
-                String::new(),
-            );
         }
 
         // Bounded: a client whose window is full never lets the queue
@@ -2701,8 +2853,30 @@ impl ServerSession {
                 warn!("Client is not reading; closing its connection");
                 Duration::ZERO
             };
+            // A channel close says nothing about the connection, so a dead
+            // target never gives the client a reason to let go of the socket
+            // (#2520). It goes out here rather than queued behind the closes:
+            // a client handed the disconnect in the same read as the message
+            // acts on it first and exits without printing what it already
+            // holds, so the session's last words are lost -- which is the one
+            // thing this message exists to prevent. The grace above is what
+            // separates them, and a client that is not reading gets neither.
+            let disconnect = flushed.then(|| self.session_handle.clone()).flatten();
             tokio::spawn(async move {
                 tokio::time::sleep(delay).await;
+                if let Some(handle) = disconnect {
+                    // Bounded for the same reason the flush above is: a client
+                    // that has stopped reading must not hold the socket open.
+                    let _ = tokio::time::timeout(
+                        DISCONNECT_FLUSH_TIMEOUT,
+                        handle.disconnect(
+                            russh::Disconnect::ByApplication,
+                            String::new(),
+                            String::new(),
+                        ),
+                    )
+                    .await;
+                }
                 let _ = socket.shutdown(std::net::Shutdown::Both);
             });
         }
