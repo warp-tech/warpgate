@@ -651,6 +651,26 @@
                                     cache approvals.
                                 </HelpText>
 
+                                <label
+                                    for="webApprovalGlobalScope"
+                                    class="d-flex align-items-center mt-3"
+                                >
+                                    <Input
+                                        id="webApprovalGlobalScope"
+                                        class="mb-0 me-2"
+                                        type="switch"
+                                        bind:checked={parameters.webApprovalGlobalScope}
+                                    />
+                                    <div>Remember web approval per target</div>
+                                </label>
+                                <HelpText>
+                                    When enabled (default), a remembered web
+                                    approval applies only to the target it was
+                                    approved for. When disabled, one approved
+                                    connection satisfies web approval for all
+                                    targets during the cache period.
+                                </HelpText>
+
                                 <FormGroup>
                                     <label class="mb-2" for="mfaEnforcement">
                                         MFA enforcement

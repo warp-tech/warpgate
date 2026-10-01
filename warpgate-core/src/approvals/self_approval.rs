@@ -109,6 +109,13 @@ pub(crate) async fn advertise_user_request(
     node_id: NodeId,
     state_arc: &Arc<Mutex<AuthState>>,
 ) -> Result<(), WarpgateError> {
+    // Read the global scope setting so the match key digest is built with
+    // the same scope semantics that approval_is_remembered will use.
+    let remember_all_targets = warpgate_db_entities::Parameters::Entity::get(db)
+        .await
+        .map(|p| !p.web_approval_global_scope)
+        .unwrap_or(false);
+
     let row = {
         let state = state_arc.lock().await;
         let session_id = *state.session_id();
@@ -121,7 +128,7 @@ pub(crate) async fn advertise_user_request(
             user_id: state.user_info().id,
             remote_address: state.remote_ip().map(|ip| ip.to_string()),
             match_digest: state
-                .web_approval_match_key()
+                .web_approval_match_key(remember_all_targets)
                 .map(|key| key.identity().digest()),
             started: *state.started(),
             about: SessionApprovalRequest::RequestAsk::User {

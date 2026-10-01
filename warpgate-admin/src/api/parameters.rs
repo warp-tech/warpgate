@@ -99,6 +99,9 @@ struct ParameterValues {
     pub web_clients_enabled: bool,
     pub web_auth_max_age_seconds: Option<i64>,
     pub web_approval_grace_period_seconds: Option<i64>,
+    /// When true the remembered web-user approval is scoped to a target.
+    /// When false it applies across all targets for that user.
+    pub web_approval_global_scope: bool,
     // None = AuthStateStore's TIMEOUT
     pub admin_approval_timeout_seconds: Option<i64>,
     pub admin_approval_grace_period_seconds: Option<i64>,
@@ -166,6 +169,7 @@ struct ParameterUpdate {
     pub web_auth_max_age_seconds: Option<Option<i64>>,
     #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
     pub web_approval_grace_period_seconds: Option<Option<i64>>,
+    pub web_approval_global_scope: Option<bool>,
     #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
     pub admin_approval_timeout_seconds: Option<Option<i64>>,
     #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
@@ -264,6 +268,7 @@ impl Api {
             web_clients_enabled: parameters.web_clients_enabled,
             web_auth_max_age_seconds: parameters.web_auth_max_age_seconds,
             web_approval_grace_period_seconds: parameters.web_approval_grace_period_seconds,
+            web_approval_global_scope: parameters.web_approval_global_scope,
             admin_approval_timeout_seconds: parameters.admin_approval_timeout_seconds,
             admin_approval_grace_period_seconds: parameters.admin_approval_grace_period_seconds,
             analytics_consent: parameters.analytics_consent,
@@ -390,6 +395,8 @@ impl Api {
         parameters.web_auth_max_age_seconds = body.web_auth_max_age_seconds.map_or(NotSet, Set);
         parameters.web_approval_grace_period_seconds =
             body.web_approval_grace_period_seconds.map_or(NotSet, Set);
+        parameters.web_approval_global_scope =
+            body.web_approval_global_scope.map_or(NotSet, Set);
         parameters.admin_approval_timeout_seconds =
             body.admin_approval_timeout_seconds.map_or(NotSet, Set);
         parameters.admin_approval_grace_period_seconds =

@@ -359,10 +359,26 @@ impl Api {
         id: Path<Uuid>,
         body: Json<ApproveAuthRequest>,
     ) -> poem::Result<ApprovalActionResponse> {
+        // When global scope is enabled (web_approval_global_scope = false),
+        // override the approval scope to AllTargets so one cached approval
+        // satisfies web-user approval for every target.
+        let remember_all_targets = match ctx
+            .services()
+            .web_approval_global_scope()
+            .await
+        {
+            Ok(global) => !global,
+            Err(_) => false, // fall back to per-target on error
+        };
+        let scope = if remember_all_targets {
+            ApprovalScope::AllTargets
+        } else {
+            body.scope
+        };
         resolve_own_approval(
             &ctx,
             UserSessionId(*id),
-            ApprovalDecision::Approved(body.scope),
+            ApprovalDecision::Approved(scope),
         )
         .await
     }

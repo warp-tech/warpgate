@@ -285,6 +285,14 @@ impl Services {
             .and_then(i64_seconds_to_duration))
     }
 
+    /// Whether web-user remembered approvals apply across all targets.
+    /// `true` = per-target (default); `false` = global for the user.
+    pub async fn web_approval_global_scope(&self) -> Result<bool, WarpgateError> {
+        Ok(Parameters::Entity::get(&self.db)
+            .await?
+            .web_approval_global_scope)
+    }
+
     /// If a matching web approval is still within the grace period, satisfies the
     /// pending `WebUserApproval` requirement and logs an audit event.
     pub async fn try_web_approval_bypass(
@@ -294,7 +302,12 @@ impl Services {
         let Some(grace) = self.web_approval_grace_period().await? else {
             return Ok(false);
         };
-        let Some(key) = state_arc.lock().await.web_approval_match_key() else {
+        let remember_all_targets = !self.web_approval_global_scope().await?;
+        let Some(key) = state_arc
+            .lock()
+            .await
+            .web_approval_match_key(remember_all_targets)
+        else {
             return Ok(false);
         };
         if !crate::approvals::approval_is_remembered(&self.db, &key, grace).await? {

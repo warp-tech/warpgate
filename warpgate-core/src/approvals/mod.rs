@@ -59,6 +59,23 @@ pub(crate) async fn approval_is_remembered(
         WebApprovalScopeKey::Target(name) => name.as_str(),
         // An untargeted flow stores an empty target name on its rows.
         WebApprovalScopeKey::Untargeted => "",
+        // Global scope — the match key was built with remember_all_targets=true.
+        // We only look for AllTargets rows (which were stored with Global scope),
+        // so we don't accidentally match per-target approvals.
+        WebApprovalScopeKey::Global => {
+            let rows = SessionApprovalRequest::Entity::find()
+                .filter(Column::Kind.eq(key.identity().kind()))
+                .filter(Column::Status.eq(ApprovalRequestStatus::Approved))
+                .filter(Column::ResolvedAt.gte(cutoff))
+                .filter(Column::Scope.eq(ApprovalScope::AllTargets))
+                .all(db)
+                .await?;
+
+            let digest = key.identity().digest();
+            return Ok(rows
+                .into_iter()
+                .any(|row| row.match_digest.as_deref() == Some(digest.as_str())));
+        }
     };
     let scope_matches = Condition::any()
         .add(
