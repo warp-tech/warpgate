@@ -12,7 +12,7 @@ use defaults::{
     _default_http_listen, _default_kubernetes_listen, _default_mysql_advertised_version,
     _default_mysql_listen, _default_postgres_listen, _default_rdp_listen, _default_recordings_path,
     _default_retention, _default_session_max_age, _default_ssh_inactivity_timeout,
-    _default_ssh_listen, _default_vnc_listen,
+    _default_ssh_listen, _default_ssh_target_handshake_timeout, _default_vnc_listen,
 };
 use poem::http::uri::Authority;
 use poem_openapi::{Object, Union};
@@ -457,6 +457,15 @@ pub struct SshConfig {
     #[serde(default, with = "humantime_serde")]
     #[schemars(with = "Option<String>")]
     pub keepalive_interval: Option<Duration>,
+
+    /// How long to wait for a target to finish the SSH handshake. Some targets
+    /// accept the connection and then never reply. Set to `0s` to wait forever.
+    #[serde(
+        default = "_default_ssh_target_handshake_timeout",
+        with = "humantime_serde"
+    )]
+    #[schemars(with = "String")]
+    pub target_handshake_timeout: Duration,
 }
 
 impl Default for SshConfig {
@@ -471,6 +480,7 @@ impl Default for SshConfig {
             external_host: None,
             inactivity_timeout: _default_ssh_inactivity_timeout(),
             keepalive_interval: None,
+            target_handshake_timeout: _default_ssh_target_handshake_timeout(),
         }
     }
 }
