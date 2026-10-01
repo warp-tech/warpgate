@@ -148,6 +148,46 @@ def _find_completed_terminal_recording(api):
     return None
 
 
+def _watch_live(http_port, recording_id, seconds):
+    """Attach to a recording's live-view socket and count what arrives.
+
+    Synchronous on purpose: the rest of this file is, and an event loop here
+    would be the only one.
+    """
+    import asyncio
+    import ssl
+
+    import websockets
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    url = f"wss://localhost:{http_port}/@warpgate/admin/api/recordings/{recording_id}/stream"
+    seen = {"started_live": False, "count": 0}
+
+    async def run():
+        async with websockets.connect(
+            url, ssl=ctx, additional_headers=TOKEN_HEADER
+        ) as ws:
+            deadline = time.monotonic() + seconds
+            while time.monotonic() < deadline:
+                remaining = deadline - time.monotonic()
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
+                except (asyncio.TimeoutError, websockets.ConnectionClosed):
+                    break
+                message = json.loads(raw)
+                if message.get("type") == "start":
+                    seen["started_live"] = bool(message.get("live"))
+                elif message.get("type") == "data":
+                    seen["count"] += 1
+                elif message.get("type") == "end":
+                    break
+
+    asyncio.run(run())
+    return seen
+
+
 def _find_in_progress_terminal_session(api):
     for session in sorted(
         api.get_sessions().items, key=lambda s: s.started, reverse=True
@@ -431,6 +471,79 @@ class TestAzureBlockUpload:
         assert partial.status_code == 206
         assert partial.content == whole.content[offset:]
         assert partial.headers["Content-Range"] == f"bytes {offset}-{total - 1}/{total}"
+
+
+class TestAzureLiveView:
+    """Watching a session while it is still running.
+
+    Live view does not read the storage backend at all: the recorder broadcasts
+    chunks and the viewer catches up from the local scratch file, because an
+    in-progress recording has not been uploaded yet. The backend still has to
+    stay out of the way -- `Storage::access` returns a local path only while
+    `ended` is null, and getting that guard wrong would break live view for
+    every object-storage backend while leaving playback working.
+    """
+
+    def test_an_in_progress_session_streams_live(
+        self, processes: ProcessManager, timeout, wg_c_ed25519_pubkey
+    ):
+        if _credentials("ServicePrincipal") is None:
+            pytest.skip("ServicePrincipal is not configured in the environment")
+
+        prefix = f"live-{uuid4().hex[:8]}"
+        wg = processes.start_wg(config_patch={"recordings": {"enable": True}})
+        wait_port(wg.http_port, recv=False)
+        url = f"https://localhost:{wg.http_port}"
+        _configure(
+            url,
+            _storage_config("ServicePrincipal", prefix, serve_through_warpgate=True),
+        )
+
+        user, ssh_target = setup_user_and_target(processes, wg, wg_c_ed25519_pubkey)
+
+        # Emits for longer than the watch window, so the recording is still
+        # open when the socket attaches -- a session that finished first would
+        # exercise playback instead.
+        marker = f"live-{uuid4().hex}"
+        ssh_client = processes.start_ssh_client(
+            f"{user.username}:{ssh_target.name}@localhost",
+            "-p",
+            str(wg.ssh_port),
+            "-tt",
+            *common_args,
+            f"for i in $(seq 1 20); do echo {marker}-$i; sleep 1; done",
+            password="123",
+        )
+
+        try:
+            read_until(ssh_client.stdout, marker.encode(), time.monotonic() + timeout)
+
+            recording_id = None
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline and recording_id is None:
+                with admin_client(url) as api:
+                    for session in api.get_sessions().items:
+                        for rec in api.get_session_recordings(session.id):
+                            if (
+                                rec.kind == sdk.RecordingKind.TERMINAL
+                                and rec.ended is None
+                            ):
+                                recording_id = rec.id
+                if recording_id is None:
+                    time.sleep(0.5)
+            assert recording_id is not None, "no in-progress recording to watch"
+
+            chunks = _watch_live(wg.http_port, recording_id, seconds=8)
+        finally:
+            ssh_client.terminate()
+
+        assert chunks["started_live"], (
+            "the socket reported the session as not live, so Storage::access "
+            "handed back something other than the local scratch file"
+        )
+        assert chunks["count"] > 0, (
+            "no data arrived while the session was still emitting"
+        )
 
 
 class TestAzureDrainOnShutdown:
