@@ -239,6 +239,10 @@ pub struct Model {
     pub instance_created_at: OffsetDateTime,
     pub web_auth_max_age_seconds: Option<i64>,
     pub web_approval_grace_period_seconds: Option<i64>,
+    /// When true (default), web-user remembered approvals are scoped to the
+    /// target they were approved for. When false the remembered approval
+    /// applies across all targets for the same user.
+    pub web_approval_global_scope: bool,
     /// How long a session held for administrator approval waits before being
     /// auto-rejected. Unset (or zero) falls back to the AuthState timeout
     pub admin_approval_timeout_seconds: Option<i64>,
@@ -456,6 +460,7 @@ mod tests {
             instance_created_at: OffsetDateTime::UNIX_EPOCH,
             web_auth_max_age_seconds: None,
             web_approval_grace_period_seconds: None,
+            web_approval_global_scope: true,
             recordings_enable: false,
             recordings_storage: "".into(),
             default_credential_policy: "{}".into(),

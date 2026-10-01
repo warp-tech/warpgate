@@ -93,6 +93,10 @@ pub enum WebApprovalScopeKey {
     Untargeted,
     /// Bound to a single target.
     Target(String),
+    /// Cached across all targets — used when the admin has disabled
+    /// per-target web-user-remembering so that one approval applies to
+    /// every target the user connects to.
+    Global,
 }
 
 /// A sorted, deduplicated, equatable set of the stored credentials an
@@ -223,10 +227,13 @@ impl WebApprovalMatchKey {
         username: &str,
         target_name: &str,
         remember_by: &RememberApprovalBy,
+        remember_all_targets: bool,
     ) -> Option<Self> {
         Some(Self {
-            scope: if target_name.is_empty() {
-                // currenrly, only the SSH menu can do this
+            scope: if remember_all_targets {
+                WebApprovalScopeKey::Global
+            } else if target_name.is_empty() {
+                // currently, only the SSH menu can do this
                 WebApprovalScopeKey::Untargeted
             } else {
                 WebApprovalScopeKey::Target(target_name.to_string())
@@ -348,7 +355,14 @@ impl AuthState {
 
     /// Builds the key used to match this attempt against a remembered web
     /// approval.
-    pub fn web_approval_match_key(&self) -> Option<WebApprovalMatchKey> {
+    ///
+    /// When `remember_all_targets` is true the scope is set to `Global` so that
+    /// the match key only lands on `AllTargets` rows — i.e. one approval serves
+    /// every target.
+    pub fn web_approval_match_key(
+        &self,
+        remember_all_targets: bool,
+    ) -> Option<WebApprovalMatchKey> {
         self.remote_ip.and_then(|ip| {
             WebApprovalMatchKey::build(
                 ApprovalKind::User,
@@ -357,6 +371,7 @@ impl AuthState {
                 &self.user_info.username,
                 &self.target_name,
                 &self.remembered_by(),
+                remember_all_targets,
             )
         })
     }
