@@ -6,6 +6,7 @@ mod auth_scheme;
 pub(crate) mod common;
 mod credentials;
 pub mod info;
+mod preferences;
 pub mod sso_provider_detail;
 pub mod sso_provider_list;
 pub mod targets_list;
@@ -23,6 +24,7 @@ pub fn get() -> impl OpenApi {
         sso_provider_detail::Api,
         credentials::Api,
         api_tokens::Api,
+        preferences::Api,
         ticket_requests::Api,
         ticket_request_targets::Api,
         web_ssh::Api,

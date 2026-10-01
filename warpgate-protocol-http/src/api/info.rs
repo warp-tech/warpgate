@@ -14,7 +14,7 @@ use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
 };
 use warpgate_core::ConfigProvider;
-use warpgate_db_entities::{LdapServer, Parameters};
+use warpgate_db_entities::{LdapServer, Parameters, User};
 
 use crate::common::{SessionExt, is_user_admin};
 
@@ -140,6 +140,8 @@ pub struct Info {
     should_prompt_analytics: bool,
     /// Login banner, shown to unauthenticated visitors too. Empty when unset.
     banner: String,
+    /// Whether the floating session menu should be shown in HTTP targets:
+    /// enabled globally and not turned off by the current user.
     show_session_menu: bool,
     config_warnings: Option<Vec<String>>,
 }
@@ -223,6 +225,18 @@ impl Api {
                 (needs_setup, enforced)
             }
             _ => (false, false),
+        };
+
+        // The global switch wins; a user can only opt out of the menu for themselves.
+        let show_session_menu = match live_user_id {
+            Some(user_id) if parameters.show_session_menu => {
+                User::Entity::find_by_id(user_id)
+                    .one(&ctx.services().db)
+                    .await
+                    .context("loading user")?
+                    .is_none_or(|user| user.show_session_menu)
+            }
+            _ => parameters.show_session_menu,
         };
 
         let has_ldap = LdapServer::Entity::find()
@@ -386,7 +400,7 @@ impl Api {
             },
             should_prompt_analytics,
             banner: parameters.banner.clone(),
-            show_session_menu: parameters.show_session_menu,
+            show_session_menu,
             config_warnings: can_edit_config.then(warnings),
         })))
     }

@@ -589,7 +589,9 @@
                                 <HelpText>
                                     Warpgate can inject a session menu into HTTP
                                     sessions, allowing users to log out or
-                                    return back to the home page.
+                                    return back to the home page. Users can
+                                    also turn it off for themselves in their
+                                    profile.
                                 </HelpText>
                             </Section>
 
