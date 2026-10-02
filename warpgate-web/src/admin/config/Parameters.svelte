@@ -1053,6 +1053,24 @@
                                             bind:value={s3.prefix}
                                         >
                                     </FormGroup>
+                                    <FormGroup
+                                        floating
+                                        label="Local scratch directory"
+                                    >
+                                        <input
+                                            type="text"
+                                            class="form-control"
+                                            placeholder="data/recordings-scratch"
+                                            value={s3.scratchPath ?? ''}
+                                            oninput={e => s3.scratchPath = e.currentTarget.value || undefined}
+                                        >
+                                    </FormGroup>
+                                    <HelpText>
+                                        Recordings are buffered here before
+                                        upload. Relative paths resolve against
+                                        the config file's directory, which the
+                                        Warpgate user must be able to write to.
+                                    </HelpText>
                                     <label
                                         for="recordingsS3PathStyle"
                                         class="d-flex align-items-center mb-2"

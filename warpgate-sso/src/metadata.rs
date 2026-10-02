@@ -1,11 +1,11 @@
-use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Write;
-use std::sync::{LazyLock, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::LazyLock;
+use std::time::Duration;
 
 use openidconnect::url::Url;
 use openidconnect::{ProviderMetadataWithLogout, reqwest};
+use warpgate_common_cache::Cache;
 
 use crate::SsoError;
 use crate::config::SsoInternalProviderConfig;
@@ -18,21 +18,9 @@ const METADATA_CACHE_TTL: Duration = Duration::from_secs(300);
 /// providers reached over a trusted network (test rigs, in-cluster IdPs).
 const ALLOWED_ENDPOINT_SCHEMES: [&str; 2] = ["https", "http"];
 
-#[allow(clippy::type_complexity)]
-static METADATA_CACHE: LazyLock<Mutex<HashMap<String, (Instant, ProviderMetadataWithLogout)>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-fn cached_metadata(issuer: &str) -> Option<ProviderMetadataWithLogout> {
-    let cache = METADATA_CACHE.lock().ok()?;
-    let (fetched_at, metadata) = cache.get(issuer)?;
-    (fetched_at.elapsed() < METADATA_CACHE_TTL).then(|| metadata.clone())
-}
-
-fn store_metadata(issuer: String, metadata: &ProviderMetadataWithLogout) {
-    if let Ok(mut cache) = METADATA_CACHE.lock() {
-        cache.insert(issuer, (Instant::now(), metadata.clone()));
-    }
-}
+/// Key = issuer URL
+static METADATA_CACHE: LazyLock<Cache<String, (), ProviderMetadataWithLogout>> =
+    LazyLock::new(|| Cache::new(METADATA_CACHE_TTL));
 
 /// Render an error together with its whole `source` chain.
 ///
@@ -116,22 +104,18 @@ pub async fn discover_metadata(
     http_client: &reqwest::Client,
 ) -> Result<ProviderMetadataWithLogout, SsoError> {
     let issuer = config.issuer_url()?;
-    let cache_key = issuer.to_string();
+    METADATA_CACHE
+        .get_or_build(&issuer.to_string(), &(), || async {
+            let metadata = ProviderMetadataWithLogout::discover_async(issuer, http_client)
+                .await
+                .map_err(|e| SsoError::Discovery(describe_error(&e)))?;
 
-    if let Some(metadata) = cached_metadata(&cache_key) {
-        return Ok(metadata);
-    }
-
-    let metadata = ProviderMetadataWithLogout::discover_async(issuer, http_client)
+            // Validate before caching, so a hostile document is never served from
+            // the cache and never reaches a caller.
+            validate_endpoint_schemes(&metadata)?;
+            Ok(metadata)
+        })
         .await
-        .map_err(|e| SsoError::Discovery(describe_error(&e)))?;
-
-    // Validate before caching, so a hostile document is never served from the
-    // cache and never reaches a caller.
-    validate_endpoint_schemes(&metadata)?;
-
-    store_metadata(cache_key, &metadata);
-    Ok(metadata)
 }
 
 #[cfg(test)]

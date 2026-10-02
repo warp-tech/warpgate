@@ -28,37 +28,6 @@ from deepmerge import always_merger
 from .util import _wait_timeout, alloc_port, wait_port
 from .test_http_common import echo_server_port  # noqa
 
-# OpenAPI Generator's Python (pydantic-v2) generator has an upstream bug where 2D
-# arrays (list of list) unconditionally call `.to_dict()` and `.from_dict()` on inner
-# items without checking if they are Enums or Models.
-# CredentialKind is an Enum and does not have `.to_dict()` or `.from_dict()`, so we
-# patch it here.
-def _patch_credential_kind(cls):
-    cls.to_dict = lambda self: self.value  # type: ignore
-
-    def _from_dict(c, obj):
-        if obj is None:
-            return None
-        if isinstance(obj, c):
-            return obj
-        if isinstance(obj, dict):
-            return c(obj.get("value", obj))
-        return c(obj)
-
-    cls.from_dict = classmethod(_from_dict)  # type: ignore
-
-
-try:
-    from openapi_client.models.credential_kind import CredentialKind
-    _patch_credential_kind(CredentialKind)
-except ImportError:
-    try:
-        from api_sdk.openapi_client.models.credential_kind import CredentialKind
-        _patch_credential_kind(CredentialKind)
-    except ImportError:
-        pass
-
-
 
 cargo_root = Path(os.getcwd()).parent
 enable_coverage = os.getenv("ENABLE_COVERAGE", "0") == "1"
@@ -344,7 +313,7 @@ class ProcessManager:
 
         return port
 
-    def start_minio(self, user, password):
+    def start_s3(self, access_key, secret_key):
         port = alloc_port()
         self.start(
             [
@@ -352,16 +321,15 @@ class ProcessManager:
                 "run",
                 "--rm",
                 "-p",
-                f"{port}:9000",
+                f"{port}:8333",
                 "-e",
-                f"MINIO_ROOT_USER={user}",
+                f"AWS_ACCESS_KEY_ID={access_key}",
                 "-e",
-                f"MINIO_ROOT_PASSWORD={password}",
-                # MinIO left Docker Hub and then Quay; Chainguard only tags
-                # `latest`, so pin the digest to keep runs reproducible.
-                "cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1",
+                f"AWS_SECRET_ACCESS_KEY={secret_key}",
+                "chrislusf/seaweedfs",
                 "server",
-                "/data",
+                "-s3",
+                "-dir=/data",
             ]
         )
         return port
