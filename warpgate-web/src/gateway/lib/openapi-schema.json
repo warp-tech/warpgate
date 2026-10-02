@@ -2079,6 +2079,9 @@
           "postgres": {
             "type": "string"
           },
+          "mongo": {
+            "type": "string"
+          },
           "kubernetes": {
             "type": "string"
           },
@@ -2478,6 +2481,10 @@
             "type": "integer",
             "format": "uint16"
           },
+          "mongo": {
+            "type": "integer",
+            "format": "uint16"
+          },
           "kubernetes": {
             "type": "integer",
             "format": "uint16"
@@ -2614,6 +2621,7 @@
           "MySql",
           "Ssh",
           "Postgres",
+          "Mongo",
           "Vnc",
           "Rdp"
         ]
@@ -2852,6 +2860,12 @@
             }
           },
           "postgres": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "mongo": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CredentialKind"

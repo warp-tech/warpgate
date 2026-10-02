@@ -26,6 +26,7 @@ pub struct PortsInfo {
     http: Option<u16>,
     mysql: Option<u16>,
     postgres: Option<u16>,
+    mongo: Option<u16>,
     kubernetes: Option<u16>,
     vnc: Option<u16>,
     rdp: Option<u16>,
@@ -37,6 +38,7 @@ pub struct ExternalHostsInfo {
     http: Option<String>,
     mysql: Option<String>,
     postgres: Option<String>,
+    mongo: Option<String>,
     kubernetes: Option<String>,
     vnc: Option<String>,
     rdp: Option<String>,
@@ -259,6 +261,12 @@ impl Api {
                     .external_host
                     .clone()
                     .or_else(|| fallback_host.clone()),
+                mongo: config
+                    .store
+                    .mongo
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
                 kubernetes: config
                     .store
                     .kubernetes
@@ -337,6 +345,11 @@ impl Api {
                     } else {
                         None
                     },
+                    mongo: if config.store.mongo.enable {
+                        Some(config.store.mongo.external_port())
+                    } else {
+                        None
+                    },
                     kubernetes: if config.store.kubernetes.enable {
                         Some(config.store.kubernetes.external_port())
                     } else {
@@ -359,6 +372,7 @@ impl Api {
                     http: None,
                     mysql: None,
                     postgres: None,
+                    mongo: None,
                     kubernetes: None,
                     vnc: None,
                     rdp: None,

@@ -76,6 +76,20 @@
                         password: '',
                     },
                 },
+                Mongo: {
+                    kind: TargetKind.Mongo,
+                    host: '192.168.0.1',
+                    port: 27017,
+                    tls: {
+                        mode: TlsMode.Preferred,
+                        verify: true,
+                    },
+                    username: 'root',
+                    auth: {
+                        kind: 'Password' as const,
+                        password: '',
+                    },
+                },
                 Kubernetes: {
                     kind: TargetKind.Kubernetes,
                     clusterUrl: 'https://kubernetes.example.com:6443',

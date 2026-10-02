@@ -188,6 +188,9 @@
                         {#if target.options.kind === TargetKind.Postgres}
                             PostgreSQL
                         {/if}
+                        {#if target.options.kind === TargetKind.Mongo}
+                            MongoDB
+                        {/if}
                         {#if target.options.kind === TargetKind.Ssh}
                             SSH
                         {/if}
