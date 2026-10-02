@@ -25,8 +25,8 @@ pub use storage::FileAccess;
 use storage::Storage;
 pub use terminal::*;
 pub use traffic::*;
-use writer::WriterShutdown;
 pub use writer::{LiveChunk, NDJsonRecordingWriter, RawRecordingWriter};
+use writer::{RecordingCompletion, WriterShutdown};
 
 /// How long `SessionRecordings::shutdown` waits
 /// (just under kubernetes default)
@@ -69,6 +69,12 @@ pub enum Error {
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("Creating recording directory {}: {source}", path.display())]
+    CreateDirectory {
+        path: std::path::PathBuf,
+        source: std::io::Error,
+    },
+
     #[error("Database: {0}")]
     Database(#[from] sea_orm::DbErr),
 
@@ -104,6 +110,7 @@ pub struct RecordingWriterOpener {
     params: GlobalParams,
     shutdown: CancellationToken,
     shutdown_tracker: TaskTracker,
+    completion: Arc<RecordingCompletion>,
 }
 
 impl RecordingWriterOpener {
@@ -136,13 +143,12 @@ impl RecordingWriterOpener {
 
         RawRecordingWriter::new(
             sink,
-            self.model.clone(),
-            self.db.clone(),
             live,
             WriterShutdown {
                 token: self.shutdown.clone(),
                 tracker: self.shutdown_tracker.clone(),
             },
+            self.completion.register_writer().await,
         )
         .await
     }
@@ -224,7 +230,12 @@ impl SessionRecordings {
         // On S3 this folder is a scratch copy, live-readable while the session runs and
         // dropped once each file finishes uploading.
         let folder = storage.recording_folder(id, &name);
-        tokio::fs::create_dir_all(&folder).await?;
+        tokio::fs::create_dir_all(&folder)
+            .await
+            .map_err(|source| Error::CreateDirectory {
+                path: folder.clone(),
+                source,
+            })?;
         if self.params.should_secure_files() {
             secure_directory(&folder)?;
         }
@@ -261,6 +272,7 @@ impl SessionRecordings {
 
         let opener = RecordingWriterOpener {
             storage,
+            completion: RecordingCompletion::new(self.db.clone(), model.id),
             model,
             db: self.db.clone(),
             live: self.live.clone(),

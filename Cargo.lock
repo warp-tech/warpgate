@@ -5975,6 +5975,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "quick_cache"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "403c1a912fec895cafb223201e368234842acb9220aaf08ab042ae89ba5f135c"
+dependencies = [
+ "equivalent",
+ "foldhash 0.2.0",
+ "hashbrown 0.17.1",
+ "parking_lot",
+]
+
+[[package]]
 name = "quinn"
 version = "0.11.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9225,7 +9237,6 @@ dependencies = [
  "aws-sigv4",
  "aws-smithy-runtime-api",
  "aws-smithy-types",
- "dashmap",
  "data-encoding",
  "http 1.5.0",
  "poem-openapi",
@@ -9235,6 +9246,7 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+ "warpgate-common-cache",
 ]
 
 [[package]]
@@ -9315,6 +9327,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "warpgate-common-cache"
+version = "0.29.1"
+dependencies = [
+ "quick_cache",
+ "tokio",
+]
+
+[[package]]
 name = "warpgate-common-http"
 version = "0.29.1"
 dependencies = [
@@ -9378,6 +9398,7 @@ dependencies = [
  "warpgate-aws",
  "warpgate-ca",
  "warpgate-common",
+ "warpgate-common-cache",
  "warpgate-db-entities",
  "warpgate-db-migrations",
  "warpgate-ldap",
@@ -9515,6 +9536,7 @@ dependencies = [
  "warpgate-aws",
  "warpgate-ca",
  "warpgate-common",
+ "warpgate-common-cache",
  "warpgate-common-http",
  "warpgate-core",
  "warpgate-db-entities",
@@ -9561,6 +9583,7 @@ dependencies = [
  "warpgate-aws",
  "warpgate-ca",
  "warpgate-common",
+ "warpgate-common-cache",
  "warpgate-common-http",
  "warpgate-core",
  "warpgate-db-entities",
@@ -9753,6 +9776,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "warpgate-common-cache",
  "yup-oauth2",
 ]
 
