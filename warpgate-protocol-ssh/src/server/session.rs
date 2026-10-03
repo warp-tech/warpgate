@@ -2046,12 +2046,14 @@ impl ServerSession {
             return russh::server::Auth::reject();
         }
 
-        // Tickets aren't authenticated with public keys, and the eager auth path
-        // consumes a ticket use. Running it here — during the unauthenticated
-        // offer/query phase — would drain the ticket before the client actually
-        // authenticates, so reject and let auth proceed via another method.
+        // The ticket itself is the credential, but standard SSH clients first
+        // send an unsigned public-key offer and wait for PK_OK before sending
+        // the signed authentication request. Do not evaluate the ticket here:
+        // the eager path consumes a ticket use. Accepting this offer only asks
+        // the client for the signed request; _auth_publickey authenticates and
+        // consumes the ticket exactly once.
         if let AuthSelector::Ticket { .. } = selector {
-            return russh::server::Auth::reject();
+            return russh::server::Auth::Accept;
         }
 
         if matches!(
