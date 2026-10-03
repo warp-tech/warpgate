@@ -75,6 +75,9 @@ tls_cert_secret: ""
 
 # Provide a full Warpgate config to override the auto-generated one
 # ⚠️ If set, ensure ports match the setup/service config below
+# The value is rendered with `tpl`, so it can reference other values, e.g.:
+#   role_mappings:
+#     {{- toYaml .Values.myRoleMappings | nindent 6 }}
 overrides_config: ""
 
 # Space-separated list of environment variable names to substitute in the config
