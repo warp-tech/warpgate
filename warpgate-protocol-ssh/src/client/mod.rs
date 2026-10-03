@@ -957,6 +957,117 @@ impl Connector {
                         Some("Public key authentication was rejected by the SSH target".into());
                 }
             }
+            SSHTargetAuth::PublicKeyAndPassword(auth) => {
+                let best_hash = session.best_supported_rsa_hash().await?.flatten();
+                let keys = load_client_keys(
+                    &self.services.db,
+                    auth.key_id,
+                    &*self.services.secret_backends,
+                )
+                .await?;
+                if keys.is_empty() {
+                    auth_error_msg = Some("No SSH client keys are configured".into());
+                }
+                for key in keys {
+                    let key = Arc::new(key);
+                    if key.key_data().is_rsa() && best_hash.is_none() && !allow_insecure_algos {
+                        info!(
+                            "Skipping ssh-rsa (SHA1) key authentication since insecure SSH algos are not allowed for this target"
+                        );
+                        continue;
+                    }
+                    let key_str = key.public_key().to_openssh().map_err(russh::Error::from)?;
+                    let mut response = session
+                        .authenticate_publickey(
+                            username.to_string(),
+                            PrivateKeyWithHashAlg::new(key.clone(), best_hash),
+                        )
+                        .await?;
+
+                    if matches!(response, AuthResult::Failure { .. })
+                        && key.key_data().is_rsa()
+                        && best_hash.is_some()
+                        && allow_insecure_algos
+                    {
+                        response = session
+                            .authenticate_publickey(
+                                username.to_string(),
+                                PrivateKeyWithHashAlg::new(key.clone(), None),
+                            )
+                            .await?;
+                    }
+
+                    match response {
+                        AuthResult::Success => {
+                            debug!(
+                                username = username,
+                                key = %key_str,
+                                "Authenticated with key (password stage not requested)"
+                            );
+                            auth_result = true;
+                            break;
+                        }
+                        AuthResult::Failure {
+                            remaining_methods,
+                            partial_success,
+                        } => {
+                            debug!(
+                                username = username,
+                                key = %key_str,
+                                partial_success = partial_success,
+                                remaining = ?remaining_methods,
+                                "Key offer resulted in Failure/Partial; evaluating secondary password stage"
+                            );
+                            let can_continue_with_password = partial_success
+                                || remaining_methods.iter().any(|m| {
+                                    matches!(
+                                        m,
+                                        MethodKind::Password | MethodKind::KeyboardInteractive
+                                    )
+                                });
+
+                            if can_continue_with_password {
+                                let password = auth
+                                    .password
+                                    .resolve(&*self.services.secret_backends)
+                                    .await?;
+                                let pwd_response = session
+                                    .authenticate_password(
+                                        username.to_string(),
+                                        password.expose_secret(),
+                                    )
+                                    .await?;
+                                auth_result = self
+                                    ._handle_auth_result(
+                                        session,
+                                        username.to_string(),
+                                        pwd_response,
+                                    )
+                                    .await
+                                    .unwrap_or(false);
+                                if auth_result {
+                                    debug!(
+                                        username = username,
+                                        key = %key_str,
+                                        "Authenticated with public key + password"
+                                    );
+                                    break;
+                                } else {
+                                    auth_error_msg = Some(
+                                        "Password stage of dual authentication was rejected by the SSH target"
+                                            .to_string(),
+                                    );
+                                }
+                            } else {
+                                auth_error_msg = Some(
+                                    "Public key authentication was rejected by the SSH target"
+                                        .to_string(),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
             SSHTargetAuth::IamRole(_) => {
                 let instance_info = warpgate_aws::find_instance_by_ip(host).await?;
 
