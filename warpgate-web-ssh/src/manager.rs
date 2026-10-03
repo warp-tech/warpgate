@@ -101,6 +101,10 @@ impl WebSshClientManager {
                 if abort_rx.recv().await.is_some()
                     && let Some(session) = session.upgrade()
                 {
+                    // `close()` alone only marks the WS side dead; without
+                    // `abort()` the backend SSH connection (and everything
+                    // still flowing over it) keeps running.
+                    session.abort();
                     session.close();
                 }
             }
