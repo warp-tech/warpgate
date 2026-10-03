@@ -62,13 +62,13 @@
 
     // svelte-ignore state_referenced_locally
     let clientKeySelectValue = $state(
-        options.auth.kind === 'PublicKey' ? (options.auth.keyId ?? '') : '',
+        options.auth.kind === 'PublicKey' || options.auth.kind === 'PublicKeyAndPassword' ? (options.auth.keyId ?? '') : '',
     )
 
     $effect(() => {
         const val = clientKeySelectValue
         untrack(() => {
-            if (options.auth.kind === 'PublicKey') {
+            if (options.auth.kind === 'PublicKey' || options.auth.kind === 'PublicKeyAndPassword') {
                 options.auth.keyId = val || undefined
             }
         })
@@ -76,7 +76,7 @@
 
     $effect(() => {
         const keyId =
-            options.auth.kind === 'PublicKey' ? options.auth.keyId : undefined
+            options.auth.kind === 'PublicKey' || options.auth.kind === 'PublicKeyAndPassword' ? options.auth.keyId : undefined
         untrack(() => {
             clientKeySelectValue = keyId ?? ''
         })
@@ -144,38 +144,43 @@
     >
 </FormGroup>
 
-<div class="d-flex">
-    <FormGroup floating label="Authenticate using" class="w-100">
-        <select bind:value={options.auth.kind} class="form-control">
-            <option value="PublicKey">Warpgate's own private keys</option>
-            <option value="Password">Password</option>
-            {#if $serverInfo?.runningOnEc2}
-                <option value="IamRole">IAM Role</option>
-            {/if}
-        </select>
-    </FormGroup>
-    {#if options.auth.kind === 'PublicKey'}
-        <FormGroup floating label="Key" class="w-100 ms-3">
-            <select class="form-control" bind:value={clientKeySelectValue}>
-                <option value="">Use default keys</option>
-                {#each clientKeys as key (key.id)}
-                    <option value={key.id}>
-                        {key.label}
-                        ({key.kind}){key.isDefault ? ' — default' : ''}
-                    </option>
-                {/each}
+<div class="row">
+    <div class="col-12 col-md-6">
+        <FormGroup floating label="Authenticate using" class="w-100">
+            <select bind:value={options.auth.kind} class="form-control">
+                <option value="PublicKey">Warpgate's own private keys</option>
+                <option value="Password">Password</option>
+                <option value="PublicKeyAndPassword">Private key + Password (Dual auth)</option>
+                {#if $serverInfo?.runningOnEc2}
+                    <option value="IamRole">IAM Role</option>
+                {/if}
             </select>
         </FormGroup>
-        <a
-            class="btn btn-link mb-3 d-flex align-items-center"
-            href="/@warpgate/admin#/config/ssh"
-            target="_blank"
-        >
-            <Fa fw icon={faExternalLink} />
-        </a>
+    </div>
+    {#if options.auth.kind === 'PublicKey' || options.auth.kind === 'PublicKeyAndPassword'}
+        <div class="col-12 col-md-6 d-flex align-items-center">
+            <FormGroup floating label="Key" class="w-100">
+                <select class="form-control" bind:value={clientKeySelectValue}>
+                    <option value="">Use default keys</option>
+                    {#each clientKeys as key (key.id)}
+                        <option value={key.id}>
+                            {key.label}
+                            ({key.kind}){key.isDefault ? ' — default' : ''}
+                        </option>
+                    {/each}
+                </select>
+            </FormGroup>
+            <a
+                class="btn btn-link mb-3 ms-2 d-flex align-items-center"
+                href="/@warpgate/admin#/config/ssh"
+                target="_blank"
+            >
+                <Fa fw icon={faExternalLink} />
+            </a>
+        </div>
     {/if}
-    {#if options.auth.kind === 'Password'}
-        <div class="w-100 ms-3 d-flex align-items-center">
+    {#if options.auth.kind === 'Password' || options.auth.kind === 'PublicKeyAndPassword'}
+        <div class="col-12 col-md-6 d-flex align-items-center">
             <SecretRefInput
                 bind:value={options.auth.password}
                 inlineLabel="Password"
