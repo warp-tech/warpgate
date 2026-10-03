@@ -50,7 +50,7 @@ class Test:
                 sdk.UserDataRequest(
                     username=user.username,
                     credential_policy=sdk.UserRequireCredentialsPolicy(
-                        ssh=["PublicKey", "Totp"],
+                        ssh=[["PublicKey", "Totp"]],
                     ),
                 ),
             )

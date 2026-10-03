@@ -74,7 +74,7 @@ pub async fn command(params: &GlobalParams, username: Option<&String>) -> Result
 
     user.credential_policy
         .get_or_insert_with(Default::default)
-        .http = Some(vec![CredentialKind::Password]);
+        .http = Some(vec![vec![CredentialKind::Password]]);
 
     User::ActiveModel {
         id: Set(user.id),
