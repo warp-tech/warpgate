@@ -207,28 +207,51 @@ class ProcessManager:
     def stop(self):
         self._remove_k3s_containers()
         for child in self.children:
+            self._stop_child(child)
+
+    def mark(self):
+        """Where the children and k3s containers started so far end, for
+        `stop_since`."""
+        return len(self.children), len(self._k3s_containers)
+
+    def stop_since(self, mark):
+        """Stop everything started after `mark` (see the per-test cleanup
+        fixture below)."""
+        children, k3s = mark
+        for name in self._k3s_containers[k3s:]:
+            subprocess.run(
+                ["docker", "rm", "-f", name],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        del self._k3s_containers[k3s:]
+        for child in reversed(self.children[children:]):
+            self._stop_child(child)
+        del self.children[children:]
+
+    def _stop_child(self, child):
+        try:
+            p = psutil.Process(child.process.pid)
+        except psutil.NoSuchProcess:
+            return
+
+        p.send_signal(child.stop_signal)
+
+        for sp in p.children(recursive=True):
             try:
-                p = psutil.Process(child.process.pid)
+                sp.terminate()
             except psutil.NoSuchProcess:
-                continue
+                pass
 
-            p.send_signal(child.stop_signal)
-
+        try:
+            p.wait(timeout=child.stop_timeout)
+        except psutil.TimeoutExpired:
             for sp in p.children(recursive=True):
                 try:
-                    sp.terminate()
+                    sp.kill()
                 except psutil.NoSuchProcess:
                     pass
-
-            try:
-                p.wait(timeout=child.stop_timeout)
-            except psutil.TimeoutExpired:
-                for sp in p.children(recursive=True):
-                    try:
-                        sp.kill()
-                    except psutil.NoSuchProcess:
-                        pass
-                p.kill()
+            p.kill()
 
     def start_ssh_server(self, trusted_keys=[], extra_config="", root_password=None):
         port = alloc_port()
@@ -1098,6 +1121,19 @@ def processes(ctx, timeout, report_generation):
         yield mgr
     finally:
         mgr.stop()
+
+
+@pytest.fixture(autouse=True)
+def _stop_test_processes(processes):
+    """`processes` is session-scoped, so without this every warpgate, SSH
+    server and other child a test starts itself stays up until the whole run
+    ends; enough of them starve the CI runner late in the suite. Pytest sets
+    up higher-scoped fixtures first, so the mark is taken after any shared
+    session fixtures this test uses have started, and only the test's own
+    children are stopped."""
+    mark = processes.mark()
+    yield
+    processes.stop_since(mark)
 
 
 @pytest.fixture(scope="session", autouse=True)
