@@ -2804,6 +2804,10 @@
           },
           "kind": {
             "$ref": "#/components/schemas/TargetKind"
+          },
+          "ticket_max_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
