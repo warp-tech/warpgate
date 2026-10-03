@@ -340,6 +340,28 @@
                                     </HelpText>
                                 </Subsection>
 
+                                <Subsection title="Terminal display">
+                                    <label
+                                        for="sshShowQrCode"
+                                        class="d-flex align-items-center"
+                                    >
+                                        <Input
+                                            id="sshShowQrCode"
+                                            class="mb-0 me-2"
+                                            type="switch"
+                                            bind:checked={parameters.sshShowQrCode}
+                                        />
+                                        <div>
+                                            Display QR code for login URLs
+                                        </div>
+                                    </label>
+                                    <HelpText>
+                                        Shows a scannable QR code in the
+                                        terminal when web authentication is
+                                        required.
+                                    </HelpText>
+                                </Subsection>
+
                                 <Subsection title="Target host keys">
                                     <FormGroup
                                         floating
