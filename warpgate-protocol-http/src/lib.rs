@@ -51,8 +51,7 @@ use crate::api::common::forward_ws_to_session_owner;
 use crate::client_cache::HttpClientCache;
 use crate::common::{endpoint_auth, page_auth};
 use crate::middleware::{
-    ContentSecurityPolicyMiddleware, CookieHostMiddleware, TicketMiddleware,
-    WARPGATE_PLAYGROUND_CSP,
+    CookieHostMiddleware, SecurityHeadersMiddleware, TicketMiddleware, WARPGATE_PLAYGROUND_CSP,
 };
 use crate::session::SessionStore;
 use crate::session_handle::warpgate_server_handle_for_request;
@@ -290,7 +289,7 @@ impl ProtocolServer for HTTPProtocolServer {
                 })
                 .data(web_ssh_manager)
                 .data(web_desktop_manager)
-                .with(ContentSecurityPolicyMiddleware)
+                .with(SecurityHeadersMiddleware)
         };
 
         let app = Route::new()
