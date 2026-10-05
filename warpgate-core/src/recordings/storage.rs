@@ -7,6 +7,7 @@ use tokio::fs::File;
 use tokio::io::{AsyncRead, AsyncWriteExt};
 use tracing::error;
 use warpgate_aws::{S3MultipartUpload, S3Storage};
+use warpgate_azure::{AzureBlobStorage, AzureBlockUpload, RangedRead};
 use warpgate_common::helpers::fs::secure_file;
 use warpgate_common::{GlobalParams, TargetSessionId};
 use warpgate_db_entities::Parameters::RecordingsStorageConfig;
@@ -16,18 +17,28 @@ use super::{RecordingFile, Result};
 
 /// Local directory used to buffer in-progress recordings while the backend is S3.
 const S3_SCRATCH_SUBDIR: &str = "data/recordings-scratch";
+/// Local directory used to buffer in-progress recordings while the backend is Azure.
+const AZURE_SCRATCH_SUBDIR: &str = "data/recordings-scratch-azure";
 /// How long a presigned recording URL handed to the browser stays valid.
 const PRESIGNED_URL_TTL: Duration = Duration::from_secs(3600);
 
 enum Backend {
     Disk,
     S3(S3Storage),
+    Azure(AzureBlobStorage),
 }
 
 /// Where a recording file lives, resolved by [`Storage::access`].
 pub enum FileAccess {
     Local(PathBuf),
-    S3 { s3: S3Storage, key: String },
+    S3 {
+        s3: S3Storage,
+        key: String,
+    },
+    Azure {
+        azure: AzureBlobStorage,
+        key: String,
+    },
 }
 
 #[must_use]
@@ -54,24 +65,40 @@ pub enum RecordingSink {
         scratch_path: PathBuf,
         upload: Option<S3MultipartUpload>,
     },
+    Azure {
+        scratch: File,
+        scratch_path: PathBuf,
+        upload: Option<AzureBlockUpload>,
+    },
 }
 
 impl RecordingSink {
     const fn file(&mut self) -> &mut File {
         match self {
             Self::Disk(file) => file,
-            Self::S3 { scratch, .. } => scratch,
+            Self::S3 { scratch, .. } | Self::Azure { scratch, .. } => scratch,
         }
     }
 
     pub async fn write_all(&mut self, bytes: &Bytes) -> Result<()> {
         self.file().write_all(bytes).await?;
 
-        if let Self::S3 { upload, .. } = self
-            && let Some(upload) = upload
-            && let Err(error) = upload.push(bytes).await
-        {
-            error!(%error, path=%upload.key(), "Failed to stream recording to S3");
+        match self {
+            Self::S3 { upload, .. } => {
+                if let Some(upload) = upload
+                    && let Err(error) = upload.push(bytes).await
+                {
+                    error!(%error, path=%upload.key(), "Failed to stream recording to S3");
+                }
+            }
+            Self::Azure { upload, .. } => {
+                if let Some(upload) = upload
+                    && let Err(error) = upload.push(bytes).await
+                {
+                    error!(%error, path=%upload.key(), "Failed to stream recording to Azure");
+                }
+            }
+            Self::Disk(_) => {}
         }
 
         Ok(())
@@ -85,20 +112,29 @@ impl RecordingSink {
     pub async fn finalize(mut self) -> Result<RecordingSinkCleanupGuard> {
         self.flush().await?;
 
-        if let Self::S3 {
-            upload,
-            scratch_path,
-            ..
-        } = self
-            && let Some(upload) = upload
-        {
-            upload.finish().await?;
-            return Ok(RecordingSinkCleanupGuard {
-                scratch_path: Some(scratch_path),
-            });
+        match self {
+            Self::S3 {
+                upload: Some(upload),
+                scratch_path,
+                ..
+            } => {
+                upload.finish().await?;
+                Ok(RecordingSinkCleanupGuard {
+                    scratch_path: Some(scratch_path),
+                })
+            }
+            Self::Azure {
+                upload: Some(upload),
+                scratch_path,
+                ..
+            } => {
+                upload.finish().await?;
+                Ok(RecordingSinkCleanupGuard {
+                    scratch_path: Some(scratch_path),
+                })
+            }
+            _ => Ok(RecordingSinkCleanupGuard { scratch_path: None }),
         }
-
-        Ok(RecordingSinkCleanupGuard { scratch_path: None })
     }
 }
 
@@ -106,20 +142,37 @@ impl FileAccess {
     pub async fn open_read(&self) -> Result<Box<dyn AsyncRead + Send + Unpin>> {
         match self {
             Self::S3 { s3, key } => Ok(s3.get_reader(key).await?),
+            Self::Azure { azure, key } => Ok(azure.get_reader(key).await?),
             Self::Local(path) => Ok(Box::new(tokio::fs::File::open(path).await?)),
+        }
+    }
+
+    /// Read from `offset` to the end, reporting the file's full size.
+    ///
+    /// `Some` only where the caller is expected to serve the bytes itself. The
+    /// disk backend is served by the static-file handler and S3 by redirect, so
+    /// both answer `None` and never reach this path.
+    pub async fn open_read_from(&self, offset: u64) -> Result<Option<RangedRead>> {
+        match self {
+            Self::Azure { azure, key } => Ok(Some(azure.get_reader_from(key, offset).await?)),
+            Self::S3 { .. } | Self::Local(_) => Ok(None),
         }
     }
 
     pub async fn external_access_url(&self) -> Result<Option<String>> {
         match self {
             Self::S3 { s3, key } => Ok(Some(s3.presign_get(key, PRESIGNED_URL_TTL).await?)),
+            // Configured to stream through Warpgate: report no external URL so
+            // the caller serves the bytes instead of redirecting.
+            Self::Azure { azure, .. } if azure.serves_through_warpgate() => Ok(None),
+            Self::Azure { azure, key } => Ok(Some(azure.sas_url(key, PRESIGNED_URL_TTL).await?)),
             Self::Local(_) => Ok(None),
         }
     }
 
     pub fn local_path(&self) -> Option<&Path> {
         match self {
-            Self::S3 { .. } => None,
+            Self::S3 { .. } | Self::Azure { .. } => None,
             Self::Local(path) => Some(path),
         }
     }
@@ -148,6 +201,10 @@ impl Storage {
             RecordingsStorageConfig::S3(s3) => {
                 local_root.push(s3.scratch_path.as_deref().unwrap_or(S3_SCRATCH_SUBDIR));
                 Backend::S3(S3Storage::new(&s3).await?)
+            }
+            RecordingsStorageConfig::Azure(azure) => {
+                local_root.push(AZURE_SCRATCH_SUBDIR);
+                Backend::Azure(AzureBlobStorage::new(&azure).await?)
             }
         };
 
@@ -193,6 +250,11 @@ impl Storage {
                 scratch_path: local_path,
                 upload: Some(s3.start_multipart(&relative_path(recording, file)).await?),
             },
+            Backend::Azure(azure) => RecordingSink::Azure {
+                scratch: local_file,
+                scratch_path: local_path,
+                upload: Some(azure.start_upload(&relative_path(recording, file))),
+            },
             Backend::Disk => RecordingSink::Disk(local_file),
         })
     }
@@ -205,29 +267,44 @@ impl Storage {
                 s3: s3.clone(),
                 key: relative_path(recording, file),
             },
+            Backend::Azure(azure) if recording.ended.is_some() => FileAccess::Azure {
+                azure: azure.clone(),
+                key: relative_path(recording, file),
+            },
             _ => FileAccess::Local(local_path_in(&self.local_root, recording, file)),
         }
     }
 
-    /// Delete a recording's files from this storage — its S3 objects (if any)
-    /// and the local folder (best-effort; on S3 the scratch is already gone).
+    /// Delete a recording's files from this storage — its remote objects (if
+    /// any) and the local folder (best-effort; on object storage the scratch is
+    /// already gone).
     pub(crate) async fn remove(&self, session_id: &TargetSessionId, name: &str) -> Result<()> {
-        if let Backend::S3(s3) = &self.backend {
-            for key in [
-                format!(
-                    "{session_id}/{name}/{}",
-                    RecordingFile::NDJsonData.filename()
-                ),
-                format!("{session_id}/{name}/{}", RecordingFile::Index.filename()),
-                format!(
-                    "{session_id}/{name}/{}",
-                    RecordingFile::TcpDumpData.filename()
-                ),
-                // Gen-1 recordings are a single object named after the recording.
-                format!("{session_id}/{name}"),
-            ] {
-                s3.delete(&key).await?;
+        let keys = [
+            format!(
+                "{session_id}/{name}/{}",
+                RecordingFile::NDJsonData.filename()
+            ),
+            format!("{session_id}/{name}/{}", RecordingFile::Index.filename()),
+            format!(
+                "{session_id}/{name}/{}",
+                RecordingFile::TcpDumpData.filename()
+            ),
+            // Gen-1 recordings are a single object named after the recording.
+            format!("{session_id}/{name}"),
+        ];
+
+        match &self.backend {
+            Backend::S3(s3) => {
+                for key in &keys {
+                    s3.delete(key).await?;
+                }
             }
+            Backend::Azure(azure) => {
+                for key in &keys {
+                    azure.delete(key).await?;
+                }
+            }
+            Backend::Disk => {}
         }
 
         let path = self.recording_folder(session_id, name);

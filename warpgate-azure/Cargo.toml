@@ -1,0 +1,32 @@
+[package]
+name = "warpgate-azure"
+version = "0.29.1"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+# Default features carry the reqwest-backed HTTP client. Turning them off still
+# compiles, and then panics on the first request with "the reqwest feature is
+# required to use the default HTTP client" -- a runtime failure on a tokio
+# worker, reachable from the admin UI's Test connection button.
+azure_core = "1.1"
+azure_identity = "1.0"
+azure_storage_blob = "1.1"
+azure_storage_common = "1.0"
+azure_storage_sas = "1.0"
+futures.workspace = true
+http.workspace = true
+poem-openapi.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+warpgate-common = { path = "../warpgate-common", default-features = false }
+
+[dev-dependencies]
+reqwest.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
