@@ -56,10 +56,7 @@ fn merge_secret(
     current: &RecordingsStorageConfig,
 ) -> RecordingsStorageConfig {
     match (&mut incoming, current) {
-        (
-            RecordingsStorageConfig::S3(s3),
-            RecordingsStorageConfig::S3(current_s3),
-        ) => {
+        (RecordingsStorageConfig::S3(s3), RecordingsStorageConfig::S3(current_s3)) => {
             if let S3Credentials::Static(creds) = &mut s3.credentials
                 && creds.secret_access_key.is_none()
                 && let S3Credentials::Static(current_creds) = &current_s3.credentials
@@ -69,10 +66,7 @@ fn merge_secret(
                     .clone_from(&current_creds.secret_access_key);
             }
         }
-        (
-            RecordingsStorageConfig::Azure(azure),
-            RecordingsStorageConfig::Azure(current_azure),
-        ) => {
+        (RecordingsStorageConfig::Azure(azure), RecordingsStorageConfig::Azure(current_azure)) => {
             if let Some(secret) = azure.credentials.stored_secret_mut()
                 && secret.stored_value().is_empty()
                 && let Some(current_secret) = current_azure.credentials.stored_secret()
@@ -541,9 +535,11 @@ mod tests {
     fn merging_across_different_backends_changes_nothing() {
         let merged = merge_secret(
             azure_with_secret(""),
-            &RecordingsStorageConfig::Disk(warpgate_db_entities::Parameters::RecordingsDiskConfig {
-                path: "./data/recordings".into(),
-            }),
+            &RecordingsStorageConfig::Disk(
+                warpgate_db_entities::Parameters::RecordingsDiskConfig {
+                    path: "./data/recordings".into(),
+                },
+            ),
         );
         assert_eq!(azure_secret_of(&merged), "");
     }
