@@ -16,9 +16,9 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader};
 use tokio::sync::broadcast;
 use tracing::error;
 use uuid::Uuid;
+use warpgate_azure::AzureError;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_azure::AzureError;
 use warpgate_core::recordings::{Error as RecordingsError, LiveChunk, RecordingFile};
 use warpgate_db_entities::Recording::{self, RecordingKind};
 use warpgate_db_entities::TargetSession;
@@ -92,7 +92,13 @@ pub async fn api_get_recording_tcpdump(
     let recording = find_recording(&ctx, id.0, Some(RecordingKind::Traffic)).await?;
     let owner = recording_owner(&ctx, &recording).await?;
     proxy_or_serve(&ctx, req, owner, None::<&()>, || {
-        serve_recording_file(&ctx, &recording, RecordingFile::TcpDumpData, static_req, req.header("Range"))
+        serve_recording_file(
+            &ctx,
+            &recording,
+            RecordingFile::TcpDumpData,
+            static_req,
+            req.header("Range"),
+        )
     })
     .await
 }
@@ -109,7 +115,13 @@ pub async fn api_get_recording_data(
     let recording = find_recording(&ctx, id.0, None).await?;
     let owner = recording_owner(&ctx, &recording).await?;
     proxy_or_serve(&ctx, req, owner, None::<&()>, || {
-        serve_recording_file(&ctx, &recording, RecordingFile::NDJsonData, static_req, req.header("Range"))
+        serve_recording_file(
+            &ctx,
+            &recording,
+            RecordingFile::NDJsonData,
+            static_req,
+            req.header("Range"),
+        )
     })
     .await
 }
@@ -126,7 +138,13 @@ pub async fn api_get_recording_index(
     let recording = find_recording(&ctx, id.0, None).await?;
     let owner = recording_owner(&ctx, &recording).await?;
     proxy_or_serve(&ctx, req, owner, None::<&()>, || {
-        serve_recording_file(&ctx, &recording, RecordingFile::Index, static_req, req.header("Range"))
+        serve_recording_file(
+            &ctx,
+            &recording,
+            RecordingFile::Index,
+            static_req,
+            req.header("Range"),
+        )
     })
     .await
 }
@@ -222,7 +240,9 @@ async fn stream_recording_file(
     };
 
     // The end is inclusive on the wire; clamp it to the last byte that exists.
-    let last = end.unwrap_or(read.total.saturating_sub(1)).min(read.total.saturating_sub(1));
+    let last = end
+        .unwrap_or(read.total.saturating_sub(1))
+        .min(read.total.saturating_sub(1));
     let len = last.saturating_sub(start) + 1;
 
     Ok(poem::Response::builder()

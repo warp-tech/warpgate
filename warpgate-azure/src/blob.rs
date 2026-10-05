@@ -1,20 +1,17 @@
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
+use std::time::Duration;
 
-use azure_core::{
-    credentials::{Secret, TokenCredential},
-    http::RequestContent,
-    time::OffsetDateTime,
-};
+use azure_core::credentials::{Secret, TokenCredential};
+use azure_core::http::RequestContent;
+use azure_core::time::OffsetDateTime;
 use azure_identity::{
     ClientSecretCredential, DeveloperToolsCredential, ManagedIdentityCredential,
     ManagedIdentityCredentialOptions, UserAssignedId, WorkloadIdentityCredential,
 };
-use azure_storage_blob::{
-    BlobContainerClient, BlobServiceClient, BlockBlobClient,
-    models::{
-        BlobClientDownloadOptions, BlobClientGetPropertiesResultHeaders, BlockLookupList, KeyInfo,
-    },
+use azure_storage_blob::models::{
+    BlobClientDownloadOptions, BlobClientGetPropertiesResultHeaders, BlockLookupList, KeyInfo,
 };
+use azure_storage_blob::{BlobContainerClient, BlobServiceClient, BlockBlobClient};
 use azure_storage_common::models::UserDelegationKey;
 use azure_storage_sas::SasBuilder;
 use futures::TryStreamExt;
@@ -325,11 +322,7 @@ impl AzureBlobStorage {
     /// An offset at or past the end is [`AzureError::RangeNotSatisfiable`]:
     /// the players seek by asking for a range they cannot know is out of
     /// bounds, and read the refusal as the end of the recording.
-    pub async fn get_reader_from(
-        &self,
-        path: &str,
-        offset: u64,
-    ) -> Result<RangedRead, AzureError> {
+    pub async fn get_reader_from(&self, path: &str, offset: u64) -> Result<RangedRead, AzureError> {
         let total = self.len(path).await?;
         if total > 0 && offset >= total {
             return Err(AzureError::RangeNotSatisfiable { total });
@@ -419,14 +412,10 @@ impl AzureBlobStorage {
         let key = self.delegation_key().await?;
         let blob_name = self.blob_name(path);
 
-        let token = SasBuilder::new(
-            self.account.as_str(),
-            &key,
-            OffsetDateTime::now_utc() + ttl,
-        )?
-        .blob(&self.container_name, &blob_name)
-        .read()
-        .build();
+        let token = SasBuilder::new(self.account.as_str(), &key, OffsetDateTime::now_utc() + ttl)?
+            .blob(&self.container_name, &blob_name)
+            .read()
+            .build();
 
         let mut url = self.container.blob_client(&blob_name).url().clone();
         url.set_query(Some(&token));
@@ -489,7 +478,9 @@ impl AzureBlockUpload {
         self.client
             .stage_block(&block_id, len, RequestContent::from(data), None)
             .await
-            .inspect_err(|error| error!(%error, key = %self.key, "Failed to stage recording block"))?;
+            .inspect_err(
+                |error| error!(%error, key = %self.key, "Failed to stage recording block"),
+            )?;
 
         self.block_ids.push(block_id);
         Ok(())
@@ -506,7 +497,9 @@ impl AzureBlockUpload {
         self.client
             .commit_block_list(RequestContent::try_from(list)?, None)
             .await
-            .inspect_err(|error| error!(%error, key = %self.key, "Failed to commit recording blocks"))?;
+            .inspect_err(
+                |error| error!(%error, key = %self.key, "Failed to commit recording blocks"),
+            )?;
         Ok(())
     }
 }
@@ -695,7 +688,11 @@ mod tests {
     #[test]
     fn a_prefix_is_applied_to_blob_names() {
         let storage_prefix = |p: &str| -> String {
-            if p.is_empty() { "rec/1".into() } else { format!("{}/{}", p.trim_end_matches('/'), "rec/1") }
+            if p.is_empty() {
+                "rec/1".into()
+            } else {
+                format!("{}/{}", p.trim_end_matches('/'), "rec/1")
+            }
         };
         assert_eq!(storage_prefix(""), "rec/1");
         assert_eq!(storage_prefix("warpgate"), "warpgate/rec/1");

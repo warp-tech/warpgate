@@ -112,7 +112,9 @@ async fn a_managed_identity_serves_ranges_and_refuses_impossible_ones() {
         return;
     };
 
-    let storage = AzureBlobStorage::new(&config).await.expect("building a client");
+    let storage = AzureBlobStorage::new(&config)
+        .await
+        .expect("building a client");
     let path = format!("ranges-{}.bin", std::process::id());
     let expected = payload();
 
@@ -156,7 +158,9 @@ async fn a_managed_identity_can_mint_a_usable_sas_url() {
         return;
     };
 
-    let storage = AzureBlobStorage::new(&config).await.expect("building a client");
+    let storage = AzureBlobStorage::new(&config)
+        .await
+        .expect("building a client");
     let path = format!("sas-{}.bin", std::process::id());
     let body = b"managed identity sas round trip".to_vec();
 
