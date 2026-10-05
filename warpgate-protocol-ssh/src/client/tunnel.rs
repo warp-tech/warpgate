@@ -161,10 +161,14 @@ pub async fn open_ssh_tunnel(
         id: session_id,
         tx,
         services: services.clone(),
+        requested_by: None,
     };
 
     let result = async {
-        let super::Connection(session, session_events) = connector.connect_chain(chain).await?;
+        let super::Connection(session, session_events) = connector
+            .connect_chain(chain, false)
+            .await?
+            .ok_or(ConnectionError::Internal)?;
         info!(%host, port, "Opening direct-tcpip channel through jump host");
         let channel = session
             .channel_open_direct_tcpip(host.to_string(), u32::from(port), "127.0.0.1", 0)

@@ -189,6 +189,9 @@ pub struct TargetMySqlOptions {
 
     #[serde(default)]
     pub default_database_name: Option<String>,
+
+    #[serde(default)]
+    pub jump_host: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default, Enum)]
@@ -227,6 +230,9 @@ pub struct TargetPostgresOptions {
 
     #[serde(default)]
     pub protocol_version: PostgresProtocolVersion,
+
+    #[serde(default)]
+    pub jump_host: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
