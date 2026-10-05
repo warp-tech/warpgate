@@ -4,11 +4,10 @@ use bytes::Bytes;
 use rsa::pkcs8::DecodePublicKey;
 use rsa::{Oaep, RsaPublicKey};
 use sha1::Sha1;
-use tokio::net::TcpStream;
 use tracing::{debug, info};
 use warpgate_common::helpers::rng::get_crypto_rng;
-use warpgate_common::{SecretResolver, TargetMySqlOptions, WarpgateError};
-use warpgate_core::AdmittedTarget;
+use warpgate_common::{TargetMySqlOptions, UserSessionId, WarpgateError};
+use warpgate_core::{AdmittedTarget, Services};
 use warpgate_database_protocols::io::Decode;
 use warpgate_database_protocols::mysql::protocol::Capabilities;
 use warpgate_database_protocols::mysql::protocol::auth::AuthPlugin;
@@ -16,6 +15,7 @@ use warpgate_database_protocols::mysql::protocol::connect::{
     AuthSwitchRequest, AuthSwitchResponse, Handshake, HandshakeResponse, SslRequest,
 };
 use warpgate_database_protocols::mysql::protocol::response::ErrPacket;
+use warpgate_protocol_ssh::{TargetStream, connect_target_stream};
 use warpgate_tls::{ClientTlsStream, TlsMode, configure_tls_connector};
 
 use crate::common::{compute_auth_challenge_response, compute_sha2_auth_challenge_response};
@@ -23,7 +23,7 @@ use crate::error::MySqlError;
 use crate::stream::MySqlStream;
 
 pub struct MySqlClient {
-    pub stream: MySqlStream<TcpStream, ClientTlsStream<TcpStream>>,
+    pub stream: MySqlStream<TargetStream, ClientTlsStream<TargetStream>>,
     /// Negotiated with the target. A subset of what the client negotiated with
     /// us, except for `SSL`, which is settled per target connection and says
     /// nothing about the client's.
@@ -41,11 +41,19 @@ impl MySqlClient {
     pub async fn connect(
         approved: AdmittedTarget<TargetMySqlOptions>,
         mut options: ConnectionOptions,
-        secrets: &dyn SecretResolver,
+        services: &Services,
+        session_id: UserSessionId,
     ) -> Result<Self, MySqlError> {
         let target = approved.specific_target().options().clone();
-        let stream = TcpStream::connect((target.host.clone(), target.port)).await?;
-        stream.set_nodelay(true)?;
+        let stream = connect_target_stream(
+            services,
+            session_id,
+            target.jump_host,
+            &target.host,
+            target.port,
+            Some(&approved.user_info().username),
+        )
+        .await?;
 
         let mut stream = MySqlStream::new(stream);
 
@@ -98,7 +106,7 @@ impl MySqlClient {
         let effective_password = match &target.auth {
             warpgate_common::DatabaseTargetAuth::Password(auth) => auth
                 .password
-                .resolve(secrets)
+                .resolve(&*services.secret_backends)
                 .await?
                 .expose_secret()
                 .clone(),
@@ -262,7 +270,7 @@ fn auth_response(
 /// RSA with a public key requested from the server
 /// https://dev.mysql.com/doc/dev/mysql-server/latest/page_caching_sha2_authentication_exchanges.html
 async fn caching_sha2_full_auth(
-    stream: &mut MySqlStream<TcpStream, ClientTlsStream<TcpStream>>,
+    stream: &mut MySqlStream<TargetStream, ClientTlsStream<TargetStream>>,
     nonce: &[u8],
     password: &str,
 ) -> Result<Vec<u8>, MySqlError> {
