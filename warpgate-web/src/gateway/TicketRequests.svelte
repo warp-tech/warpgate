@@ -430,15 +430,13 @@
                         <small class="text-muted flex-shrink-0">
                             <RelativeDate date={ticket.created} />
                         </small>
-                        {#if !expired}
-                            <Button
-                                color="link"
-                                size="sm"
-                                onclick={() => deleteTicket(ticket)}
-                            >
-                                Revoke
-                            </Button>
-                        {/if}
+                        <Button
+                            color="link"
+                            size="sm"
+                            onclick={() => deleteTicket(ticket)}
+                        >
+                            {expired ? 'Dismiss' : 'Revoke'}
+                        </Button>
                     </div>
                 {/each}
             </div>
