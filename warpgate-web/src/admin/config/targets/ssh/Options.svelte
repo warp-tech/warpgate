@@ -4,15 +4,14 @@
     import {
         api,
         type SSHClientKey,
-        type Target,
         type TargetOptionsTargetSSHOptions,
     } from 'admin/lib/api'
     import { adminPermissions } from 'admin/lib/store'
     import SecretRefInput from 'common/SecretRefInput.svelte'
-    import { TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import { untrack } from 'svelte'
     import Fa from 'svelte-fa'
+    import JumpHostSelect from '../JumpHostSelect.svelte'
     import TargetSshHostKeyChecker from './KeyChecker.svelte'
 
     interface Props {
@@ -24,7 +23,6 @@
     let { id, name, options }: Props = $props()
 
     let hostKeyCheckInvalidated = $state(false)
-    let sshTargets = $state<Target[]>([])
     let clientKeys = $state<SSHClientKey[]>([])
 
     api.getSshOwnKeys().then(keys => {
@@ -34,30 +32,6 @@
     $effect(() => {
         options // run effect when options get reassigned after saving
         hostKeyCheckInvalidated = false
-    })
-
-    api.getTargets().then(targets => {
-        sshTargets = targets.filter(
-            t => t.options.kind === TargetKind.Ssh && t.id !== id,
-        )
-    })
-
-    // svelte-ignore state_referenced_locally
-    let jumpHostSelectValue = $state(options.jumpHost ?? '')
-
-    $effect(() => {
-        const val = jumpHostSelectValue
-        untrack(() => {
-            options.jumpHost = val || undefined
-        })
-    })
-
-    // Re-sync from options when the prop is reassigned (e.g. after save)
-    $effect(() => {
-        const jumpHost = options.jumpHost
-        untrack(() => {
-            jumpHostSelectValue = jumpHost ?? ''
-        })
     })
 
     // svelte-ignore state_referenced_locally
@@ -86,18 +60,7 @@
 <h4 class="mt-4">Connection</h4>
 
 <div class="row">
-    {#if sshTargets.length}
-        <div class="col">
-            <FormGroup floating label="Jump host">
-                <select class="form-control" bind:value={jumpHostSelectValue}>
-                    <option value="">Direct connection</option>
-                    {#each sshTargets as target (target.id)}
-                        <option value={target.id}>{target.name}</option>
-                    {/each}
-                </select>
-            </FormGroup>
-        </div>
-    {/if}
+    <JumpHostSelect bind:value={options.jumpHost} excludeTargetId={id} />
     <div class="col" style="flex-grow: 2">
         <FormGroup floating label="Target host">
             <input
