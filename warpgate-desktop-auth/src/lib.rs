@@ -284,7 +284,8 @@ pub async fn admit_desktop_session<O: Send + Sync>(
             Ok(())
         },
     )
-    .await
+    .await?
+    .admitted()
 }
 
 /// Build the browser web-approval URL for the current auth state, or `None` if the external

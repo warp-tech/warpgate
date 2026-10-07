@@ -15,21 +15,21 @@
         ModalBody,
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
-    import ConnectingNotice from 'common/ConnectingNotice.svelte'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import { stringifyError } from 'common/errors'
-    import InfoBox from 'common/InfoBox.svelte'
     import { handleReauthError } from 'common/reauth'
+    import WebClientStatus from 'common/WebClientStatus.svelte'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import { onDestroy, onMount, tick } from 'svelte'
     import { SvelteMap } from 'svelte/reactivity'
     import Fa from 'svelte-fa'
     import { loadTheme } from 'theme'
-    import { api, ResponseError, type WebSshSessionInfo } from './lib/api'
+    import { api, ResponseError, type WebClientSessionInfo } from './lib/api'
     import {
-        ConnectionState,
         ReconnectingWebSocket,
+        SocketState,
     } from './lib/ReconnectingWebSocket.svelte'
+    import type { SessionPhase } from './lib/webClientSession'
     import SshTerminalTab, { THEME } from './WebSshTab.svelte'
 
     // Match both routes (start & viewer)
@@ -47,7 +47,7 @@
         | { type: 'reject_host_key' }
 
     type ServerMessage =
-        | { type: 'connection_state'; state: ConnectionState }
+        | ({ type: 'state' } & SessionPhase)
         | { type: 'output'; channel_id: string; data: string }
         | { type: 'channel_opened'; channel_id: string }
         | { type: 'channel_closed'; channel_id: string }
@@ -72,7 +72,8 @@
     let channels = new SvelteMap<string, ChannelState>()
     let channelOrder: string[] = $state([])
     let activeChannelId: string | null = $state(null)
-    let connectionError: string | null = $state(null)
+    let phase = $state<SessionPhase | null>(null)
+    let notice: string | null = $state(null)
     let sessionNotFound = $state(false)
     let opening = $state(false)
     let pendingHostKey: Extract<
@@ -84,7 +85,7 @@
     // svelte-ignore state_referenced_locally
     let sessionId = $state(params.sessionId)
 
-    let sessionInfo = $state<WebSshSessionInfo | null>(null)
+    let sessionInfo = $state<WebClientSessionInfo | null>(null)
 
     const FONT_SIZE_MIN = 8
     const FONT_SIZE_MAX = 32
@@ -108,6 +109,9 @@
     let showInstructions = $state(false)
 
     let ws = $state<ReconnectingWebSocket | undefined>()
+    const connected = $derived(
+        phase?.phase === 'connected' && ws?.state === SocketState.Connected,
+    )
 
     function startStream() {
         if (!sessionId) {
@@ -115,11 +119,7 @@
         }
         ws = new ReconnectingWebSocket({
             url: `wss://${location.host}/@warpgate/api/web-ssh/sessions/${sessionId}/stream`,
-            onOpen: () => {
-                if (channelOrder.length === 0) {
-                    requestNewChannel()
-                }
-            },
+            onOpen: () => null,
             onMessage: data =>
                 onMessage(JSON.parse(data as string) as ServerMessage),
         })
@@ -154,8 +154,14 @@
             return
         }
         switch (msg.type) {
-            case 'connection_state':
-                ws.state = msg.state
+            case 'state':
+                phase = msg
+                if (msg.phase === 'connected' && channelOrder.length === 0) {
+                    requestNewChannel()
+                }
+                if (msg.phase === 'closed') {
+                    ws.close()
+                }
                 break
             case 'channel_opened':
                 openChannel(msg.channel_id)
@@ -186,8 +192,7 @@
                 break
             }
             case 'error':
-                ws.state = ConnectionState.Error
-                connectionError = msg.message
+                notice = msg.message
                 break
             case 'host_key_unknown':
                 pendingHostKey = msg
@@ -275,7 +280,7 @@
             if (await handleReauthError(e)) {
                 return
             }
-            connectionError = await stringifyError(e)
+            notice = await stringifyError(e)
             if (e instanceof ResponseError && e.response.status === 404) {
                 sessionNotFound = true
             }
@@ -317,7 +322,7 @@
                     bind:this={tabs[id]}
                     active={id === activeChannelId}
                     {fontSize}
-                    readOnly={ws?.state !== ConnectionState.Connected}
+                    readOnly={!connected}
                     onInput={data => send({ type: 'input', channel_id: id, data: bytesToBase64(data) })}
                     onResize={(cols, rows) => send({ type: 'resize', channel_id: id, cols, rows })}
                     onTitleChange={title => {
@@ -331,115 +336,101 @@
         {/each}
     </div>
 
-    {#if opening}
-        <ConnectingNotice />
-    {/if}
-
-    {#if connectionError}
-        <div class="mx-3 mt-3">
-            <InfoBox variant="warning">
-                {#if sessionNotFound}
-                    Session not found. It may have expired or been closed.
-                {:else}
-                    {connectionError}
-                {/if}
-            </InfoBox>
-        </div>
-    {:else}
-        <div class="toolbar d-flex align-items-center gap-2 p-2">
-            <div class="tab-bar d-flex align-items-stretch gap-2 flex-grow-1">
-                {#each channelOrder as id (id)}
-                    {@const ch = channels.get(id)}
-                    {#if ch}
-                        <!-- biome-ignore lint/a11y/useSemanticElements: nested -->
-                        <div
-                            class="tab btn btn-secondary d-flex align-items-center"
-                            class:active={id === activeChannelId}
-                            tabindex="0"
-                            role="button"
-                            onclick={() => switchToChannel(id)}
-                            onkeydown={e => e.key === 'Enter' && switchToChannel(id)}
+    <div class="toolbar d-flex align-items-center gap-2 p-2">
+        <div class="tab-bar d-flex align-items-stretch gap-2 flex-grow-1">
+            {#each channelOrder as id (id)}
+                {@const ch = channels.get(id)}
+                {#if ch}
+                    <!-- biome-ignore lint/a11y/useSemanticElements: nested -->
+                    <div
+                        class="tab btn btn-secondary d-flex align-items-center"
+                        class:active={id === activeChannelId}
+                        tabindex="0"
+                        role="button"
+                        onclick={() => switchToChannel(id)}
+                        onkeydown={e => e.key === 'Enter' && switchToChannel(id)}
+                    >
+                        <span class="label"
+                            >{ch.terminalTitle ?? ch.label}</span
                         >
-                            <span class="label"
-                                >{ch.terminalTitle ?? ch.label}</span
-                            >
-                            <button
-                                type="button"
-                                class="btn btn-link btn-sm close-button"
-                                onclick={e => { e.stopPropagation(); closeTab(id) }}
-                            >
-                                <Fa icon={faTimes} />
-                            </button>
-                        </div>
-                    {/if}
-                {/each}
+                        <button
+                            type="button"
+                            class="btn btn-link btn-sm close-button"
+                            onclick={e => { e.stopPropagation(); closeTab(id) }}
+                        >
+                            <Fa icon={faTimes} />
+                        </button>
+                    </div>
+                {/if}
+            {/each}
 
-                {#if ws?.state === ConnectionState.Connected}
+            {#if connected}
+                <button
+                    type="button"
+                    class="btn btn-secondary px-3"
+                    onclick={requestNewChannel}
+                >
+                    <Fa icon={faPlus} />
+                </button>
+            {/if}
+        </div>
+
+        {#if !opening}
+            <div class="me-3">
+                <WebClientStatus
+                    {phase}
+                    socket={ws}
+                    {sessionNotFound}
+                    {notice}
+                />
+            </div>
+        {/if}
+
+        {#if phase?.phase !== 'closed' && !sessionNotFound}
+            <Button color="danger" onclick={disconnect}>Disconnect</Button>
+        {/if}
+
+        <Dropdown bind:isOpen={menuOpen}>
+            <DropdownToggle color="secondary" caret={false}>
+                <Fa icon={faGear} />
+            </DropdownToggle>
+            <DropdownMenu end>
+                <div
+                    class="dropdown-item disabled font-size-row d-flex align-items-center gap-2"
+                >
                     <button
                         type="button"
-                        class="btn btn-secondary px-3"
-                        onclick={requestNewChannel}
+                        class="btn btn-sm btn-secondary"
+                        disabled={fontSize <= FONT_SIZE_MIN}
+                        onclick={() => { zoomOut(); menuOpen = true }}
+                        aria-label="Zoom out"
+                    >
+                        <Fa icon={faMinus} />
+                    </button>
+                    <span class="text-nowrap ms-auto me-auto">
+                        {fontSize}px
+                    </span>
+                    <button
+                        type="button"
+                        class="btn btn-sm btn-secondary"
+                        disabled={fontSize >= FONT_SIZE_MAX}
+                        onclick={() => { zoomIn(); menuOpen = true }}
+                        aria-label="Zoom in"
                     >
                         <Fa icon={faPlus} />
                     </button>
-                {/if}
-            </div>
-
-            {#if !sessionNotFound}
-                <span class="text-muted small me-3">
-                    {ws?.state ?? ConnectionState.Connecting}
-                    {#if ws?.state === ConnectionState.Connecting && ws.attempt > 0}
-                        &nbsp;(attempt {ws.attempt})
-                    {/if}
-                </span>
-            {/if}
-
-            {#if ws?.state === ConnectionState.Connected}
-                <Button color="danger" onclick={disconnect}>Disconnect</Button>
-            {/if}
-
-            <Dropdown bind:isOpen={menuOpen}>
-                <DropdownToggle color="secondary" caret={false}>
-                    <Fa icon={faGear} />
-                </DropdownToggle>
-                <DropdownMenu end>
-                    <div
-                        class="dropdown-item disabled font-size-row d-flex align-items-center gap-2"
+                </div>
+                {#if sessionInfo}
+                    <DropdownItem divider />
+                    <DropdownItem
+                        onclick={() => { showInstructions = true; menuOpen = false }}
                     >
-                        <button
-                            type="button"
-                            class="btn btn-sm btn-secondary"
-                            disabled={fontSize <= FONT_SIZE_MIN}
-                            onclick={() => { zoomOut(); menuOpen = true }}
-                            aria-label="Zoom out"
-                        >
-                            <Fa icon={faMinus} />
-                        </button>
-                        <span class="text-nowrap ms-auto me-auto">
-                            {fontSize}px
-                        </span>
-                        <button
-                            type="button"
-                            class="btn btn-sm btn-secondary"
-                            disabled={fontSize >= FONT_SIZE_MAX}
-                            onclick={() => { zoomIn(); menuOpen = true }}
-                            aria-label="Zoom in"
-                        >
-                            <Fa icon={faPlus} />
-                        </button>
-                    </div>
-                    {#if sessionInfo}
-                        <DropdownItem divider />
-                        <DropdownItem
-                            onclick={() => { showInstructions = true; menuOpen = false }}
-                        >
-                            Connect from your machine
-                        </DropdownItem>
-                    {/if}
-                </DropdownMenu>
-            </Dropdown>
-        </div>
-    {/if}
+                        Connect from your machine
+                    </DropdownItem>
+                {/if}
+            </DropdownMenu>
+        </Dropdown>
+    </div>
 </div>
 
 {#if sessionInfo}
