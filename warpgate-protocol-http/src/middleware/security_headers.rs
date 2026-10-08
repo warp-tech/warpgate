@@ -1,14 +1,31 @@
-use poem::http::{HeaderMap, HeaderName, HeaderValue, header};
 use poem::{Endpoint, IntoResponse, Middleware, Request, Response};
-pub use warpgate_common_http::{WARPGATE_CSP, WARPGATE_PLAYGROUND_CSP};
+use warpgate_common_http::insert_security_headers;
 
-/// Adds baseline security headers to Warpgate's own responses.
+/// Adds the baseline security headers to a Warpgate-generated response,
+/// keeping any value the response already carries (e.g. a custom CSP).
 ///
-/// Every header is only set when absent, so individual endpoints (e.g. the
-/// OpenAPI playground or the admin document) can still supply their own value.
-///
-/// This must only wrap Warpgate-served endpoints, never proxied target
-/// traffic, as it would otherwise override the upstream application's policy.
+/// Never apply this to proxied target responses: it would override the
+/// upstream application's own policy.
+pub fn insert_security_headers(headers: &mut HeaderMap) {
+    fn insert_if_absent(headers: &mut HeaderMap, name: HeaderName, value: &'static str) {
+        if !headers.contains_key(&name) {
+            headers.insert(name, HeaderValue::from_static(value));
+        }
+    }
+
+    insert_if_absent(headers, header::CONTENT_SECURITY_POLICY, WARPGATE_CSP);
+    // Prevent MIME type sniffing - not covered by CSP.
+    insert_if_absent(headers, header::X_CONTENT_TYPE_OPTIONS, "nosniff");
+    // Don't leak Warpgate URLs (which may contain target names or tickets)
+    // to third-party origins.
+    insert_if_absent(headers, header::REFERRER_POLICY, "same-origin");
+    // Legacy clickjacking protection for user agents that predate the CSP
+    // `frame-ancestors` directive, which takes precedence when both are present.
+    insert_if_absent(headers, header::X_FRAME_OPTIONS, "SAMEORIGIN");
+}
+
+/// Applies [`insert_security_headers`] to successful responses. Must only wrap
+/// Warpgate-served endpoints; errors get the same headers from `render_errors`.
 #[derive(Clone)]
 pub struct SecurityHeadersMiddleware;
 
@@ -24,30 +41,12 @@ pub struct SecurityHeadersEndpoint<E: Endpoint> {
     inner: E,
 }
 
-fn insert_if_absent(headers: &mut HeaderMap, name: HeaderName, value: &'static str) {
-    if !headers.contains_key(&name) {
-        headers.insert(name, HeaderValue::from_static(value));
-    }
-}
-
 impl<E: Endpoint> Endpoint for SecurityHeadersEndpoint<E> {
     type Output = Response;
 
     async fn call(&self, req: Request) -> poem::Result<Self::Output> {
         let mut resp = self.inner.call(req).await?.into_response();
-        let headers = resp.headers_mut();
-
-        insert_if_absent(headers, header::CONTENT_SECURITY_POLICY, WARPGATE_CSP);
-        // Prevent MIME type sniffing - not covered by CSP.
-        insert_if_absent(headers, header::X_CONTENT_TYPE_OPTIONS, "nosniff");
-        // Don't leak Warpgate URLs (which may contain target names or tickets)
-        // to third-party origins.
-        insert_if_absent(headers, header::REFERRER_POLICY, "same-origin");
-        // Legacy clickjacking protection. Modern browsers use the CSP
-        // `frame-ancestors 'self'` directive instead and ignore this header
-        // when both are present; it is kept for older user agents only.
-        insert_if_absent(headers, header::X_FRAME_OPTIONS, "SAMEORIGIN");
-
+        insert_security_headers(resp.headers_mut());
         Ok(resp)
     }
 }
@@ -55,7 +54,9 @@ impl<E: Endpoint> Endpoint for SecurityHeadersEndpoint<E> {
 #[cfg(test)]
 mod tests {
     use poem::endpoint::make_sync;
+    use poem::http::header;
     use poem::{EndpointExt, Request, Response};
+    use warpgate_common_http::{WARPGATE_CSP, WARPGATE_PLAYGROUND_CSP};
 
     use super::*;
 
@@ -100,7 +101,6 @@ mod tests {
             resp.headers().get(header::CONTENT_SECURITY_POLICY).unwrap(),
             WARPGATE_PLAYGROUND_CSP
         );
-        // The remaining headers must still be applied alongside a custom CSP.
         assert_baseline_headers(&resp);
     }
 
