@@ -96,5 +96,6 @@
     <div class="text-danger mt-2">{error}</div>
 {/if}
 <HelpText>
-    Replaces the Warpgate logo in the header and on the login page. PNG, JPEG, GIF, WebP or SVG up to 4 MB.
+    Replaces the Warpgate logo in the header and on the login page. PNG, JPEG,
+    GIF, WebP or SVG up to 4 MB.
 </HelpText>
