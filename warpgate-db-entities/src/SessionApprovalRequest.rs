@@ -3,7 +3,7 @@ use std::ops::Deref;
 use poem_openapi::Enum;
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::{IntoCondition, SimpleExpr};
-use sea_orm::{Condition, NotSet, QueryFilter, Set, SqlErr};
+use sea_orm::{Condition, NotSet, QueryFilter, Set, SqlErr, TransactionTrait};
 use serde::Serialize;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -114,7 +114,7 @@ impl StatusTransition {
     /// returns change count
     async fn apply(
         self,
-        db: &DatabaseConnection,
+        db: &impl ConnectionTrait,
         which: Condition,
     ) -> Result<u64, WarpgateError> {
         let mut query = Entity::update_many()
@@ -380,15 +380,19 @@ pub async fn upsert_request(
 }
 
 // Returns whether the change succeeded, or was raced by somebody else
+//
+// The status change and its refund commit together: a caller cancelled
+// between the two would otherwise leave an ended request holding its use.
 async fn settle_request_internal(
     db: &DatabaseConnection,
     row: &Model,
     transition: StatusTransition,
 ) -> Result<bool, WarpgateError> {
     let keeps_the_spend = transition.to == ApprovalRequestStatus::Approved;
+    let transaction = db.begin().await?;
     let moved = transition
         .apply(
-            db,
+            &transaction,
             Key::new(row.session_id, row.kind, &row.target)
                 .into_condition()
                 .add(Column::Started.eq(row.started)),
@@ -397,10 +401,10 @@ async fn settle_request_internal(
     if moved > 0
         && !keeps_the_spend
         && let Some(ticket_id) = row.ticket_id
-        && let Err(error) = super::Ticket::refund_use(db, ticket_id).await
     {
-        tracing::warn!(%error, %ticket_id, "Failed to refund the ticket of an ended approval request");
+        super::Ticket::refund_use(&transaction, ticket_id).await?;
     }
+    transaction.commit().await?;
     // false if the request was already settled
     Ok(moved > 0)
 }
@@ -449,10 +453,20 @@ pub async fn settle_request(
 }
 
 /// mark a decision as acknowledged by its session
-pub async fn mark_consumed(db: &DatabaseConnection, which: Key) -> Result<(), WarpgateError> {
+///
+/// Only the asking it was read from (`started`): a consumed approval can be
+/// remembered, so a late acknowledgement must not land on a newer asking
+/// under the same key.
+pub async fn mark_consumed(
+    db: &DatabaseConnection,
+    which: Key,
+    started: OffsetDateTime,
+) -> Result<(), WarpgateError> {
     Entity::update_many()
         .col_expr(Column::ConsumedAt, OffsetDateTime::now_utc().into())
         .filter(which.into_condition())
+        .filter(Column::Started.eq(started))
+        .filter(Column::Status.is_in(ApprovalRequestStatus::DECIDED))
         .filter(Column::ConsumedAt.is_null())
         .exec(db)
         .await?;

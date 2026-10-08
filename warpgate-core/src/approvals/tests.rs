@@ -20,6 +20,21 @@ use warpgate_db_migrations::migrate_database;
 
 use super::*;
 
+/// Drives `runtime` until every task spawned on it has finished — the point
+/// after which nothing it left detached can still write anything. The deadline
+/// only exists to fail.
+fn run_detached_to_completion(runtime: &tokio::runtime::Runtime) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while runtime.metrics().num_alive_tasks() > 0 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "detached tasks never finished: {} alive",
+            runtime.metrics().num_alive_tasks(),
+        );
+        runtime.block_on(async { tokio::time::sleep(Duration::from_millis(1)).await });
+    }
+}
+
 async fn migrated_db() -> DatabaseConnection {
     set_config_migration_values(ConfigMigrationValues::default());
     let db = Database::connect("sqlite::memory:").await.unwrap();
@@ -236,12 +251,7 @@ async fn pruning_leaves_anything_still_being_waited_on() {
     assert!(approve(&db, answered, "a-target").await);
     // Answered and picked up.
     assert!(approve(&db, delivered, "a-target").await);
-    mark_consumed(
-        &db,
-        SessionApprovalRequest::Key::new(delivered, ApprovalKind::Admin, "a-target"),
-    )
-    .await
-    .unwrap();
+    consume(&db, delivered, "a-target").await;
     // Ended without an answer.
     close_request(
         &db,
@@ -298,6 +308,69 @@ async fn reaping_never_erases_an_answer() {
     assert_eq!(
         status_of(&db, session_id, "a-target").await,
         Status::Approved
+    );
+}
+
+/// An approval only stands for later sessions once its own session picked
+/// it up. Whatever lands after the asker stopped waiting — timed out,
+/// cancelled, or never closed — is on record, but grants nothing further.
+#[tokio::test]
+async fn an_approval_no_session_picked_up_is_not_remembered() {
+    let db = migrated_db().await;
+    let session_id = UserSessionId(Uuid::new_v4());
+    advertise_row(&db, session_id, &remembered_subject("prod", [7u8; 32])).await;
+
+    assert!(approve_with_scope(&db, session_id, "prod", ApprovalScope::Target).await);
+    assert!(
+        !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE)
+            .await
+            .unwrap(),
+        "an approval nobody picked up must not be remembered",
+    );
+
+    consume(&db, session_id, "prod").await;
+    assert!(
+        approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE)
+            .await
+            .unwrap()
+    );
+}
+
+/// The gate acknowledges in the background, so its acknowledgement can land
+/// after the asking it read was pruned and the session asked again under the
+/// same key. It must stay with the asking it was read from.
+#[tokio::test]
+async fn a_late_acknowledgement_does_not_consume_a_newer_asking() {
+    let db = migrated_db().await;
+    let session_id = UserSessionId(Uuid::new_v4());
+    let key = || SessionApprovalRequest::Key::new(session_id, ApprovalKind::Admin, "prod");
+
+    advertise_row(&db, session_id, &remembered_subject("prod", [7u8; 32])).await;
+    assert!(approve_with_scope(&db, session_id, "prod", ApprovalScope::Target).await);
+    let read = find_question(&db, key()).await.unwrap().unwrap();
+
+    SessionApprovalRequest::Entity::delete_many()
+        .filter(key().into_condition())
+        .exec(&db)
+        .await
+        .unwrap();
+    advertise_row(&db, session_id, &remembered_subject("prod", [7u8; 32])).await;
+    assert!(approve_with_scope(&db, session_id, "prod", ApprovalScope::Target).await);
+
+    mark_consumed(&db, key(), read.started).await.unwrap();
+    assert!(
+        find_question(&db, key())
+            .await
+            .unwrap()
+            .unwrap()
+            .consumed_at
+            .is_none(),
+        "a late acknowledgement must not consume a newer asking",
+    );
+    assert!(
+        !approval_is_remembered(&db, &lookup_key("prod", [7u8; 32]), GRACE)
+            .await
+            .unwrap()
     );
 }
 
@@ -431,12 +504,7 @@ async fn re_advertising_reuses_a_consumed_decision() {
     let session_id = UserSessionId(Uuid::new_v4());
     pending_row(&db, session_id, "a-target").await;
     assert!(approve_with_scope(&db, session_id, "a-target", ApprovalScope::Target).await);
-    mark_consumed(
-        &db,
-        SessionApprovalRequest::Key::new(session_id, ApprovalKind::Admin, "a-target".into()),
-    )
-    .await
-    .unwrap();
+    consume(&db, session_id, "a-target").await;
 
     pending_row(&db, session_id, "a-target").await;
 
@@ -653,7 +721,7 @@ async fn a_decision_written_later_is_picked_up() {
     assert!(
         matches!(
             outcome,
-            DecisionWaitOutcome::Decided(ApprovalDecision::Approved(ApprovalScope::Once))
+            DecisionWaitOutcome::Decided(ApprovalDecision::Approved(ApprovalScope::Once), _)
         ),
         "the wait should have seen the recorded decision",
     );
@@ -698,7 +766,18 @@ async fn remembered_approval(
     let session_id = UserSessionId(Uuid::new_v4());
     advertise_row(db, session_id, &remembered_subject(target, hash)).await;
     assert!(approve_with_scope(db, session_id, target, scope).await);
+    consume(db, session_id, target).await;
     session_id
+}
+
+/// What the gate does once its session has the decision
+async fn consume(db: &DatabaseConnection, session_id: UserSessionId, target: &str) {
+    let which = || SessionApprovalRequest::Key::new(session_id, ApprovalKind::Admin, target);
+    let row = find_question(db, which())
+        .await
+        .unwrap()
+        .expect("the request should exist");
+    mark_consumed(db, which(), row.started).await.unwrap();
 }
 
 const GRACE: Duration = Duration::from_secs(3600);
@@ -717,6 +796,7 @@ async fn an_approval_only_login_is_remembered_on_the_empty_credential_set() {
     };
     advertise_row(&db, session_id, &subject).await;
     assert!(approve_with_scope(&db, session_id, "prod", ApprovalScope::AllTargets).await);
+    consume(&db, session_id, "prod").await;
 
     let empty_key = |target: &str| {
         WebApprovalMatchKey::build(
@@ -1881,6 +1961,258 @@ mod polled_gate {
             1,
             "only the original asking may announce",
         );
+    }
+
+    /// A database file both sides open with their own pool. The gate's side
+    /// cannot share the test's: sqlx hands a connection back to its pool from a
+    /// spawned task, which a frozen runtime would never run.
+    struct SharedDb {
+        path: std::path::PathBuf,
+        url: String,
+    }
+
+    impl SharedDb {
+        async fn migrated(grace: Option<Duration>) -> (Self, DatabaseConnection) {
+            let path = std::env::temp_dir().join(format!("warpgate-gate-{}.db", Uuid::new_v4()));
+            let url = format!("sqlite://{}?mode=rwc", path.display());
+            set_config_migration_values(ConfigMigrationValues::default());
+            let db = Database::connect(&url).await.unwrap();
+            migrate_database(&db).await.unwrap();
+            // A zero window expires the question on the first look
+            Parameters::Entity::update_many()
+                .col_expr(
+                    Parameters::Column::AdminApprovalTimeoutSeconds,
+                    sea_orm::sea_query::Expr::value(0i64),
+                )
+                .col_expr(
+                    Parameters::Column::AdminApprovalGracePeriodSeconds,
+                    sea_orm::sea_query::Expr::value(grace.map(|grace| grace.as_secs() as i64)),
+                )
+                .exec(&db)
+                .await
+                .unwrap();
+            (Self { path, url }, db)
+        }
+    }
+
+    impl Drop for SharedDb {
+        fn drop(&mut self) {
+            for suffix in ["", "-wal", "-shm"] {
+                let _ = std::fs::remove_file(format!("{}{suffix}", self.path.display()));
+            }
+        }
+    }
+
+    /// Runs a blocking gate to its deadline and returns its runtime undriven. A
+    /// current-thread runtime only runs spawned tasks inside `block_on`, so
+    /// anything the gate left detached stays frozen at the moment its caller
+    /// sees the outcome — when the session is torn down, and an
+    /// administrator's decision can still land.
+    fn expire_on_a_frozen_runtime(
+        shared: &SharedDb,
+        session_id: UserSessionId,
+        credentials: RememberApprovalBy,
+    ) -> (tokio::runtime::Runtime, GateOutcome) {
+        let runtime = test_runtime();
+        let outcome = runtime.block_on(async {
+            let db = Database::connect(&shared.url).await.unwrap();
+            hold(&db, session_id, credentials).await
+        });
+        (runtime, outcome)
+    }
+
+    async fn hold(
+        db: &DatabaseConnection,
+        session_id: UserSessionId,
+        credentials: RememberApprovalBy,
+    ) -> GateOutcome {
+        test_services(db)
+            .await
+            .require_admin_approval(
+                crate::TargetAuthorization::for_test(
+                    someone(),
+                    gated_target("prod"),
+                    Protocol::Ssh,
+                ),
+                session_id,
+                GatedConnection {
+                    remote_ip: Some("10.0.0.5".parse().unwrap()),
+                    credentials,
+                },
+                || async { Ok::<_, WarpgateError>(()) },
+            )
+            .await
+            .unwrap()
+    }
+
+    fn test_runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+    }
+
+    /// `Expired` is what ends the session, so by then the question must
+    /// already say it timed out — a question still pending past that point
+    /// can be approved for a session that no longer exists.
+    #[test]
+    fn a_timed_out_question_is_closed_before_the_gate_returns() {
+        audit_events();
+        let runtime = test_runtime();
+        let (shared, db) = runtime.block_on(SharedDb::migrated(None));
+        let session_id = UserSessionId(Uuid::new_v4());
+
+        let (frozen, outcome) =
+            expire_on_a_frozen_runtime(&shared, session_id, RememberApprovalBy::Nothing);
+        assert!(matches!(outcome, GateOutcome::Expired));
+
+        runtime.block_on(async {
+            assert_eq!(
+                status_of(&db, session_id, "prod").await,
+                SessionApprovalRequest::ApprovalRequestStatus::TimedOut,
+                "the question must be closed by the time the gate reports the timeout",
+            );
+            assert!(
+                !approve(&db, session_id, "prod").await,
+                "a decision arriving after the timeout must settle nothing",
+            );
+        });
+        // Whatever the gate left detached runs to its end: a close it
+        // repeated would audit the timeout a second time
+        run_detached_to_completion(&frozen);
+        assert_eq!(
+            audited_for(session_id, "SessionApprovalTimedOut1").len(),
+            1,
+            "the timeout must reach the audit trail exactly once",
+        );
+    }
+
+    /// What makes the window matter: a late approval with a target scope would
+    /// be remembered, letting later sessions through on the strength of a
+    /// question that had already expired.
+    #[test]
+    fn a_late_approval_of_a_timed_out_question_is_not_remembered() {
+        let runtime = test_runtime();
+        let (shared, db) = runtime.block_on(SharedDb::migrated(Some(GRACE)));
+        let session_id = UserSessionId(Uuid::new_v4());
+
+        let (_frozen, outcome) =
+            expire_on_a_frozen_runtime(&shared, session_id, password_credentials([7u8; 32]));
+        assert!(matches!(outcome, GateOutcome::Expired));
+
+        runtime.block_on(async {
+            let key = lookup_key("prod", [7u8; 32]);
+            let asked = find_question(
+                &db,
+                SessionApprovalRequest::Key::new(session_id, ApprovalKind::Admin, "prod"),
+            )
+            .await
+            .unwrap()
+            .expect("the gate must have asked");
+            // Otherwise the lookup below would miss for the wrong reason
+            assert_eq!(
+                asked.match_digest.as_deref(),
+                Some(key.identity().digest().as_str()),
+            );
+
+            assert!(
+                !approve_with_scope(&db, session_id, "prod", ApprovalScope::Target).await,
+                "a decision arriving after the timeout must settle nothing",
+            );
+            assert!(
+                !approval_is_remembered(&db, &key, GRACE).await.unwrap(),
+                "an approval of an expired question must not admit later sessions",
+            );
+        });
+    }
+
+    /// A decision can still land after the timeout close has read the question
+    /// as pending and before its conditional update. The update then moves
+    /// nothing, and the decision is what the database holds — so it is what
+    /// the gate must answer with, not a denial that leaves a scoped approval
+    /// on record for later sessions.
+    #[test]
+    fn a_decision_that_beats_the_timeout_close_is_honoured() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        audit_events();
+        let runtime = test_runtime();
+        let (shared, db) = runtime.block_on(SharedDb::migrated(None));
+        let session_id = UserSessionId(Uuid::new_v4());
+        let landed = Arc::new(AtomicBool::new(false));
+
+        let gate_runtime = test_runtime();
+        let outcome = gate_runtime.block_on(async {
+            let mut gate_db = Database::connect(&shared.url).await.unwrap();
+            let url = shared.url.clone();
+            let landed = landed.clone();
+            // Runs in the gate's task right after each statement returns. The
+            // only read of this question the gate filters on status is the
+            // close's own look for a pending row, so the decision lands just
+            // before its update.
+            gate_db.set_metric_callback(move |info| {
+                let sql = &info.statement.sql;
+                if sql.starts_with("SELECT")
+                    && sql.contains(r#"."session_id" = "#)
+                    && sql.contains(r#"."status" = "#)
+                    && !landed.swap(true, Ordering::SeqCst)
+                {
+                    let url = url.clone();
+                    std::thread::spawn(move || {
+                        test_runtime().block_on(async {
+                            let db = Database::connect(&url).await.unwrap();
+                            assert!(
+                                approve_with_scope(&db, session_id, "prod", ApprovalScope::Target)
+                                    .await
+                            );
+                        });
+                    })
+                    .join()
+                    .unwrap();
+                }
+            });
+            hold(&gate_db, session_id, RememberApprovalBy::Nothing).await
+        });
+
+        assert!(
+            landed.load(Ordering::SeqCst),
+            "the decision must have landed inside the close",
+        );
+        assert!(
+            matches!(outcome, GateOutcome::Approved(_)),
+            "the gate must answer with the decision that beat its close",
+        );
+        assert!(
+            audited_for(session_id, "SessionApprovalTimedOut1").is_empty(),
+            "nothing timed out: the decision did",
+        );
+
+        // Consumed by the guard's drop, as on the ordinary decided path
+        let consumed = gate_runtime.block_on(async {
+            let db = Database::connect(&shared.url).await.unwrap();
+            let which =
+                || SessionApprovalRequest::Key::new(session_id, ApprovalKind::Admin, "prod");
+            tokio::time::timeout(Duration::from_secs(10), async {
+                while find_question(&db, which())
+                    .await
+                    .unwrap()
+                    .and_then(|row| row.consumed_at)
+                    .is_none()
+                {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .is_ok()
+        });
+        assert!(consumed, "the honoured decision must be consumed");
+        runtime.block_on(async {
+            assert_eq!(
+                status_of(&db, session_id, "prod").await,
+                SessionApprovalRequest::ApprovalRequestStatus::Approved,
+            );
+        });
     }
 
     /// What the advertiser reports is what the announcement decision rides on.
