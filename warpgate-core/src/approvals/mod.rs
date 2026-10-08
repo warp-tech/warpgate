@@ -18,7 +18,7 @@ use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use time::OffsetDateTime;
 use warpgate_common::WarpgateError;
 pub use warpgate_common::auth::ApprovalScope;
-use warpgate_common::auth::{WebApprovalMatchKey, WebApprovalScopeKey};
+use warpgate_common::auth::{ApprovalKind, WebApprovalMatchKey, WebApprovalScopeKey};
 use warpgate_db_entities::{Parameters, SessionApprovalRequest};
 
 use crate::auth_state_store::TIMEOUT;
@@ -68,19 +68,20 @@ pub(crate) async fn approval_is_remembered(
         )
         .add(Column::Scope.eq(ApprovalScope::AllTargets));
 
-    let rows = SessionApprovalRequest::Entity::find()
-        .filter(Column::Kind.eq(key.identity().kind()))
+    let kind = key.identity().kind();
+    let mut query = SessionApprovalRequest::Entity::find()
+        .filter(Column::Kind.eq(kind))
         .filter(Column::Status.eq(ApprovalRequestStatus::Approved))
-        // Admin: an approval is consumed only by the gate that read it for its
-        // session, so one that landed after the session stopped waiting — timed
-        // out, cancelled, or a close that failed — never becomes a standing
-        // grant. Expiry still runs from resolved_at; a late consume only
-        // shortens the window.
-        .filter(Column::ConsumedAt.is_not_null())
         .filter(Column::ResolvedAt.gte(cutoff))
-        .filter(scope_matches)
-        .all(db)
-        .await?;
+        .filter(scope_matches);
+    if kind == ApprovalKind::Admin {
+        // Only the gate that read the approval for its session consumes an
+        // admin row, so one that landed after the session stopped waiting
+        // never becomes a standing grant. User rows are stamped consumed
+        // whether or not they were delivered, so this says nothing for them.
+        query = query.filter(Column::ConsumedAt.is_not_null());
+    }
+    let rows = query.all(db).await?;
 
     let digest = key.identity().digest();
     Ok(rows
