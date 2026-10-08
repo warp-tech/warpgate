@@ -150,12 +150,7 @@ mod tests {
             .finish();
 
         assert_eq!(
-            trusted_client_ip(
-                &req,
-                &Secret::new("".into()),
-                Some("10.0.0.1".to_string()),
-                true
-            ),
+            trusted_client_ip(&req, Some("10.0.0.1".to_string()), true),
             Some("10.0.0.1".to_string())
         );
     }
@@ -187,7 +182,7 @@ mod tests {
         let mut req = Request::builder()
             .header(&X_WARPGATE_CLUSTER_CLIENT_IP, "203.0.113.10")
             .finish();
-        // What ClusterPeerMiddleware attaches for a connection the acceptor
+        // What cluster_peer_extension attaches for a connection the acceptor
         // authenticated as a pinned node
         req.extensions_mut().insert(ClusterPeer {
             node_id: NodeId(Uuid::new_v4()),

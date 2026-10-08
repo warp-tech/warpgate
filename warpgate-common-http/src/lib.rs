@@ -5,10 +5,11 @@ pub mod ext;
 pub mod internal_page;
 mod keepalive;
 pub mod logging;
+pub mod mtls_acceptor;
 mod request;
 
 pub use auth::{AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization};
-pub use cluster_tls::{ClusterPeer, ClusterPeerMiddleware, cluster_peer, is_cluster_peer_request};
+pub use cluster_tls::{ClusterPeer, cluster_peer, cluster_peer_extension, is_cluster_peer_request};
 pub use keepalive::{SessionKeepalive, SessionKeepaliveGuard};
 use poem::Request;
 pub use warpgate_common::http_headers::{

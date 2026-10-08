@@ -1,19 +1,16 @@
 use std::sync::Arc;
-use std::time::Duration;
 
-use anyhow::Context;
 use base64::{self, Engine};
-use poem::Addr;
 use poem::listener::Acceptor;
 use poem::web::RemoteAddr;
 use rustls::ServerConfig;
-use tokio::time::timeout;
 use tokio_rustls::server::TlsStream;
-use tracing::{debug, warn};
 use warpgate_common::helpers::concurrent_acceptor::ConcurrentAcceptor;
-use warpgate_common_http::logging::remote_addr_string;
+use warpgate_common_http::mtls_acceptor::{
+    RemoteAddrExtension, annotate_remote_addr, extracting_mtls_acceptor, remote_addr_annotation,
+};
 
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+const CAPTURED_CERT_SCHEME: &str = "captured-cert";
 
 /// Custom TLS acceptor that captures client certificates and embeds them in remote_addr
 pub fn certificate_capturing_acceptor<A>(
@@ -23,52 +20,24 @@ pub fn certificate_capturing_acceptor<A>(
 where
     A: Acceptor + 'static,
 {
-    let tls_acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
-    ConcurrentAcceptor::new(inner, move |(stream, local_addr, remote_addr, _)| {
-        let tls_acceptor = tls_acceptor.clone();
-        async move {
-            let tls_stream = timeout(HANDSHAKE_TIMEOUT, tls_acceptor.accept(stream))
-                .await
-                .context("TLS handshake timed out")?
-                .context("TLS handshake failed")?;
-            let remote_addr = embed_client_certificate(&tls_stream, remote_addr);
-            Ok((
-                tls_stream,
-                local_addr,
-                remote_addr,
-                http::uri::Scheme::HTTPS,
-            ))
-        }
-    })
-}
-
-/// Smuggle the peer certificate in the RemoteAddr
-fn embed_client_certificate<T>(tls_stream: &TlsStream<T>, remote_addr: RemoteAddr) -> RemoteAddr {
-    let Some(cert_der) = extract_peer_certificates(tls_stream) else {
-        return remote_addr;
-    };
-    let cert_b64 = base64::engine::general_purpose::STANDARD.encode(&cert_der);
-    RemoteAddr(Addr::Custom(
-        "captured-cert",
-        format!("{}|cert:{cert_b64}", remote_addr_string(&remote_addr)).into(),
-    ))
-}
-
-/// Extract peer certificates from the TLS stream
-fn extract_peer_certificates<T>(tls_stream: &TlsStream<T>) -> Option<Vec<u8>> {
-    // Get the TLS connection info
-    let (_, tls_conn) = tls_stream.get_ref();
-
-    // Extract peer certificates - this gives us the certificate chain
-    if let Some(peer_certs) = tls_conn.peer_certificates()
-        && let Some(end_entity_cert) = peer_certs.first()
-    {
-        debug!("Extracted client certificate from TLS stream");
-        return Some(end_entity_cert.as_ref().to_vec());
-    }
-
-    debug!("No client certificate found in TLS stream");
-    None
+    let server_config = Arc::new(server_config);
+    extracting_mtls_acceptor(
+        inner,
+        move |_| server_config.clone(),
+        |certificate, remote_addr| async move {
+            Ok(match certificate {
+                Some(certificate) => annotate_remote_addr(
+                    &remote_addr,
+                    CAPTURED_CERT_SCHEME,
+                    &format!(
+                        "cert:{}",
+                        base64::engine::general_purpose::STANDARD.encode(certificate)
+                    ),
+                ),
+                None => remote_addr,
+            })
+        },
+    )
 }
 
 /// Certificate data extracted from client TLS connection
@@ -77,64 +46,18 @@ pub struct ClientCertificate {
     pub der_bytes: Vec<u8>,
 }
 
-/// Middleware that extracts client certificates from enhanced remote_addr and stores them in request extensions
-pub struct CertificateExtractorMiddleware;
-
-impl<E> poem::Middleware<E> for CertificateExtractorMiddleware
-where
-    E: poem::Endpoint,
-{
-    type Output = CertificateExtractorEndpoint<E>;
-
-    fn transform(&self, ep: E) -> Self::Output {
-        CertificateExtractorEndpoint { inner: ep }
-    }
+fn client_certificate_from_remote_addr(remote_addr: &RemoteAddr) -> Option<ClientCertificate> {
+    let encoded =
+        remote_addr_annotation(remote_addr, CAPTURED_CERT_SCHEME)?.strip_prefix("cert:")?;
+    let der_bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()?;
+    Some(ClientCertificate { der_bytes })
 }
 
-// Extracts client certificates stored in the request by [CertificateCapturingAcceptor]
-pub struct CertificateExtractorEndpoint<E> {
-    inner: E,
-}
-
-impl<E> poem::Endpoint for CertificateExtractorEndpoint<E>
-where
-    E: poem::Endpoint,
-{
-    type Output = E::Output;
-    async fn call(&self, mut req: poem::Request) -> poem::Result<Self::Output> {
-        // Extract certificate from enhanced remote_addr if present
-        if let RemoteAddr(Addr::Custom("captured-cert", value)) = req.remote_addr() {
-            if let Some(cert_part) = value.split("|cert:").nth(1) {
-                // Decode the base64 certificate
-                match base64::engine::general_purpose::STANDARD.decode(cert_part) {
-                    Ok(cert_der) => {
-                        debug!(
-                            "Middleware: Successfully extracted client certificate from remote_addr"
-                        );
-
-                        let client_cert = ClientCertificate {
-                            der_bytes: cert_der,
-                        };
-
-                        // Store certificate in request extensions for later access
-                        req.extensions_mut().insert(client_cert);
-                        debug!("Middleware: Client certificate stored in request extensions");
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Middleware: Failed to decode client certificate from remote_addr: {}",
-                            e
-                        );
-                    }
-                }
-            }
-        } else {
-            debug!("Middleware: No client certificate found in remote_addr");
-        }
-
-        // Continue with the request
-        self.inner.call(req).await
-    }
+pub fn client_certificate_extension()
+-> RemoteAddrExtension<fn(&RemoteAddr) -> Option<ClientCertificate>> {
+    RemoteAddrExtension::new(client_certificate_from_remote_addr)
 }
 
 /// Helper trait to easily extract client certificate from request
@@ -154,10 +77,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use base64::Engine;
-    use poem::Addr;
     use poem::listener::{Acceptor, Listener, TcpListener};
-    use poem::web::RemoteAddr;
     use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer, ServerName};
     use rustls::{ClientConfig, RootCertStore, ServerConfig};
     use tokio::net::TcpStream;
@@ -165,7 +85,7 @@ mod tests {
     use tokio_rustls::TlsConnector;
     use warpgate_tls::PossessionOnlyClientCertVerifier;
 
-    use super::certificate_capturing_acceptor;
+    use super::{certificate_capturing_acceptor, client_certificate_from_remote_addr};
 
     #[tokio::test]
     async fn stalled_tls_handshake_does_not_block_later_connections() {
@@ -229,13 +149,9 @@ mod tests {
         .await
         .expect("a stalled TLS handshake blocked the next connection")
         .expect("the second TLS handshake failed");
-        let RemoteAddr(Addr::Custom("captured-cert", value)) = remote_addr else {
-            panic!("client certificate was not captured")
-        };
-        let captured_certificate = base64::engine::general_purpose::STANDARD
-            .decode(value.split("|cert:").nth(1).unwrap())
-            .unwrap();
-        assert_eq!(captured_certificate, client_certificate_der.as_ref());
+        let captured = client_certificate_from_remote_addr(&remote_addr)
+            .expect("client certificate was not captured");
+        assert_eq!(captured.der_bytes, client_certificate_der.as_ref());
 
         drop(second_tls);
         drop(stalled_connection);

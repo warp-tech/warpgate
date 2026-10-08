@@ -17,14 +17,13 @@ use warpgate_tls::{
 };
 
 use crate::correlator::RequestCorrelator;
-use crate::server::client_certs::certificate_capturing_acceptor;
+use crate::server::client_certs::{certificate_capturing_acceptor, client_certificate_extension};
 use crate::server::handlers::handle_api_request;
 
 pub mod auth;
 mod client_certs;
 mod handlers;
 
-use client_certs::CertificateExtractorMiddleware;
 use warpgate_common_http::errors::render_errors;
 
 /// Cached client reuse time limit, itself limited by the credential lifetime (e.g. EKS token)
@@ -47,7 +46,7 @@ pub async fn bind_server(
         .at("/", handle_api_request)
         .at("/*path", handle_api_request)
         .with(poem::middleware::Cors::new())
-        .with(CertificateExtractorMiddleware)
+        .with(client_certificate_extension())
         .data(UnauthenticatedRequestContext::new(services.clone()).await)
         .data(correlator)
         .data(upstream_clients)

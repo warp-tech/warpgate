@@ -38,7 +38,7 @@ use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
-use warpgate_common_http::{ClusterPeerMiddleware, warpgate_csp_with_connect_src};
+use warpgate_common_http::{cluster_peer_extension, warpgate_csp_with_connect_src};
 use warpgate_core::{ProtocolServer, Services};
 use warpgate_db_entities::Parameters::RecordingsStorageConfig;
 use warpgate_tls::TlsCertificateAndPrivateKey;
@@ -311,7 +311,7 @@ impl ProtocolServer for HTTPProtocolServer {
                 session_storage.clone(),
             ))
             .with(CookieHostMiddleware::new(base_cookie_domain))
-            .with(ClusterPeerMiddleware)
+            .with(cluster_peer_extension())
             .data(UnauthenticatedRequestContext::new(self.services.clone()).await)
             .data(http_client_cache.clone())
             .data(session_store.clone())

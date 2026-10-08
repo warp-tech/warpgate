@@ -8,21 +8,11 @@ use warpgate_core::{Services, WarpgateServerHandle};
 
 use crate::request::trusted_client_ip;
 
-/// The bare `ip:port` of a connection, for acceptors that annotate the
-/// [`RemoteAddr`] as `ip:port|...` (see [`raw_remote_ip`]).
-pub fn remote_addr_string(remote_addr: &RemoteAddr) -> String {
-    match &remote_addr.0 {
-        Addr::SocketAddr(addr) => addr.to_string(),
-        other => other.to_string(),
-    }
-}
-
 /// The peer IP of the connection itself, ignoring any forwarding headers.
 pub fn raw_remote_ip(req: &Request) -> Option<String> {
     let socket_addr = match req.remote_addr() {
-        // Acceptors that learn something during the TLS handshake (a captured
-        // client certificate, an authenticated cluster peer) smuggle it after
-        // the socket address as `ip:port|...`
+        // An acceptor that learned something during the TLS handshake carries
+        // it after the socket address (see `tls_acceptor::annotate_remote_addr`)
         RemoteAddr(Addr::Custom(_, value)) => value
             .split('|')
             .next()

@@ -6,23 +6,18 @@
 //! row has pinned. Browsers and other clients, which send a real host name,
 //! never see a certificate request.
 //!
-//! The acceptor marks an authenticated peer connection in its `RemoteAddr`,
-//! which is the only per-connection channel poem offers an acceptor, and
-//! [`ClusterPeerMiddleware`] turns that into a [`ClusterPeer`] request
-//! extension that the auth code reads through [`cluster_peer`].
+//! The acceptor marks an authenticated peer connection in its `RemoteAddr`
+//! (see [`crate::tls_acceptor`]), and [`cluster_peer_extension`] turns that
+//! into a [`ClusterPeer`] request extension that the auth code reads through
+//! [`cluster_peer`].
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::Context;
-use poem::http::uri::Scheme;
+use poem::Request;
 use poem::listener::Acceptor;
 use poem::web::RemoteAddr;
-use poem::{Addr, Endpoint, Middleware, Request};
 use rustls::ServerConfig;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::time::timeout;
-use tokio_rustls::LazyConfigAcceptor;
 use tokio_rustls::server::TlsStream;
 use tracing::warn;
 use uuid::Uuid;
@@ -35,7 +30,9 @@ use warpgate_tls::{
     TlsCertificateAndPrivateKey, cluster_identity_certified_key,
 };
 
-use crate::logging::remote_addr_string;
+use crate::mtls_acceptor::{
+    RemoteAddrExtension, annotate_remote_addr, extracting_mtls_acceptor, remote_addr_annotation,
+};
 
 /// A request from another cluster node, authenticated by its pinned TLS
 /// client certificate.
@@ -45,7 +42,7 @@ pub struct ClusterPeer {
 }
 
 const CLUSTER_PEER_ADDR_SCHEME: &str = "cluster-peer";
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+const CLUSTER_PEER_PAYLOAD_PREFIX: &str = "node-uuid:";
 
 /// Resolves a connecting peer's TLS pin to a cluster node.
 pub trait PeerRegistry: Send + Sync + 'static {
@@ -109,68 +106,42 @@ where
     A: Acceptor + 'static,
     R: PeerRegistry,
 {
-    ConcurrentAcceptor::new(inner, move |(stream, local_addr, remote_addr, _)| {
-        let configs = configs.clone();
-        let registry = registry.clone();
-        async move {
-            let (tls_stream, peer) =
-                timeout(HANDSHAKE_TIMEOUT, handshake(stream, &configs, &*registry))
+    extracting_mtls_acceptor(
+        inner,
+        move |client_hello| {
+            if client_hello.server_name() == Some(CLUSTER_TLS_SNI_NAME) {
+                configs.cluster.clone()
+            } else {
+                configs.public.clone()
+            }
+        },
+        move |certificate, remote_addr| {
+            // certificate present = configs.cluster was used
+            let registry = registry.clone();
+            async move {
+                let Some(certificate) = certificate else {
+                    return Ok(remote_addr);
+                };
+                let spki = certificate_der_spki_sha256_hex(certificate.as_ref())?;
+                let node_id = registry
+                    .node_for_pin(spki)
                     .await
-                    .context("TLS handshake timed out")??;
-            let remote_addr = match peer {
-                Some(node_id) => RemoteAddr(Addr::Custom(
+                    .context("unknown cluster peer certificate")?;
+                Ok(annotate_remote_addr(
+                    &remote_addr,
                     CLUSTER_PEER_ADDR_SCHEME,
-                    format!("{}|node:{node_id}", remote_addr_string(&remote_addr)).into(),
-                )),
-                None => remote_addr,
-            };
-            Ok((tls_stream, local_addr, remote_addr, Scheme::HTTPS))
-        }
-    })
-}
-
-async fn handshake<Io, R>(
-    stream: Io,
-    configs: &ClusterTlsConfigs,
-    registry: &R,
-) -> anyhow::Result<(TlsStream<Io>, Option<NodeId>)>
-where
-    Io: AsyncRead + AsyncWrite + Unpin,
-    R: PeerRegistry,
-{
-    let start = LazyConfigAcceptor::new(rustls::server::Acceptor::default(), stream)
-        .await
-        .context("reading TLS ClientHello")?;
-    if start.client_hello().server_name() != Some(CLUSTER_TLS_SNI_NAME) {
-        let tls_stream = start
-            .into_stream(configs.public.clone())
-            .await
-            .context("TLS handshake failed")?;
-        return Ok((tls_stream, None));
-    }
-
-    let tls_stream = start
-        .into_stream(configs.cluster.clone())
-        .await
-        .context("cluster peer TLS handshake failed")?;
-    let (_, connection) = tls_stream.get_ref();
-    let certificate = connection
-        .peer_certificates()
-        .and_then(|chain| chain.first())
-        .context("cluster peer presented no certificate")?;
-    let spki = certificate_der_spki_sha256_hex(certificate.as_ref())?;
-    let node_id = registry
-        .node_for_pin(spki)
-        .await
-        .context("cluster peer certificate is not pinned by any live node")?;
-    Ok((tls_stream, Some(node_id)))
+                    &format!("{CLUSTER_PEER_PAYLOAD_PREFIX}{node_id}"),
+                ))
+            }
+        },
+    )
 }
 
 fn peer_from_remote_addr(remote_addr: &RemoteAddr) -> Option<ClusterPeer> {
-    let RemoteAddr(Addr::Custom(CLUSTER_PEER_ADDR_SCHEME, value)) = remote_addr else {
-        return None;
-    };
-    let node_id = value.rsplit_once("|node:")?.1.parse::<Uuid>().ok()?;
+    let node_id = remote_addr_annotation(remote_addr, CLUSTER_PEER_ADDR_SCHEME)?
+        .strip_prefix(CLUSTER_PEER_PAYLOAD_PREFIX)?
+        .parse::<Uuid>()
+        .ok()?;
     Some(ClusterPeer {
         node_id: NodeId(node_id),
     })
@@ -188,30 +159,10 @@ pub fn is_cluster_peer_request(req: &Request) -> bool {
     cluster_peer(req).is_some()
 }
 
-/// Copies the acceptor's peer marker into a [`ClusterPeer`] request extension.
-pub struct ClusterPeerMiddleware;
-
-impl<E: Endpoint> Middleware<E> for ClusterPeerMiddleware {
-    type Output = ClusterPeerEndpoint<E>;
-
-    fn transform(&self, ep: E) -> Self::Output {
-        ClusterPeerEndpoint { inner: ep }
-    }
-}
-
-pub struct ClusterPeerEndpoint<E> {
-    inner: E,
-}
-
-impl<E: Endpoint> Endpoint for ClusterPeerEndpoint<E> {
-    type Output = E::Output;
-
-    async fn call(&self, mut req: Request) -> poem::Result<Self::Output> {
-        if let Some(peer) = peer_from_remote_addr(req.remote_addr()) {
-            req.extensions_mut().insert(peer);
-        }
-        self.inner.call(req).await
-    }
+/// Middleware copying the acceptor's peer marker into a [`ClusterPeer`]
+/// request extension.
+pub fn cluster_peer_extension() -> RemoteAddrExtension<fn(&RemoteAddr) -> Option<ClusterPeer>> {
+    RemoteAddrExtension::new(peer_from_remote_addr)
 }
 
 #[cfg(test)]
@@ -393,17 +344,12 @@ mod tests {
     #[test]
     fn marker_round_trip() {
         let node_id = NodeId(Uuid::new_v4());
-        let addr = RemoteAddr(Addr::Custom(
-            CLUSTER_PEER_ADDR_SCHEME,
-            format!("127.0.0.1:4000|node:{node_id}").into(),
-        ));
+        let plain = RemoteAddr(poem::Addr::SocketAddr("127.0.0.1:4000".parse().unwrap()));
+        let addr =
+            annotate_remote_addr(&plain, CLUSTER_PEER_ADDR_SCHEME, &format!("node:{node_id}"));
         assert_eq!(peer_from_remote_addr(&addr), Some(ClusterPeer { node_id }));
-        let plain = RemoteAddr(Addr::SocketAddr("127.0.0.1:4000".parse().unwrap()));
         assert_eq!(peer_from_remote_addr(&plain), None);
-        let other = RemoteAddr(Addr::Custom(
-            "captured-cert",
-            "127.0.0.1:4000|cert:AAAA".into(),
-        ));
+        let other = annotate_remote_addr(&plain, "captured-cert", "cert:AAAA");
         assert_eq!(peer_from_remote_addr(&other), None);
     }
 }
