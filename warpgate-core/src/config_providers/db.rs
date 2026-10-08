@@ -283,6 +283,7 @@ impl DatabaseConfigProvider {
             ldap_server_id: Set(ldap_server_id),
             ldap_object_uuid: Set(ldap_object_uuid),
             allowed_ip_ranges: Set(serde_json::Value::Null),
+            show_session_menu: Set(true),
         }
         .insert(db)
         .await?;

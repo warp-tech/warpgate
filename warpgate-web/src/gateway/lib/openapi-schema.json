@@ -992,6 +992,76 @@
         "operationId": "delete_my_api_token"
       }
     },
+    "/profile/preferences": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPreferences"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
+          }
+        ],
+        "operationId": "get_my_preferences"
+      },
+      "put": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserPreferences"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPreferences"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
+          }
+        ],
+        "operationId": "update_my_preferences"
+      }
+    },
     "/ticket-requests": {
       "post": {
         "requestBody": {
@@ -2213,7 +2283,8 @@
             "description": "Login banner, shown to unauthenticated visitors too. Empty when unset."
           },
           "show_session_menu": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether the floating session menu should be shown in HTTP targets:\nenabled globally and not turned off by the current user."
           },
           "config_warnings": {
             "type": "array",
@@ -2814,6 +2885,32 @@
           },
           "secret": {
             "type": "string"
+          }
+        }
+      },
+      "UpdateUserPreferences": {
+        "type": "object",
+        "title": "UpdateUserPreferences",
+        "properties": {
+          "show_session_menu": {
+            "type": "boolean"
+          }
+        }
+      },
+      "UserPreferences": {
+        "type": "object",
+        "title": "UserPreferences",
+        "required": [
+          "show_session_menu",
+          "session_menu_disabled_globally"
+        ],
+        "properties": {
+          "show_session_menu": {
+            "type": "boolean"
+          },
+          "session_menu_disabled_globally": {
+            "type": "boolean",
+            "description": "The session menu is turned off globally, so the user's own setting has no effect."
           }
         }
       },

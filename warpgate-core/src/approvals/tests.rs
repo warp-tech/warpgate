@@ -900,6 +900,7 @@ async fn ticket_with_uses(db: &DatabaseConnection, uses: i16) -> Uuid {
         ldap_server_id: Set(None),
         ldap_object_uuid: Set(None),
         allowed_ip_ranges: Set(serde_json::Value::Null),
+        show_session_menu: Set(true),
     })
     .exec(db)
     .await

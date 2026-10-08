@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use ipnet::IpNet;
 use poem_openapi::Object;
-use sea_orm::Set;
+use sea_orm::{NotSet, Set};
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::{Func, IntoCondition};
 use serde::Serialize;
@@ -31,6 +31,9 @@ pub struct Model {
     pub ldap_object_uuid: Option<Uuid>,
     #[sea_orm(column_type = "Text", nullable)]
     pub allowed_ip_ranges: serde_json::Value,
+    /// Per-user preference for the floating session menu injected into HTTP
+    /// targets. Only takes effect when the global `show_session_menu` is on.
+    pub show_session_menu: bool,
 }
 
 impl Related<super::Role::Entity> for Entity {
@@ -271,6 +274,7 @@ impl TryFrom<User> for ActiveModel {
                 )?,
                 None => serde_json::Value::Null,
             }),
+            show_session_menu: NotSet,
         })
     }
 }
