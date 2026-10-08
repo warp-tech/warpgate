@@ -2320,16 +2320,20 @@ mod polled_gate {
             );
         });
 
-        let mut status = SessionApprovalRequest::ApprovalRequestStatus::Pending;
-        for _ in 0..100 {
-            gate_runtime.block_on(async { tokio::time::sleep(Duration::from_millis(20)).await });
-            status = runtime.block_on(status_of(&db, session_id, "prod"));
-            if status != SessionApprovalRequest::ApprovalRequestStatus::Pending {
-                break;
-            }
+        // Waits for the event, not the row: the update commits on sqlx's own
+        // worker thread, so the row reads `TimedOut` while the retry has yet to
+        // be polled again to emit. The deadline only exists to fail.
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while audited_for(session_id, "SessionApprovalTimedOut1").is_empty()
+            && std::time::Instant::now() < deadline
+        {
+            gate_runtime.block_on(async { tokio::time::sleep(Duration::from_millis(5)).await });
         }
+        // Whatever else the gate left detached gets to run too
+        gate_runtime.block_on(async { tokio::time::sleep(Duration::from_millis(300)).await });
+
         assert_eq!(
-            status,
+            runtime.block_on(status_of(&db, session_id, "prod")),
             SessionApprovalRequest::ApprovalRequestStatus::TimedOut,
             "the retry must have closed the question as timed out",
         );
