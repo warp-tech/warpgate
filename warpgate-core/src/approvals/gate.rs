@@ -207,7 +207,10 @@ impl Services {
                 // the record says
                 Ok(TimeoutClose::Decided(decision)) => decision,
                 Ok(TimeoutClose::Ended) => return Ok(GateOutcome::Expired),
-                // The deadline has passed regardless; the guard's drop retries the close
+                // Not `Expired`: the question is still open and can yet be
+                // approved, so a session told it timed out would be told
+                // something the record contradicts. Every caller denies on an
+                // error, and the guard's drop retries the close.
                 Err(error) => {
                     error!(
                         %error,
@@ -215,7 +218,7 @@ impl Services {
                         target = %subject.target_name,
                         "Failed to close a timed-out approval request"
                     );
-                    return Ok(GateOutcome::Expired);
+                    return Err(error.into());
                 }
             },
             DecisionWaitOutcome::Ended => return Ok(GateOutcome::Expired),

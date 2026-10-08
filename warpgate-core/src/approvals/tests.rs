@@ -1987,6 +1987,14 @@ mod polled_gate {
         session_id: UserSessionId,
         credentials: RememberApprovalBy,
     ) -> GateOutcome {
+        try_hold(db, session_id, credentials).await.unwrap()
+    }
+
+    async fn try_hold(
+        db: &DatabaseConnection,
+        session_id: UserSessionId,
+        credentials: RememberApprovalBy,
+    ) -> Result<GateOutcome, WarpgateError> {
         test_services(db)
             .await
             .require_admin_approval(
@@ -2003,7 +2011,6 @@ mod polled_gate {
                 || async { Ok::<_, WarpgateError>(()) },
             )
             .await
-            .unwrap()
     }
 
     fn test_runtime() -> tokio::runtime::Runtime {
@@ -2173,58 +2180,77 @@ mod polled_gate {
         });
     }
 
-    /// A close that fails leaves the question pending after the session has
-    /// been told it expired. A scoped approval can still land on it, but no
-    /// session ever picks it up, so it must not be remembered.
-    #[test]
-    fn a_late_approval_after_a_failed_timeout_close_is_not_remembered() {
+    /// A gate-side connection whose timeout close fails: the table is taken
+    /// away between the close's read and its update. The flag says the break
+    /// happened, so a test cannot pass on a gate that never reached the close.
+    async fn with_a_failing_timeout_close(
+        url: &str,
+    ) -> (
+        DatabaseConnection,
+        std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) {
         use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
+
+        let broke = Arc::new(AtomicBool::new(false));
+        let mut gate_db = Database::connect(url).await.unwrap();
+        let url = url.to_owned();
+        let flag = broke.clone();
+        gate_db.set_metric_callback(move |info| {
+            let sql = &info.statement.sql;
+            if sql.starts_with("SELECT")
+                && sql.contains("session_approval_requests")
+                && sql.contains(r#"."session_id" = "#)
+                && sql.contains(r#"."status" = "#)
+                && !flag.swap(true, Ordering::SeqCst)
+            {
+                let url = url.clone();
+                std::thread::spawn(move || {
+                    test_runtime().block_on(async {
+                        Database::connect(&url)
+                            .await
+                            .unwrap()
+                            .execute_unprepared(
+                                "ALTER TABLE session_approval_requests RENAME TO hidden",
+                            )
+                            .await
+                            .unwrap();
+                    });
+                })
+                .join()
+                .unwrap();
+            }
+        });
+        (gate_db, broke)
+    }
+
+    /// A close that fails leaves the question pending, so the gate must not
+    /// report a timeout: the question can still be approved. A scoped approval
+    /// that lands on it reaches no session, so it must not be remembered.
+    #[test]
+    fn a_late_approval_after_a_failed_timeout_close_is_not_remembered() {
+        use std::sync::atomic::Ordering;
 
         audit_events();
         let runtime = test_runtime();
         let (shared, db) = runtime.block_on(SharedDb::migrated(None));
         let session_id = UserSessionId(Uuid::new_v4());
-        let broke = Arc::new(AtomicBool::new(false));
 
         let gate_runtime = test_runtime();
-        let outcome = gate_runtime.block_on(async {
-            let mut gate_db = Database::connect(&shared.url).await.unwrap();
-            let url = shared.url.clone();
-            let broke = broke.clone();
-            // Takes the table away between the close's read and its update
-            gate_db.set_metric_callback(move |info| {
-                let sql = &info.statement.sql;
-                if sql.starts_with("SELECT")
-                    && sql.contains(r#"."session_id" = "#)
-                    && sql.contains(r#"."status" = "#)
-                    && !broke.swap(true, Ordering::SeqCst)
-                {
-                    let url = url.clone();
-                    std::thread::spawn(move || {
-                        test_runtime().block_on(async {
-                            Database::connect(&url)
-                                .await
-                                .unwrap()
-                                .execute_unprepared(
-                                    "ALTER TABLE session_approval_requests RENAME TO hidden",
-                                )
-                                .await
-                                .unwrap();
-                        });
-                    })
-                    .join()
-                    .unwrap();
-                }
-            });
-            hold(&gate_db, session_id, password_credentials([7u8; 32])).await
+        let (outcome, broke) = gate_runtime.block_on(async {
+            let (gate_db, broke) = with_a_failing_timeout_close(&shared.url).await;
+            let outcome = try_hold(&gate_db, session_id, password_credentials([7u8; 32])).await;
+            (outcome, broke)
         });
 
         assert!(
             broke.load(Ordering::SeqCst),
             "the close must have been broken"
         );
-        assert!(matches!(outcome, GateOutcome::Expired));
+        assert!(
+            outcome.is_err(),
+            "a failed close must surface as an error, not as a timeout",
+        );
         assert!(
             audited_for(session_id, "SessionApprovalTimedOut1").is_empty(),
             "a close that failed must not be audited as a timeout",
@@ -2246,6 +2272,77 @@ mod polled_gate {
                     .unwrap(),
                 "an approval of a question nobody waits on must not be remembered",
             );
+        });
+    }
+
+    /// What a client is told comes from the `Admission`: the web lifecycle
+    /// renders `Expired` as "approval timed out" and an error as an error. A
+    /// failed close leaves the question open, so it must be the latter.
+    #[test]
+    fn a_failed_timeout_close_is_not_admitted_as_expired() {
+        use std::sync::atomic::Ordering;
+
+        use crate::{SessionHandle, State, UserSessionStateInit};
+
+        struct NoopHandle;
+        impl SessionHandle for NoopHandle {
+            fn close(&mut self) {}
+        }
+
+        let runtime = test_runtime();
+        let (shared, db) = runtime.block_on(SharedDb::migrated(None));
+
+        let gate_runtime = test_runtime();
+        let (admission, broke) = gate_runtime.block_on(async {
+            let (gate_db, broke) = with_a_failing_timeout_close(&shared.url).await;
+            let services = test_services(&gate_db).await;
+            let handle = State::register_node_local_user_session(
+                &services.state,
+                Protocol::Http,
+                UserSessionStateInit {
+                    remote_address: None,
+                    handle: Box::new(NoopHandle),
+                },
+            )
+            .await
+            .unwrap();
+            let admission = admit_target_session(
+                &services,
+                &handle,
+                crate::TargetAuthorization::for_test(
+                    someone(),
+                    gated_target("prod"),
+                    Protocol::Http,
+                ),
+                GatedConnection {
+                    remote_ip: None,
+                    credentials: RememberApprovalBy::Nothing,
+                },
+                || async { Ok(()) },
+            )
+            .await;
+            (admission, broke)
+        });
+
+        assert!(
+            broke.load(Ordering::SeqCst),
+            "the close must have been broken"
+        );
+        let reported = match &admission {
+            Err(_) => "an error",
+            Ok(Admission::Expired) => "an approval timeout",
+            Ok(Admission::Refused) => "a refusal",
+            Ok(Admission::Admitted(_)) => "an admission",
+        };
+        assert!(
+            admission.is_err(),
+            "a failed close must be reported as an error, not as {reported}",
+        );
+
+        runtime.block_on(async {
+            db.execute_unprepared("ALTER TABLE hidden RENAME TO session_approval_requests")
+                .await
+                .unwrap();
         });
     }
 
