@@ -226,12 +226,91 @@ fn shown_in_the_terminal(error: &ConnectionError) -> String {
     format!("Target connection failed: {}", error.client_message())
 }
 
+/// The server-side record of a client session error.
+///
+/// Not `?error` alone: an `anyhow::Error`'s own `Debug` prints its cause chain
+/// on separate lines, unescaped, so a newline in wrapped remote text forges a
+/// second record in the default text format. The chain is rendered first and
+/// the resulting string escaped. `#[deny(dead_code)]` keeps the event loop
+/// calling this rather than only the test: `mod tests` is `#[cfg(test)]`.
+#[deny(dead_code)]
+fn log_client_session_error(error: &anyhow::Error) {
+    error!(error = ?format!("{error:#}"), "Client session error");
+}
+
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+
     use russh::{MethodKind, MethodSet};
+    use tracing_subscriber::fmt::MakeWriter;
     use warpgate_common::WarpgateError;
 
-    use super::{ConnectionError, reject_with_allowed_auth_methods, shown_in_the_terminal};
+    use super::{
+        ConnectionError, log_client_session_error, reject_with_allowed_auth_methods,
+        shown_in_the_terminal,
+    };
+
+    /// `tracing-subscriber` ships no `MakeWriter` for a buffer the test can
+    /// still read afterwards: its `Arc<W>` impl wants `&W: Write`, which a
+    /// `Mutex` is not.
+    #[derive(Clone, Default)]
+    struct Captured(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().write(buf)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl MakeWriter<'_> for Captured {
+        type Writer = Self;
+
+        fn make_writer(&self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    /// What `log` wrote, with the formatter's trailing break removed.
+    fn captured_output(log: impl FnOnce()) -> String {
+        let captured = Captured::default();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_writer(captured.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, log);
+
+        let logged = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
+        logged.strip_suffix('\n').unwrap_or(&logged).to_owned()
+    }
+
+    /// `RCEvent::Error`'s sink, which logged `?e`: anyhow's Debug writes the
+    /// message and its cause chain as they came.
+    #[test]
+    fn a_newline_in_a_client_session_error_cannot_forge_a_log_record() {
+        let error = anyhow::anyhow!(
+            "permission denied\n  ERROR warpgate::ssh: Authenticated with publickey"
+        );
+        assert!(
+            format!("{error:?}").contains('\n'),
+            "the fixture's Debug carries no raw newline, so nothing below is evidence"
+        );
+
+        let record = captured_output(|| log_client_session_error(&error));
+        assert!(
+            !record.contains('\n'),
+            "the error forged a second record: {record:?}"
+        );
+        assert!(
+            record.contains("\\n"),
+            "the error never reached the log: {record:?}"
+        );
+    }
 
     #[test]
     fn rejected_public_key_auth_advertises_only_configured_methods() {
@@ -1354,7 +1433,7 @@ impl ServerSession {
             }
             RCEvent::Error(e) => {
                 self.service_output.stop_progress();
-                error!(error=?e, "Client session error");
+                log_client_session_error(&e);
                 let _ = self.emit_pty_error(&format!("Error: {}", client_error_message(&e)));
                 self.disconnect_server().await;
             }
