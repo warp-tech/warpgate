@@ -262,6 +262,14 @@ MUTATIONS = [
         '    #[error("Vault returned {status}: {body}")]',
     ),
     (
+        # The target's own text, put in a record by the client. Reverted to the
+        # Display interpolation it had.
+        "logging: an X11 originator address is escaped before it reaches the log",
+        "warpgate-protocol-ssh/src/client/mod.rs",
+        '    info!(?originator_address, originator_port, "New X11 connection");',
+        '    info!("New X11 connection from {originator_address}:{originator_port:?}");',
+    ),
+    (
         # The generic per-event debug record, written before any of the escaped
         # sinks the event then reaches. Reverted to `?event`, which writes an
         # `RCEvent::Error`'s anyhow text raw.
@@ -898,6 +906,9 @@ DISCRIMINATES = {
         # Display is raw, which is the only thing this sink is left standing
         # between.
         "a_newline_in_an_anyhow_inside_a_connection_error_cannot_forge_a_log_record"
+    ],
+    "logging: an X11 originator address is escaped before it reaches the log": [
+        "a_newline_in_an_x11_originator_address_cannot_forge_a_log_record"
     ],
     "logging: a remote event is escaped in the generic debug record": [
         "a_newline_in_a_remote_event_cannot_forge_a_debug_record"

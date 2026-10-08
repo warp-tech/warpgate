@@ -280,7 +280,7 @@ mod tests {
         ConnectionError, log_client_session_error, log_remote_event, log_target_connection_failure,
         reject_with_allowed_auth_methods,
     };
-    use crate::client::log_command_loop_error;
+    use crate::client::{log_command_loop_error, log_x11_connection};
     use crate::{RCEvent, SshClientError};
 
     /// `tracing-subscriber` ships no `MakeWriter` for a buffer the test can
@@ -476,6 +476,27 @@ mod tests {
         assert!(
             record.contains("\\n"),
             "the error never reached the log: {record:?}"
+        );
+    }
+
+    /// The target chooses the X11 originator address, and it arrives here as
+    /// it sent it.
+    #[test]
+    fn a_newline_in_an_x11_originator_address_cannot_forge_a_log_record() {
+        let address = "10.0.0.1\n  ERROR warpgate::ssh: Authenticated with certificate";
+
+        let record = captured_output(|| log_x11_connection(address, 6000));
+        assert!(
+            record.contains("New X11 connection"),
+            "no record was written, so nothing below is evidence: {record:?}"
+        );
+        assert!(
+            !record.contains('\n'),
+            "the address forged a second record: {record:?}"
+        );
+        assert!(
+            record.contains("\\n"),
+            "the address never reached the log: {record:?}"
         );
     }
 

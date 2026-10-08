@@ -1357,7 +1357,7 @@ impl RemoteClient {
                         let _ = self.tx.send(RCEvent::ForwardedAgent(id)).await;
                     }
                     ClientHandlerEvent::X11(channel, originator_address, originator_port) => {
-                        info!("New X11 connection from {originator_address}:{originator_port:?}");
+                        log_x11_connection(&originator_address, originator_port);
                         let id = self.setup_server_initiated_channel(channel).await?;
                         let _ = self
                             .tx
@@ -2495,6 +2495,20 @@ impl Drop for RemoteClient {
 /// unescaped, so remote text in any link of it forges a record. Named so a test
 /// can stand at it; `#[deny(dead_code)]` stops a revert to logging inline from
 /// leaving only the test calling this.
+/// The record of an X11 channel the target opened.
+///
+/// The originator address is the target's own text, forwarded unchanged by
+/// `server_channel_open_x11`. Interpolated with Display, a newline in it forges
+/// a record; as a field its `Debug` escapes it.
+#[deny(dead_code)]
+#[allow(
+    clippy::redundant_pub_crate,
+    reason = "`pub` would re-export it through `pub use client::*`, and a public item is never dead code, which is what ties the call site to this sink"
+)]
+pub(crate) fn log_x11_connection(originator_address: &str, originator_port: u32) {
+    info!(?originator_address, originator_port, "New X11 connection");
+}
+
 #[deny(dead_code)]
 #[allow(
     clippy::redundant_pub_crate,
