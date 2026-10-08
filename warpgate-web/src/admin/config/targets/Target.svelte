@@ -69,7 +69,11 @@
         return allRoles
     }
 
-    const loadRolesPromise = loadRoles()
+    // Share a single init() so `target` is loaded before roles: loadRoles()
+    // guards on `!target` and, if run eagerly here, returns [] before init()
+    // resolves -- leaving the "Allow access for roles" list permanently empty.
+    const initPromise = init()
+    const loadRolesPromise = initPromise.then(() => loadRoles())
 
     async function update() {
         if (!target) return
@@ -126,7 +130,7 @@
     }
 </script>
 
-<Loadable promise={init()} bind:value={target}>
+<Loadable promise={initPromise} bind:value={target}>
     {#snippet children(target)}
         <div class="main-container container-max-lg">
             <div class="flex-grow-1">

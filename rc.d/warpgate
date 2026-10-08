@@ -1,0 +1,36 @@
+#!/bin/sh
+
+# PROVIDE: warpgate
+# REQUIRE: NETWORKING
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="warpgate"
+rcvar="warpgate_enable"
+
+load_rc_config $name
+
+: ${warpgate_enable:="NO"}
+: ${warpgate_config:="/etc/warpgate.yaml"}
+: ${warpgate_logfile:="/var/log/warpgate.log"}
+
+command="/usr/local/bin/warpgate"
+# procname must match the full path as returned by ps -o command=
+# rc.subr uses this for process identification in status and stop
+procname="/usr/local/bin/warpgate"
+pidfile="/var/run/${name}.pid"
+
+start_cmd="warpgate_start"
+stop_postcmd="rm -f ${pidfile}"
+
+warpgate_start()
+{
+    touch "${warpgate_logfile}"
+    chmod 640 "${warpgate_logfile}"
+    echo "Starting ${name}."
+    ${command} --config ${warpgate_config} run >> ${warpgate_logfile} 2>&1 &
+    echo $! > ${pidfile}
+}
+
+run_rc_command "$1"
