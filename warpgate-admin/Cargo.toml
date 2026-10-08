@@ -43,4 +43,8 @@ warpgate-protocol-ssh = { path = "../warpgate-protocol-ssh" }
 warpgate-tls = { path = "../warpgate-tls" }
 
 [dev-dependencies]
+tracing-subscriber = { version = "0.3", default-features = false, features = [
+    "fmt",
+    "std",
+] }
 warpgate-db-migrations = { path = "../warpgate-db-migrations", features = ["sqlite"] }
