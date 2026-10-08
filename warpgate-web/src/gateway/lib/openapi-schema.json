@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.29.1-16-ge7b4703c-modified"
+    "version": "v0.29.1-26-gdf7b889a-modified"
   },
   "servers": [
     {
@@ -2214,6 +2214,10 @@
           },
           "show_session_menu": {
             "type": "boolean"
+          },
+          "logo_etag": {
+            "type": "string",
+            "description": "Content hash of the custom logo, `None` when unset. Changes whenever the\nlogo does, so it keys the logo URL (`/api/logo?v=…`) for long-lived caching."
           },
           "config_warnings": {
             "type": "array",
