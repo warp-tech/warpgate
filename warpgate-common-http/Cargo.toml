@@ -6,19 +6,23 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
+anyhow.workspace = true
 html-escape.workspace = true
 poem.workspace = true
 poem-openapi.workspace = true
+rustls.workspace = true
 serde.workspace = true
-subtle.workspace = true
 tokio.workspace = true
+tokio-rustls = { version = "0.26", default-features = false }
 tracing.workspace = true
 url.workspace = true
 uuid.workspace = true
+warpgate-ca = { path = "../warpgate-ca" }
 warpgate-common = { path = "../warpgate-common" }
 warpgate-core = { path = "../warpgate-core" }
 warpgate-db-entities = { path = "../warpgate-db-entities" }
+warpgate-tls = { path = "../warpgate-tls" }
 
 [dev-dependencies]
-anyhow.workspace = true
+rcgen.workspace = true
 thiserror.workspace = true

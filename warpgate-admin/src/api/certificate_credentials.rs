@@ -124,7 +124,7 @@ impl ListApi {
         let db = &admin.services().db;
         let params = admin.parameters().await?;
         let ca =
-            warpgate_ca::deserialize_ca(&params.ca_certificate_pem, &params.ca_private_key_pem)?;
+            warpgate_ca::deserialize_ca(&params.ca_certificate_pem, &params.ca_private_key()?)?;
         let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
             return Ok(IssueCertificateCredentialResponse::NotFound);
         };

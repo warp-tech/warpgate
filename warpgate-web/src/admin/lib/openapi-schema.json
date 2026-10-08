@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.29.1-26-gdf7b889a-modified"
+    "version": "v0.29.1-38-ge278f699-modified"
   },
   "servers": [
     {
@@ -103,7 +103,7 @@
             "CookieSecurityScheme": []
           },
           {
-            "ClusterTokenSecurityScheme": []
+            "ClusterPeerSecurityScheme": []
           }
         ],
         "operationId": "close_all_sessions"
@@ -222,7 +222,7 @@
             "CookieSecurityScheme": []
           },
           {
-            "ClusterTokenSecurityScheme": []
+            "ClusterPeerSecurityScheme": []
           }
         ],
         "operationId": "close_session"
@@ -266,7 +266,7 @@
             "CookieSecurityScheme": []
           },
           {
-            "ClusterTokenSecurityScheme": []
+            "ClusterPeerSecurityScheme": []
           }
         ],
         "operationId": "get_recording"
@@ -2313,7 +2313,7 @@
             "CookieSecurityScheme": []
           },
           {
-            "ClusterTokenSecurityScheme": []
+            "ClusterPeerSecurityScheme": []
           }
         ],
         "operationId": "delete_user"
@@ -6652,8 +6652,7 @@
             "type": "boolean"
           },
           "logo_etag": {
-            "type": "string",
-            "description": "Content hash of the custom logo, `None` when unset; the image itself is\nserved by the gateway `/api/logo` endpoint."
+            "type": "string"
           },
           "web_auth_max_age_seconds": {
             "type": "integer",
@@ -9079,10 +9078,10 @@
       }
     },
     "securitySchemes": {
-      "ClusterTokenSecurityScheme": {
+      "ClusterPeerSecurityScheme": {
         "type": "apiKey",
-        "description": "Peer-to-peer cluster token.",
-        "name": "X-Warpgate-Cluster-Token",
+        "description": "Peer-forwarded request.",
+        "name": "X-Warpgate-Cluster-Node",
         "in": "header"
       },
       "CookieSecurityScheme": {

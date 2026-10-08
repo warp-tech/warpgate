@@ -1,15 +1,21 @@
+use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::Arc;
 
 use rustls::client::WebPkiServerVerifier;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::crypto::CryptoProvider;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
+use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
-use rustls::{CertificateError, ClientConfig, Error as TlsError, SignatureScheme};
+use rustls::{
+    CertificateError, ClientConfig, DigitallySignedStruct, Error as TlsError, SignatureScheme,
+};
 use rustls_pki_types::pem::PemObject;
+use warpgate_ca::ClusterTlsIdentity;
 
-use super::{ROOT_CERT_STORE, RustlsSetupError};
+use super::{ROOT_CERT_STORE, RustlsSetupError, TlsCertificateAndPrivateKey};
 
 #[derive(Debug)]
 pub struct ResolveServerCert(pub Arc<CertifiedKey>);
@@ -18,6 +24,145 @@ impl ResolvesServerCert for ResolveServerCert {
     fn resolve(&self, _: ClientHello) -> Option<Arc<CertifiedKey>> {
         Some(self.0.clone())
     }
+}
+
+/// Picks the certificate whose SAN matches the requested SNI name, falling back
+/// to the first certificate for clients that send no SNI or an unknown name.
+#[derive(Debug)]
+pub struct SniCertResolver {
+    fallback: Arc<CertifiedKey>,
+    by_name: HashMap<String, Arc<CertifiedKey>>,
+}
+
+impl SniCertResolver {
+    /// The first certificate is the fallback; every certificate (including the
+    /// first) is also registered under each of its SAN names.
+    pub fn new(
+        mut certificates: impl Iterator<Item = TlsCertificateAndPrivateKey>,
+    ) -> Result<Self, RustlsSetupError> {
+        let primary = certificates
+            .next()
+            .ok_or(RustlsSetupError::NoCertificates)?;
+        let fallback = Arc::new(CertifiedKey::from(primary.clone()));
+        let mut by_name = HashMap::new();
+        for cert in std::iter::once(primary).chain(certificates) {
+            let names = cert.certificate.sni_names()?;
+            let key = Arc::new(CertifiedKey::from(cert));
+            for name in names {
+                by_name.insert(name, key.clone());
+            }
+        }
+        Ok(Self { fallback, by_name })
+    }
+}
+
+impl ResolvesServerCert for SniCertResolver {
+    fn resolve(&self, client_hello: ClientHello) -> Option<Arc<CertifiedKey>> {
+        Some(
+            client_hello
+                .server_name()
+                .and_then(|name| self.by_name.get(name))
+                .unwrap_or(&self.fallback)
+                .clone(),
+        )
+    }
+}
+
+/// Client certificate verifier that proves the peer holds the presented
+/// certificate's private key (by verifying the handshake signature) but does
+/// **not** validate the certificate chain against a trust anchor. Who the
+/// certificate belongs to is decided after the handshake: by Warpgate's
+/// credential database for Kubernetes clients, by the `nodes` SPKI pins for
+/// cluster peers.
+#[derive(Debug)]
+pub struct PossessionOnlyClientCertVerifier {
+    provider: Arc<CryptoProvider>,
+    mandatory: bool,
+}
+
+impl PossessionOnlyClientCertVerifier {
+    /// A client may connect without a certificate.
+    pub const fn optional(provider: Arc<CryptoProvider>) -> Self {
+        Self {
+            provider,
+            mandatory: false,
+        }
+    }
+
+    /// The handshake fails unless the client presents a certificate.
+    pub const fn mandatory(provider: Arc<CryptoProvider>) -> Self {
+        Self {
+            provider,
+            mandatory: true,
+        }
+    }
+}
+
+impl ClientCertVerifier for PossessionOnlyClientCertVerifier {
+    fn offer_client_auth(&self) -> bool {
+        true
+    }
+
+    fn client_auth_mandatory(&self) -> bool {
+        self.mandatory
+    }
+
+    fn verify_client_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _now: UnixTime,
+    ) -> Result<ClientCertVerified, TlsError> {
+        Ok(ClientCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, TlsError> {
+        rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &self.provider.signature_verification_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, TlsError> {
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &self.provider.signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.provider
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
+
+    fn root_hint_subjects(&self) -> &[rustls::DistinguishedName] {
+        &[]
+    }
+}
+
+/// The identity's certificate chain and key in rustls form.
+pub fn cluster_identity_certified_key(
+    identity: &ClusterTlsIdentity,
+) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>), RustlsSetupError> {
+    let certs = CertificateDer::pem_slice_iter(identity.certificate_pem.as_bytes())
+        .collect::<Result<Vec<_>, _>>()?;
+    let key = PrivateKeyDer::from_pem_slice(identity.private_key_pem.as_bytes())?;
+    Ok((certs, key))
 }
 
 pub async fn configure_tls_connector(
@@ -191,12 +336,15 @@ impl ClusterPeerVerifier {
     }
 }
 
-/// A TLS client config trusting only the cluster peer with
-/// specific pinned certificate
+/// A TLS client config trusting only the cluster peer with the pinned
+/// certificate, and presenting this node's own identity so the peer can pin
+/// us in turn.
 pub fn configure_cluster_tls_connector(
     ca_certificate_pem: &[u8],
     expected_spki_sha256_hex: String,
+    identity: &ClusterTlsIdentity,
 ) -> Result<ClientConfig, RustlsSetupError> {
+    let (certs, key) = cluster_identity_certified_key(identity)?;
     Ok(
         ClientConfig::builder_with_provider(
             Arc::new(rustls::crypto::aws_lc_rs::default_provider()),
@@ -207,7 +355,7 @@ pub fn configure_cluster_tls_connector(
             ca_certificate_pem,
             expected_spki_sha256_hex,
         )?))
-        .with_no_client_auth(),
+        .with_client_auth_cert(certs, key)?,
     )
 }
 
@@ -266,7 +414,6 @@ impl ServerCertVerifier for ClusterPeerVerifier {
 
 #[cfg(test)]
 mod tests {
-    use rustls::pki_types::PrivateKeyDer;
     use rustls::{ClientConnection, ServerConnection};
 
     use super::*;
@@ -303,52 +450,83 @@ mod tests {
         Ok(())
     }
 
-    fn connections(expected_pin: String) -> (warpgate_ca::ClusterTlsIdentity, ClientConnection) {
+    /// The server's identity, the client's identity (same CA) and a client
+    /// connection expecting the given pin (empty = the server's real pin).
+    fn connections(
+        expected_pin: String,
+    ) -> (ClusterTlsIdentity, ClusterTlsIdentity, ClientConnection) {
         let (ca_cert, ca_key) = warpgate_ca::issue_ca_root_certificate().unwrap();
-        let identity = warpgate_ca::ClusterTlsIdentity::issue(&ca_cert, &ca_key).unwrap();
+        let server_identity = ClusterTlsIdentity::issue(&ca_cert, &ca_key).unwrap();
+        let client_identity = ClusterTlsIdentity::issue(&ca_cert, &ca_key).unwrap();
 
         let pin = if expected_pin.is_empty() {
-            identity.spki_sha256_hex.clone()
+            server_identity.spki_sha256_hex.clone()
         } else {
             expected_pin
         };
-        let client_config = configure_cluster_tls_connector(ca_cert.as_bytes(), pin).unwrap();
+        let client_config =
+            configure_cluster_tls_connector(ca_cert.as_bytes(), pin, &client_identity).unwrap();
         let client = ClientConnection::new(
             Arc::new(client_config),
             ServerName::try_from(warpgate_ca::CLUSTER_TLS_SNI_NAME).unwrap(),
         )
         .unwrap();
-        (identity, client)
+        (server_identity, client_identity, client)
     }
 
-    fn server(identity: &warpgate_ca::ClusterTlsIdentity) -> ServerConnection {
-        let certs = CertificateDer::pem_slice_iter(identity.certificate_pem.as_bytes())
-            .collect::<Result<Vec<_>, _>>()
+    fn server(identity: &ClusterTlsIdentity) -> ServerConnection {
+        let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+        let (certs, key) = cluster_identity_certified_key(identity).unwrap();
+        let config = rustls::ServerConfig::builder_with_provider(provider.clone())
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_client_cert_verifier(Arc::new(PossessionOnlyClientCertVerifier::mandatory(
+                provider,
+            )))
+            .with_single_cert(certs, key)
             .unwrap();
-        let key = PrivateKeyDer::from_pem_slice(identity.private_key_pem.as_bytes()).unwrap();
-        let config = rustls::ServerConfig::builder_with_provider(Arc::new(
-            rustls::crypto::aws_lc_rs::default_provider(),
-        ))
-        .with_safe_default_protocol_versions()
-        .unwrap()
-        .with_no_client_auth()
-        .with_single_cert(certs, key)
-        .unwrap();
         ServerConnection::new(Arc::new(config)).unwrap()
     }
 
     #[test]
-    fn cluster_handshake_succeeds() {
+    fn cluster_handshake_succeeds_and_exposes_the_client_certificate() {
         install_crypto_provider();
-        let (identity, mut client) = connections(String::new());
-        let mut srv = server(&identity);
+        let (server_identity, client_identity, mut client) = connections(String::new());
+        let mut srv = server(&server_identity);
         handshake(&mut client, &mut srv).unwrap();
+        let peer = srv.peer_certificates().unwrap().first().unwrap();
+        assert_eq!(
+            warpgate_ca::certificate_der_spki_sha256_hex(peer.as_ref()).unwrap(),
+            client_identity.spki_sha256_hex,
+        );
     }
 
     #[test]
     fn cluster_handshake_rejects_wrong_pin() {
         install_crypto_provider();
-        let (identity, mut client) = connections("00".repeat(32));
+        let (server_identity, _, mut client) = connections("00".repeat(32));
+        let mut srv = server(&server_identity);
+        assert!(handshake(&mut client, &mut srv).is_err());
+    }
+
+    #[test]
+    fn mandatory_verifier_rejects_a_client_without_a_certificate() {
+        install_crypto_provider();
+        let (ca_cert, ca_key) = warpgate_ca::issue_ca_root_certificate().unwrap();
+        let identity = ClusterTlsIdentity::issue(&ca_cert, &ca_key).unwrap();
+        let client_config = ClientConfig::builder_with_provider(Arc::new(
+            rustls::crypto::aws_lc_rs::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(DummyTlsVerifier))
+        .with_no_client_auth();
+        let mut client = ClientConnection::new(
+            Arc::new(client_config),
+            ServerName::try_from(warpgate_ca::CLUSTER_TLS_SNI_NAME).unwrap(),
+        )
+        .unwrap();
         let mut srv = server(&identity);
         assert!(handshake(&mut client, &mut srv).is_err());
     }

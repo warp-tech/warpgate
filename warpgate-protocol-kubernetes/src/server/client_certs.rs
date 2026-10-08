@@ -6,89 +6,12 @@ use base64::{self, Engine};
 use poem::Addr;
 use poem::listener::Acceptor;
 use poem::web::RemoteAddr;
-use rustls::crypto::CryptoProvider;
-use rustls::pki_types::{CertificateDer, UnixTime};
-use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
-use rustls::{DigitallySignedStruct, ServerConfig, SignatureScheme};
+use rustls::ServerConfig;
 use tokio::time::timeout;
 use tokio_rustls::server::TlsStream;
 use tracing::{debug, warn};
 use warpgate_common::helpers::concurrent_acceptor::ConcurrentAcceptor;
-
-/// Client certificate verifier that proves the peer holds the presented
-/// certificate's private key (by verifying the handshake signature) but does
-/// **not** validate the certificate chain against a trust anchor. The
-/// certificate's identity is matched against Warpgate's credential database
-/// afterwards in [`crate::server::auth::validate_client_certificate`].
-#[derive(Debug)]
-pub struct AcceptAnyClientCert {
-    provider: Arc<CryptoProvider>,
-}
-
-impl AcceptAnyClientCert {
-    pub const fn new(provider: Arc<CryptoProvider>) -> Self {
-        Self { provider }
-    }
-}
-
-impl ClientCertVerifier for AcceptAnyClientCert {
-    fn offer_client_auth(&self) -> bool {
-        true
-    }
-
-    fn client_auth_mandatory(&self) -> bool {
-        false
-    }
-
-    fn verify_client_cert(
-        &self,
-        _end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _now: UnixTime,
-    ) -> Result<ClientCertVerified, rustls::Error> {
-        // Accept any client certificate - we'll extract and validate it later
-        debug!("Client certificate received, accepting for later validation");
-        Ok(ClientCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.provider.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.provider.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.provider
-            .signature_verification_algorithms
-            .supported_schemes()
-    }
-
-    fn root_hint_subjects(&self) -> &[rustls::DistinguishedName] {
-        &[]
-    }
-}
+use warpgate_common_http::logging::remote_addr_string;
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -125,14 +48,9 @@ fn embed_client_certificate<T>(tls_stream: &TlsStream<T>, remote_addr: RemoteAdd
         return remote_addr;
     };
     let cert_b64 = base64::engine::general_purpose::STANDARD.encode(&cert_der);
-    let original_remote_addr_str = match &remote_addr.0 {
-        Addr::SocketAddr(addr) => addr.to_string(),
-        Addr::Unix(_) => remote_addr.to_string(),
-        Addr::Custom(_, _) => "".into(),
-    };
     RemoteAddr(Addr::Custom(
         "captured-cert",
-        format!("{original_remote_addr_str}|cert:{cert_b64}").into(),
+        format!("{}|cert:{cert_b64}", remote_addr_string(&remote_addr)).into(),
     ))
 }
 
@@ -245,8 +163,9 @@ mod tests {
     use tokio::net::TcpStream;
     use tokio::time::timeout;
     use tokio_rustls::TlsConnector;
+    use warpgate_tls::PossessionOnlyClientCertVerifier;
 
-    use super::{AcceptAnyClientCert, certificate_capturing_acceptor};
+    use super::certificate_capturing_acceptor;
 
     #[tokio::test]
     async fn stalled_tls_handshake_does_not_block_later_connections() {
@@ -264,7 +183,9 @@ mod tests {
         let server_config = ServerConfig::builder_with_provider(provider.clone())
             .with_safe_default_protocol_versions()
             .unwrap()
-            .with_client_cert_verifier(Arc::new(AcceptAnyClientCert::new(provider.clone())))
+            .with_client_cert_verifier(Arc::new(PossessionOnlyClientCertVerifier::optional(
+                provider.clone(),
+            )))
             .with_single_cert(vec![certificate_der.clone()], private_key.into())
             .unwrap();
 

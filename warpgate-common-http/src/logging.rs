@@ -8,18 +8,26 @@ use warpgate_core::{Services, WarpgateServerHandle};
 
 use crate::request::trusted_client_ip;
 
+/// The bare `ip:port` of a connection, for acceptors that annotate the
+/// [`RemoteAddr`] as `ip:port|...` (see [`raw_remote_ip`]).
+pub fn remote_addr_string(remote_addr: &RemoteAddr) -> String {
+    match &remote_addr.0 {
+        Addr::SocketAddr(addr) => addr.to_string(),
+        other => other.to_string(),
+    }
+}
+
 /// The peer IP of the connection itself, ignoring any forwarding headers.
 pub fn raw_remote_ip(req: &Request) -> Option<String> {
     let socket_addr = match req.remote_addr() {
-        // See [CertificateExtractorEndpoint]
-        RemoteAddr(Addr::Custom("captured-cert", value)) => {
-            #[allow(clippy::unwrap_used)]
-            let original_remote_addr = value.split('|').next().unwrap();
-            original_remote_addr
-                .to_socket_addrs()
-                .ok()
-                .and_then(|i| i.into_iter().next())
-        }
+        // Acceptors that learn something during the TLS handshake (a captured
+        // client certificate, an authenticated cluster peer) smuggle it after
+        // the socket address as `ip:port|...`
+        RemoteAddr(Addr::Custom(_, value)) => value
+            .split('|')
+            .next()
+            .and_then(|addr| addr.to_socket_addrs().ok())
+            .and_then(|mut addrs| addrs.next()),
         other => other.as_socket_addr().copied(),
     };
 
@@ -32,12 +40,7 @@ pub async fn get_client_ip(req: &Request, services: &Services) -> Option<String>
         config.store.http.trust_x_forwarded_headers
     };
 
-    trusted_client_ip(
-        req,
-        &services.cluster.cluster_token,
-        raw_remote_ip(req),
-        trust_x_forwarded_headers,
-    )
+    trusted_client_ip(req, raw_remote_ip(req), trust_x_forwarded_headers)
 }
 
 pub async fn get_client_ip_addr(req: &Request, services: &Services) -> Option<IpAddr> {

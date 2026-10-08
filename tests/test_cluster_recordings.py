@@ -1,22 +1,107 @@
 import base64
 import json
+import socket
+import ssl
+import tempfile
 import time
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import requests
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from .api_client import admin_client, sdk
 from .conftest import ProcessManager
 from .test_ssh_proto import common_args, setup_user_and_target
 from .util import open_wg_sqlite_db, read_until, wait_port
 
+CLUSTER_SNI = "warpgate-cluster.internal"
 
-def _cluster_token(config_path):
-    """The auto-generated cluster token, read from the node's database."""
+
+def _instance_ca(config_path):
+    """The instance CA (cert PEM, key PEM) as a database reader sees it."""
     with open_wg_sqlite_db(config_path) as db:
-        row = db.execute("SELECT cluster_token FROM parameters").fetchone()
-    assert row and row[0], "cluster token was not generated"
-    return row[0]
+        row = db.execute(
+            "SELECT ca_certificate_pem, ca_private_key_pem FROM parameters"
+        ).fetchone()
+    assert row and row[0] and row[1], "instance CA missing"
+    return row[0], row[1]
+
+
+def _mint_peer_lookalike(ca_cert_pem, ca_key_pem):
+    """A certificate shaped like a node identity, for a key no node has
+    published. Signed by the real instance CA when a database reader can get
+    at its key; when the key is enveloped (an encryption key is configured,
+    e.g. via a `.env` dotenv picks up) the lookalike is self-signed, which the
+    pin check must reject just the same."""
+    key = ec.generate_private_key(ec.SECP384R1())
+    if ca_key_pem.startswith("wgenc:"):
+        issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "rogue")])
+        signer = key
+    else:
+        issuer = x509.load_pem_x509_certificate(ca_cert_pem.encode()).subject
+        signer = serialization.load_pem_private_key(ca_key_pem.encode(), password=None)
+    now = datetime.now(timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, CLUSTER_SNI)]))
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(hours=1))
+        .not_valid_after(now + timedelta(days=1))
+        .add_extension(x509.SubjectAlternativeName([x509.DNSName(CLUSTER_SNI)]), False)
+        .add_extension(
+            x509.ExtendedKeyUsage(
+                [ExtendedKeyUsageOID.SERVER_AUTH, ExtendedKeyUsageOID.CLIENT_AUTH]
+            ),
+            False,
+        )
+        .sign(signer, hashes.SHA384())
+    )
+    return (
+        cert.public_bytes(serialization.Encoding.PEM),
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ),
+    )
+
+
+def _peer_request(port, client_cert, identity, timeout):
+    """Talks to the node the way a peer would (cluster SNI, optional client
+    cert, forwarded identity header). Returns the HTTP status, or None when
+    the node refused the connection at or right after the TLS handshake."""
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    if client_cert:
+        cert_pem, key_pem = client_cert
+        with tempfile.NamedTemporaryFile(suffix=".pem") as f:
+            f.write(cert_pem + key_pem)
+            f.flush()
+            ctx.load_cert_chain(f.name)
+    request = (
+        "GET /@warpgate/admin/api/sessions HTTP/1.1\r\n"
+        f"Host: {CLUSTER_SNI}\r\n"
+        f"X-Warpgate-Cluster-Node: {uuid4()}\r\n"
+        f"X-Warpgate-Cluster-Identity: {identity}\r\n"
+        "Connection: close\r\n\r\n"
+    ).encode()
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout) as tcp:
+            with ctx.wrap_socket(tcp, server_hostname=CLUSTER_SNI) as tls:
+                tls.sendall(request)
+                head = tls.recv(64)
+    except (ssl.SSLError, ConnectionError, TimeoutError):
+        return None
+    if not head.startswith(b"HTTP/1.1 "):
+        return None
+    return int(head.split(b" ")[1])
 
 
 def _find_in_progress_terminal_recording_id(api):
@@ -93,17 +178,20 @@ class Test:
                 recorded += base64.b64decode(item["data"])
         assert marker.encode() in recorded, "proxied recording is missing the marker"
 
-        # The cluster token is scoped to recordings: it must NOT reach general
-        # admin endpoints, while the admin token still does.
-        scoped = requests.get(
-            f"{url_b}/@warpgate/admin/api/sessions",
-            headers={"X-Warpgate-Cluster-Token": _cluster_token(node_a.config_path)},
-            verify=False,
-            timeout=timeout,
-        )
+        # Peer forwarding runs the request as the user named in the identity
+        # header, so a peer is only ever trusted on a connection that proved a
+        # node's pinned TLS key. Everything a database reader can get at - the
+        # instance CA included - must not be enough to pose as a peer.
+        with admin_client(url_b) as api:
+            admin_user_id = next(u.id for u in api.get_users() if u.username == "admin")
+        ca_cert_pem, ca_key_pem = _instance_ca(node_a.config_path)
+        lookalike = _mint_peer_lookalike(ca_cert_pem, ca_key_pem)
         assert (
-            scoped.status_code != 200
-        ), f"cluster token must not reach /sessions: {scoped.status_code}"
+            _peer_request(node_b.http_port, lookalike, admin_user_id, timeout) is None
+        ), "a CA-signed but unpinned certificate must not reach the admin API"
+        assert (
+            _peer_request(node_b.http_port, None, admin_user_id, timeout) is None
+        ), "the cluster SNI must demand a client certificate"
         admin = requests.get(
             f"{url_b}/@warpgate/admin/api/sessions",
             headers={"X-Warpgate-Token": "token-value"},

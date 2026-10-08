@@ -9341,16 +9341,20 @@ dependencies = [
  "html-escape",
  "poem",
  "poem-openapi",
+ "rcgen",
+ "rustls 0.23.45",
  "serde",
- "subtle",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-rustls 0.26.4",
  "tracing",
  "url",
  "uuid",
+ "warpgate-ca",
  "warpgate-common",
  "warpgate-core",
  "warpgate-db-entities",
+ "warpgate-tls",
 ]
 
 [[package]]
