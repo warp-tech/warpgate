@@ -4,13 +4,11 @@ use std::sync::Arc;
 use sea_orm::sea_query::IntoCondition;
 use sea_orm::{EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
-use tracing::{error, warn};
+use tracing::warn;
 use warpgate_common::auth::{ApprovalKind, RememberApprovalBy};
 use warpgate_common::{UserSessionId, WarpgateError};
 use warpgate_db_entities::SessionApprovalRequest;
-use warpgate_db_entities::SessionApprovalRequest::{
-    Advertised, UndecidedApprovalRequestStatus, mark_consumed,
-};
+use warpgate_db_entities::SessionApprovalRequest::{Advertised, mark_consumed};
 
 use super::*;
 use crate::cluster::ClusterNotification;
@@ -198,26 +196,28 @@ impl Services {
                 guard.decided(started);
                 decision
             }
-            DecisionWaitOutcome::TimedOut => match guard.close_timed_out().await {
-                // The guard audits the timeout when its close is what ended it
-                Ok(TimeoutClose::Closed | TimeoutClose::Ended) => return Ok(GateOutcome::Expired),
-                // A decision that beat the close stands, so the session gets what
-                // the record says
-                Ok(TimeoutClose::Decided(decision)) => decision,
-                // Not `Expired`: the question is still open and can yet be
-                // approved, so a session told it timed out would be told
-                // something the record contradicts. Every caller denies on an
-                // error, and the guard's drop retries the close.
-                Err(error) => {
-                    error!(
-                        %error,
-                        %session_id,
-                        target = %subject.target_name,
-                        "Failed to close a timed-out approval request"
-                    );
-                    return Err(error.into());
+            // Closed before returning: `Expired` ends the session, and a
+            // question left open past that point could still be approved
+            DecisionWaitOutcome::TimedOut => {
+                if close_timed_out(&self.db, &subject).await? {
+                    return Ok(GateOutcome::Expired);
                 }
-            },
+                // A decision landed between the last poll and the close
+                match row_decision(
+                    &self.db,
+                    session_id,
+                    ApprovalKind::Admin,
+                    &subject.target_name,
+                )
+                .await?
+                {
+                    Some((decision, started)) => {
+                        guard.decided(started);
+                        decision
+                    }
+                    None => return Ok(GateOutcome::Expired),
+                }
+            }
             DecisionWaitOutcome::Ended => return Ok(GateOutcome::Expired),
         };
 
@@ -293,12 +293,7 @@ impl Services {
                 #[allow(clippy::cast_possible_wrap)]
                 let window = time::Duration::seconds(timeout.as_secs() as i64);
                 if time::OffsetDateTime::now_utc() - row.started >= window {
-                    close_detached(
-                        self.db.clone(),
-                        subject.clone(),
-                        UndecidedApprovalRequestStatus::TimedOut,
-                    )
-                    .await?;
+                    close_timed_out(&self.db, &subject).await?;
                     if matches!(
                         self.announce_admin_request(&subject).await?,
                         Advertised::TicketExhausted
