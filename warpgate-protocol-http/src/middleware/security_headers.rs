@@ -1,29 +1,6 @@
 use poem::{Endpoint, IntoResponse, Middleware, Request, Response};
 use warpgate_common_http::insert_security_headers;
 
-/// Adds the baseline security headers to a Warpgate-generated response,
-/// keeping any value the response already carries (e.g. a custom CSP).
-///
-/// Never apply this to proxied target responses: it would override the
-/// upstream application's own policy.
-pub fn insert_security_headers(headers: &mut HeaderMap) {
-    fn insert_if_absent(headers: &mut HeaderMap, name: HeaderName, value: &'static str) {
-        if !headers.contains_key(&name) {
-            headers.insert(name, HeaderValue::from_static(value));
-        }
-    }
-
-    insert_if_absent(headers, header::CONTENT_SECURITY_POLICY, WARPGATE_CSP);
-    // Prevent MIME type sniffing - not covered by CSP.
-    insert_if_absent(headers, header::X_CONTENT_TYPE_OPTIONS, "nosniff");
-    // Don't leak Warpgate URLs (which may contain target names or tickets)
-    // to third-party origins.
-    insert_if_absent(headers, header::REFERRER_POLICY, "same-origin");
-    // Legacy clickjacking protection for user agents that predate the CSP
-    // `frame-ancestors` directive, which takes precedence when both are present.
-    insert_if_absent(headers, header::X_FRAME_OPTIONS, "SAMEORIGIN");
-}
-
 /// Applies [`insert_security_headers`] to successful responses. Must only wrap
 /// Warpgate-served endpoints; errors get the same headers from `render_errors`.
 #[derive(Clone)]
