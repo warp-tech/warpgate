@@ -291,6 +291,7 @@ mod tests {
 
     use tracing_subscriber::fmt::MakeWriter;
     use warpgate_common::{UserSessionId, WarpgateError};
+    use warpgate_protocol_ssh::SshClientError;
 
     use super::{BrowserNotice, ConnectionError};
 
@@ -322,13 +323,16 @@ mod tests {
         assert_eq!(shown, leaky.client_message());
     }
 
-    /// The other event the browser is told of. `RCEvent::Error` carries an
-    /// `anyhow::Error`; this one interpolates the inner error's text, so its
-    /// top-level `Display` carries the SQL.
+    /// The other event the browser is told of, shaped as the command loop
+    /// sends it: an `SshClientError` from `handle_event`, converted to
+    /// `anyhow::Error`, sent as `RCEvent::Error` unwrapped. `Russh` is chosen
+    /// because its phrase differs from the unknown-type fallback, so the
+    /// assertion on it shows the downcast in `client_error_message` was taken.
     #[test]
     fn a_browser_never_sees_a_client_session_error_s_own_words() {
-        let inner = WarpgateError::Other(format!("database error: {SENTINEL}").into());
-        let leaky = anyhow::anyhow!("Error in command loop: {inner}");
+        let leaky = anyhow::Error::from(SshClientError::Russh(russh::Error::IO(
+            std::io::Error::other(SENTINEL),
+        )));
         assert!(
             leaky.to_string().contains(SENTINEL),
             "the fixture does not carry the sentinel, so nothing below is evidence"
@@ -339,6 +343,25 @@ mod tests {
             !shown.contains(SENTINEL),
             "the raw error reached the browser: {shown}"
         );
+        assert_eq!(shown, "SSH protocol error", "the downcast was not taken");
+    }
+
+    /// An `anyhow::Error` that is not an `SshClientError` — nothing in the
+    /// command loop sends one today — gets the fixed fallback, not its text.
+    #[test]
+    fn an_unrecognised_client_session_error_gets_the_fallback_phrase() {
+        let leaky = anyhow::anyhow!("Error in command loop: database error: {SENTINEL}");
+        assert!(
+            leaky.to_string().contains(SENTINEL),
+            "the fixture does not carry the sentinel, so nothing below is evidence"
+        );
+
+        let shown = BrowserNotice::Client(&leaky).message();
+        assert!(
+            !shown.contains(SENTINEL),
+            "the raw error reached the browser: {shown}"
+        );
+        assert_eq!(shown, "Internal error in the target connection");
     }
 
     /// `tracing-subscriber` ships no `MakeWriter` for a buffer the test can

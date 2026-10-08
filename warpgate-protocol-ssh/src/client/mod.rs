@@ -504,7 +504,7 @@ impl RemoteClient {
                 }
                 .await
                 .map_err(|error| {
-                    error!(?error, "error in command loop");
+                    log_command_loop_error(&error);
                     let err = anyhow::anyhow!("Error in command loop: {error}");
                     let _ = self.tx.try_send(RCEvent::Error(error));
                     err
@@ -1292,6 +1292,24 @@ impl Drop for RemoteClient {
         info!("Closed connection");
         debug!("Dropped");
     }
+}
+
+/// The command loop's own record of the error it ends on, written before the
+/// error is handed on as `RCEvent::Error` and logged again by whichever session
+/// receives it.
+///
+/// Rendered and then escaped, as `log_client_session_error` does: an
+/// `anyhow::Error`'s own `Debug` prints its cause chain on separate lines,
+/// unescaped, so remote text in any link of it forges a record. Named so a test
+/// can stand at it; `#[deny(dead_code)]` stops a revert to logging inline from
+/// leaving only the test calling this.
+#[deny(dead_code)]
+#[allow(
+    clippy::redundant_pub_crate,
+    reason = "`pub` would re-export it through `pub use client::*`, and a public item is never dead code, which is what ties the call site to this sink"
+)]
+pub(crate) fn log_command_loop_error(error: &anyhow::Error) {
+    error!(error = ?format!("{error:#}"), "error in command loop");
 }
 
 #[cfg(test)]
