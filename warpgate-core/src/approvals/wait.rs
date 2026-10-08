@@ -8,8 +8,8 @@ use warpgate_common::auth::ApprovalKind;
 use warpgate_common::helpers::logging::format_related_ids;
 use warpgate_common::{NodeId, UserSessionId, WarpgateError};
 use warpgate_db_entities::SessionApprovalRequest::{
-    self, Advertised, ApprovalActor, UndecidedApprovalRequestStatus, close_request_then,
-    mark_consumed, upsert_request,
+    self, Advertised, ApprovalActor, UndecidedApprovalRequestStatus, close_request, mark_consumed,
+    upsert_request,
 };
 
 use super::*;
@@ -45,20 +45,7 @@ impl Drop for PendingApproval {
         let on_drop = self.on_drop;
         tokio::spawn(async move {
             let result = match on_drop {
-                OnDrop::Close(status) => close_request_then(
-                    &db,
-                    session_id,
-                    ApprovalKind::Admin,
-                    &target,
-                    status,
-                    || {
-                        if status == UndecidedApprovalRequestStatus::TimedOut {
-                            subject.emit_timed_out_event();
-                        }
-                    },
-                )
-                .await
-                .map(|_| ()),
+                OnDrop::Close(status) => close_and_audit(db, subject, status).await.map(|_| ()),
                 OnDrop::Consume(started) => mark_consumed(
                     &db,
                     SessionApprovalRequest::Key::new(session_id, ApprovalKind::Admin, &target),
@@ -94,20 +81,7 @@ impl PendingApproval {
         // Stays armed until the outcome is known, so a failure at either step
         // leaves the drop to try again
         self.on_drop = OnDrop::Close(TimedOut);
-        // Audited the moment the row moves, not after the ticket refund: a
-        // caller cancelled during the refund leaves the row timed out, and the
-        // drop's retry then finds nothing left to close
-        let subject = &self.subject;
-        if close_request_then(
-            &self.db,
-            subject.session_id,
-            ApprovalKind::Admin,
-            &subject.target_name,
-            TimedOut,
-            || subject.emit_timed_out_event(),
-        )
-        .await?
-        {
+        if close_detached(self.db.clone(), self.subject.clone(), TimedOut).await? {
             self.closed = true;
             return Ok(TimeoutClose::Closed);
         }
@@ -130,6 +104,45 @@ impl PendingApproval {
     pub(super) const fn decided(&mut self, started: OffsetDateTime) {
         self.on_drop = OnDrop::Consume(started);
     }
+}
+
+/// Closes an undecided request and audits a timeout, as one unit no caller
+/// can interrupt.
+///
+/// The update, the ticket refund and the audit event are awaits apart, and
+/// SQLite's worker finishes a submitted statement even after its caller is
+/// gone: a gate cancelled part-way — a browser that went away — would leave a
+/// timed-out row with its use unrefunded or its event unwritten. Running here
+/// in a task of its own, the close completes whatever happens to the caller.
+/// Only the close that moved the row audits it, so a retry racing this one
+/// cannot audit twice.
+pub(super) async fn close_detached(
+    db: DatabaseConnection,
+    subject: ApprovalSubject,
+    status: UndecidedApprovalRequestStatus,
+) -> Result<bool, WarpgateError> {
+    tokio::spawn(close_and_audit(db, subject, status))
+        .await
+        .map_err(WarpgateError::other)?
+}
+
+async fn close_and_audit(
+    db: DatabaseConnection,
+    subject: ApprovalSubject,
+    status: UndecidedApprovalRequestStatus,
+) -> Result<bool, WarpgateError> {
+    let moved = close_request(
+        &db,
+        subject.session_id,
+        ApprovalKind::Admin,
+        &subject.target_name,
+        status,
+    )
+    .await?;
+    if moved && status == UndecidedApprovalRequestStatus::TimedOut {
+        subject.emit_timed_out_event();
+    }
+    Ok(moved)
 }
 
 pub(super) enum TimeoutClose {

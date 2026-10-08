@@ -2359,12 +2359,183 @@ mod polled_gate {
         );
     }
 
-    /// The timeout is audited when the row moves, not once the ticket refund
-    /// that follows is done: a gate cancelled during that refund leaves a
-    /// timed-out row behind, and the drop's retry then finds nothing left to
-    /// close or audit.
+    /// A ticket-backed question already asked, with the session's use spent.
+    fn ticketed_question(
+        runtime: &tokio::runtime::Runtime,
+        db: &DatabaseConnection,
+        session_id: UserSessionId,
+    ) -> (ApprovalSubject, Uuid) {
+        let mut subject = plain_subject("a-target");
+        subject.session_id = session_id;
+        let ticket_id = runtime.block_on(async {
+            let ticket_id = ticket_with_uses(db, 0).await;
+            subject.ticket_id = Some(ticket_id);
+            advertise_row(db, session_id, &subject).await;
+            ticket_id
+        });
+        (subject, ticket_id)
+    }
+
+    /// What every cancelled timeout close must still leave behind
+    fn assert_the_close_completed(
+        runtime: &tokio::runtime::Runtime,
+        db: &DatabaseConnection,
+        session_id: UserSessionId,
+        ticket_id: Uuid,
+    ) {
+        assert_eq!(
+            runtime.block_on(status_of(db, session_id, "a-target")),
+            SessionApprovalRequest::ApprovalRequestStatus::TimedOut,
+        );
+        assert_eq!(
+            audited_for(session_id, "SessionApprovalTimedOut1").len(),
+            1,
+            "a timeout that reached the row must be audited exactly once",
+        );
+        assert_eq!(
+            runtime.block_on(uses_left(db, ticket_id)),
+            Some(1),
+            "a question that ended unanswered must give its use back",
+        );
+    }
+
+    /// The gate is cancelled while its timeout update is with SQLite's
+    /// worker: submitted, held behind another writer, not yet returned. The
+    /// worker commits it regardless, so the close must still refund and audit.
     #[test]
-    fn a_timeout_close_cancelled_during_its_refund_is_still_audited() {
+    fn a_timeout_close_cancelled_during_its_update_still_completes() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        audit_events();
+        let runtime = test_runtime();
+        let (shared, db) = runtime.block_on(SharedDb::migrated(None));
+        let session_id = UserSessionId(Uuid::new_v4());
+        let (subject, ticket_id) = ticketed_question(&runtime, &db, session_id);
+
+        // Another writer holds the database, so the update waits in the worker
+        let writer = runtime.block_on(async {
+            let writer = Database::connect(
+                sea_orm::ConnectOptions::new(shared.url.clone())
+                    .max_connections(1)
+                    .to_owned(),
+            )
+            .await
+            .unwrap();
+            writer.execute_unprepared("BEGIN IMMEDIATE").await.unwrap();
+            writer
+        });
+
+        let gate_runtime = test_runtime();
+        let (read_pending, finished) = gate_runtime.block_on(async {
+            let read_pending = Arc::new(AtomicBool::new(false));
+            let flag = read_pending.clone();
+            let mut gate_db = Database::connect(&shared.url).await.unwrap();
+            gate_db.set_metric_callback(move |info| {
+                let sql = &info.statement.sql;
+                if sql.starts_with("SELECT")
+                    && sql.contains("session_approval_requests")
+                    && sql.contains(r#"."status" = "#)
+                {
+                    flag.store(true, Ordering::SeqCst);
+                }
+            });
+
+            let mut guard = PendingApproval::guarding(gate_db, &subject);
+            let mut finished = false;
+            {
+                let close = guard.close_timed_out();
+                tokio::pin!(close);
+                // The close reads the question, then hands its update to the
+                // worker; whether that happened is checked below, not assumed
+                let mut ticks = 0;
+                while ticks < 50 {
+                    tokio::select! {
+                        biased;
+                        _ = &mut close => {
+                            finished = true;
+                            break;
+                        }
+                        () = tokio::time::sleep(Duration::from_millis(1)) => {}
+                    }
+                    if read_pending.load(Ordering::SeqCst) {
+                        ticks += 1;
+                    }
+                }
+            }
+            drop(guard);
+            (read_pending.load(Ordering::SeqCst), finished)
+        });
+        assert!(read_pending, "the close must have read the question");
+        assert!(!finished, "the close must have been cancelled unfinished");
+        assert_eq!(
+            runtime.block_on(status_of(&db, session_id, "a-target")),
+            SessionApprovalRequest::ApprovalRequestStatus::Pending,
+            "held behind the writer, the update cannot have landed yet",
+        );
+
+        runtime.block_on(async { writer.execute_unprepared("COMMIT").await.unwrap() });
+        // Without driving the gate's runtime: only an update the worker
+        // already held can land now, which proves the cancellation came after
+        // it was submitted
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while runtime.block_on(status_of(&db, session_id, "a-target"))
+            == SessionApprovalRequest::ApprovalRequestStatus::Pending
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the submitted update never landed"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        run_detached_to_completion(&gate_runtime);
+        assert_the_close_completed(&runtime, &db, session_id, ticket_id);
+    }
+
+    /// A write transaction held open on a thread of its own, so a statement
+    /// can be made to wait without the caller's runtime having to run anything
+    struct HeldDatabase {
+        release: std::sync::mpsc::Sender<()>,
+        thread: std::thread::JoinHandle<()>,
+    }
+
+    impl HeldDatabase {
+        fn take(url: &str) -> Self {
+            let url = url.to_owned();
+            let (held_tx, held_rx) = std::sync::mpsc::channel();
+            let (release, release_rx) = std::sync::mpsc::channel::<()>();
+            let thread = std::thread::spawn(move || {
+                test_runtime().block_on(async {
+                    let writer = Database::connect(
+                        sea_orm::ConnectOptions::new(url)
+                            .max_connections(1)
+                            .to_owned(),
+                    )
+                    .await
+                    .unwrap();
+                    writer.execute_unprepared("BEGIN IMMEDIATE").await.unwrap();
+                    held_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    writer.execute_unprepared("COMMIT").await.unwrap();
+                });
+            });
+            held_rx.recv().unwrap();
+            Self { release, thread }
+        }
+
+        fn release(self) {
+            self.release.send(()).unwrap();
+            self.thread.join().unwrap();
+        }
+    }
+
+    /// The gate is cancelled after its timeout update has landed and before
+    /// the ticket refund that follows has: the refund waits for the pool's
+    /// only connection and, once it has one, behind another writer. The refund
+    /// must still happen, and the timeout must still be audited.
+    #[test]
+    fn a_timeout_close_cancelled_during_its_refund_still_completes() {
         use std::sync::Arc;
 
         use tokio::sync::Notify;
@@ -2373,53 +2544,63 @@ mod polled_gate {
         let runtime = test_runtime();
         let (shared, db) = runtime.block_on(SharedDb::migrated(None));
         let session_id = UserSessionId(Uuid::new_v4());
-        let mut subject = plain_subject("a-target");
-        subject.session_id = session_id;
-        runtime.block_on(async {
-            subject.ticket_id = Some(ticket_with_uses(&db, 0).await);
-            advertise_row(&db, session_id, &subject).await;
-        });
+        let (subject, ticket_id) = ticketed_question(&runtime, &db, session_id);
 
+        let held: Arc<Mutex<Option<HeldDatabase>>> = Arc::new(Mutex::new(None));
         let gate_runtime = test_runtime();
         let cancelled = gate_runtime.block_on(async {
-            // Fires once the close's update has committed; the refund is the
-            // close's next await, so that is where the cancellation lands
             let moved = Arc::new(Notify::new());
             let signal = moved.clone();
-            let mut gate_db = Database::connect(&shared.url).await.unwrap();
+            let url = shared.url.clone();
+            let hold = held.clone();
+            // One connection: the update's goes back to the pool from a task
+            // of its own, so the refund cannot take it in the same poll
+            let mut gate_db = Database::connect(
+                sea_orm::ConnectOptions::new(shared.url.clone())
+                    .max_connections(1)
+                    .to_owned(),
+            )
+            .await
+            .unwrap();
             gate_db.set_metric_callback(move |info| {
                 let sql = &info.statement.sql;
                 if sql.starts_with("UPDATE") && sql.contains("session_approval_requests") {
-                    signal.notify_one();
+                    let mut slot = hold.lock().unwrap();
+                    if slot.is_none() {
+                        // The update has committed; nothing else may write
+                        // until the test has looked
+                        *slot = Some(HeldDatabase::take(&url));
+                        signal.notify_one();
+                    }
                 }
             });
 
             let mut guard = PendingApproval::guarding(gate_db, &subject);
+            // Biased toward the close: `true` only if it had not finished
             let cancelled = tokio::select! {
                 biased;
-                () = moved.notified() => true,
                 _ = guard.close_timed_out() => false,
+                () = moved.notified() => true,
             };
             drop(guard);
             cancelled
         });
-        assert!(
-            cancelled,
-            "the close must have been cancelled after its update"
-        );
-        // The drop's retry, and anything else the close left detached
-        run_detached_to_completion(&gate_runtime);
-
+        assert!(cancelled, "the close must have been cancelled unfinished");
         assert_eq!(
             runtime.block_on(status_of(&db, session_id, "a-target")),
             SessionApprovalRequest::ApprovalRequestStatus::TimedOut,
-            "the cancelled close had already timed the question out",
+            "the update had landed when the close was cancelled",
         );
         assert_eq!(
-            audited_for(session_id, "SessionApprovalTimedOut1").len(),
-            1,
-            "a timeout that reached the row must be audited exactly once",
+            runtime.block_on(uses_left(&db, ticket_id)),
+            Some(0),
+            "the refund had not when the close was cancelled",
         );
+
+        let taken = held.lock().unwrap().take();
+        taken.expect("the update must have been seen").release();
+        run_detached_to_completion(&gate_runtime);
+        assert_the_close_completed(&runtime, &db, session_id, ticket_id);
     }
 
     /// What a client is told comes from the `Admission`: the web lifecycle

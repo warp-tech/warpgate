@@ -9,7 +9,7 @@ use warpgate_common::auth::{ApprovalKind, RememberApprovalBy};
 use warpgate_common::{UserSessionId, WarpgateError};
 use warpgate_db_entities::SessionApprovalRequest;
 use warpgate_db_entities::SessionApprovalRequest::{
-    Advertised, UndecidedApprovalRequestStatus, close_request_then, mark_consumed,
+    Advertised, UndecidedApprovalRequestStatus, mark_consumed,
 };
 
 use super::*;
@@ -293,13 +293,10 @@ impl Services {
                 #[allow(clippy::cast_possible_wrap)]
                 let window = time::Duration::seconds(timeout.as_secs() as i64);
                 if time::OffsetDateTime::now_utc() - row.started >= window {
-                    close_request_then(
-                        &self.db,
-                        subject.session_id,
-                        ApprovalKind::Admin,
-                        &subject.target_name,
+                    close_detached(
+                        self.db.clone(),
+                        subject.clone(),
                         UndecidedApprovalRequestStatus::TimedOut,
-                        || subject.emit_timed_out_event(),
                     )
                     .await?;
                     if matches!(

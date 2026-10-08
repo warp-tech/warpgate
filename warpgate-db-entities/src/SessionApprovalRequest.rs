@@ -380,14 +380,10 @@ pub async fn upsert_request(
 }
 
 // Returns whether the change succeeded, or was raced by somebody else
-//
-// `on_moved` runs once the transition has committed and before the refund is
-// awaited, so a caller cancelled during the refund has already acted on it
 async fn settle_request_internal(
     db: &DatabaseConnection,
     row: &Model,
     transition: StatusTransition,
-    on_moved: impl FnOnce(),
 ) -> Result<bool, WarpgateError> {
     let keeps_the_spend = transition.to == ApprovalRequestStatus::Approved;
     let moved = transition
@@ -398,9 +394,6 @@ async fn settle_request_internal(
                 .add(Column::Started.eq(row.started)),
         )
         .await?;
-    if moved > 0 {
-        on_moved();
-    }
     if moved > 0
         && !keeps_the_spend
         && let Some(ticket_id) = row.ticket_id
@@ -419,19 +412,6 @@ pub async fn close_request(
     target: &str,
     status: UndecidedApprovalRequestStatus,
 ) -> Result<bool, WarpgateError> {
-    close_request_then(db, session_id, kind, target, status, || {}).await
-}
-
-/// [`close_request`], running `on_closed` as soon as this call is the one
-/// that closed the request — before the ticket refund is awaited
-pub async fn close_request_then(
-    db: &DatabaseConnection,
-    session_id: UserSessionId,
-    kind: ApprovalKind,
-    target: &str,
-    status: UndecidedApprovalRequestStatus,
-    on_closed: impl FnOnce(),
-) -> Result<bool, WarpgateError> {
     let Some(row) = Entity::find()
         .filter(Key::new(session_id, kind, target).into_condition())
         .filter(Column::Status.eq(ApprovalRequestStatus::Pending))
@@ -440,13 +420,7 @@ pub async fn close_request_then(
     else {
         return Ok(false);
     };
-    settle_request_internal(
-        db,
-        &row,
-        StatusTransition::from_pending(status.into()),
-        on_closed,
-    )
-    .await
+    settle_request_internal(db, &row, StatusTransition::from_pending(status.into())).await
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -470,7 +444,6 @@ pub async fn settle_request(
             .set(Column::Scope, scope)
             .set(Column::ResolvedByUsername, resolved_by.username.clone())
             .set(Column::ResolvedByUserId, resolved_by.user_id),
-        || {},
     )
     .await
 }
@@ -514,7 +487,6 @@ async fn abandon_each(db: &DatabaseConnection, which: Condition) -> Result<(), W
             db,
             &row,
             StatusTransition::from_pending(ApprovalRequestStatus::Abandoned),
-            || {},
         )
         .await?;
     }
