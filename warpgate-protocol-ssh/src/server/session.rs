@@ -220,7 +220,7 @@ fn reject_with_allowed_auth_methods(allowed_auth_methods: MethodSet) -> russh::s
 
 /// What a terminal session is told when the connection to the target fails.
 ///
-/// Named, like web-ssh's `shown_to_the_browser`, so a test has somewhere to
+/// Named, like web-ssh's `BrowserNotice`, so a test has somewhere to
 /// stand: a call inside the event loop does not.
 fn shown_in_the_terminal(error: &ConnectionError) -> String {
     format!("Target connection failed: {}", error.client_message())
