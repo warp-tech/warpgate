@@ -2,6 +2,7 @@ mod channel_direct_tcpip;
 mod channel_session;
 mod error;
 mod handler;
+mod tunnel;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::net::ToSocketAddrs;
@@ -26,6 +27,7 @@ use tokio::sync::mpsc::{
 use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
 use tracing::*;
+pub use tunnel::{SshTunnel, TargetStream, connect_target_stream, open_ssh_tunnel};
 use uuid::Uuid;
 use warpgate_aws::AwsError;
 use warpgate_common::{
