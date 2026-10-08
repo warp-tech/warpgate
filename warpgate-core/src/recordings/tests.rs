@@ -318,11 +318,9 @@ async fn a_failed_finalize_keeps_the_other_files_scratch() {
         .access(&recording, RecordingFile::NDJsonData)
         .await
         .unwrap();
-    let path = access.local_path().map(Path::to_path_buf);
     assert!(
         access.open_read().await.is_ok(),
-        "the reader for a not-ended recording is pointed at {path:?}, which exists={:?}",
-        path.as_deref().map(exists),
+        "the reader for a not-ended recording is pointed at a scratch file that no longer exists",
     );
 }
 
@@ -511,7 +509,10 @@ async fn a_failed_ended_update_keeps_the_scratch() {
     assert_eq!(h.ended().await, None);
     for file in [RecordingFile::NDJsonData, RecordingFile::Index] {
         let path = h.scratch(file).await;
-        assert!(exists(&path), "{path:?} is gone");
+        assert!(
+            exists(&path),
+            "a scratch file of the unended recording is gone"
+        );
     }
 }
 
