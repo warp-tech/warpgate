@@ -199,14 +199,11 @@ impl Services {
                 decision
             }
             DecisionWaitOutcome::TimedOut => match guard.close_timed_out().await {
-                Ok(TimeoutClose::Closed) => {
-                    subject.emit_timed_out_event();
-                    return Ok(GateOutcome::Expired);
-                }
+                // The guard audits the timeout when its close is what ended it
+                Ok(TimeoutClose::Closed | TimeoutClose::Ended) => return Ok(GateOutcome::Expired),
                 // A decision that beat the close stands, so the session gets what
                 // the record says
                 Ok(TimeoutClose::Decided(decision)) => decision,
-                Ok(TimeoutClose::Ended) => return Ok(GateOutcome::Expired),
                 // Not `Expired`: the question is still open and can yet be
                 // approved, so a session told it timed out would be told
                 // something the record contradicts. Every caller denies on an

@@ -8,15 +8,17 @@ use warpgate_common::auth::ApprovalKind;
 use warpgate_common::helpers::logging::format_related_ids;
 use warpgate_common::{NodeId, UserSessionId, WarpgateError};
 use warpgate_db_entities::SessionApprovalRequest::{
-    self, Advertised, ApprovalActor, close_request, mark_consumed, upsert_request,
+    self, Advertised, ApprovalActor, UndecidedApprovalRequestStatus, close_request, mark_consumed,
+    upsert_request,
 };
 
 use super::*;
 
 // An "owning" close-on-drop guard for an approval
 pub(super) struct PendingApproval {
-    session_id: UserSessionId,
-    target: String,
+    /// Kept whole so whichever close moves the row to `TimedOut`, in-line or
+    /// on drop, is the one that audits it
+    subject: ApprovalSubject,
     db: DatabaseConnection,
     on_drop: OnDrop,
     /// Already closed in-line, nothing left to do on drop
@@ -36,8 +38,9 @@ impl Drop for PendingApproval {
         if self.closed {
             return;
         }
-        let session_id = self.session_id;
-        let target = std::mem::take(&mut self.target);
+        let subject = self.subject.clone();
+        let session_id = subject.session_id;
+        let target = subject.target_name.clone();
         let db = self.db.clone();
         let on_drop = self.on_drop;
         tokio::spawn(async move {
@@ -45,7 +48,11 @@ impl Drop for PendingApproval {
                 OnDrop::Close(status) => {
                     close_request(&db, session_id, ApprovalKind::Admin, &target, status)
                         .await
-                        .map(|_| ())
+                        .map(|moved| {
+                            if moved && status == UndecidedApprovalRequestStatus::TimedOut {
+                                subject.emit_timed_out_event();
+                            }
+                        })
                 }
                 OnDrop::Consume(started) => mark_consumed(
                     &db,
@@ -65,8 +72,7 @@ impl Drop for PendingApproval {
 impl PendingApproval {
     pub(super) fn guarding(db: DatabaseConnection, subject: &ApprovalSubject) -> Self {
         Self {
-            session_id: subject.session_id,
-            target: subject.target_name.clone(),
+            subject: subject.clone(),
             db,
             on_drop: OnDrop::Close(
                 SessionApprovalRequest::UndecidedApprovalRequestStatus::Abandoned,
@@ -85,18 +91,24 @@ impl PendingApproval {
         self.on_drop = OnDrop::Close(TimedOut);
         if close_request(
             &self.db,
-            self.session_id,
+            self.subject.session_id,
             ApprovalKind::Admin,
-            &self.target,
+            &self.subject.target_name,
             TimedOut,
         )
         .await?
         {
             self.closed = true;
+            self.subject.emit_timed_out_event();
             return Ok(TimeoutClose::Closed);
         }
-        if let Some((decision, started)) =
-            row_decision(&self.db, self.session_id, ApprovalKind::Admin, &self.target).await?
+        if let Some((decision, started)) = row_decision(
+            &self.db,
+            self.subject.session_id,
+            ApprovalKind::Admin,
+            &self.subject.target_name,
+        )
+        .await?
         {
             self.decided(started);
             Ok(TimeoutClose::Decided(decision))

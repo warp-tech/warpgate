@@ -2030,7 +2030,7 @@ mod polled_gate {
         let (shared, db) = runtime.block_on(SharedDb::migrated(None));
         let session_id = UserSessionId(Uuid::new_v4());
 
-        let (_frozen, outcome) =
+        let (frozen, outcome) =
             expire_on_a_frozen_runtime(&shared, session_id, RememberApprovalBy::Nothing);
         assert!(matches!(outcome, GateOutcome::Expired));
 
@@ -2045,10 +2045,13 @@ mod polled_gate {
                 "a decision arriving after the timeout must settle nothing",
             );
         });
+        // Whatever the gate left detached gets to run: a close it repeated
+        // would audit the timeout a second time
+        frozen.block_on(async { tokio::time::sleep(Duration::from_millis(300)).await });
         assert_eq!(
             audited_for(session_id, "SessionApprovalTimedOut1").len(),
             1,
-            "the timeout must still reach the audit trail",
+            "the timeout must reach the audit trail exactly once",
         );
     }
 
@@ -2273,6 +2276,68 @@ mod polled_gate {
                 "an approval of a question nobody waits on must not be remembered",
             );
         });
+    }
+
+    /// The guard's drop retries a timeout close that failed in-line. When that
+    /// retry is what moves the question to `TimedOut`, it is also what has to
+    /// audit the timeout, or the record says timed out with no event for it.
+    /// The retry is a single detached attempt; this covers it succeeding.
+    #[test]
+    fn a_timeout_closed_by_the_retry_is_audited_once() {
+        use std::sync::atomic::Ordering;
+
+        audit_events();
+        let runtime = test_runtime();
+        let (shared, db) = runtime.block_on(SharedDb::migrated(None));
+        let session_id = UserSessionId(Uuid::new_v4());
+
+        // Not driven again until the table is back, so the retry the gate
+        // leaves behind cannot run against the broken database
+        let gate_runtime = test_runtime();
+        let (outcome, broke) = gate_runtime.block_on(async {
+            let (gate_db, broke) = with_a_failing_timeout_close(&shared.url).await;
+            let outcome = try_hold(&gate_db, session_id, RememberApprovalBy::Nothing).await;
+            (outcome, broke)
+        });
+        assert!(
+            broke.load(Ordering::SeqCst),
+            "the close must have been broken"
+        );
+        assert!(outcome.is_err(), "the in-line close must have failed");
+        assert!(
+            audited_for(session_id, "SessionApprovalTimedOut1").is_empty(),
+            "nothing has timed out the question yet",
+        );
+
+        runtime.block_on(async {
+            db.execute_unprepared("ALTER TABLE hidden RENAME TO session_approval_requests")
+                .await
+                .unwrap();
+            assert_eq!(
+                status_of(&db, session_id, "prod").await,
+                SessionApprovalRequest::ApprovalRequestStatus::Pending,
+                "the retry must not have run before the table came back",
+            );
+        });
+
+        let mut status = SessionApprovalRequest::ApprovalRequestStatus::Pending;
+        for _ in 0..100 {
+            gate_runtime.block_on(async { tokio::time::sleep(Duration::from_millis(20)).await });
+            status = runtime.block_on(status_of(&db, session_id, "prod"));
+            if status != SessionApprovalRequest::ApprovalRequestStatus::Pending {
+                break;
+            }
+        }
+        assert_eq!(
+            status,
+            SessionApprovalRequest::ApprovalRequestStatus::TimedOut,
+            "the retry must have closed the question as timed out",
+        );
+        assert_eq!(
+            audited_for(session_id, "SessionApprovalTimedOut1").len(),
+            1,
+            "the timeout the retry recorded must be audited exactly once",
+        );
     }
 
     /// What a client is told comes from the `Admission`: the web lifecycle
