@@ -6285,7 +6285,8 @@
         "type": "string",
         "enum": [
           "remotefx",
-          "lossless"
+          "lossless",
+          "graphics_pipeline"
         ]
       },
       "RdpTargetPasswordAuth": {
@@ -7399,11 +7400,6 @@
           "interactive_logon": {
             "type": "boolean",
             "description": "Show the target's own sign-in screen instead of logging on automatically.\nThe stored credentials still pass network-level authentication (CredSSP)."
-          },
-          "graphics_pipeline": {
-            "type": "boolean",
-            "description": "Offer the RDP Graphics Pipeline (MS-RDPEGFX). Servers that dropped the legacy\nbitmap paths, such as GNOME Remote Desktop and KDE KRDP, refuse clients without\nit. Turn it off only if a server renders incorrectly with it.",
-            "default": true
           },
           "tls_security": {
             "$ref": "#/components/schemas/RdpTlsSecurity"

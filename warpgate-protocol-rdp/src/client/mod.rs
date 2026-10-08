@@ -22,7 +22,6 @@ use ironrdp::core::WriteBuf;
 use ironrdp::displaycontrol::client::DisplayControlClient;
 use ironrdp::displaycontrol::pdu::MonitorLayoutEntry;
 use ironrdp::dvc::DrdynvcClient;
-use ironrdp_egfx::client::{GraphicsPipelineClient, GraphicsPipelineHandler};
 use ironrdp::graphics::image_processing::PixelFormat;
 use ironrdp::pdu::gcc::KeyboardType;
 use ironrdp::pdu::geometry::InclusiveRectangle;
@@ -32,6 +31,7 @@ use ironrdp::pdu::rdp::headers::ShareDataPdu;
 use ironrdp::pdu::rdp::refresh_rectangle::RefreshRectanglePdu;
 use ironrdp::session::image::DecodedImage;
 use ironrdp::session::{ActiveStage, ActiveStageBuilder, ActiveStageOutput};
+use ironrdp_egfx::client::{GraphicsPipelineClient, GraphicsPipelineHandler};
 use ironrdp_tokio::reqwest::ReqwestNetworkClient;
 use ironrdp_tokio::{FramedWrite as _, TokioFramed};
 use tokio::net::TcpStream;
@@ -621,7 +621,7 @@ fn build_config(
     height: u16,
 ) -> connector::Config {
     let codec_overrides: &[&str] = match options.compression {
-        RdpTargetCompression::RemoteFX => &[],
+        RdpTargetCompression::RemoteFX | RdpTargetCompression::GraphicsPipeline => &[],
         RdpTargetCompression::Lossless => &["remotefx:off"],
     };
     connector::Config {
@@ -639,9 +639,11 @@ fn build_config(
         ime_file_name: String::new(),
         dig_product_id: String::new(),
         desktop_size: connector::DesktopSize { width, height },
-        // The compression mode only controls the codec advertisement: the default set
+        // The bitmap codec advertisement covers the legacy bitmap path: the default set
         // includes RemoteFX, while a `lossless` target advertises no codecs so it sends
-        // losslessly-compressed 32bpp bitmap updates instead. `lossy_compression` stays
+        // losslessly-compressed 32bpp bitmap updates instead. A server that accepts the
+        // Graphics Pipeline moves all output onto it and picks its own codecs, so the
+        // advertisement then only matters as the fallback. `lossy_compression` stays
         // off in every mode — it would advertise the dynamic-color-fidelity / subsampling
         // drawing flags, inviting the target to dither legacy bitmap updates down to
         // 16bpp. (`client_codecs_capabilities` never fails for these inputs; `None` would
@@ -677,9 +679,9 @@ fn build_config(
         pointer_software_rendering: true,
         desktop_scale_factor: 0,
         multitransport_flags: None,
-        // Must match the channel `connect` registers: advertising the Graphics Pipeline
-        // without a processor for it leaves the desktop blank.
-        support_dyn_vc_gfx_protocol: options.graphics_pipeline,
+        // `connect` registers the Graphics Pipeline channel from this flag: advertising
+        // it without a processor leaves the desktop blank.
+        support_dyn_vc_gfx_protocol: options.compression == RdpTargetCompression::GraphicsPipeline,
     }
 }
 
@@ -712,8 +714,8 @@ async fn connect(
     // Advertise the Display Control DVC so viewer-driven resolution changes can be pushed
     // to the target mid-session (MS-RDPEDISP). The capabilities callback has nothing to
     // reply with; `ActiveStage::encode_resize` drives the channel once it is ready.
-    let mut drdynvc =
-        DrdynvcClient::new().with_dynamic_channel(DisplayControlClient::new(|_caps| Ok(Vec::new())));
+    let mut drdynvc = DrdynvcClient::new()
+        .with_dynamic_channel(DisplayControlClient::new(|_caps| Ok(Vec::new())));
     if config.support_dyn_vc_gfx_protocol {
         // The session drains the client-side compositor into the framebuffer, so the
         // graphics pipeline's per-command callbacks are unused. With no H.264 decoder the

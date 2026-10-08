@@ -110,7 +110,6 @@
                     interactiveLogon: false,
                     tlsSecurity: RdpTlsSecurity.Tls12,
                     compression: RdpTargetCompression.Remotefx,
-                    graphicsPipeline: true,
                 },
             }[params.kind]
             if (!options) {

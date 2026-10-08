@@ -97,20 +97,13 @@
     <Input type="select" bind:value={options.compression}>
         <option value={RdpTargetCompression.Lossless}>Lossless</option>
         <option value={RdpTargetCompression.Remotefx}>RemoteFX</option>
+        <option value={RdpTargetCompression.GraphicsPipeline}>
+            Graphics pipeline (server-selected codecs)
+        </option>
     </Input>
 </FormGroup>
 <HelpText>
     If Warpgate and the RDP server are in the same network, lossless compression
     will significantly improve image quality, even if the client is connecting
-    remotely.
-</HelpText>
-
-<Input
-    type="switch"
-    label="Graphics pipeline"
-    bind:checked={options.graphicsPipeline}
-/>
-<HelpText>
-    Required by GNOME Remote Desktop and KDE KRDP, which refuse clients without
-    it. Turn it off only if a server renders incorrectly with it.
+    remotely. GNOME Remote Desktop and KDE KRDP require the graphics pipeline.
 </HelpText>
