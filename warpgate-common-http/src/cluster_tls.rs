@@ -345,8 +345,11 @@ mod tests {
     fn marker_round_trip() {
         let node_id = NodeId(Uuid::new_v4());
         let plain = RemoteAddr(poem::Addr::SocketAddr("127.0.0.1:4000".parse().unwrap()));
-        let addr =
-            annotate_remote_addr(&plain, CLUSTER_PEER_ADDR_SCHEME, &format!("node:{node_id}"));
+        let addr = annotate_remote_addr(
+            &plain,
+            CLUSTER_PEER_ADDR_SCHEME,
+            &format!("{CLUSTER_PEER_PAYLOAD_PREFIX}{node_id}"),
+        );
         assert_eq!(peer_from_remote_addr(&addr), Some(ClusterPeer { node_id }));
         assert_eq!(peer_from_remote_addr(&plain), None);
         let other = annotate_remote_addr(&plain, "captured-cert", "cert:AAAA");
