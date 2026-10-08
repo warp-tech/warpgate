@@ -226,6 +226,31 @@ fn shown_in_the_terminal(error: &ConnectionError) -> String {
     format!("Target connection failed: {}", error.client_message())
 }
 
+/// The server-side record of a failed target connection.
+///
+/// Rendered and then escaped: remote text reaches some `ConnectionError`
+/// variants with its control characters intact, and a newline in one forges a
+/// whole record in the default text format. `?error` alone is not enough for a
+/// variant that nests an `anyhow::Error` (through `WarpgateError::Anyhow`):
+/// derived Debug escapes strings but defers to anyhow's own Debug, which does
+/// not. `#[deny(dead_code)]` ties the event loop to this function, as below.
+#[deny(dead_code)]
+fn log_target_connection_failure(error: &ConnectionError) {
+    error!(error = ?format!("{error:?}"), "Target connection failed");
+}
+
+/// The debug record of every event the target connection delivers.
+///
+/// Rendered and then escaped for the same reason: `RCEvent::Error` carries the
+/// command loop's `anyhow::Error` and `RCEvent::ConnectionError` may nest one,
+/// so `?event` writes their text raw — a forged record ahead of the escaped one
+/// `handle_remote_event` writes. Rendering the whole event rather than
+/// special-casing those two keeps every variant under one rule.
+#[deny(dead_code)]
+fn log_remote_event(event: &RCEvent) {
+    debug!(event = ?format!("{event:?}"), "Event");
+}
+
 /// The server-side record of a client session error.
 ///
 /// Not `?error` alone: an `anyhow::Error`'s own `Debug` prints its cause chain
@@ -248,11 +273,11 @@ mod tests {
     use warpgate_common::WarpgateError;
 
     use super::{
-        ConnectionError, log_client_session_error, reject_with_allowed_auth_methods,
-        shown_in_the_terminal,
+        ConnectionError, log_client_session_error, log_remote_event, log_target_connection_failure,
+        reject_with_allowed_auth_methods, shown_in_the_terminal,
     };
-    use crate::SshClientError;
     use crate::client::log_command_loop_error;
+    use crate::{RCEvent, SshClientError};
 
     /// `tracing-subscriber` ships no `MakeWriter` for a buffer the test can
     /// still read afterwards: its `Arc<W>` impl wants `&W: Write`, which a
@@ -281,8 +306,11 @@ mod tests {
     /// What `log` wrote, with the formatter's trailing break removed.
     fn captured_output(log: impl FnOnce()) -> String {
         let captured = Captured::default();
+        // Every level: `log_remote_event` writes at debug, which the
+        // formatter's default level would drop, leaving nothing to assert on.
         let subscriber = tracing_subscriber::fmt()
             .without_time()
+            .with_max_level(tracing::Level::TRACE)
             .with_writer(captured.clone())
             .finish();
         tracing::subscriber::with_default(subscriber, log);
@@ -307,6 +335,60 @@ mod tests {
         assert!(
             !record.contains('\n'),
             "the error forged a second record: {record:?}"
+        );
+        assert!(
+            record.contains("\\n"),
+            "the error never reached the log: {record:?}"
+        );
+    }
+
+    /// A `ConnectionError` that nests an `anyhow::Error`, which derived Debug
+    /// does not escape: `?error` passed this newline through as written.
+    #[test]
+    fn a_newline_in_an_anyhow_inside_a_connection_error_cannot_forge_a_log_record() {
+        let error = ConnectionError::Warpgate(WarpgateError::Anyhow(anyhow::anyhow!(
+            "permission denied\n  ERROR warpgate::ssh: Authenticated with publickey"
+        )));
+        assert!(
+            format!("{error:?}").contains('\n'),
+            "the fixture's Debug carries no raw newline, so nothing below is evidence"
+        );
+
+        let record = captured_output(|| log_target_connection_failure(&error));
+        assert!(
+            !record.contains('\n'),
+            "the error forged a second record: {record:?}"
+        );
+        assert!(
+            record.contains("\\n"),
+            "the error never reached the log: {record:?}"
+        );
+    }
+
+    /// The generic per-event debug record, ahead of every escaped sink in
+    /// `handle_remote_event`. The fixture is the command loop's error as it
+    /// sends it, with the newline in the cause.
+    #[test]
+    fn a_newline_in_a_remote_event_cannot_forge_a_debug_record() {
+        let event = RCEvent::Error(
+            anyhow::Error::from(SshClientError::other(std::io::Error::other(
+                "permission denied\n  ERROR warpgate::ssh: Authenticated with publickey",
+            )))
+            .context("handling a client event"),
+        );
+        assert!(
+            format!("{event:?}").contains('\n'),
+            "the fixture's Debug carries no raw newline, so nothing below is evidence"
+        );
+
+        let record = captured_output(|| log_remote_event(&event));
+        assert!(
+            record.contains("DEBUG") && record.contains("Event"),
+            "no debug record was written, so nothing below is evidence: {record:?}"
+        );
+        assert!(
+            !record.contains('\n'),
+            "the event forged a second record: {record:?}"
         );
         assert!(
             record.contains("\\n"),
@@ -989,10 +1071,10 @@ impl ServerSession {
                     } else {
                         e
                     };
-                    debug!(event=?e, "Event");
+                    log_remote_event(&e);
                     let span = self.make_logging_span();
                     if let Err(err) = self.handle_remote_event(e).instrument(span).await {
-                        error!("Client event handler error: {:?}", err);
+                        error!(error = ?format!("{err:#}"), "Client event handler error");
                         // break;
                     }
                 }
@@ -1454,7 +1536,7 @@ impl ServerSession {
                         // whose span carries no username and no client IP —
                         // this is the record that ties the failure to the
                         // session that saw it.
-                        error!(?error, "Target connection failed");
+                        log_target_connection_failure(&error);
                         let _ = self.emit_pty_error(&shown_in_the_terminal(&error));
                     }
                 }

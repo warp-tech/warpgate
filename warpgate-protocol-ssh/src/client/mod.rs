@@ -488,7 +488,7 @@ impl RemoteClient {
                     loop {
                         tokio::select! {
                             Some(event) = self.inner_event_rx.recv() => {
-                                debug!(event=?event, "event");
+                                debug!(event = ?format!("{event:?}"), "event");
                                 if self.handle_event(event).await? {
                                     break
                                 }
@@ -532,8 +532,12 @@ impl RemoteClient {
                     Ok(connection) => self.on_connected(connection).await?,
                     Err(e) => {
                         // Was `debug!`, so a user-visible connect failure left no
-                        // record at the default log level.
-                        error!(error = ?e, "Connect error");
+                        // record at the default log level. Rendered and then
+                        // escaped: derived Debug escapes strings but hands a
+                        // nested `anyhow::Error` (through `WarpgateError::Anyhow`)
+                        // to anyhow's own Debug, which writes a remote party's
+                        // newline raw and forges a record.
+                        error!(error = ?format!("{e:?}"), "Connect error");
                         let _ = self.tx.send(RCEvent::ConnectionError(e)).await;
                         self.set_disconnected().await;
                         return Ok(true);
@@ -879,7 +883,7 @@ impl Connector {
                                 ClientHandlerError::Ssh(e) => ConnectionError::Ssh(e),
                                 ClientHandlerError::Internal => ConnectionError::Internal,
                             };
-                            error!(error=?connection_error, "Connection error");
+                            error!(error = ?format!("{connection_error:?}"), "Connection error");
                             return Err(connection_error);
                         }
                     };

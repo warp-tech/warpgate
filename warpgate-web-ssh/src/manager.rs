@@ -48,10 +48,11 @@ impl BrowserNotice<'_> {
         }
     }
 
-    /// `{:?}` and not `{}`: `ConnectionError::Io` is transparent, so a newline
-    /// in remote text would otherwise forge a second record in the default
-    /// text format. An `anyhow::Error`'s own `Debug` is multi-line and
-    /// unescaped, so that variant is rendered first and the string escaped.
+    /// Rendered and then escaped: `ConnectionError::Io` is transparent, so a
+    /// newline in remote text would otherwise forge a second record in the
+    /// default text format. An `anyhow::Error`'s own `Debug` is multi-line and
+    /// unescaped, and a `ConnectionError` can nest one that its derived Debug
+    /// passes through raw, so both are rendered first and the string escaped.
     fn log(&self, session_id: UserSessionId) {
         match self {
             Self::Client(error) => {
@@ -60,7 +61,7 @@ impl BrowserNotice<'_> {
             // The connect path logs it as well, but this is the record on the
             // side that knows which browser session was told what.
             Self::Connection(error) => {
-                error!(session=%session_id, ?error, "Target connection failed");
+                error!(session=%session_id, error = ?format!("{error:?}"), "Target connection failed");
             }
         }
     }
@@ -420,6 +421,18 @@ mod tests {
         assert!(
             error.to_string().contains('\n'),
             "the fixture carries no newline, so nothing below is evidence"
+        );
+        assert_one_escaped_record(&captured_record(&BrowserNotice::Connection(&error)));
+    }
+
+    /// A `ConnectionError` nesting an `anyhow::Error`, whose text derived
+    /// Debug passes through raw.
+    #[test]
+    fn a_newline_in_an_anyhow_inside_a_connection_error_cannot_forge_a_web_ssh_log_record() {
+        let error = ConnectionError::Warpgate(WarpgateError::Anyhow(anyhow::anyhow!(FORGED)));
+        assert!(
+            format!("{error:?}").contains('\n'),
+            "the fixture's Debug carries no raw newline, so nothing below is evidence"
         );
         assert_one_escaped_record(&captured_record(&BrowserNotice::Connection(&error)));
     }
