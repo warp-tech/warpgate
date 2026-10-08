@@ -1023,7 +1023,7 @@ impl ServerSession {
             .channels
             .get(&channel_id)
             .and_then(|c| c.pty_size.as_ref())
-            .map_or((220, 24), |r| (r.col_width as u16, r.row_height as u16));
+            .map_or((220, 24), PtyRequest::screen_size);
 
         spawn_target_menu_loop(
             self.id,
@@ -1701,12 +1701,10 @@ impl ServerSession {
         channel_state.audit.on_resize(&request).await;
 
         if matches!(self.target, TargetSelection::Menu) {
+            let (cols, rows) = request.screen_size();
             let _ = self
                 .event_sender
-                .try_send_once(Event::MenuRedraw(
-                    request.col_width as u16,
-                    request.row_height as u16,
-                ))
+                .try_send_once(Event::MenuRedraw(cols, rows))
                 .await;
         }
 

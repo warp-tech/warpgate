@@ -11,6 +11,7 @@ pub mod sso_provider_list;
 pub mod targets_list;
 pub mod ticket_request_targets;
 pub mod ticket_requests;
+mod web_clients;
 mod web_desktop;
 mod web_ssh;
 

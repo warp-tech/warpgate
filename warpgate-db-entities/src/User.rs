@@ -236,6 +236,18 @@ impl Model {
             credentials,
         })
     }
+
+    pub async fn require_otp_in_policy(self, db: &DatabaseConnection) -> Result<(), WarpgateError> {
+        let details = self.load_details(db).await?;
+        let mut user = details.inner;
+        user.credential_policy = Some(
+            user.credential_policy
+                .unwrap_or_default()
+                .upgrade_to_otp(&details.credentials),
+        );
+        ActiveModel::try_from(user)?.update(db).await?;
+        Ok(())
+    }
 }
 
 impl TryFrom<User> for ActiveModel {

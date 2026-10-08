@@ -9809,7 +9809,11 @@ dependencies = [
 name = "warpgate-web-clients-common"
 version = "0.23.4"
 dependencies = [
+ "futures",
+ "poem",
+ "serde",
  "tokio",
+ "tokio-util",
  "tracing",
  "uuid",
  "warpgate-common",
@@ -9832,6 +9836,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-util",
  "tracing",
  "uuid",
  "warpgate-common",
@@ -9859,6 +9864,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-util",
  "tracing",
  "uuid",
  "warpgate-common",
