@@ -241,6 +241,16 @@ fn log_target_connection_failure(error: &ConnectionError) {
     error!(?error, "Target connection failed");
 }
 
+/// The server-side record of a client session error, under the same rule.
+///
+/// Not `?error` alone: an `anyhow::Error`'s own `Debug` prints its cause chain
+/// on separate lines, unescaped, which forges records just as `Display` does.
+/// The chain is rendered first and the resulting string escaped.
+#[deny(dead_code)]
+fn log_client_session_error(error: &anyhow::Error) {
+    error!(error = ?format!("{error:#}"), "Client session error");
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Write;
@@ -251,7 +261,10 @@ mod tests {
     use tracing_subscriber::fmt::MakeWriter;
     use warpgate_vault::VaultError;
 
-    use super::{ConnectionError, log_target_connection_failure, reject_with_allowed_auth_methods};
+    use super::{
+        ConnectionError, log_client_session_error, log_target_connection_failure,
+        reject_with_allowed_auth_methods,
+    };
 
     /// `tracing-subscriber` ships no `MakeWriter` for a buffer the test can
     /// still read afterwards: its `Arc<W>` impl wants `&W: Write`, which a
@@ -297,12 +310,16 @@ mod tests {
 
     /// One record out of the sink, with the formatter's trailing break removed.
     fn captured_record(error: &ConnectionError) -> String {
+        captured_output(|| log_target_connection_failure(error))
+    }
+
+    fn captured_output(log: impl FnOnce()) -> String {
         let captured = Captured::default();
         let subscriber = tracing_subscriber::fmt()
             .without_time()
             .with_writer(captured.clone())
             .finish();
-        tracing::subscriber::with_default(subscriber, || log_target_connection_failure(error));
+        tracing::subscriber::with_default(subscriber, log);
 
         let logged = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
         logged.strip_suffix('\n').unwrap_or(&logged).to_owned()
@@ -328,6 +345,29 @@ mod tests {
         );
 
         let record = captured_record(&error);
+        assert!(
+            !record.contains('\n'),
+            "the error forged a second record: {record:?}"
+        );
+        assert!(
+            record.contains("\\n"),
+            "the error never reached the log: {record:?}"
+        );
+    }
+
+    /// `RCEvent::Error`'s sink, which logged `%e`: whatever the command loop
+    /// wrapped, written as it came.
+    #[test]
+    fn a_newline_in_a_client_session_error_cannot_forge_a_log_record() {
+        let error = anyhow::anyhow!(
+            "permission denied\n  ERROR warpgate::ssh: Authenticated with certificate"
+        );
+        assert!(
+            error.to_string().contains('\n'),
+            "the fixture carries no newline, so nothing below is evidence"
+        );
+
+        let record = captured_output(|| log_client_session_error(&error));
         assert!(
             !record.contains('\n'),
             "the error forged a second record: {record:?}"
@@ -1477,7 +1517,7 @@ impl ServerSession {
                 // must not be handed; printing `{e}` gave it to the user and
                 // was the one path to this sink that no round of hardening had
                 // touched.
-                error!(error=%e, "Client session error");
+                log_client_session_error(&e);
                 let _ = self.emit_pty_error(client_error_message(&e));
                 self.disconnect_server().await;
             }
