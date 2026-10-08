@@ -120,7 +120,7 @@ pub fn connect(
             {
                 // The full chain goes to the log; only the top-level cause
                 // reaches the viewer.
-                error!(%error, error_chain = %format!("{error:#}"), "RDP client failed");
+                log_client_failure(&error);
                 let _ = event_tx.send(DesktopEvent::backend_error(&error)).await;
             }
             let _ = event_tx
@@ -136,4 +136,96 @@ pub fn connect(
         abort_tx,
         logon_state: sign_in,
     })
+}
+
+/// The RDP client task's own record of the failure that ended it.
+///
+/// Rendered and then escaped: `%error` writes the chain's text as it came, and
+/// a transparent I/O error carries whatever the operating system or the remote
+/// side said, so a newline in it forges a second record in the default text
+/// format. `#[deny(dead_code)]` keeps the spawned task calling this rather
+/// than only the test, since `mod tests` is `#[cfg(test)]`.
+#[deny(dead_code)]
+fn log_client_failure(error: &anyhow::Error) {
+    error!(
+        error = ?error.to_string(),
+        error_chain = ?format!("{error:#}"),
+        "RDP client failed"
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+
+    use tracing_subscriber::fmt::MakeWriter;
+
+    use super::log_client_failure;
+
+    /// `tracing-subscriber` ships no `MakeWriter` for a buffer the test can
+    /// still read afterwards: its `Arc<W>` impl wants `&W: Write`, which a
+    /// `Mutex` is not.
+    #[derive(Clone, Default)]
+    struct Captured(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().write(buf)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl MakeWriter<'_> for Captured {
+        type Writer = Self;
+
+        fn make_writer(&self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    /// What `log` wrote, with the formatter's trailing break removed.
+    fn captured_output(log: impl FnOnce()) -> String {
+        let captured = Captured::default();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_writer(captured.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, log);
+
+        let logged = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
+        logged.strip_suffix('\n').unwrap_or(&logged).to_owned()
+    }
+
+    const FORGED: &str =
+        "Connection reset by peer\n  ERROR warpgate::ssh: Authenticated with publickey";
+
+    fn assert_one_escaped_record(record: &str) {
+        assert!(
+            !record.contains('\n'),
+            "the error forged a second record: {record:?}"
+        );
+        assert!(
+            record.contains("\\n"),
+            "the error never reached the log: {record:?}"
+        );
+    }
+
+    #[test]
+    fn a_newline_in_an_rdp_client_failure_cannot_forge_a_log_record() {
+        // The newline once in a cause, once at the top: the record carries
+        // both the top-level message and the chain, and each must be escaped.
+        let in_cause = anyhow::Error::from(std::io::Error::other(FORGED)).context("RDP connect");
+        let at_top = anyhow::anyhow!(FORGED);
+        for error in [in_cause, at_top] {
+            assert!(
+                format!("{error:#}").contains('\n'),
+                "the fixture carries no newline, so nothing below is evidence"
+            );
+            assert_one_escaped_record(&captured_output(|| log_client_failure(&error)));
+        }
+    }
 }
