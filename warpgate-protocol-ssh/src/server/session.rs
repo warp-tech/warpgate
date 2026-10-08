@@ -1023,7 +1023,7 @@ impl ServerSession {
             .channels
             .get(&channel_id)
             .and_then(|c| c.pty_size.as_ref())
-            .map_or((220, 24), |r| (r.col_width as u16, r.row_height as u16));
+            .map_or((220, 24), PtyRequest::screen_size);
 
         spawn_target_menu_loop(
             self.id,
@@ -1701,12 +1701,10 @@ impl ServerSession {
         channel_state.audit.on_resize(&request).await;
 
         if matches!(self.target, TargetSelection::Menu) {
+            let (cols, rows) = request.screen_size();
             let _ = self
                 .event_sender
-                .try_send_once(Event::MenuRedraw(
-                    request.col_width as u16,
-                    request.row_height as u16,
-                ))
+                .try_send_once(Event::MenuRedraw(cols, rows))
                 .await;
         }
 
@@ -1918,12 +1916,18 @@ impl ServerSession {
     async fn _data(&mut self, server_channel_id: ServerChannelId, data: Bytes) -> Result<()> {
         let channel_id = self.map_channel(server_channel_id)?;
         debug!(channel=%server_channel_id.0, ?data, "Data");
-        if (
-            // aborting connection
-            self.rc_state == RCState::Connecting
-            // aborting admin approval wait
-            || matches!(self.target, TargetSelection::AwaitingApproval)
-        ) && data.first() == Some(&3)
+        let has_pty = self.channels.get(&channel_id).is_some_and(Channel::has_pty);
+        // Only a terminal turns Ctrl-C into a 0x03 byte. On a forwarded
+        // connection it's payload — RDP's first packet starts with 0x03, and
+        // with `ssh -N` it arrives while the target is still connecting (#2658).
+        if has_pty
+            && (
+                // aborting connection
+                self.rc_state == RCState::Connecting
+                // aborting admin approval wait
+                || matches!(self.target, TargetSelection::AwaitingApproval)
+            )
+            && data.first() == Some(&3)
         {
             info!(channel=%channel_id, "User requested connection abort (Ctrl-C)");
             let was_held = matches!(self.target, TargetSelection::AwaitingApproval);
@@ -1950,7 +1954,7 @@ impl ServerSession {
             }
         }
 
-        if self.channels.get(&channel_id).is_some_and(Channel::has_pty) {
+        if has_pty {
             let _ = self
                 .event_sender
                 .try_send_once(Event::ConsoleInput(data.clone()))

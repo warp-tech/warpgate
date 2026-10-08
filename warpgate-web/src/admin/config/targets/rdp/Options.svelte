@@ -6,12 +6,15 @@
         type TargetOptionsTargetRdpOptions,
     } from 'admin/lib/api'
     import HelpText from 'admin/lib/HelpText.svelte'
+    import SecretRefInput from 'common/SecretRefInput.svelte'
 
     interface Props {
+        id: string
+        name: string
         options: TargetOptionsTargetRdpOptions
     }
 
-    let { options = $bindable() }: Props = $props()
+    let { id, name, options = $bindable() }: Props = $props()
 </script>
 
 <h4 class="mt-4">Connection</h4>
@@ -47,13 +50,15 @@
 </FormGroup>
 
 {#if options.auth.kind === 'Password'}
-    <FormGroup floating label="Password">
-        <input
-            class="form-control"
-            type="password"
-            bind:value={options.auth.password}
-        >
-    </FormGroup>
+    <SecretRefInput
+        bind:value={options.auth.password}
+        inlineLabel="Password"
+        intendedUsage={{
+            kind: 'Target',
+            id,
+            name
+        }}
+    />
 {/if}
 
 <Input

@@ -1,16 +1,21 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Write;
-use std::sync::{LazyLock, Mutex};
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use openidconnect::url::Url;
 use openidconnect::{ProviderMetadataWithLogout, reqwest};
+use tokio::sync::Mutex;
+use warpgate_common_cache::Cache;
 
 use crate::SsoError;
 use crate::config::SsoInternalProviderConfig;
 
 const METADATA_CACHE_TTL: Duration = Duration::from_secs(300);
+
+// avoid refreshing on every request if metadata is simply bad
+const METADATA_REFRESH_MIN_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Schemes an endpoint from a discovery document is allowed to use.
 ///
@@ -18,21 +23,13 @@ const METADATA_CACHE_TTL: Duration = Duration::from_secs(300);
 /// providers reached over a trusted network (test rigs, in-cluster IdPs).
 const ALLOWED_ENDPOINT_SCHEMES: [&str; 2] = ["https", "http"];
 
-#[allow(clippy::type_complexity)]
-static METADATA_CACHE: LazyLock<Mutex<HashMap<String, (Instant, ProviderMetadataWithLogout)>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+/// Key = issuer URL
+static METADATA_CACHE: LazyLock<Cache<String, (), ProviderMetadataWithLogout>> =
+    LazyLock::new(|| Cache::new(METADATA_CACHE_TTL));
 
-fn cached_metadata(issuer: &str) -> Option<ProviderMetadataWithLogout> {
-    let cache = METADATA_CACHE.lock().ok()?;
-    let (fetched_at, metadata) = cache.get(issuer)?;
-    (fetched_at.elapsed() < METADATA_CACHE_TTL).then(|| metadata.clone())
-}
-
-fn store_metadata(issuer: String, metadata: &ProviderMetadataWithLogout) {
-    if let Ok(mut cache) = METADATA_CACHE.lock() {
-        cache.insert(issuer, (Instant::now(), metadata.clone()));
-    }
-}
+/// Key = issuer URL
+static LAST_FORCED_CACHE_EVICTION: LazyLock<Mutex<HashMap<String, Instant>>> =
+    LazyLock::new(Default::default);
 
 /// Render an error together with its whole `source` chain.
 ///
@@ -116,29 +113,50 @@ pub async fn discover_metadata(
     http_client: &reqwest::Client,
 ) -> Result<ProviderMetadataWithLogout, SsoError> {
     let issuer = config.issuer_url()?;
-    let cache_key = issuer.to_string();
+    METADATA_CACHE
+        .get_or_build(&issuer.to_string(), &(), || async {
+            let metadata = ProviderMetadataWithLogout::discover_async(issuer, http_client)
+                .await
+                .map_err(|e| SsoError::Discovery(describe_error(&e)))?;
 
-    if let Some(metadata) = cached_metadata(&cache_key) {
-        return Ok(metadata);
-    }
-
-    let metadata = ProviderMetadataWithLogout::discover_async(issuer, http_client)
+            // Validate before caching, so a hostile document is never served from
+            // the cache and never reaches a caller.
+            validate_endpoint_schemes(&metadata)?;
+            Ok(metadata)
+        })
         .await
-        .map_err(|e| SsoError::Discovery(describe_error(&e)))?;
+}
 
-    // Validate before caching, so a hostile document is never served from the
-    // cache and never reaches a caller.
-    validate_endpoint_schemes(&metadata)?;
+/// false = not evicted due to interval check
+async fn evict_for_forced_refresh(issuer: &str) -> bool {
+    let mut last = LAST_FORCED_CACHE_EVICTION.lock().await;
+    if last
+        .get(issuer)
+        .is_some_and(|at| at.elapsed() < METADATA_REFRESH_MIN_INTERVAL)
+    {
+        return false;
+    }
+    last.insert(issuer.to_owned(), Instant::now());
+    METADATA_CACHE.remove(&issuer.to_owned());
+    true
+}
 
-    store_metadata(cache_key, &metadata);
-    Ok(metadata)
+pub async fn refresh_metadata(
+    config: &SsoInternalProviderConfig,
+    http_client: &reqwest::Client,
+) -> Result<ProviderMetadataWithLogout, SsoError> {
+    evict_for_forced_refresh(&config.issuer_url()?.to_string()).await;
+    discover_metadata(config, http_client).await
 }
 
 #[cfg(test)]
 pub mod tests {
     use serde_json::{Value, json};
 
-    use super::{ProviderMetadataWithLogout, SsoError, describe_error, validate_endpoint_schemes};
+    use super::{
+        ProviderMetadataWithLogout, SsoError, describe_error, evict_for_forced_refresh,
+        validate_endpoint_schemes,
+    };
 
     /// A minimal discovery document, with `extra` merged over the defaults.
     pub fn metadata(extra: &Value) -> ProviderMetadataWithLogout {
@@ -278,5 +296,12 @@ pub mod tests {
         .map(|e| e.to_string())
         .unwrap_or_default();
         assert!(err.contains("javascript:alert(1)"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn forced_refresh_is_throttled_per_issuer() {
+        assert!(evict_for_forced_refresh("https://a.example").await);
+        assert!(!evict_for_forced_refresh("https://a.example").await);
+        assert!(evict_for_forced_refresh("https://b.example").await);
     }
 }

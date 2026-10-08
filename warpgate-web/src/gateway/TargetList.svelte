@@ -201,6 +201,7 @@
     groupObject={groupInfoFromTarget}
     groupKey={group => group.id}
     bind:collapsedGroups={$collapsedTargetGroups}
+    virtual
 >
     {#snippet header(items, groupControls)}
         {#if items?.length}

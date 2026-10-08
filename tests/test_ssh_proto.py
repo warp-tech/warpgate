@@ -1,10 +1,13 @@
 from uuid import uuid4
+import http.server
 import os
 import paramiko
 import requests
 import socket
+import socketserver
 import subprocess
 import tempfile
+import threading
 import time
 import pytest
 from textwrap import dedent
@@ -224,6 +227,32 @@ class Test:
         shared_wg: WarpgateProcess,
         timeout,
     ):
+        # The destination is served by this test rather than a public site: a
+        # public HTTPS site answered with a redirect, which requests followed
+        # over a direct connection, so the asserted response never crossed
+        # the tunnel. The body spans several SSH packets and carries a per-run
+        # nonce, so only a complete forward reproduces it. Plain HTTP is
+        # enough — the byte stream is under test, not TLS.
+        nonce = uuid4().hex
+        body = nonce.encode() * 4096
+        served = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                served.append(self.path)
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        # All interfaces: the target container reaches the runner through the
+        # Docker host gateway, not through loopback.
+        server = http.server.ThreadingHTTPServer(("0.0.0.0", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+
         user, ssh_target = setup_user_and_target(
             processes, shared_wg, wg_c_ed25519_pubkey
         )
@@ -235,21 +264,30 @@ class Test:
             "-v",
             *common_args,
             "-L",
-            f"{local_port}:github.com:443",
+            f"{local_port}:host.docker.internal:{server.server_address[1]}",
             "-N",
             password="123",
         )
+        try:
+            time.sleep(10)
 
-        time.sleep(10)
+            wait_port(local_port, recv=False)
 
-        wait_port(local_port, recv=False)
-
-        s = requests.Session()
-        retries = requests.adapters.Retry(total=5, backoff_factor=1)
-        s.mount("https://", requests.adapters.HTTPAdapter(max_retries=retries))
-        response = s.get(f"https://localhost:{local_port}", timeout=timeout, verify=False)
-        assert response.status_code == 200
-        ssh_client.kill()
+            s = requests.Session()
+            retries = requests.adapters.Retry(total=5, backoff_factor=1)
+            s.mount("http://", requests.adapters.HTTPAdapter(max_retries=retries))
+            response = s.get(
+                f"http://localhost:{local_port}/{nonce}",
+                timeout=timeout,
+                allow_redirects=False,
+            )
+            assert response.status_code == 200
+            assert response.content == body
+            assert f"/{nonce}" in served
+        finally:
+            ssh_client.kill()
+            server.shutdown()
+            server.server_close()
 
     # https://github.com/warp-tech/warpgate/issues/2328
     def test_direct_tcpip_server_speaks_first(
@@ -331,6 +369,80 @@ class Test:
                 checked += 1
             finally:
                 ssh_client.kill()
+
+    # https://github.com/warp-tech/warpgate/issues/2658
+    def test_direct_tcpip_payload_starting_with_ctrl_c(
+        self,
+        processes: ProcessManager,
+        wg_c_ed25519_pubkey,
+        shared_wg: WarpgateProcess,
+        timeout,
+    ):
+        # A terminal sends Ctrl-C as 0x03, and a session that is still
+        # connecting to its target is aborted when one arrives. Forwarded data
+        # is not keystrokes: RDP opens with a 0x03 TPKT header, and under `-N`
+        # the first forwarded connection is what starts the target connection,
+        # so its first bytes land mid-connect and must not end the session.
+        payload = b"\x03\x00\x00\x13" + uuid4().hex.encode()
+
+        class Echo(socketserver.BaseRequestHandler):
+            def handle(self):
+                while data := self.request.recv(4096):
+                    self.request.sendall(data)
+
+        # All interfaces: the target container reaches the runner through the
+        # Docker host gateway, not through loopback.
+        server = socketserver.ThreadingTCPServer(("0.0.0.0", 0), Echo)
+        server.daemon_threads = True
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+
+        user, ssh_target = setup_user_and_target(
+            processes, shared_wg, wg_c_ed25519_pubkey
+        )
+        local_port = alloc_port()
+        ssh_client = processes.start_ssh_client(
+            f"{user.username}:{ssh_target.name}@localhost",
+            "-p",
+            str(shared_wg.ssh_port),
+            *common_args,
+            "-L",
+            f"{local_port}:host.docker.internal:{server.server_address[1]}",
+            "-N",
+            password="123",
+        )
+        try:
+            # Do not probe the port first: the payload has to ride the
+            # session's first forwarded connection, the one that starts the
+            # target connection. A refused connection (listener not up yet)
+            # opens no channel, so retrying the connect is safe.
+            deadline = time.time() + timeout
+            conn = None
+            while time.time() < deadline and ssh_client.poll() is None:
+                try:
+                    conn = socket.create_connection(
+                        ("localhost", local_port), timeout=5
+                    )
+                    break
+                except socket.error:
+                    time.sleep(0.1)
+            assert conn is not None, "forwarded port never came up"
+
+            with conn:
+                conn.settimeout(timeout)
+                conn.sendall(payload)
+                echoed = b""
+                while len(echoed) < len(payload):
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        break
+                    echoed += chunk
+
+            assert echoed == payload, "forwarded data did not make the round trip"
+            assert ssh_client.poll() is None, "the session was aborted"
+        finally:
+            ssh_client.kill()
+            server.shutdown()
+            server.server_close()
 
     # https://github.com/warp-tech/warpgate/issues/2494
     def test_output_survives_a_stalled_client_window(

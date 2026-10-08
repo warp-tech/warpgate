@@ -91,7 +91,7 @@
     }
 </script>
 
-<div class="container-max-md">
+<div>
     <div class="page-summary-bar">
         <h1>targets</h1>
         <div class="d-flex gap-2 ms-auto">
@@ -145,6 +145,7 @@
             showSearch={true}
             groupObject={groupInfoFromTarget}
             groupKey={group => group.id}
+            virtual
             bind:collapsedGroups={$collapsedGroups}
         >
             {#snippet header(_items, groupControls)}

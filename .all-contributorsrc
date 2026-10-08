@@ -360,6 +360,33 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "sthalbert",
+      "name": "Steve ALBERT",
+      "avatar_url": "https://avatars.githubusercontent.com/u/79840652?v=4",
+      "profile": "https://github.com/sthalbert",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "megative",
+      "name": "Pavel K",
+      "avatar_url": "https://avatars.githubusercontent.com/u/29413909?v=4",
+      "profile": "https://github.com/megative",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "vitaly-sinev",
+      "name": "vitaly-sinev",
+      "avatar_url": "https://avatars.githubusercontent.com/u/48276666?v=4",
+      "profile": "https://github.com/vitaly-sinev",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,

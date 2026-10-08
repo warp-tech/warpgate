@@ -48,7 +48,7 @@ use warpgate_web_ssh::WebSshClientManager;
 use warpgate_web_ssh::api::ws_handler as ssh_web_client_ws_handler;
 
 use crate::api::common::forward_ws_to_session_owner;
-use crate::client_cache::{HTTP_CLIENT_CACHE_VACUUM_INTERVAL, HttpClientCache};
+use crate::client_cache::HttpClientCache;
 use crate::common::{endpoint_auth, page_auth};
 use crate::middleware::{
     ContentSecurityPolicyMiddleware, CookieHostMiddleware, TicketMiddleware,
@@ -125,7 +125,7 @@ impl ProtocolServer for HTTPProtocolServer {
 
         let session_storage = SharedSessionStorage::new(self.services.db.clone());
         let session_store = SessionStore::new();
-        let http_client_cache = HttpClientCache::default();
+        let http_client_cache = HttpClientCache::new(std::time::Duration::MAX);
 
         let cache_bust = || {
             SetHeader::new().overriding(
@@ -248,6 +248,7 @@ impl ProtocolServer for HTTPProtocolServer {
                             Ok(resp)
                         }),
                 )
+                .at("/api/logo", poem::get(api::logo::api_get_logo))
                 .at(
                     "/api/auth/web-auth-requests/stream",
                     endpoint_auth(api::auth::api_get_web_auth_requests_stream),
@@ -354,8 +355,7 @@ impl ProtocolServer for HTTPProtocolServer {
                 if let Err(error) = session_storage.gc(cookie_max_age).await {
                     warn!(%error, "Failed to expire stored HTTP sessions");
                 }
-                http_client_cache.vacuum().await;
-                tokio::time::sleep(HTTP_CLIENT_CACHE_VACUUM_INTERVAL).await;
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
             }
         });
 

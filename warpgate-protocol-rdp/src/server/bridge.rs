@@ -100,7 +100,11 @@ pub(super) async fn connect_backend(
         input_tx,
         abort_tx,
         logon_state,
-    } = crate::connect(admitted, (screen.width, screen.height))?;
+    } = crate::connect(
+        admitted,
+        (screen.width, screen.height),
+        services.secret_backends.clone(),
+    )?;
     if let Some(recorder) = &recorder {
         recorder.track_logon_state(logon_state);
     }

@@ -1,12 +1,15 @@
 <script lang="ts">
     import { FormGroup } from '@sveltestrap/sveltestrap'
     import type { TargetOptionsTargetVncOptions } from 'admin/lib/api'
+    import SecretRefInput from 'common/SecretRefInput.svelte'
 
     interface Props {
+        id: string
+        name: string
         options: TargetOptionsTargetVncOptions
     }
 
-    let { options = $bindable() }: Props = $props()
+    let { id, name, options = $bindable() }: Props = $props()
 
     function setAuthKind(kind: 'None' | 'Password') {
         if (kind === 'Password') {
@@ -53,11 +56,13 @@
 </FormGroup>
 
 {#if options.auth.kind === 'Password'}
-    <FormGroup floating label="Password">
-        <input
-            class="form-control"
-            type="password"
-            bind:value={options.auth.password}
-        >
-    </FormGroup>
+    <SecretRefInput
+        bind:value={options.auth.password}
+        inlineLabel="Password"
+        intendedUsage={{
+            kind: 'Target',
+            id,
+            name
+        }}
+    />
 {/if}

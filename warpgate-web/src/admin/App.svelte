@@ -141,7 +141,7 @@
         </header>
         <main>
             {#if $serverInfo?.configWarnings?.length}
-                <Alert color="warning" fade={false}>
+                <Alert color="warning" fade={false} class="mb-3">
                     <strong>Issues found:</strong>
                     <ul class="mb-0 mt-2">
                         {#each $serverInfo.configWarnings as warning (warning)}

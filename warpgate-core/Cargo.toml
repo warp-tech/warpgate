@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-core"
-version = "0.29.0"
+version = "0.29.1"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -47,9 +47,11 @@ vt100 = "0.16"
 warpgate-aws = { path = "../warpgate-aws" }
 warpgate-ca = { path = "../warpgate-ca" }
 warpgate-common = { path = "../warpgate-common" }
+warpgate-common-cache = { path = "../warpgate-common-cache" }
 warpgate-db-entities = { path = "../warpgate-db-entities" }
 warpgate-db-migrations = { path = "../warpgate-db-migrations" }
 warpgate-ldap = { path = "../warpgate-ldap" }
+warpgate-secrets-vault = { path = "../warpgate-secrets-vault" }
 warpgate-sso = { path = "../warpgate-sso", default-features = false }
 warpgate-tls = { path = "../warpgate-tls" }
 webpki = { version = "0.22", default-features = false }

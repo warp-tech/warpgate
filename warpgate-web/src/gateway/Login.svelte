@@ -222,7 +222,7 @@
     <div class="content">
         <div class="page-summary-bar">
             {#if authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected}
-                <h1>Welcome</h1>
+                <h1 style="margin-left: -4px">Welcome</h1>
             {:else}
                 <h1>Continue login</h1>
             {/if}

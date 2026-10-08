@@ -11,10 +11,9 @@ use uuid::Uuid;
 use warpgate_common::encryption::idempotent_maybe_encrypt_secret;
 use warpgate_common::{
     AdminPermission, Role as RoleConfig, Target as TargetConfig, TargetOptions, TargetSSHOptions,
-    WarpgateError, map_target_secrets,
+    WarpgateError, map_stored_target_secrets, redact_target_secrets,
 };
 use warpgate_common_http::errors::invalid_field;
-use warpgate_db_entities::Target::TargetKind;
 use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment, Ticket, TicketRequest};
 
 use super::AdminContext;
@@ -25,8 +24,18 @@ fn serialize_options_for_storage(
     options: TargetOptions,
 ) -> Result<serde_json::Value, WarpgateError> {
     let mut value = serde_json::to_value(options).map_err(WarpgateError::from)?;
-    map_target_secrets(&mut value, &mut idempotent_maybe_encrypt_secret)?;
+    map_stored_target_secrets(&mut value, &mut idempotent_maybe_encrypt_secret)?;
     Ok(value)
+}
+
+pub(crate) fn maybe_redacted_target(
+    admin: &AdminContext,
+    mut model: Target::Model,
+) -> Result<TargetConfig, WarpgateError> {
+    if !admin.has_permission(AdminPermission::TargetsEdit) {
+        redact_target_secrets(&mut model.options);
+    }
+    model.try_into().map_err(WarpgateError::from)
 }
 
 #[derive(Object)]
@@ -107,9 +116,10 @@ impl ListApi {
 
         let targets = targets.all(db).await.map_err(WarpgateError::from)?;
 
-        let targets: Result<Vec<TargetConfig>, _> =
-            targets.into_iter().map(TryInto::try_into).collect();
-        let targets = targets.map_err(WarpgateError::from)?;
+        let targets = targets
+            .into_iter()
+            .map(|t| maybe_redacted_target(&admin, t))
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(GetTargetsResponse::Ok(Json(targets)))
     }
@@ -155,9 +165,9 @@ impl ListApi {
             Err(err) => return Err(WarpgateError::from(err)),
         };
 
-        Ok(CreateTargetResponse::Created(Json(
-            target.try_into().map_err(WarpgateError::from)?,
-        )))
+        Ok(CreateTargetResponse::Created(Json(maybe_redacted_target(
+            &admin, target,
+        )?)))
     }
 }
 
@@ -220,7 +230,9 @@ impl DetailApi {
             return Ok(GetTargetResponse::NotFound);
         };
 
-        Ok(GetTargetResponse::Ok(Json(target.try_into()?)))
+        Ok(GetTargetResponse::Ok(Json(maybe_redacted_target(
+            &admin, target,
+        )?)))
     }
 
     #[oai(path = "/targets/:id", method = "put", operation_id = "update_target")]
@@ -317,16 +329,14 @@ impl DetailApi {
             .exec(db)
             .await?;
 
-        if target.kind == TargetKind::Ssh {
-            let options: TargetOptions = serde_json::from_value(target.options.clone())?;
-            if let TargetOptions::Ssh(ssh_options) = options {
-                use warpgate_db_entities::KnownHost;
-                KnownHost::Entity::delete_many()
-                    .filter(KnownHost::Column::Host.eq(&ssh_options.host))
-                    .filter(KnownHost::Column::Port.eq(i32::from(ssh_options.port)))
-                    .exec(db)
-                    .await?;
-            }
+        let options = serde_json::from_value::<TargetOptions>(target.options.clone())?;
+        if let TargetOptions::Ssh(ssh_options) = &options {
+            use warpgate_db_entities::KnownHost;
+            KnownHost::Entity::delete_many()
+                .filter(KnownHost::Column::Host.eq(&ssh_options.host))
+                .filter(KnownHost::Column::Port.eq(i32::from(ssh_options.port)))
+                .exec(db)
+                .await?;
         }
 
         target.delete(db).await?;

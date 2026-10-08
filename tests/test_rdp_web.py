@@ -112,7 +112,7 @@ class Test:
                     messages.append(parsed)
                     if parsed.get("type") == "resize":
                         got_resize = True
-                    if parsed.get("type") == "error":
+                    if parsed.get("type") == "state" and parsed.get("phase") == "closed":
                         break
                 else:  # CLOSED / CLOSING / ERROR
                     break
