@@ -1,15 +1,16 @@
 use std::collections::HashMap;
 
+use data_encoding::HEXLOWER;
+use data_url::DataUrl;
 use poem_openapi::{Enum, Object, Union};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_aws::S3StorageConfig;
 use warpgate_common::auth::CredentialKind;
-use warpgate_common::{
-    PasswordPolicy, Protocol, UserAuthCredential, UserRequireCredentialsPolicy,
-};
+use warpgate_common::{PasswordPolicy, Protocol, UserAuthCredential, UserRequireCredentialsPolicy};
 
 #[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
@@ -175,6 +176,25 @@ pub fn get_config_migration_values() -> &'static ConfigMigrationValues {
         .expect("recordings migration values must be set before migrations run")
 }
 
+pub struct LogoImage {
+    pub content_type: String,
+    pub bytes: Vec<u8>,
+}
+
+impl LogoImage {
+    pub fn from_data_url(data_url: &str) -> Option<Self> {
+        let url = DataUrl::process(data_url).ok()?;
+        if url.mime_type().type_ != "image" {
+            return None;
+        }
+        let (bytes, _fragment) = url.decode_to_vec().ok()?;
+        Some(Self {
+            content_type: url.mime_type().to_string(),
+            bytes,
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Object)]
 pub struct RecordingsDiskConfig {
     pub path: String,
@@ -266,6 +286,8 @@ pub struct Model {
     pub ssh_host_key_ed25519: String,
     #[sea_orm(column_type = "Text")]
     pub ssh_host_key_rsa: String,
+    #[sea_orm(column_type = "Text")]
+    pub logo: Option<String>, // data URI
 }
 
 impl Model {
@@ -279,6 +301,27 @@ impl Model {
     /// The login banner shown to connecting clients, or `None` when it's blank.
     pub fn banner_text(&self) -> Option<&str> {
         Some(self.banner.trim()).filter(|text| !text.is_empty())
+    }
+
+    /// Content hash of the stored logo, `None` when unset. Keys the logo URL, so
+    /// a changed logo gets a URL no browser has cached yet.
+    pub fn logo_etag(&self) -> Option<String> {
+        self.logo_data_url()
+            .map(|data_url| HEXLOWER.encode(&Sha256::digest(data_url.as_bytes())))
+    }
+
+    fn logo_data_url(&self) -> Option<&str> {
+        self.logo.as_deref().filter(|data_url| !data_url.is_empty())
+    }
+
+    /// The stored logo decoded from its data URL. `None` when unset or (after a
+    /// warning) when the stored value isn't an image data URL.
+    pub fn logo_image(&self) -> Option<LogoImage> {
+        let image = LogoImage::from_data_url(self.logo_data_url()?);
+        if image.is_none() {
+            tracing::warn!("the stored logo is not an image data URL, ignoring it");
+        }
+        image
     }
 }
 
@@ -464,6 +507,7 @@ mod tests {
             retiring_key_fp: None,
             ssh_host_key_ed25519: "".into(),
             ssh_host_key_rsa: "".into(),
+            logo: None,
         }
     }
 
@@ -525,6 +569,40 @@ mod tests {
                 Some(&CredentialKind::WebUserApproval),
                 "{protocol}"
             );
+        }
+    }
+
+    #[test]
+    fn logo_round_trips_through_data_url() {
+        let mut params = parameters_defaults();
+        assert_eq!(params.logo_etag(), None);
+        assert!(params.logo_image().is_none());
+
+        params.logo = Some("data:image/png;base64,iVBORw0KGgo=".into());
+        let image = params.logo_image().unwrap();
+        assert_eq!(image.content_type, "image/png");
+        assert_eq!(image.bytes, b"\x89PNG\r\n\x1a\n");
+        let etag = params.logo_etag().unwrap();
+
+        params.logo = Some("data:image/gif;base64,R0lGODlh".into());
+        assert_ne!(params.logo_etag().unwrap(), etag);
+
+        // Browsers tolerate missing padding and non-zero trailing bits.
+        for lenient in [
+            "data:image/png;base64,iVBORw0KGgo",
+            "data:image/png;base64,iVBORw0KGgp=",
+        ] {
+            params.logo = Some(lenient.into());
+            assert_eq!(params.logo_image().unwrap().bytes, b"\x89PNG\r\n\x1a\n");
+        }
+
+        for invalid in [
+            "not a data url",
+            "data:text/html;base64,PHNjcmlwdC8+",
+            "data:image/png;base64,iVBORw0KGgoAB",
+        ] {
+            params.logo = Some(invalid.into());
+            assert!(params.logo_image().is_none(), "{invalid}");
         }
     }
 

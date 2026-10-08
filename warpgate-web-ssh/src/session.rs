@@ -1,13 +1,14 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
+use std::sync::{Arc, OnceLock};
 
 use bytes::Bytes;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, oneshot};
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 use uuid::Uuid;
-use warpgate_common::{TargetSessionId, UserSessionId};
+use warpgate_common::{TargetSSHOptions, TargetSessionId, UserSessionId};
 use warpgate_core::WarpgateServerHandle;
 use warpgate_core::recordings::{SessionRecordings, TerminalRecorder};
 use warpgate_db_entities::Target::TargetKind;
@@ -19,13 +20,13 @@ use warpgate_web_clients_common::{ManagedSession, Sheddable, WebSession};
 
 use crate::protocol::ServerMessage;
 
-/// Terminal output ring: the whole byte stream is droppable, so an idle/slow client's backlog
-/// is capped at the most recent [`OUTPUT_BUFFER_CAPACITY`] messages.
+/// Terminal output ring: the byte stream is droppable, so an idle/slow client's backlog is
+/// capped at the most recent [`OUTPUT_BUFFER_CAPACITY`] output messages.
 const OUTPUT_BUFFER_CAPACITY: usize = 2048;
 
 impl Sheddable for ServerMessage {
     fn is_droppable(&self) -> bool {
-        true
+        matches!(self, Self::Output { .. })
     }
 }
 
@@ -39,7 +40,8 @@ pub struct WebSshSession {
     command_tx: UnboundedSender<(RCCommand, Option<RCCommandReply>)>,
 
     channel_counter: Arc<AtomicUsize>,
-    target_session_id: TargetSessionId,
+    /// Bound once the target is admitted; recordings need it, so no channel is opened before.
+    target_session_id: OnceLock<TargetSessionId>,
     recordings: Arc<SessionRecordings>,
     channel_audits: Arc<Mutex<HashMap<Uuid, ChannelAudit>>>,
     pending_host_key: Arc<Mutex<Option<PendingHostKey>>>,
@@ -52,10 +54,9 @@ impl WebSshSession {
         user_id: Uuid,
         target_name: String,
         target_kind: TargetKind,
-        target_session_id: TargetSessionId,
         server_handle: Arc<Mutex<WarpgateServerHandle>>,
+        cancel: CancellationToken,
         command_tx: UnboundedSender<(RCCommand, Option<RCCommandReply>)>,
-        abort_tx: UnboundedSender<()>,
         recordings: Arc<SessionRecordings>,
     ) -> Self {
         Self {
@@ -65,17 +66,21 @@ impl WebSshSession {
                 target_name,
                 target_kind,
                 server_handle,
-                abort_tx,
+                cancel,
                 OUTPUT_BUFFER_CAPACITY,
                 OUTPUT_BUFFER_CAPACITY,
             ),
             command_tx,
             channel_counter: Arc::new(AtomicUsize::new(0)),
-            target_session_id,
+            target_session_id: OnceLock::new(),
             recordings,
             channel_audits: Arc::new(Mutex::new(HashMap::new())),
             pending_host_key: Arc::new(Mutex::new(None)),
         }
+    }
+
+    pub fn bind_target_session(&self, id: TargetSessionId) {
+        let _ = self.target_session_id.set(id);
     }
 
     pub async fn set_pending_host_key(&self, pending: PendingHostKey) {
@@ -86,14 +91,22 @@ impl WebSshSession {
         self.pending_host_key.lock().await.take()
     }
 
-    async fn start_recording(&self, channel_id: Uuid) -> Option<TerminalRecorder> {
+    pub fn connect(&self, chain: Vec<TargetSSHOptions>) {
+        let _ = self.command_tx.send((RCCommand::Connect(chain), None));
+    }
+
+    async fn start_recording(
+        &self,
+        target_session_id: &TargetSessionId,
+        channel_id: Uuid,
+    ) -> Option<TerminalRecorder> {
         let channel_number = self
             .channel_counter
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         match self
             .recordings
             .start::<TerminalRecorder, _>(
-                &self.target_session_id,
+                target_session_id,
                 None,
                 SshRecordingMetadata::Shell {
                     channel: channel_number,
@@ -124,7 +137,8 @@ impl WebSshSession {
         Some(rx)
     }
 
-    pub async fn open_shell_channel(&self, cols: u32, rows: u32) -> Uuid {
+    pub async fn open_shell_channel(&self, cols: u32, rows: u32) -> Option<Uuid> {
+        let target_session_id = self.target_session_id.get()?;
         let channel_id = Uuid::new_v4();
 
         info!(session=%self.id(), channel=%channel_id, "Opening session channel");
@@ -133,7 +147,7 @@ impl WebSshSession {
         let mut audit = ChannelAudit::new(channel_id);
         let (cols, rows) = pty_request.screen_size();
         audit.start_command_detection(cols, rows);
-        if let Some(recorder) = self.start_recording(channel_id).await {
+        if let Some(recorder) = self.start_recording(target_session_id, channel_id).await {
             audit.set_recorder(recorder);
         }
         // seeds the recording with the initial screen size
@@ -149,7 +163,7 @@ impl WebSshSession {
             channel_id,
             ChannelOperation::RequestShell,
         ));
-        channel_id
+        Some(channel_id)
     }
 
     pub async fn send_input(&self, channel_id: Uuid, data: Bytes) {
