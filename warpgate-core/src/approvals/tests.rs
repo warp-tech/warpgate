@@ -20,6 +20,21 @@ use warpgate_db_migrations::migrate_database;
 
 use super::*;
 
+/// Drives `runtime` until every task spawned on it has finished — the point
+/// after which nothing it left detached can still write anything. The deadline
+/// only exists to fail.
+fn run_detached_to_completion(runtime: &tokio::runtime::Runtime) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while runtime.metrics().num_alive_tasks() > 0 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "detached tasks never finished: {} alive",
+            runtime.metrics().num_alive_tasks(),
+        );
+        runtime.block_on(async { tokio::time::sleep(Duration::from_millis(1)).await });
+    }
+}
+
 async fn migrated_db() -> DatabaseConnection {
     set_config_migration_values(ConfigMigrationValues::default());
     let db = Database::connect("sqlite::memory:").await.unwrap();
@@ -2045,9 +2060,9 @@ mod polled_gate {
                 "a decision arriving after the timeout must settle nothing",
             );
         });
-        // Whatever the gate left detached gets to run: a close it repeated
-        // would audit the timeout a second time
-        frozen.block_on(async { tokio::time::sleep(Duration::from_millis(300)).await });
+        // Whatever the gate left detached runs to its end: a close it
+        // repeated would audit the timeout a second time
+        run_detached_to_completion(&frozen);
         assert_eq!(
             audited_for(session_id, "SessionApprovalTimedOut1").len(),
             1,
@@ -2329,8 +2344,8 @@ mod polled_gate {
         {
             gate_runtime.block_on(async { tokio::time::sleep(Duration::from_millis(5)).await });
         }
-        // Whatever else the gate left detached gets to run too
-        gate_runtime.block_on(async { tokio::time::sleep(Duration::from_millis(300)).await });
+        // Whatever else the gate left detached runs to its end too
+        run_detached_to_completion(&gate_runtime);
 
         assert_eq!(
             runtime.block_on(status_of(&db, session_id, "prod")),
@@ -2341,6 +2356,69 @@ mod polled_gate {
             audited_for(session_id, "SessionApprovalTimedOut1").len(),
             1,
             "the timeout the retry recorded must be audited exactly once",
+        );
+    }
+
+    /// The timeout is audited when the row moves, not once the ticket refund
+    /// that follows is done: a gate cancelled during that refund leaves a
+    /// timed-out row behind, and the drop's retry then finds nothing left to
+    /// close or audit.
+    #[test]
+    fn a_timeout_close_cancelled_during_its_refund_is_still_audited() {
+        use std::sync::Arc;
+
+        use tokio::sync::Notify;
+
+        audit_events();
+        let runtime = test_runtime();
+        let (shared, db) = runtime.block_on(SharedDb::migrated(None));
+        let session_id = UserSessionId(Uuid::new_v4());
+        let mut subject = plain_subject("a-target");
+        subject.session_id = session_id;
+        runtime.block_on(async {
+            subject.ticket_id = Some(ticket_with_uses(&db, 0).await);
+            advertise_row(&db, session_id, &subject).await;
+        });
+
+        let gate_runtime = test_runtime();
+        let cancelled = gate_runtime.block_on(async {
+            // Fires once the close's update has committed; the refund is the
+            // close's next await, so that is where the cancellation lands
+            let moved = Arc::new(Notify::new());
+            let signal = moved.clone();
+            let mut gate_db = Database::connect(&shared.url).await.unwrap();
+            gate_db.set_metric_callback(move |info| {
+                let sql = &info.statement.sql;
+                if sql.starts_with("UPDATE") && sql.contains("session_approval_requests") {
+                    signal.notify_one();
+                }
+            });
+
+            let mut guard = PendingApproval::guarding(gate_db, &subject);
+            let cancelled = tokio::select! {
+                biased;
+                () = moved.notified() => true,
+                _ = guard.close_timed_out() => false,
+            };
+            drop(guard);
+            cancelled
+        });
+        assert!(
+            cancelled,
+            "the close must have been cancelled after its update"
+        );
+        // The drop's retry, and anything else the close left detached
+        run_detached_to_completion(&gate_runtime);
+
+        assert_eq!(
+            runtime.block_on(status_of(&db, session_id, "a-target")),
+            SessionApprovalRequest::ApprovalRequestStatus::TimedOut,
+            "the cancelled close had already timed the question out",
+        );
+        assert_eq!(
+            audited_for(session_id, "SessionApprovalTimedOut1").len(),
+            1,
+            "a timeout that reached the row must be audited exactly once",
         );
     }
 

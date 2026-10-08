@@ -8,8 +8,8 @@ use warpgate_common::auth::ApprovalKind;
 use warpgate_common::helpers::logging::format_related_ids;
 use warpgate_common::{NodeId, UserSessionId, WarpgateError};
 use warpgate_db_entities::SessionApprovalRequest::{
-    self, Advertised, ApprovalActor, UndecidedApprovalRequestStatus, close_request, mark_consumed,
-    upsert_request,
+    self, Advertised, ApprovalActor, UndecidedApprovalRequestStatus, close_request_then,
+    mark_consumed, upsert_request,
 };
 
 use super::*;
@@ -45,15 +45,20 @@ impl Drop for PendingApproval {
         let on_drop = self.on_drop;
         tokio::spawn(async move {
             let result = match on_drop {
-                OnDrop::Close(status) => {
-                    close_request(&db, session_id, ApprovalKind::Admin, &target, status)
-                        .await
-                        .map(|moved| {
-                            if moved && status == UndecidedApprovalRequestStatus::TimedOut {
-                                subject.emit_timed_out_event();
-                            }
-                        })
-                }
+                OnDrop::Close(status) => close_request_then(
+                    &db,
+                    session_id,
+                    ApprovalKind::Admin,
+                    &target,
+                    status,
+                    || {
+                        if status == UndecidedApprovalRequestStatus::TimedOut {
+                            subject.emit_timed_out_event();
+                        }
+                    },
+                )
+                .await
+                .map(|_| ()),
                 OnDrop::Consume(started) => mark_consumed(
                     &db,
                     SessionApprovalRequest::Key::new(session_id, ApprovalKind::Admin, &target),
@@ -89,17 +94,21 @@ impl PendingApproval {
         // Stays armed until the outcome is known, so a failure at either step
         // leaves the drop to try again
         self.on_drop = OnDrop::Close(TimedOut);
-        if close_request(
+        // Audited the moment the row moves, not after the ticket refund: a
+        // caller cancelled during the refund leaves the row timed out, and the
+        // drop's retry then finds nothing left to close
+        let subject = &self.subject;
+        if close_request_then(
             &self.db,
-            self.subject.session_id,
+            subject.session_id,
             ApprovalKind::Admin,
-            &self.subject.target_name,
+            &subject.target_name,
             TimedOut,
+            || subject.emit_timed_out_event(),
         )
         .await?
         {
             self.closed = true;
-            self.subject.emit_timed_out_event();
             return Ok(TimeoutClose::Closed);
         }
         if let Some((decision, started)) = row_decision(
