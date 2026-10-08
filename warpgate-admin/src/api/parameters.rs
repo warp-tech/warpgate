@@ -97,6 +97,7 @@ struct ParameterValues {
     pub lp_user_exempt_admins: bool,
     pub banner: String,
     pub web_clients_enabled: bool,
+    pub logo_etag: Option<String>,
     pub web_auth_max_age_seconds: Option<i64>,
     pub web_approval_grace_period_seconds: Option<i64>,
     // None = AuthStateStore's TIMEOUT
@@ -161,6 +162,17 @@ struct ParameterUpdate {
     pub lp_user_lockout_duration_seconds: Option<i32>,
     pub lp_user_exempt_admins: Option<bool>,
     pub banner: Option<String>,
+    /// Only browser-renderable image data URLs are stored: the value is served
+    /// to every visitor as an image, so nothing else must ever end up in it.
+    /// `null` clears the logo. The size cap is mirrored in the Parameters UI.
+    #[oai(
+        deserialize_with = "parse_nullable",
+        validator(
+            max_length = 4_194_304,
+            pattern = r"^data:image/(png|jpeg|gif|webp|svg\+xml);base64,[A-Za-z0-9+/]+={0,2}$"
+        )
+    )]
+    pub logo: Option<Option<String>>,
     pub web_clients_enabled: Option<bool>,
     #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
     pub web_auth_max_age_seconds: Option<Option<i64>>,
@@ -222,6 +234,7 @@ impl Api {
     async fn api_get(&self, admin: AdminContext) -> Result<GetParametersResponse, WarpgateError> {
         let parameters = admin.parameters().await?.clone();
         let recordings_storage = redact_secret(parameters.recordings_storage_config()?);
+        let logo_etag = parameters.logo_etag();
 
         Ok(GetParametersResponse::Ok(Json(ParameterValues {
             allow_own_credential_management: parameters.allow_own_credential_management,
@@ -261,6 +274,7 @@ impl Api {
             lp_user_lockout_duration_seconds: parameters.lp_user_lockout_duration_seconds,
             lp_user_exempt_admins: parameters.lp_user_exempt_admins,
             banner: parameters.banner,
+            logo_etag,
             web_clients_enabled: parameters.web_clients_enabled,
             web_auth_max_age_seconds: parameters.web_auth_max_age_seconds,
             web_approval_grace_period_seconds: parameters.web_approval_grace_period_seconds,
@@ -305,6 +319,14 @@ impl Api {
         body: Json<ParameterUpdate>,
     ) -> Result<UpdateParametersResponse, WarpgateError> {
         admin.require(AdminPermission::ConfigEdit)?;
+
+        if let Some(Some(logo)) = &body.logo
+            && Parameters::LogoImage::from_data_url(logo).is_none()
+        {
+            return Err(WarpgateError::InvalidRequest(
+                "logo is not a valid image data URL".into(),
+            ));
+        }
 
         let services = admin.services();
         let db = &services.db;
@@ -386,6 +408,7 @@ impl Api {
             body.lp_user_lockout_duration_seconds.map_or(NotSet, Set);
         parameters.lp_user_exempt_admins = body.lp_user_exempt_admins.map_or(NotSet, Set);
         parameters.banner = body.banner.clone().map_or(NotSet, Set);
+        parameters.logo = body.logo.clone().map_or(NotSet, Set);
         parameters.web_clients_enabled = body.web_clients_enabled.map_or(NotSet, Set);
         parameters.web_auth_max_age_seconds = body.web_auth_max_age_seconds.map_or(NotSet, Set);
         parameters.web_approval_grace_period_seconds =
@@ -476,6 +499,31 @@ mod tests {
         match ParameterUpdate::parse_from_json(Some(value)) {
             Ok(v) => v.web_approval_grace_period_seconds,
             Err(e) => panic!("{}", e.into_message()),
+        }
+    }
+
+    #[test]
+    fn logo_accepts_only_image_data_urls() {
+        for body in [
+            json!({ "logo": null }),
+            json!({ "logo": "data:image/png;base64,iVBORw0KGgo=" }),
+            json!({ "logo": "data:image/svg+xml;base64,PHN2Zy8+" }),
+        ] {
+            assert!(
+                ParameterUpdate::parse_from_json(Some(body.clone())).is_ok(),
+                "{body} was rejected"
+            );
+        }
+        for body in [
+            json!({ "logo": "" }),
+            json!({ "logo": "https://example.com/logo.png" }),
+            json!({ "logo": "data:text/html;base64,PHNjcmlwdC8+" }),
+            json!({ "logo": "data:image/png;base64,not base64!" }),
+        ] {
+            assert!(
+                ParameterUpdate::parse_from_json(Some(body.clone())).is_err(),
+                "{body} was accepted"
+            );
         }
     }
 
