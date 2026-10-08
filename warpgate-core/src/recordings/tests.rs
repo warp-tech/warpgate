@@ -345,7 +345,7 @@ async fn a_recorder_that_fails_to_open_all_files_does_not_end() {
     let failed_creates = h.s3().failed_creates.clone();
     assert!(
         matches!(failed_creates.as_slice(), [key] if key.ends_with("index.ndjson")),
-        "start failed, but not on the injected index.ndjson create: {failed_creates:?}"
+        "start failed, but not on the injected index.ndjson create"
     );
     h.wait_for_writers(0).await;
 
@@ -460,7 +460,7 @@ async fn a_failed_s3_part_does_not_end() {
     let aborted = h.s3().aborted.clone();
     assert!(
         matches!(aborted.as_slice(), [key] if key.ends_with("data.ndjson")),
-        "expected one abort of data.ndjson: {aborted:?}"
+        "expected exactly one abort, of data.ndjson"
     );
 
     let mut scratch = Vec::new();
