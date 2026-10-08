@@ -26,8 +26,12 @@ struct AdminAccess {
 }
 
 impl AdminAccess {
+    const fn has_permission(&self, permission: AdminPermission) -> bool {
+        self.permissions.contains(permission)
+    }
+
     const fn require(&self, permission: AdminPermission) -> Result<(), WarpgateError> {
-        if self.permissions.contains(permission) {
+        if self.has_permission(permission) {
             Ok(())
         } else {
             Err(WarpgateError::NoAdminPermission(permission))
@@ -99,6 +103,10 @@ impl AdminContext {
             Self::Token(t) => &t.0,
             Self::Cookie(c) => &c.0,
         }
+    }
+
+    pub(crate) const fn has_permission(&self, permission: AdminPermission) -> bool {
+        self.access().has_permission(permission)
     }
 
     /// Require a specific permission, yielding a [`PermissionGranted`] proof or a 403.

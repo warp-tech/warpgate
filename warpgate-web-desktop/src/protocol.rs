@@ -4,6 +4,7 @@ use warpgate_core::{
     DesktopEvent, DesktopInput, DesktopRect, DesktopState, MAX_CLIPBOARD_BYTES, Scancode,
     truncate_clipboard_contents_in_place,
 };
+use warpgate_web_clients_common::{LiveSessionPhase, SessionPhase};
 
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct WsRect {
@@ -101,9 +102,7 @@ impl From<ClientMessage> for Option<DesktopInput> {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
-    ConnectionState {
-        state: &'static str,
-    },
+    State(SessionPhase),
     Resize {
         width: u16,
         height: u16,
@@ -144,9 +143,16 @@ pub enum ServerMessage {
         text: String,
     },
     Bell,
+    /// A non-fatal notice; the session ends through [`ServerMessage::State`] alone.
     Error {
         message: String,
     },
+}
+
+impl From<SessionPhase> for ServerMessage {
+    fn from(phase: SessionPhase) -> Self {
+        Self::State(phase)
+    }
 }
 
 impl ServerMessage {
@@ -198,20 +204,21 @@ fn encode_image(kind: u8, rect: WsRect, data: &[u8]) -> Vec<u8> {
     out
 }
 
-const fn state_name(state: DesktopState) -> &'static str {
+/// A backend state change as a session phase; `None` for the backend's own end, which
+/// the lifecycle reports once with a reason.
+pub const fn phase_for(state: DesktopState) -> Option<LiveSessionPhase> {
     match state {
-        DesktopState::Connecting => "connecting",
-        DesktopState::Connected => "connected",
-        DesktopState::Disconnected => "disconnected",
+        DesktopState::Connecting => Some(LiveSessionPhase::Connecting),
+        DesktopState::Connected => Some(LiveSessionPhase::Connected),
+        DesktopState::Disconnected => None,
     }
 }
 
-impl From<DesktopEvent> for ServerMessage {
-    fn from(event: DesktopEvent) -> Self {
-        match event {
-            DesktopEvent::State(state) => Self::ConnectionState {
-                state: state_name(state),
-            },
+impl ServerMessage {
+    /// `None` for state changes, which are reported as a session phase instead.
+    pub fn from_event(event: DesktopEvent) -> Option<Self> {
+        Some(match event {
+            DesktopEvent::State(_) => return None,
             DesktopEvent::Resize { width, height } => Self::Resize { width, height },
             DesktopEvent::RawImage { rect, data } => Self::RawImage {
                 rect: rect.into(),
@@ -237,6 +244,6 @@ impl From<DesktopEvent> for ServerMessage {
             DesktopEvent::Clipboard(text) => Self::Clipboard { text },
             DesktopEvent::Bell => Self::Bell,
             DesktopEvent::Error(message) => Self::Error { message },
-        }
+        })
     }
 }

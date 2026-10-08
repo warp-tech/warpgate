@@ -505,7 +505,6 @@ impl Api {
 
         let user_id = user.id;
         let username = user.username.clone();
-        let mut user_cfg: User = user.clone().try_into()?;
 
         let object = entities::OtpCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -516,16 +515,7 @@ impl Api {
         .await
         .map_err(WarpgateError::from)?;
 
-        let details = user.load_details(db).await?;
-        user_cfg.credential_policy = Some(
-            user_cfg
-                .credential_policy
-                .unwrap_or_default()
-                .upgrade_to_otp(details.credentials.as_slice()),
-        );
-
-        let user = entities::User::ActiveModel::try_from(user_cfg)?;
-        user.update(db).await?;
+        user.require_otp_in_policy(db).await?;
 
         AuditEvent::CredentialCreated {
             credential_type: "otp".to_string(),

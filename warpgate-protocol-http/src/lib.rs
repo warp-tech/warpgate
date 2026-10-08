@@ -247,6 +247,7 @@ impl ProtocolServer for HTTPProtocolServer {
                             Ok(resp)
                         }),
                 )
+                .at("/api/logo", poem::get(api::logo::api_get_logo))
                 .at(
                     "/api/auth/web-auth-requests/stream",
                     endpoint_auth(api::auth::api_get_web_auth_requests_stream),
