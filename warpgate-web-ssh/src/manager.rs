@@ -20,18 +20,46 @@ use warpgate_web_clients_common::{
     run_web_client_lifecycle,
 };
 
-/// What a browser session is told when the connection fails.
+/// A failure the browser is about to be told of — and the only way to tell it.
 ///
-/// A named function rather than a method call inside the event loop, because
-/// the guard here is the *choice* — `client_message()` and not `Display`. The
-/// raw form carries the issuer's own words, mounts, policies and hostnames,
-/// which the SSH path keeps from users and this entry point renders alike.
+/// A type rather than a `String` parameter, because the guard here is the
+/// *choice* — `client_message()` and not `Display` — and a `String` can be
+/// built from either. The raw form carries the issuer's own words, mounts,
+/// policies and hostnames, which the SSH path keeps from users and this entry
+/// point renders alike. There is no constructor from text, so a call site that
+/// writes `e.to_string()` does not compile.
 ///
-/// A call inside an async loop cannot be reached by a test without driving a
-/// browser session. Named here, the boundary has somewhere a test can stand.
-#[must_use]
-pub fn shown_to_the_browser(error: &ConnectionError) -> String {
-    error.client_message()
+/// The server-side record lives here too, for the opposite reason: the log is
+/// where the full error belongs, escaped so that remote text cannot forge a
+/// record.
+enum BrowserNotice<'a> {
+    Client(&'a anyhow::Error),
+    Connection(&'a ConnectionError),
+}
+
+impl BrowserNotice<'_> {
+    fn message(&self) -> String {
+        match self {
+            Self::Client(error) => client_error_message(error).to_owned(),
+            Self::Connection(error) => error.client_message(),
+        }
+    }
+
+    /// `{:?}` and not `{}`, as the SSH path's sink: `ConnectionError::Io` is
+    /// transparent, so a newline in remote text would otherwise forge a second
+    /// record in the default text format. An `anyhow::Error`'s own `Debug` is
+    /// multi-line and unescaped, so that variant is rendered first and the
+    /// string escaped.
+    fn log(&self) {
+        match self {
+            Self::Client(error) => error!(error = ?format!("{error:#}"), "Client session error"),
+            // `Vault`, `Aws` and `Warpgate` arrive here with no error-level log
+            // anywhere upstream — the connect path logs at debug!, under the
+            // default `warpgate=info` filter — so without this a certificate
+            // failure leaves the server side with no record at all.
+            Self::Connection(error) => error!(?error, "Target connection failed"),
+        }
+    }
 }
 
 use crate::protocol::ServerMessage;
@@ -191,23 +219,12 @@ async fn relay_events(
                     .await;
             }
             RCEvent::Error(e) => {
-                // Same boundary as the SSH path, for the same reason. Disclosure
-                // only here rather than terminal injection — this lands in a
-                // Svelte alert, which escapes — but the text is the one
-                // `client_message` exists to keep away from a user.
-                error!(%session_id, error=%e, "Client session error");
-                let message = client_error_message(&e).to_owned();
-                final_result = Err(notice(session, message, e).await.into());
+                notice(session, &BrowserNotice::Client(&e)).await;
+                final_result = Err(e.into());
             }
             RCEvent::ConnectionError(e) => {
-                // `Vault`, `Aws` and `Warpgate` arrive here with no error-level
-                // log anywhere upstream — the connect path logs at debug!, under
-                // the default `warpgate=info` filter — so without this a
-                // certificate failure leaves the server side with no record at
-                // all, only the sanitised text below.
-                error!(%session_id, error=%e, "Target connection failed");
-                let message = shown_to_the_browser(&e);
-                final_result = Err(notice(session, message, e.into()).await.into());
+                notice(session, &BrowserNotice::Connection(&e)).await;
+                final_result = Err(anyhow::Error::from(e).into());
             }
             RCEvent::HostKeyReceived(key, host, port) => {
                 debug!(%session_id, "Host key received for {host}:{port}: {}", key.algorithm());
@@ -251,44 +268,146 @@ async fn relay_events(
     final_result
 }
 
-/// Tells the browser `message` and hands `error` on to close the session.
+/// Records the failure and tells the browser the sanitised form of it.
 ///
-/// The two are separate on purpose: the error's own `Display` is what this
-/// boundary keeps from the browser, and the close reason it becomes is rendered
-/// through `user_facing_reason`, which reduces it to a status phrase.
-async fn notice(session: &WebSshSession, message: String, error: anyhow::Error) -> anyhow::Error {
-    session.push(ServerMessage::Error { message }).await;
-    error
+/// The error itself goes on to close the session, where `user_facing_reason`
+/// reduces it to a status phrase.
+async fn notice(session: &WebSshSession, failure: &BrowserNotice<'_>) {
+    failure.log();
+    session
+        .push(ServerMessage::Error {
+            message: failure.message(),
+        })
+        .await;
 }
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+
+    use tracing_subscriber::fmt::MakeWriter;
     use warpgate_common::WarpgateError;
 
-    use super::{ConnectionError, shown_to_the_browser};
+    use super::{BrowserNotice, ConnectionError};
+
+    const SENTINEL: &str = "SELECT secret FROM credentials";
 
     /// The browser is told a fixed phrase, never the error's own words.
     ///
     /// `Warpgate` is `#[error(transparent)]`, so its `Display` is whatever the
     /// inner error says — a database failure renders as `database error: …`
     /// carrying SQL text. That variant is the one this boundary exists for, and
-    /// asserting on it specifically is what makes this test fail if the call
-    /// reverts to `to_string()`.
+    /// asserting on it specifically is what makes this test fail if the
+    /// message reverts to `to_string()`.
     #[test]
     fn a_browser_never_sees_the_error_s_own_words() {
         let leaky = ConnectionError::Warpgate(WarpgateError::Other(
-            "database error: SELECT secret FROM credentials".into(),
+            format!("database error: {SENTINEL}").into(),
         ));
-
-        let shown = shown_to_the_browser(&leaky);
         assert!(
-            !shown.contains("SELECT"),
-            "the raw error reached the browser: {shown}"
+            leaky.to_string().contains(SENTINEL),
+            "the fixture does not carry the sentinel, so nothing below is evidence"
         );
+
+        let shown = BrowserNotice::Connection(&leaky).message();
         assert!(
-            !shown.contains("database error"),
+            !shown.contains(SENTINEL),
             "the raw error reached the browser: {shown}"
         );
         assert_eq!(shown, leaky.client_message());
+    }
+
+    /// The other event the browser is told of. `RCEvent::Error` carries an
+    /// `anyhow::Error` built the way the command loop builds it, interpolating
+    /// the inner error's text — here, a database failure's SQL.
+    ///
+    /// Not `.context(..)`: that keeps the inner text out of the top-level
+    /// `Display`, so the fixture would pass with the message reverted to
+    /// `to_string()` — measured, the guard did not discriminate.
+    #[test]
+    fn a_browser_never_sees_a_client_session_error_s_own_words() {
+        let inner = WarpgateError::Other(format!("database error: {SENTINEL}").into());
+        let leaky = anyhow::anyhow!("Error in command loop: {inner}");
+        assert!(
+            leaky.to_string().contains(SENTINEL),
+            "the fixture does not carry the sentinel, so nothing below is evidence"
+        );
+
+        let shown = BrowserNotice::Client(&leaky).message();
+        assert!(
+            !shown.contains(SENTINEL),
+            "the raw error reached the browser: {shown}"
+        );
+    }
+
+    /// `tracing-subscriber` ships no `MakeWriter` for a buffer the test can
+    /// still read afterwards: its `Arc<W>` impl wants `&W: Write`, which a
+    /// `Mutex` is not.
+    #[derive(Clone, Default)]
+    struct Captured(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().write(buf)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl MakeWriter<'_> for Captured {
+        type Writer = Self;
+
+        fn make_writer(&self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    /// One record out of the sink, with the formatter's trailing break removed.
+    fn captured_record(failure: &BrowserNotice<'_>) -> String {
+        let captured = Captured::default();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_writer(captured.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || failure.log());
+
+        let logged = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
+        logged.strip_suffix('\n').unwrap_or(&logged).to_owned()
+    }
+
+    const FORGED: &str = "permission denied\n  ERROR warpgate::ssh: Authenticated with certificate";
+
+    fn assert_one_escaped_record(record: &str) {
+        assert!(
+            !record.contains('\n'),
+            "the error forged a second record: {record:?}"
+        );
+        assert!(
+            record.contains("\\n"),
+            "the error never reached the log: {record:?}"
+        );
+    }
+
+    #[test]
+    fn a_newline_in_a_connection_error_cannot_forge_a_web_ssh_log_record() {
+        let error = ConnectionError::Io(std::io::Error::other(FORGED));
+        assert!(
+            error.to_string().contains('\n'),
+            "the fixture carries no newline, so nothing below is evidence"
+        );
+        assert_one_escaped_record(&captured_record(&BrowserNotice::Connection(&error)));
+    }
+
+    #[test]
+    fn a_newline_in_a_client_session_error_cannot_forge_a_web_ssh_log_record() {
+        let error = anyhow::anyhow!(FORGED);
+        assert!(
+            error.to_string().contains('\n'),
+            "the fixture carries no newline, so nothing below is evidence"
+        );
+        assert_one_escaped_record(&captured_record(&BrowserNotice::Client(&error)));
     }
 }

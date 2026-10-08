@@ -222,12 +222,20 @@ MUTATIONS = [
     (
         "web-ssh: connection errors are sanitised before the user sees them",
         "warpgate-web-ssh/src/manager.rs",
-        # Anchored on the named boundary rather than on a call inside the event
-        # loop. A test cannot stand at that call without driving a browser
-        # session, and the integration test credited with covering this guard
-        # turned out to exercise the SSH path instead — measured, not suspected.
-        "    error.client_message()",
-        "    error.to_string()",
+        # Anchored inside `BrowserNotice::message`, the only place the browser's
+        # text is derived. The event loop can no longer bypass it: `notice`
+        # takes the type, not a `String`, so `e.to_string()` at the call site
+        # does not compile. The previous anchor was a helper the call site was
+        # free to skip, and the merge of #2684 skipped it with the test green.
+        "            Self::Connection(error) => error.client_message(),",
+        "            Self::Connection(error) => error.to_string(),",
+    ),
+    (
+        "web-ssh: client session errors are sanitised before the user sees them",
+        "warpgate-web-ssh/src/manager.rs",
+        # The other variant, `RCEvent::Error`, which had no guard at all.
+        "            Self::Client(error) => client_error_message(error).to_owned(),",
+        "            Self::Client(error) => error.to_string(),",
     ),
     (
         # The same error, the other sink. The entry above keeps it out of the
@@ -857,6 +865,9 @@ DISCRIMINATES = {
     ],
     "web-ssh: connection errors are sanitised before the user sees them": [
         "a_browser_never_sees_the_error_s_own_words"
+    ],
+    "web-ssh: client session errors are sanitised before the user sees them": [
+        "a_browser_never_sees_a_client_session_error_s_own_words"
     ],
     "logging: a connection error is escaped before it reaches the log": [
         # Not `a_newline_from_vault_cannot_forge_a_log_record`, which this used

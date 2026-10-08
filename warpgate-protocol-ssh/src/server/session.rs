@@ -222,7 +222,7 @@ fn reject_with_allowed_auth_methods(allowed_auth_methods: MethodSet) -> russh::s
 
 /// The server-side record of a failed target connection.
 ///
-/// Named, like web-ssh's `shown_to_the_browser`, so a test has somewhere to
+/// Named, like web-ssh's `BrowserNotice`, so a test has somewhere to
 /// stand: a call inside the event loop does not.
 ///
 /// `{:?}` and not `{}`, the rule the connect path states for itself. Remote text

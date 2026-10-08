@@ -26,3 +26,8 @@ warpgate-core = { path = "../warpgate-core" }
 warpgate-db-entities = { path = "../warpgate-db-entities" }
 warpgate-protocol-ssh = { path = "../warpgate-protocol-ssh" }
 warpgate-web-clients-common = { path = "../warpgate-web-clients-common" }
+
+[dev-dependencies]
+tracing-subscriber = { version = "0.3", default-features = false, features = [
+    "fmt",
+] }
