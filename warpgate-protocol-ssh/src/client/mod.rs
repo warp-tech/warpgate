@@ -1252,7 +1252,7 @@ impl RemoteClient {
                     loop {
                         tokio::select! {
                             Some(event) = self.inner_event_rx.recv() => {
-                                debug!(event=?event, "event");
+                                debug!(event = ?format!("{event:?}"), "event");
                                 if self.handle_event(event).await? {
                                     break
                                 }
@@ -1315,15 +1315,17 @@ impl RemoteClient {
                         return Ok(true);
                     }
                     Err(e) => {
-                        // `{:?}` rather than `{}` throughout this file for
+                        // Rendered and then escaped throughout this file for
                         // anything carrying a remote party's words. A newline in a
                         // Vault error body or an unresolved host name forges a
                         // whole record in the default text format — a log line the
-                        // reader has no way to tell from one Warpgate wrote. Debug
-                        // escapes it; Display does not, and `emit_pty_output`'s
-                        // escaping does not reach here because no `tracing` call
-                        // routes through it.
-                        debug!("Connect error: {e:?}");
+                        // reader has no way to tell from one Warpgate wrote.
+                        // Derived Debug alone is not enough: it escapes strings
+                        // but hands a nested `anyhow::Error` (through
+                        // `WarpgateError::Anyhow`) to anyhow's own Debug, which
+                        // writes it raw. `emit_pty_output`'s escaping does not
+                        // reach here because no `tracing` call routes through it.
+                        debug!(error = ?format!("{e:?}"), "Connect error");
                         let _ = self.tx.send(RCEvent::ConnectionError(e)).await;
                         self.set_disconnected().await;
                         return Ok(true);
@@ -1887,7 +1889,7 @@ impl Connector {
                                 ClientHandlerError::Ssh(e) => ConnectionError::Ssh(e),
                                 ClientHandlerError::Internal => ConnectionError::Internal,
                             };
-                            error!(error=?connection_error, "Connection error");
+                            error!(error = ?format!("{connection_error:?}"), "Connection error");
                             return Err(connection_error);
                         }
                     };

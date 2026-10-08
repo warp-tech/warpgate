@@ -245,8 +245,10 @@ MUTATIONS = [
         # event loop, where no test can stand.
         "logging: a connection error is escaped before it reaches the log",
         "warpgate-protocol-ssh/src/server/session.rs",
+        '    error!(error = ?format!("{error:?}"), "Target connection failed");',
+        # `?error`, the previous form: escapes a string but not a nested
+        # `anyhow::Error`, which is what the named test carries.
         '    error!(?error, "Target connection failed");',
-        '    error!(%error, "Target connection failed");',
     ),
     (
         # The same forgery, a layer up. The entry above escapes it at one sink;
@@ -258,6 +260,15 @@ MUTATIONS = [
         "warpgate-vault/src/error.rs",
         '    #[error("Vault returned {status}: {body:?}")]',
         '    #[error("Vault returned {status}: {body}")]',
+    ),
+    (
+        # The generic per-event debug record, written before any of the escaped
+        # sinks the event then reaches. Reverted to `?event`, which writes an
+        # `RCEvent::Error`'s anyhow text raw.
+        "logging: a remote event is escaped in the generic debug record",
+        "warpgate-protocol-ssh/src/server/session.rs",
+        '    debug!(event = ?format!("{event:?}"), "Event");',
+        '    debug!(?event, "Event");',
     ),
     (
         # The producer of the error `RCEvent::Error`'s sinks receive: the
@@ -886,7 +897,10 @@ DISCRIMINATES = {
         # passes with this sink reverted. The one named here uses an error whose
         # Display is raw, which is the only thing this sink is left standing
         # between.
-        "a_newline_in_a_connection_error_cannot_forge_a_log_record"
+        "a_newline_in_an_anyhow_inside_a_connection_error_cannot_forge_a_log_record"
+    ],
+    "logging: a remote event is escaped in the generic debug record": [
+        "a_newline_in_a_remote_event_cannot_forge_a_debug_record"
     ],
     "logging: a command loop error is escaped before it reaches the log": [
         "a_newline_in_a_command_loop_error_cannot_forge_a_log_record"
