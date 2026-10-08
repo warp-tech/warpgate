@@ -144,6 +144,7 @@ pub struct Info {
     /// Login banner, shown to unauthenticated visitors too. Empty when unset.
     banner: String,
     show_session_menu: bool,
+    logo_etag: Option<String>,
     config_warnings: Option<Vec<String>>,
 }
 
@@ -392,6 +393,7 @@ impl Api {
                 .then(|| ctx.services().vault.get().is_some()),
             should_prompt_analytics,
             banner: parameters.banner.clone(),
+            logo_etag: parameters.logo_etag(),
             show_session_menu: parameters.show_session_menu,
             config_warnings: can_edit_config.then(warnings),
         })))

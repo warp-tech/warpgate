@@ -2020,6 +2020,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
 
 [[package]]
+name = "data-url"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
+
+[[package]]
 name = "delegate"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9498,11 +9504,14 @@ name = "warpgate-db-entities"
 version = "0.29.1"
 dependencies = [
  "bytes",
+ "data-encoding",
+ "data-url",
  "ipnet",
  "poem-openapi",
  "sea-orm",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "sqlx",
  "time",
  "tracing",
