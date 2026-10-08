@@ -125,12 +125,22 @@ def test_the_terminal_is_told_what_happened_not_what_the_error_said(
         f"the target-connection arm never ran: {terminal!r}"
     )
 
-    for fragment in ("os error", "refused", "Connection reset", "No route"):
+    # The operating system's own phrasing, whole, rather than single words: a
+    # fixed phrase derived from the error kind may say the target "refused the
+    # connection" or that there is "no route to it", which is the sanitiser
+    # working, not leaking. What must not arrive is the `io::Error` text.
+    for fragment in (
+        "os error",
+        "Connection refused",
+        "Connection reset by peer",
+        "No route to host",
+    ):
         assert fragment.lower() not in terminal.lower(), (
             f"the operating system's own words reached the terminal "
             f"({fragment!r}): {terminal!r}"
         )
-    assert "SSH protocol error" in terminal, (
+    sanitised = ("SSH protocol error", "Could not open an SSH connection to the target")
+    assert any(phrase in terminal for phrase in sanitised), (
         f"the sanitised phrase is missing, so something else was shown: "
         f"{terminal!r}"
     )
