@@ -260,6 +260,17 @@ MUTATIONS = [
         '    #[error("Vault returned {status}: {body}")]',
     ),
     (
+        # The producer of the error `RCEvent::Error`'s sinks receive: the
+        # command loop logs it first, so escaping only the receivers left this
+        # record forgeable. Reverted to the old form, `?error`, which is unsafe
+        # for an `anyhow::Error` too — its Debug prints the cause chain on
+        # separate lines.
+        "logging: a command loop error is escaped before it reaches the log",
+        "warpgate-protocol-ssh/src/client/mod.rs",
+        '    error!(error = ?format!("{error:#}"), "error in command loop");',
+        '    error!(?error, "error in command loop");',
+    ),
+    (
         "vault: certificate_ttl outside the allowed range is refused at config load",
         "warpgate-vault/src/client.rs",
         "            return Err(VaultError::InvalidCertificateTtl(ttl));",
@@ -876,6 +887,9 @@ DISCRIMINATES = {
         # Display is raw, which is the only thing this sink is left standing
         # between.
         "a_newline_in_a_connection_error_cannot_forge_a_log_record"
+    ],
+    "logging: a command loop error is escaped before it reaches the log": [
+        "a_newline_in_a_command_loop_error_cannot_forge_a_log_record"
     ],
     "logging: a Vault error body is escaped by the type that owns it": [
         "a_newline_in_a_vault_error_body_cannot_forge_a_log_record"

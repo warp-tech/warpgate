@@ -265,6 +265,8 @@ mod tests {
         ConnectionError, log_client_session_error, log_target_connection_failure,
         reject_with_allowed_auth_methods,
     };
+    use crate::SshClientError;
+    use crate::client::log_command_loop_error;
 
     /// `tracing-subscriber` ships no `MakeWriter` for a buffer the test can
     /// still read afterwards: its `Arc<W>` impl wants `&W: Write`, which a
@@ -368,6 +370,32 @@ mod tests {
         );
 
         let record = captured_output(|| log_client_session_error(&error));
+        assert!(
+            !record.contains('\n'),
+            "the error forged a second record: {record:?}"
+        );
+        assert!(
+            record.contains("\\n"),
+            "the error never reached the log: {record:?}"
+        );
+    }
+
+    /// The command loop logs the same error before it is sent on, so the
+    /// sinks downstream being escaped is not enough. The fixture is shaped as
+    /// the loop's errors are — an `SshClientError` from `handle_event`, under a
+    /// context — with the newline in the cause, not the outermost message.
+    #[test]
+    fn a_newline_in_a_command_loop_error_cannot_forge_a_log_record() {
+        let error = anyhow::Error::from(SshClientError::other(std::io::Error::other(
+            "permission denied\n  ERROR warpgate::ssh: Authenticated with certificate",
+        )))
+        .context("handling a client event");
+        assert!(
+            format!("{error:#}").contains('\n'),
+            "the fixture carries no newline, so nothing below is evidence"
+        );
+
+        let record = captured_output(|| log_command_loop_error(&error));
         assert!(
             !record.contains('\n'),
             "the error forged a second record: {record:?}"

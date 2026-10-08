@@ -20,14 +20,16 @@ use warpgate_web_clients_common::{
     run_web_client_lifecycle,
 };
 
-/// A failure the browser is about to be told of — and the only way to tell it.
+/// A failure the browser is about to be told of, as `notice` takes it.
 ///
 /// A type rather than a `String` parameter, because the guard here is the
 /// *choice* — `client_message()` and not `Display` — and a `String` can be
 /// built from either. The raw form carries the issuer's own words, mounts,
 /// policies and hostnames, which the SSH path keeps from users and this entry
-/// point renders alike. There is no constructor from text, so a call site that
-/// writes `e.to_string()` does not compile.
+/// point renders alike. There is no constructor from text, so a `notice` call
+/// that passes `e.to_string()` does not compile. A direct
+/// `ServerMessage::Error` push would still bypass it; `notice` is the only one
+/// today.
 ///
 /// The server-side record lives here too, for the opposite reason: the log is
 /// where the full error belongs, escaped so that remote text cannot forge a
@@ -288,6 +290,7 @@ mod tests {
 
     use tracing_subscriber::fmt::MakeWriter;
     use warpgate_common::WarpgateError;
+    use warpgate_protocol_ssh::SshClientError;
 
     use super::{BrowserNotice, ConnectionError};
 
@@ -318,17 +321,16 @@ mod tests {
         assert_eq!(shown, leaky.client_message());
     }
 
-    /// The other event the browser is told of. `RCEvent::Error` carries an
-    /// `anyhow::Error` built the way the command loop builds it, interpolating
-    /// the inner error's text — here, a database failure's SQL.
-    ///
-    /// Not `.context(..)`: that keeps the inner text out of the top-level
-    /// `Display`, so the fixture would pass with the message reverted to
-    /// `to_string()` — measured, the guard did not discriminate.
+    /// The other event the browser is told of, shaped as the command loop
+    /// sends it: an `SshClientError` from `handle_event`, converted to
+    /// `anyhow::Error`, sent as `RCEvent::Error` unwrapped. `Russh` is chosen
+    /// because its phrase differs from the unknown-type fallback, so the
+    /// assertion on it shows the downcast in `client_error_message` was taken.
     #[test]
     fn a_browser_never_sees_a_client_session_error_s_own_words() {
-        let inner = WarpgateError::Other(format!("database error: {SENTINEL}").into());
-        let leaky = anyhow::anyhow!("Error in command loop: {inner}");
+        let leaky = anyhow::Error::from(SshClientError::Russh(russh::Error::IO(
+            std::io::Error::other(SENTINEL),
+        )));
         assert!(
             leaky.to_string().contains(SENTINEL),
             "the fixture does not carry the sentinel, so nothing below is evidence"
@@ -339,6 +341,25 @@ mod tests {
             !shown.contains(SENTINEL),
             "the raw error reached the browser: {shown}"
         );
+        assert_eq!(shown, "SSH protocol error", "the downcast was not taken");
+    }
+
+    /// An `anyhow::Error` that is not an `SshClientError` — nothing in the
+    /// command loop sends one today — gets the fixed fallback, not its text.
+    #[test]
+    fn an_unrecognised_client_session_error_gets_the_fallback_phrase() {
+        let leaky = anyhow::anyhow!("Error in command loop: database error: {SENTINEL}");
+        assert!(
+            leaky.to_string().contains(SENTINEL),
+            "the fixture does not carry the sentinel, so nothing below is evidence"
+        );
+
+        let shown = BrowserNotice::Client(&leaky).message();
+        assert!(
+            !shown.contains(SENTINEL),
+            "the raw error reached the browser: {shown}"
+        );
+        assert_eq!(shown, "Internal error in the target connection");
     }
 
     /// `tracing-subscriber` ships no `MakeWriter` for a buffer the test can
