@@ -11,7 +11,7 @@ use uuid::Uuid;
 use warpgate_common::encryption::idempotent_maybe_encrypt_secret;
 use warpgate_common::{
     AdminPermission, Role as RoleConfig, Target as TargetConfig, TargetOptions, TargetSSHOptions,
-    WarpgateError, map_stored_target_secrets,
+    WarpgateError, map_stored_target_secrets, redact_target_secrets,
 };
 use warpgate_common_http::errors::invalid_field;
 use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment, Ticket, TicketRequest};
@@ -26,6 +26,16 @@ fn serialize_options_for_storage(
     let mut value = serde_json::to_value(options).map_err(WarpgateError::from)?;
     map_stored_target_secrets(&mut value, &mut idempotent_maybe_encrypt_secret)?;
     Ok(value)
+}
+
+pub(crate) fn maybe_redacted_target(
+    admin: &AdminContext,
+    mut model: Target::Model,
+) -> Result<TargetConfig, WarpgateError> {
+    if !admin.has_permission(AdminPermission::TargetsEdit) {
+        redact_target_secrets(&mut model.options);
+    }
+    model.try_into().map_err(WarpgateError::from)
 }
 
 #[derive(Object)]
@@ -106,9 +116,10 @@ impl ListApi {
 
         let targets = targets.all(db).await.map_err(WarpgateError::from)?;
 
-        let targets: Result<Vec<TargetConfig>, _> =
-            targets.into_iter().map(TryInto::try_into).collect();
-        let targets = targets.map_err(WarpgateError::from)?;
+        let targets = targets
+            .into_iter()
+            .map(|t| maybe_redacted_target(&admin, t))
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(GetTargetsResponse::Ok(Json(targets)))
     }
@@ -154,9 +165,9 @@ impl ListApi {
             Err(err) => return Err(WarpgateError::from(err)),
         };
 
-        Ok(CreateTargetResponse::Created(Json(
-            target.try_into().map_err(WarpgateError::from)?,
-        )))
+        Ok(CreateTargetResponse::Created(Json(maybe_redacted_target(
+            &admin, target,
+        )?)))
     }
 }
 
@@ -219,7 +230,9 @@ impl DetailApi {
             return Ok(GetTargetResponse::NotFound);
         };
 
-        Ok(GetTargetResponse::Ok(Json(target.try_into()?)))
+        Ok(GetTargetResponse::Ok(Json(maybe_redacted_target(
+            &admin, target,
+        )?)))
     }
 
     #[oai(path = "/targets/:id", method = "put", operation_id = "update_target")]

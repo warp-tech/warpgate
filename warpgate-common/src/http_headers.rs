@@ -25,8 +25,7 @@ pub static X_FORWARDED_HOST: HeaderName = HeaderName::from_static("x-forwarded-h
 pub static X_FORWARDED_PROTO: HeaderName = HeaderName::from_static("x-forwarded-proto");
 
 pub static X_WARPGATE_TOKEN: HeaderName = HeaderName::from_static("x-warpgate-token");
-pub static X_WARPGATE_CLUSTER_TOKEN: HeaderName =
-    HeaderName::from_static("x-warpgate-cluster-token");
+pub static X_WARPGATE_CLUSTER_NODE: HeaderName = HeaderName::from_static("x-warpgate-cluster-node");
 /// Acting user ID of intra cluster request
 pub static X_WARPGATE_CLUSTER_IDENTITY: HeaderName =
     HeaderName::from_static("x-warpgate-cluster-identity");

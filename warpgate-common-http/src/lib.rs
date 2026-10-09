@@ -1,34 +1,22 @@
 pub mod auth;
+pub mod cluster_tls;
 pub mod errors;
 pub mod ext;
 pub mod internal_page;
 mod keepalive;
 pub mod logging;
+pub mod mtls_acceptor;
 mod request;
 
 pub use auth::{AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization};
+pub use cluster_tls::{ClusterPeer, cluster_peer, cluster_peer_extension, is_cluster_peer_request};
 pub use keepalive::{SessionKeepalive, SessionKeepaliveGuard};
 use poem::Request;
-use subtle::ConstantTimeEq;
-use warpgate_common::Secret;
+use poem::http::{HeaderMap, HeaderName, HeaderValue, header};
 pub use warpgate_common::http_headers::{
-    X_WARPGATE_CLUSTER_CLIENT_IP, X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_TOKEN,
+    X_WARPGATE_CLUSTER_CLIENT_IP, X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_NODE,
     X_WARPGATE_TOKEN,
 };
-
-/// True if the request carries a valid cluster token, i.e. it was forwarded by
-/// a peer node. Gates every other `x-warpgate-cluster-*` header.
-pub fn is_cluster_peer_request(req: &Request, cluster_token: &Secret<String>) -> bool {
-    let Some(provided) = req.header(&X_WARPGATE_CLUSTER_TOKEN) else {
-        return false;
-    };
-    // Constant-time comparison to prevent timing attacks.
-    cluster_token
-        .expose_secret()
-        .as_bytes()
-        .ct_eq(provided.as_bytes())
-        .into()
-}
 
 /// The credential from the first `Authorization` header using `scheme`
 /// (compared case-insensitively, as RFC 7235 requires).
@@ -87,6 +75,29 @@ font-src 'self' data: https://unpkg.com https://fonts.gstatic.com; \
 img-src 'self' data: https://unpkg.com; \
 connect-src 'self' https://unpkg.com; \
 object-src 'none'";
+
+/// Adds the baseline security headers to a Warpgate-generated response,
+/// keeping any value the response already carries (e.g. a custom CSP).
+///
+/// Never apply this to proxied target responses: it would override the
+/// upstream application's own policy.
+pub fn insert_security_headers(headers: &mut HeaderMap) {
+    fn insert_if_absent(headers: &mut HeaderMap, name: HeaderName, value: &'static str) {
+        if !headers.contains_key(&name) {
+            headers.insert(name, HeaderValue::from_static(value));
+        }
+    }
+
+    insert_if_absent(headers, header::CONTENT_SECURITY_POLICY, WARPGATE_CSP);
+    // Prevent MIME type sniffing - not covered by CSP.
+    insert_if_absent(headers, header::X_CONTENT_TYPE_OPTIONS, "nosniff");
+    // Don't leak Warpgate URLs (which may contain target names or tickets)
+    // to third-party origins.
+    insert_if_absent(headers, header::REFERRER_POLICY, "same-origin");
+    // Legacy clickjacking protection for user agents that predate the CSP
+    // `frame-ancestors` directive, which takes precedence when both are present.
+    insert_if_absent(headers, header::X_FRAME_OPTIONS, "SAMEORIGIN");
+}
 
 #[cfg(test)]
 mod tests {
