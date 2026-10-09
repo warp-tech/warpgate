@@ -156,10 +156,6 @@ impl ManagedSession for WebDesktopSession {
         self.core.user_id()
     }
 
-    fn is_dead(&self) -> bool {
-        self.core.is_dead()
-    }
-
     fn on_removed(&self) {
         self.core.abort();
         self.core.close();

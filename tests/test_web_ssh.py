@@ -150,9 +150,7 @@ class TestWebSsh:
         timeout,
         shared_wg: WarpgateProcess,
     ):
-        # Admin "close session" must actually end the session: abort the SSH
-        # connection to the target (not just mark the websocket dead), and
-        # refuse to let a client reattach to what's now a dead session.
+        # Admin close must disconnect the backend and reject reattachment.
         ssh_port = processes.start_ssh_server(
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
         )
@@ -213,8 +211,7 @@ class TestWebSsh:
             f"/@warpgate/api/web-ssh/sessions/{session_id}/stream"
         )
 
-        # Connect via WebSocket and prove the backend is really up (not just
-        # the websocket) by round-tripping a command through it.
+        # Round-trip a command to confirm the SSH backend is connected.
         ws = create_connection(
             stream_url, cookie=cookie, sslopt={"cert_reqs": ssl.CERT_NONE}
         )
@@ -260,11 +257,7 @@ class TestWebSsh:
             except Exception:
                 pass
 
-        # The backend is a real TCP socket from the warpgate process to the
-        # target -- visible on the host independently of the websocket, and
-        # of when the manager gets around to reaping the session.
-        # Per-process, so it works without root (system-wide
-        # `psutil.net_connections` is denied on macOS).
+        # Inspect backend connections independently of websocket/session cleanup.
         def backend_connected():
             return any(
                 c.status == psutil.CONN_ESTABLISHED
@@ -281,27 +274,15 @@ class TestWebSsh:
         with admin_client(url) as api:
             api.close_session(session_id)
 
-        # The backend must disconnect promptly. The wait is capped well under
-        # the 60s reattach grace period: before the fix, admin close only
-        # marked the websocket dead and left the backend connected until that
-        # timer swept it, so waiting longer would pass without the fix.
+        # Disconnect before the 60-second reconnect grace period can expire.
         deadline = time.time() + min(timeout, 20)
         while time.time() < deadline and backend_connected():
             time.sleep(0.25)
-        assert not backend_connected(), (
-            "admin close did not abort the SSH backend connection"
-        )
+        assert (
+            not backend_connected()
+        ), "admin close did not abort the SSH backend connection"
 
-        # A closed session must refuse a websocket reattach -- specifically with a
-        # 404, matching the "not found" response an unrelated/nonexistent session
-        # gets, not merely *some* error. Admin close is delivered to the manager
-        # asynchronously, so this doesn't land the instant the admin request
-        # returns; it's the disconnect-triggered 404 that matters here, whichever
-        # of the two guards (dead-but-registered, or already reaped) produces it.
-        # The dead-but-registered case specifically -- the new `is_dead()` guard --
-        # isn't reproducible deterministically from here (by the time this checks,
-        # the session may already be fully removed) and is covered instead by a
-        # Rust unit test in warpgate-web-clients-common.
+        # Admin close is asynchronous; wait for reattachment to return HTTP 404.
         def attach_rejected():
             try:
                 probe = create_connection(
