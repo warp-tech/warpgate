@@ -387,6 +387,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "askz",
+      "name": "Max:",
+      "avatar_url": "https://avatars.githubusercontent.com/u/854038?v=4",
+      "profile": "http://perdu.com",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,

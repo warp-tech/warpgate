@@ -6,6 +6,7 @@ mod auth_scheme;
 pub(crate) mod common;
 mod credentials;
 pub mod info;
+pub mod logo;
 pub mod sso_provider_detail;
 pub mod sso_provider_list;
 pub mod targets_list;

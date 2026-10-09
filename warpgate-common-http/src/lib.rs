@@ -9,6 +9,7 @@ mod request;
 pub use auth::{AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization};
 pub use keepalive::{SessionKeepalive, SessionKeepaliveGuard};
 use poem::Request;
+use poem::http::{HeaderMap, HeaderName, HeaderValue, header};
 use subtle::ConstantTimeEq;
 use warpgate_common::Secret;
 pub use warpgate_common::http_headers::{
@@ -87,6 +88,29 @@ font-src 'self' data: https://unpkg.com https://fonts.gstatic.com; \
 img-src 'self' data: https://unpkg.com; \
 connect-src 'self' https://unpkg.com; \
 object-src 'none'";
+
+/// Adds the baseline security headers to a Warpgate-generated response,
+/// keeping any value the response already carries (e.g. a custom CSP).
+///
+/// Never apply this to proxied target responses: it would override the
+/// upstream application's own policy.
+pub fn insert_security_headers(headers: &mut HeaderMap) {
+    fn insert_if_absent(headers: &mut HeaderMap, name: HeaderName, value: &'static str) {
+        if !headers.contains_key(&name) {
+            headers.insert(name, HeaderValue::from_static(value));
+        }
+    }
+
+    insert_if_absent(headers, header::CONTENT_SECURITY_POLICY, WARPGATE_CSP);
+    // Prevent MIME type sniffing - not covered by CSP.
+    insert_if_absent(headers, header::X_CONTENT_TYPE_OPTIONS, "nosniff");
+    // Don't leak Warpgate URLs (which may contain target names or tickets)
+    // to third-party origins.
+    insert_if_absent(headers, header::REFERRER_POLICY, "same-origin");
+    // Legacy clickjacking protection for user agents that predate the CSP
+    // `frame-ancestors` directive, which takes precedence when both are present.
+    insert_if_absent(headers, header::X_FRAME_OPTIONS, "SAMEORIGIN");
+}
 
 #[cfg(test)]
 mod tests {

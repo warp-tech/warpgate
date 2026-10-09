@@ -37,7 +37,7 @@ use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
-use warpgate_common_http::warpgate_csp_with_connect_src;
+use warpgate_common_http::{WARPGATE_PLAYGROUND_CSP, warpgate_csp_with_connect_src};
 use warpgate_core::{ProtocolServer, Services};
 use warpgate_db_entities::Parameters::RecordingsStorageConfig;
 use warpgate_tls::{TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey};
@@ -50,10 +50,7 @@ use warpgate_web_ssh::api::ws_handler as ssh_web_client_ws_handler;
 use crate::api::common::forward_ws_to_session_owner;
 use crate::client_cache::HttpClientCache;
 use crate::common::{endpoint_auth, page_auth};
-use crate::middleware::{
-    ContentSecurityPolicyMiddleware, CookieHostMiddleware, TicketMiddleware,
-    WARPGATE_PLAYGROUND_CSP,
-};
+use crate::middleware::{CookieHostMiddleware, SecurityHeadersMiddleware, TicketMiddleware};
 use crate::session::SessionStore;
 use crate::session_handle::warpgate_server_handle_for_request;
 use crate::session_storage::SharedSessionStorage;
@@ -248,6 +245,7 @@ impl ProtocolServer for HTTPProtocolServer {
                             Ok(resp)
                         }),
                 )
+                .at("/api/logo", poem::get(api::logo::api_get_logo))
                 .at(
                     "/api/auth/web-auth-requests/stream",
                     endpoint_auth(api::auth::api_get_web_auth_requests_stream),
@@ -290,7 +288,7 @@ impl ProtocolServer for HTTPProtocolServer {
                 })
                 .data(web_ssh_manager)
                 .data(web_desktop_manager)
-                .with(ContentSecurityPolicyMiddleware)
+                .with(SecurityHeadersMiddleware)
         };
 
         let app = Route::new()
