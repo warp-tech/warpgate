@@ -52,6 +52,8 @@ pub enum SSHTargetAuth {
     Password(SshTargetPasswordAuth),
     #[serde(rename = "publickey")]
     PublicKey(SshTargetPublicKeyAuth),
+    #[serde(rename = "publickey_and_password")]
+    PublicKeyAndPassword(SshTargetPublicKeyAndPasswordAuth),
     #[serde(rename = "iam_role")]
     IamRole(SshTargetIamRoleAuth),
 }
@@ -67,6 +69,15 @@ pub struct SshTargetPublicKeyAuth {
     /// marked default.
     #[serde(default)]
     pub key_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+pub struct SshTargetPublicKeyAndPasswordAuth {
+    /// Specific stored client key to authenticate with; `None` uses the keys
+    /// marked default.
+    #[serde(default)]
+    pub key_id: Option<Uuid>,
+    pub password: MaybeSecretRef,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
@@ -447,6 +458,7 @@ impl TargetSecrets for TargetSSHOptions {
     fn secrets(&self) -> Vec<&MaybeSecretRef> {
         match &self.auth {
             SSHTargetAuth::Password(auth) => vec![&auth.password],
+            SSHTargetAuth::PublicKeyAndPassword(auth) => vec![&auth.password],
             SSHTargetAuth::PublicKey(_) | SSHTargetAuth::IamRole(_) => vec![],
         }
     }
@@ -571,9 +583,10 @@ mod tests {
     use super::{
         DatabaseTargetAuth, DatabaseTargetIamRoleAuth, DatabaseTargetPasswordAuth, MaybeSecretRef,
         PostgresProtocolVersion, RdpTargetCompression, RdpTlsSecurity, SSHTargetAuth, SecretRef,
-        SshTargetIamRoleAuth, SshTargetPasswordAuth, SshTargetPublicKeyAuth, TargetHTTPOptions,
-        TargetKubernetesOptions, TargetMySqlOptions, TargetOptions, TargetPostgresOptions,
-        TargetRdpOptions, TargetSSHOptions, Tls,
+        SshTargetIamRoleAuth, SshTargetPasswordAuth, SshTargetPublicKeyAuth,
+        SshTargetPublicKeyAndPasswordAuth, TargetHTTPOptions, TargetKubernetesOptions,
+        TargetMySqlOptions, TargetOptions, TargetPostgresOptions, TargetRdpOptions, TargetSSHOptions,
+        Tls,
     };
     use crate::TargetSecrets;
 
@@ -604,6 +617,12 @@ mod tests {
         let ssh = ssh_options(SSHTargetAuth::Password(SshTargetPasswordAuth {
             password: reference(),
         }));
+        let ssh_dual = ssh_options(SSHTargetAuth::PublicKeyAndPassword(
+            SshTargetPublicKeyAndPasswordAuth {
+                key_id: None,
+                password: reference(),
+            },
+        ));
         let mut mysql: TargetMySqlOptions = serde_json::from_str("{}").unwrap();
         mysql.auth = db_password_auth(reference());
         let mut postgres: TargetPostgresOptions = serde_json::from_str("{}").unwrap();
@@ -611,6 +630,7 @@ mod tests {
 
         for options in [
             ssh,
+            ssh_dual,
             TargetOptions::MySql(mysql),
             TargetOptions::Postgres(postgres),
         ] {
@@ -730,6 +750,11 @@ mod tests {
         let secret = || MaybeSecretRef::from_str("s").unwrap();
         let mut ssh: TargetSSHOptions = serde_json::from_str(r#"{"host":"h"}"#).unwrap();
         ssh.auth = SSHTargetAuth::Password(SshTargetPasswordAuth { password: secret() });
+        let mut ssh_dual: TargetSSHOptions = serde_json::from_str(r#"{"host":"h"}"#).unwrap();
+        ssh_dual.auth = SSHTargetAuth::PublicKeyAndPassword(SshTargetPublicKeyAndPasswordAuth {
+            key_id: None,
+            password: secret(),
+        });
         let mut mysql: TargetMySqlOptions = serde_json::from_str("{}").unwrap();
         mysql.auth =
             DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth { password: secret() });
@@ -750,6 +775,7 @@ mod tests {
 
         for options in [
             TargetOptions::Ssh(ssh),
+            TargetOptions::Ssh(ssh_dual),
             TargetOptions::MySql(mysql),
             TargetOptions::Postgres(postgres),
             TargetOptions::Vnc(vnc),

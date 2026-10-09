@@ -7172,6 +7172,9 @@
             "$ref": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth"
           },
           {
+            "$ref": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAndPasswordAuth"
+          },
+          {
             "$ref": "#/components/schemas/SSHTargetAuth_SshTargetIamRoleAuth"
           }
         ],
@@ -7180,6 +7183,7 @@
           "mapping": {
             "Password": "#/components/schemas/SSHTargetAuth_SshTargetPasswordAuth",
             "PublicKey": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth",
+            "PublicKeyAndPassword": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAndPasswordAuth",
             "IamRole": "#/components/schemas/SSHTargetAuth_SshTargetIamRoleAuth"
           }
         }
@@ -7247,6 +7251,28 @@
           },
           {
             "$ref": "#/components/schemas/SshTargetPublicKeyAuth"
+          }
+        ]
+      },
+      "SSHTargetAuth_SshTargetPublicKeyAndPasswordAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "PublicKeyAndPassword"
+                ],
+                "example": "PublicKeyAndPassword"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/SshTargetPublicKeyAndPasswordAuth"
           }
         ]
       },
@@ -7698,6 +7724,23 @@
             "type": "string",
             "format": "uuid",
             "description": "Specific stored client key to authenticate with; `None` uses the keys\nmarked default."
+          }
+        }
+      },
+      "SshTargetPublicKeyAndPasswordAuth": {
+        "type": "object",
+        "title": "SshTargetPublicKeyAndPasswordAuth",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "key_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Specific stored client key to authenticate with; `None` uses the keys\nmarked default."
+          },
+          "password": {
+            "type": "string"
           }
         }
       },
