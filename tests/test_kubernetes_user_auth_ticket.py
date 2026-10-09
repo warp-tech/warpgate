@@ -1,5 +1,6 @@
 """Kubernetes tickets route without a target selector or additional credentials."""
 
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import json
@@ -60,6 +61,13 @@ def request(wg, secret, path="/api", **kwargs):
 
 def uses_left(setup, ticket):
     return next(t.uses_left for t in setup[0].get_tickets() if t.id == ticket.ticket.id)
+
+
+def open_kubernetes_session_id(api, username):
+    return next(
+        s.id for s in api.get_sessions(username=username).items
+        if s.protocol == "Kubernetes" and s.ended is None
+    )
 
 
 def test_ticket_selects_target_and_shares_one_use(shared_wg, ticket_setup):
@@ -263,3 +271,311 @@ async def test_ticket_websocket_uses_same_session(shared_wg, ticket_setup):
         assert uses_left(setup, ticket) == 0
     finally:
         await runner.cleanup()
+
+
+async def _run_echo_and_watch_upstream():
+    """Start an echo/watch mock; the caller must clean up its runner."""
+    from aiohttp import web
+
+    async def upstream(req):
+        assert req.headers["Authorization"] == "Bearer upstream-token"
+        if req.query.get("watch") == "true":
+            resp = web.StreamResponse(headers={"Transfer-Encoding": "chunked"})
+            await resp.prepare(req)
+            try:
+                while True:
+                    await resp.write(b'{"type":"ADDED"}\n')
+                    await asyncio.sleep(0.5)
+            except (ConnectionResetError, asyncio.CancelledError):
+                pass
+            return resp
+        if req.path == "/api":
+            return web.json_response({})
+        ws = web.WebSocketResponse(protocols=["v4.channel.k8s.io"])
+        await ws.prepare(req)
+        async for message in ws:
+            await ws.send_str(message.data)
+        return ws
+
+    app = web.Application()
+    app.router.add_get("/{path:.*}", upstream)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = alloc_port()
+    await web.TCPSite(runner, "127.0.0.1", port).start()
+    return runner, port
+
+
+@pytest.mark.asyncio
+async def test_admin_close_session_ends_websocket(shared_wg, ticket_setup):
+    """Admin close must end an open Kubernetes websocket."""
+    import aiohttp
+
+    runner, port = await _run_echo_and_watch_upstream()
+    try:
+        api, user, _ = ticket_setup
+        setup = api, user, create_target(api, port)
+        ticket = create_ticket(setup, number_of_uses=1)
+        async with aiohttp.ClientSession(headers={
+            "Authorization": f"Bearer ticket-{ticket.secret}",
+        }) as session:
+            url = f"https://localhost:{shared_wg.kubernetes_port}"
+            async with session.ws_connect(
+                f"{url}/socket", ssl=False, protocols=["v4.channel.k8s.io"],
+            ) as ws:
+                await ws.send_str("still alive")
+                assert (await ws.receive(timeout=5)).data == "still alive"
+
+                api.close_session(open_kubernetes_session_id(api, user.username))
+
+                closed = await ws.receive(timeout=15)
+                assert closed.type in (
+                    aiohttp.WSMsgType.CLOSE,
+                    aiohttp.WSMsgType.CLOSED,
+                    aiohttp.WSMsgType.CLOSING,
+                    aiohttp.WSMsgType.ERROR,
+                ), closed
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_admin_close_session_ends_websocket_stalled_on_upstream_rejection(
+    shared_wg, ticket_setup
+):
+    """Admin close must interrupt a stalled upstream rejection body."""
+    import aiohttp
+    from aiohttp import web
+
+    received = asyncio.Event()
+    release = asyncio.Event()
+
+    async def upstream(req):
+        assert req.headers["Authorization"] == "Bearer upstream-token"
+        # Stall a rejected response after its first chunk.
+        resp = web.StreamResponse(
+            status=403, headers={"Transfer-Encoding": "chunked"}
+        )
+        await resp.prepare(req)
+        await resp.write(b'{"message":"forbidden')
+        received.set()
+        await release.wait()
+        await resp.write(b'"}')
+        await resp.write_eof()
+        return resp
+
+    app = web.Application()
+    app.router.add_get("/{path:.*}", upstream)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = alloc_port()
+    await web.TCPSite(runner, "127.0.0.1", port).start()
+    try:
+        api, user, _ = ticket_setup
+        setup = api, user, create_target(api, port)
+        ticket = create_ticket(setup, number_of_uses=1)
+        async with aiohttp.ClientSession(headers={
+            "Authorization": f"Bearer ticket-{ticket.secret}",
+        }) as session:
+            url = f"https://localhost:{shared_wg.kubernetes_port}"
+            # Poem upgrades downstream before the upstream request finishes.
+            async with session.ws_connect(
+                f"{url}/socket", ssl=False, protocols=["v4.channel.k8s.io"],
+            ) as ws:
+                # Wait until the upstream request stalls before closing.
+                await asyncio.wait_for(received.wait(), timeout=10)
+
+                api.close_session(open_kubernetes_session_id(api, user.username))
+
+                closed = await ws.receive(timeout=15)
+                assert closed.type in (
+                    aiohttp.WSMsgType.CLOSE,
+                    aiohttp.WSMsgType.CLOSED,
+                    aiohttp.WSMsgType.CLOSING,
+                    aiohttp.WSMsgType.ERROR,
+                ), closed
+    finally:
+        release.set()
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_admin_close_session_ends_watch_stream(shared_wg, ticket_setup):
+    """Admin close must end an open watch stream."""
+    import aiohttp
+
+    runner, port = await _run_echo_and_watch_upstream()
+    try:
+        api, user, _ = ticket_setup
+        setup = api, user, create_target(api, port)
+        ticket = create_ticket(setup, number_of_uses=1)
+        async with aiohttp.ClientSession(headers={
+            "Authorization": f"Bearer ticket-{ticket.secret}",
+        }) as session:
+            url = f"https://localhost:{shared_wg.kubernetes_port}"
+            async with session.get(
+                f"{url}/api/v1/pods?watch=true", ssl=False
+            ) as response:
+                assert response.status == 200
+                # At least one chunk, so the stream is genuinely open before
+                # the session is closed.
+                chunk = await asyncio.wait_for(
+                    response.content.readline(), timeout=5
+                )
+                assert b"ADDED" in chunk
+
+                api.close_session(open_kubernetes_session_id(api, user.username))
+
+                async def drain():
+                    # Accept EOF or a truncated-body error; either must arrive promptly.
+                    try:
+                        while True:
+                            data = await response.content.readline()
+                            if not data:
+                                return
+                    except aiohttp.ClientPayloadError:
+                        return
+
+                await asyncio.wait_for(drain(), timeout=15)
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_admin_close_session_lets_a_dispatched_mutation_finish(
+    shared_wg, ticket_setup
+):
+    """A dispatched audited mutation must receive its full response across a close."""
+    import aiohttp
+    from aiohttp import web
+
+    received = asyncio.Event()
+    release = asyncio.Event()
+    body = b'{"kind":"Pod","metadata":{"name":"created"}}'
+
+    async def upstream(req):
+        await req.read()
+        resp = web.StreamResponse(status=201, headers={"Transfer-Encoding": "chunked"})
+        await resp.prepare(req)
+        await resp.write(body[:10])
+        received.set()
+        await release.wait()
+        await resp.write(body[10:])
+        await resp.write_eof()
+        return resp
+
+    app = web.Application()
+    app.router.add_post("/{path:.*}", upstream)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = alloc_port()
+    await web.TCPSite(runner, "127.0.0.1", port).start()
+    try:
+        api, user, _ = ticket_setup
+        setup = api, user, create_target(api, port)
+        ticket = create_ticket(setup, number_of_uses=1)
+        pod = {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {"name": "created"},
+            "spec": {"containers": [{"name": "c", "image": "busybox"}]},
+        }
+        async with aiohttp.ClientSession(headers={
+            "Authorization": f"Bearer ticket-{ticket.secret}",
+        }) as session:
+            url = f"https://localhost:{shared_wg.kubernetes_port}"
+
+            async def create():
+                async with session.post(
+                    f"{url}/api/v1/namespaces/default/pods", json=pod, ssl=False
+                ) as response:
+                    return response.status, await response.read()
+
+            creating = asyncio.create_task(create())
+            await asyncio.wait_for(received.wait(), timeout=10)
+            api.close_session(open_kubernetes_session_id(api, user.username))
+            release.set()
+            status, data = await asyncio.wait_for(creating, timeout=15)
+            assert status == 201
+            assert data == body
+    finally:
+        release.set()
+        await runner.cleanup()
+
+
+def test_admin_close_session_admits_a_fresh_session(shared_wg, ticket_setup):
+    """The next request must open a fresh session after admin close."""
+    api, user, _ = ticket_setup
+    ticket = create_ticket(ticket_setup)  # unlimited uses
+
+    assert request(shared_wg, ticket.secret).status_code == 200
+    first_id = open_kubernetes_session_id(api, user.username)
+
+    api.close_session(first_id)
+
+    assert request(shared_wg, ticket.secret).status_code == 200
+    second_id = open_kubernetes_session_id(api, user.username)
+
+    assert second_id != first_id
+    closed_session = next(
+        s for s in api.get_sessions(username=user.username).items if s.id == first_id
+    )
+    assert closed_session.ended is not None
+
+
+def test_admin_close_session_ends_a_web_approval_wait(shared_wg, ticket_setup):
+    """An API-token request waiting for web approval must return 401 on close."""
+    api, user, target = ticket_setup
+    api.create_password_credential(user.id, sdk.NewPasswordCredential(password="123"))
+    api.update_user(user.id, sdk.UserDataRequest(
+        username=user.username,
+        credential_policy=sdk.UserRequireCredentialsPolicy(
+            kubernetes=[sdk.CredentialKind.WEBUSERAPPROVAL],
+        ),
+    ))
+    role = api.create_role(sdk.RoleDataRequest(name=f"k8s-role-{uuid4()}"))
+    api.add_user_role(user.id, role.id)
+    api.add_target_role(target.id, role.id)
+
+    session = requests.Session()
+    session.verify = False
+    try:
+        url = f"https://localhost:{shared_wg.http_port}/@warpgate/api"
+        session.post(f"{url}/auth/login", json={
+            "username": user.username, "password": "123",
+        }, timeout=10).raise_for_status()
+        token_response = session.post(f"{url}/profile/api-tokens", json={
+            "label": "web-approval-close",
+            "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        }, timeout=10)
+        token_response.raise_for_status()
+        headers = {"Authorization": f"Bearer {token_response.json()['secret']}"}
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                requests.get,
+                f"https://localhost:{shared_wg.kubernetes_port}/{target.name}/api",
+                headers=headers, verify=False, timeout=30,
+            )
+
+            # Wait until the Kubernetes request is held for web approval.
+            deadline = time.monotonic() + 10
+            pending = False
+            while time.monotonic() < deadline:
+                r = session.get(f"{url}/auth/web-auth-requests", timeout=10)
+                r.raise_for_status()
+                if any(s["protocol"] == "Kubernetes" for s in r.json()):
+                    pending = True
+                    break
+                time.sleep(0.2)
+            assert pending, "request never became a pending web approval"
+            assert not future.done(), (
+                "request must be held for web approval, not already through"
+            )
+
+            api.close_session(open_kubernetes_session_id(api, user.username))
+
+            response = future.result(timeout=15)
+            assert response.status_code == 401
+    finally:
+        session.close()

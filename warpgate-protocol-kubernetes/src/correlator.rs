@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 use poem::Request;
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthResult, AuthStateUserInfo, RememberApprovalBy};
 use warpgate_common::{TargetKubernetesOptions, UserSessionId, WarpgateError};
@@ -72,6 +73,13 @@ struct SessionEntry {
     handle: Arc<Mutex<WarpgateServerHandle>>,
     created: Instant,
     authorization: SharedAuthorization,
+    /// Stops in-flight requests and prevents new requests from joining the session.
+    closed: CancellationToken,
+}
+
+/// Closed or expired entries are rejected on lookup and removed by the vacuum.
+fn entry_is_live(created: Instant, closed: &CancellationToken, max_age: Duration) -> bool {
+    created.elapsed() < max_age && !closed.is_cancelled()
 }
 
 pub struct RequestCorrelator {
@@ -95,7 +103,11 @@ pub async fn correlated_authorization(
     identity: KubernetesIdentity,
     target_name: &str,
     services: &Services,
-) -> poem::Result<(Arc<Mutex<WarpgateServerHandle>>, AdmittedSession)> {
+) -> poem::Result<(
+    Arc<Mutex<WarpgateServerHandle>>,
+    AdmittedSession,
+    CancellationToken,
+)> {
     let user_info = identity.user_info();
     let key = CorrelationKey::for_request(request, &identity, services, target_name.into()).await;
     let max_age = services
@@ -116,8 +128,9 @@ pub async fn correlated_authorization(
         // take minutes, and that request needs the correlator lock to clean up
         // after a denial.
         let existing = correlator.lock().await.entry(&key, max_age);
-        if let Some((handle, slot)) = existing
-            && let Some(joined) = join_session(correlator, &key, handle, slot, services).await?
+        if let Some((handle, slot, closed)) = existing
+            && let Some(joined) =
+                join_session(correlator, &key, handle, slot, closed, services).await?
         {
             return Ok(joined);
         }
@@ -125,24 +138,25 @@ pub async fn correlated_authorization(
         // Registered outside the correlator lock so that concurrent first
         // requests don't serialise on its database insert. A handle that then
         // loses the race below is dropped, deleting the session it just opened.
-        let handle = register_pending_session(services, request, &user_info).await?;
+        let (handle, closed) = register_pending_session(services, request, &user_info).await?;
         let session_id = handle.lock().await.user_session_id();
 
         let slot = SharedAuthorization::default();
         let claimed = {
-            let mut correlator = correlator.lock().await;
-            if correlator.entry(&key, max_age).is_some() {
+            let mut correlator_state = correlator.lock().await;
+            if correlator_state.entry(&key, max_age).is_some() {
                 None
             } else {
                 // Locked before the correlator lock is released, so a request
                 // joining this session can't reach the pending slot ahead of us.
                 let guard = slot.clone().lock_owned().await;
-                correlator.handles.insert(
+                correlator_state.handles.insert(
                     key.clone(),
                     SessionEntry {
                         handle: handle.clone(),
                         created: Instant::now(),
                         authorization: slot.clone(),
+                        closed: closed.clone(),
                     },
                 );
                 Some(guard)
@@ -153,42 +167,55 @@ pub async fn correlated_authorization(
             continue;
         };
 
-        let resolved = match identity {
-            KubernetesIdentity::User(user) => {
-                authorize_kubernetes_target(request, &user, target_name, session_id, services).await
-            }
-            KubernetesIdentity::Ticket(ticket) => ticket
-                .spend(&services.db)
-                .await
-                .map_err(poem::Error::from)
-                .and_then(|authorization| authorization.ok_or_else(unauthorized))
-                .and_then(|authorization| authorization.narrow().map_err(Into::into)),
+        // Cancel credential-policy waits on close; joined requests receive the denial too.
+        let resolved = tokio::select! {
+            biased;
+            () = closed.cancelled() => Err(unauthorized()),
+            resolved = async move {
+                match identity {
+                    KubernetesIdentity::User(user) => {
+                        authorize_kubernetes_target(request, &user, target_name, session_id, services).await
+                    }
+                    KubernetesIdentity::Ticket(ticket) => ticket
+                        .spend(&services.db)
+                        .await
+                        .map_err(poem::Error::from)
+                        .and_then(|authorization| authorization.ok_or_else(unauthorized))
+                        .and_then(|authorization| authorization.narrow().map_err(Into::into)),
+                }
+            } => resolved,
         };
         return match resolved {
             Ok(resolved) => {
-                let admitted =
-                    match admit_kubernetes_session(request, services, &handle, resolved).await {
-                        Ok(admitted) => Arc::new(admitted),
-                        Err(error) => {
-                            *authorization = Authorization::Denied;
-                            {
-                                let mut correlator = correlator.lock().await;
-                                correlator.evict(&key, &slot);
-                                if matches!(error, WarpgateError::SessionNotApproved) {
-                                    correlator.refusals.insert(key.clone(), Instant::now());
-                                }
+                // Closing the session also cancels an admin-approval wait.
+                let admission = tokio::select! {
+                    biased;
+                    () = closed.cancelled() => Err(WarpgateError::UserSessionEnded),
+                    admission = admit_kubernetes_session(request, services, &handle, resolved) => admission,
+                };
+                let admitted = match admission {
+                    Ok(admitted) => Arc::new(admitted),
+                    Err(error) => {
+                        *authorization = Authorization::Denied;
+                        {
+                            let mut correlator = correlator.lock().await;
+                            correlator.evict(&key, &slot);
+                            if matches!(error, WarpgateError::SessionNotApproved) {
+                                correlator.refusals.insert(key.clone(), Instant::now());
                             }
-                            settle_failed_attempt(services, &handle, session_id).await;
-                            return Err(error.into());
                         }
-                    };
+                        settle_failed_attempt(services, &handle, session_id).await;
+                        return Err(match error {
+                            WarpgateError::UserSessionEnded => unauthorized(),
+                            error => error.into(),
+                        });
+                    }
+                };
                 *authorization = Authorization::Authorized(admitted.clone());
-                Ok((handle, admitted))
+                Ok((handle, admitted, closed))
             }
             Err(error) => {
-                // A denied attempt is not cached: the requests waiting on this
-                // one fail with it, and the entry goes so that the next request
-                // can prompt again.
+                // Settle joined requests before eviction so the next request can prompt again.
                 *authorization = Authorization::Denied;
                 correlator.lock().await.evict(&key, &slot);
                 settle_failed_attempt(services, &handle, session_id).await;
@@ -205,7 +232,7 @@ async fn admit_kubernetes_session(
     handle: &Arc<Mutex<WarpgateServerHandle>>,
     resolved: TargetAuthorization<TargetKubernetesOptions>,
 ) -> Result<AdmittedTarget<TargetKubernetesOptions>, WarpgateError> {
-    admit_target_session(
+    let admission = admit_target_session(
         services,
         handle,
         resolved,
@@ -218,28 +245,33 @@ async fn admit_kubernetes_session(
         },
         || async { Ok(()) },
     )
-    .await?
-    .admitted()
+    .await?;
+    admission.admitted()
 }
 
 /// Waits for the request that opened this session to resolve its authorization.
 ///
-/// `None` means there is nothing to join and the caller should open a session of
-/// its own: the opening request was dropped mid-approval — a cancelled `kubectl`
-/// — so its entry is evicted here rather than left to fail every later request
-/// until the vacuum, and its auth state is dropped so the dead attempt does not
-/// linger as an approvable orphan in the pending-approvals UI.
+/// `None` means the opening request was dropped mid-approval; evict it and retry.
+/// An in-flight `AuthStateStore::open` can still insert a pending-approval row
+/// after cleanup. The stale-request reaper handles those rows.
 async fn join_session(
     correlator: &Arc<Mutex<RequestCorrelator>>,
     key: &CorrelationKey,
     handle: Arc<Mutex<WarpgateServerHandle>>,
     slot: SharedAuthorization,
+    closed: CancellationToken,
     services: &Services,
-) -> poem::Result<Option<(Arc<Mutex<WarpgateServerHandle>>, AdmittedSession)>> {
+) -> poem::Result<
+    Option<(
+        Arc<Mutex<WarpgateServerHandle>>,
+        AdmittedSession,
+        CancellationToken,
+    )>,
+> {
     // Cloned out so the slot lock is not held while taking the correlator lock.
     let outcome = slot.lock().await.clone();
     match outcome {
-        Authorization::Authorized(admitted) => Ok(Some((handle, admitted))),
+        Authorization::Authorized(admitted) => Ok(Some((handle, admitted, closed))),
         Authorization::Denied => Err(unauthorized()),
         Authorization::Pending => {
             correlator.lock().await.evict(key, &slot);
@@ -252,12 +284,9 @@ async fn join_session(
 
 /// Settles the session of an attempt that failed.
 ///
-/// A terminal auth outcome — a rejection, or an approval whose target lookup
-/// then failed — is recorded in the audit log against the session, so that
-/// session has to outlive the attempt and is confirmed. An approval that merely
-/// timed out leaves no trace to keep: the session stays provisional and is
-/// discarded along with the handle. Either way nothing will come back to the
-/// attempt, so its auth state must not outlive it as an approvable orphan.
+/// Confirm sessions with a terminal auth outcome for audit; leave timed-out
+/// attempts provisional. Drop auth state in both cases. See [`join_session`]
+/// for the pending-approval insertion race.
 async fn settle_failed_attempt(
     services: &Services,
     handle: &Arc<Mutex<WarpgateServerHandle>>,
@@ -287,14 +316,15 @@ async fn register_pending_session(
     services: &Services,
     request: &Request,
     user_info: &AuthStateUserInfo,
-) -> Result<Arc<Mutex<WarpgateServerHandle>>, WarpgateError> {
+) -> Result<(Arc<Mutex<WarpgateServerHandle>>, CancellationToken), WarpgateError> {
     let ip = get_client_ip(request, services).await;
+    let (session_handle, closed) = KubernetesSessionHandle::new();
     let handle = State::register_node_local_user_session(
         &services.state,
         crate::PROTOCOL_NAME,
         UserSessionStateInit {
             remote_address: ip.and_then(|x| x.parse().ok()),
-            handle: Box::new(KubernetesSessionHandle),
+            handle: Box::new(session_handle),
         },
     )
     .await?;
@@ -305,7 +335,7 @@ async fn register_pending_session(
         // waiting for approval is attributable while it waits.
         handle.set_user_info(user_info.clone()).await?;
     }
-    Ok(handle)
+    Ok((handle, closed))
 }
 
 impl RequestCorrelator {
@@ -325,12 +355,22 @@ impl RequestCorrelator {
         &self,
         key: &CorrelationKey,
         max_age: Duration,
-    ) -> Option<(Arc<Mutex<WarpgateServerHandle>>, SharedAuthorization)> {
+    ) -> Option<(
+        Arc<Mutex<WarpgateServerHandle>>,
+        SharedAuthorization,
+        CancellationToken,
+    )> {
         self.handles
             .get(key)
             // Enforce the bound at lookup, not just on the periodic vacuum.
-            .filter(|entry| entry.created.elapsed() < max_age)
-            .map(|entry| (entry.handle.clone(), entry.authorization.clone()))
+            .filter(|entry| entry_is_live(entry.created, &entry.closed, max_age))
+            .map(|entry| {
+                (
+                    entry.handle.clone(),
+                    entry.authorization.clone(),
+                    entry.closed.clone(),
+                )
+            })
     }
 
     fn was_refused(&self, key: &CorrelationKey) -> bool {
@@ -361,7 +401,7 @@ impl RequestCorrelator {
             .session_max_age;
         let now = Instant::now();
         self.handles
-            .retain(|_, entry| now.duration_since(entry.created) < max_age);
+            .retain(|_, entry| entry_is_live(entry.created, &entry.closed, max_age));
         self.refusals
             .retain(|_, at| now.duration_since(*at) < REFUSAL_MEMORY);
     }
@@ -376,5 +416,33 @@ impl RequestCorrelator {
                 guard.vacuum().await;
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cancelled_entry_is_not_live() {
+        let closed = CancellationToken::new();
+        assert!(entry_is_live(
+            Instant::now(),
+            &closed,
+            Duration::from_secs(60)
+        ));
+        closed.cancel();
+        assert!(!entry_is_live(
+            Instant::now(),
+            &closed,
+            Duration::from_secs(60)
+        ));
+    }
+
+    #[test]
+    fn an_aged_out_entry_is_not_live() {
+        let closed = CancellationToken::new();
+        let created = Instant::now() - Duration::from_secs(120);
+        assert!(!entry_is_live(created, &closed, Duration::from_secs(60)));
     }
 }
