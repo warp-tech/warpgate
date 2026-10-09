@@ -2205,6 +2205,10 @@
           "running_on_ec2": {
             "type": "boolean"
           },
+          "has_vault": {
+            "type": "boolean",
+            "description": "Whether a Vault server is configured, so the admin UI can hide target\nauthentication options that would fail at connect time."
+          },
           "should_prompt_analytics": {
             "type": "boolean"
           },

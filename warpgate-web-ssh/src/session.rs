@@ -8,13 +8,13 @@ use tokio::sync::{Mutex, oneshot};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 use uuid::Uuid;
-use warpgate_common::{TargetSSHOptions, TargetSessionId, UserSessionId};
+use warpgate_common::{TargetSessionId, UserSessionId};
 use warpgate_core::WarpgateServerHandle;
 use warpgate_core::recordings::{SessionRecordings, TerminalRecorder};
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_protocol_ssh::{
-    ChannelAudit, ChannelOperation, PtyRequest, RCCommand, RCCommandReply, SshClientError,
-    SshRecordingMetadata,
+    ChannelAudit, ChannelOperation, PtyRequest, RCCommand, RCCommandReply, ResolvedSshChainHost,
+    SshClientError, SshRecordingMetadata,
 };
 use warpgate_web_clients_common::{ManagedSession, Sheddable, WebSession};
 
@@ -91,7 +91,10 @@ impl WebSshSession {
         self.pending_host_key.lock().await.take()
     }
 
-    pub fn connect(&self, chain: Vec<TargetSSHOptions>) {
+    /// Takes the resolved hops whole rather than their SSH options: `Connect`
+    /// carries each hop's identity, so `connect_chain` decides which target was
+    /// asked about rather than assuming it is the last one.
+    pub fn connect(&self, chain: Vec<ResolvedSshChainHost>) {
         let _ = self.command_tx.send((RCCommand::Connect(chain), None));
     }
 

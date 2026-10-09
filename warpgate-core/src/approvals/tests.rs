@@ -1345,6 +1345,7 @@ mod delivery {
             login_protection: Arc::new(LoginProtectionService::new(db.clone()).await.unwrap()),
             global_params: Arc::new(params),
             listener_status: Default::default(),
+            vault: crate::vault_cell::VaultCell::new(None),
             secret_backends,
         }
     }
