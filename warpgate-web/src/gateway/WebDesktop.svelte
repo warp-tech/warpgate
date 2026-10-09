@@ -1,7 +1,6 @@
 <script lang="ts">
     import { faCompress, faExpand } from '@fortawesome/free-solid-svg-icons'
     import { Button } from '@sveltestrap/sveltestrap'
-    import ConnectingNotice from 'common/ConnectingNotice.svelte'
     import {
         applyDesktopFrame,
         type DesktopFrame,
@@ -13,17 +12,18 @@
     import { DesktopClipboard } from 'common/desktopClipboard'
     import { codeToScancode } from 'common/desktopInput'
     import { stringifyError } from 'common/errors'
-    import InfoBox from 'common/InfoBox.svelte'
     import { handleReauthError } from 'common/reauth'
+    import WebClientStatus from 'common/WebClientStatus.svelte'
     import { debounceTime, distinctUntilChanged, Subject } from 'rxjs'
     import { onDestroy, onMount } from 'svelte'
     import Fa from 'svelte-fa'
     import { loadTheme } from 'theme'
-    import { api, ResponseError, type WebDesktopSessionInfo } from './lib/api'
+    import { api, ResponseError, type WebClientSessionInfo } from './lib/api'
     import {
-        ConnectionState,
         ReconnectingWebSocket,
+        SocketState,
     } from './lib/ReconnectingWebSocket.svelte'
+    import type { SessionPhase } from './lib/webClientSession'
 
     // Match both routes (start & viewer)
     interface Props {
@@ -32,7 +32,7 @@
     let { params }: Props = $props()
 
     type ServerMessage =
-        | { type: 'connection_state'; state: string }
+        | ({ type: 'state' } & SessionPhase)
         | { type: 'resize'; width: number; height: number }
         | { type: 'raw_image'; rect: Rect; data: string }
         | { type: 'jpeg_image'; rect: Rect; data: string }
@@ -54,10 +54,11 @@
     let rootElement: HTMLDivElement | undefined = $state()
     let isFullscreen = $state(false)
     let ctx: CanvasRenderingContext2D | null = null
-    let connectionError: string | null = $state(null)
+    let phase = $state<SessionPhase | null>(null)
+    let notice: string | null = $state(null)
     let sessionNotFound = $state(false)
     let opening = $state(false)
-    let sessionInfo = $state<WebDesktopSessionInfo | null>(null)
+    let sessionInfo = $state<WebClientSessionInfo | null>(null)
 
     // Framebuffer messages are queued off the WS thread and painted in a rAF loop so a
     // burst of updates (e.g. dragging a window) can never block the main thread. Beyond
@@ -73,6 +74,9 @@
     let pendingPointer: { x: number; y: number; buttons: number } | null = null
 
     let ws = $state<ReconnectingWebSocket | undefined>()
+    const connected = $derived(
+        phase?.phase === 'connected' && ws?.state === SocketState.Connected,
+    )
 
     function startStream() {
         if (!sessionId) {
@@ -114,7 +118,7 @@
     const resizeRequests = new Subject<ViewportSize>()
 
     function sendResize(size: ViewportSize) {
-        if (ws?.state !== ConnectionState.Connected) {
+        if (!connected) {
             return
         }
         send({ type: 'resize', ...size })
@@ -144,15 +148,16 @@
         }
         const msg = JSON.parse(data) as ServerMessage
         switch (msg.type) {
-            case 'connection_state':
-                if (msg.state === 'connected') {
-                    ws.state = ConnectionState.Connected
+            case 'state':
+                phase = msg
+                if (msg.phase === 'connected') {
                     const size = viewportSize()
                     if (size) {
                         sendResize(size)
                     }
-                } else if (msg.state === 'disconnected') {
-                    ws.state = ConnectionState.Disconnected
+                }
+                if (msg.phase === 'closed') {
+                    ws.close()
                 }
                 break
             case 'clipboard':
@@ -161,8 +166,7 @@
             case 'bell':
                 break
             case 'error':
-                ws.state = ConnectionState.Error
-                connectionError = msg.message
+                notice = msg.message
                 break
             default:
                 queueFrame(msg)
@@ -234,7 +238,6 @@
                 await applyDesktopFrame(canvas, ctx, frame)
                 // Reveal only once there's something to show, so the canvas fades in with
                 // the first real content instead of flashing an empty surface.
-                painted = true
                 if (
                     frame.type === 'raw_image' ||
                     frame.type === 'png_image' ||
@@ -396,7 +399,7 @@
     }
 
     function onPaste(e: ClipboardEvent) {
-        if (ws?.state !== ConnectionState.Connected) {
+        if (!connected) {
             return
         }
         clipboard.onPaste(e)
@@ -462,7 +465,7 @@
             if (await handleReauthError(e)) {
                 return
             }
-            connectionError = await stringifyError(e)
+            notice = await stringifyError(e)
             if (e instanceof ResponseError && e.response.status === 404) {
                 sessionNotFound = true
             }
@@ -508,13 +511,15 @@
         <span class="me-auto text-muted small"
             >{sessionInfo?.targetName ?? ''}</span
         >
-        {#if !sessionNotFound && !connectionError}
-            <span class="text-muted small me-3">
-                {ws?.state ?? ConnectionState.Connecting}
-                {#if ws?.state === ConnectionState.Connecting && ws.attempt > 0}
-                    &nbsp;(attempt {ws.attempt})
-                {/if}
-            </span>
+        {#if !opening}
+            <div class="me-3">
+                <WebClientStatus
+                    {phase}
+                    socket={ws}
+                    {sessionNotFound}
+                    {notice}
+                />
+            </div>
         {/if}
         <button
             type="button"
@@ -528,22 +533,6 @@
             Disconnect
         </Button>
     </div>
-
-    {#if opening}
-        <ConnectingNotice />
-    {/if}
-
-    {#if connectionError}
-        <div class="mx-3 mt-3">
-            <InfoBox variant="warning">
-                {#if sessionNotFound}
-                    Session not found. It may have expired or been closed.
-                {:else}
-                    {connectionError}
-                {/if}
-            </InfoBox>
-        </div>
-    {/if}
 
     <div
         bind:this={canvasArea}

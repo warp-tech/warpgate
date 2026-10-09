@@ -211,7 +211,6 @@ pub async fn correlated_authorization(
                         });
                     }
                 };
-                handle.lock().await.confirm();
                 *authorization = Authorization::Authorized(admitted.clone());
                 Ok((handle, admitted, closed))
             }
@@ -233,7 +232,7 @@ async fn admit_kubernetes_session(
     handle: &Arc<Mutex<WarpgateServerHandle>>,
     resolved: TargetAuthorization<TargetKubernetesOptions>,
 ) -> Result<AdmittedTarget<TargetKubernetesOptions>, WarpgateError> {
-    admit_target_session(
+    let admission = admit_target_session(
         services,
         handle,
         resolved,
@@ -246,7 +245,8 @@ async fn admit_kubernetes_session(
         },
         || async { Ok(()) },
     )
-    .await
+    .await?;
+    admission.admitted()
 }
 
 /// Waits for the request that opened this session to resolve its authorization.

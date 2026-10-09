@@ -19,6 +19,7 @@ ironrdp = { version = "0.17", features = [
     "dvc",
     "displaycontrol",
 ] }
+ironrdp-egfx = "0.3"
 ironrdp-server = "0.13"
 ironrdp-tokio = "0.10"
 openssl = { version = "0.10", optional = true, features = ["vendored"] }
@@ -51,11 +52,11 @@ warpgate-desktop-ui = { path = "../warpgate-desktop-ui" }
 warpgate-tls = { path = "../warpgate-tls" }
 x509-cert = { version = "0.2", default-features = false, features = ["std"] }
 
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
 [features]
 openssl-tls = [
     "dep:openssl",
     "dep:tokio-openssl",
 ]
-
-[dev-dependencies]
-tokio = { workspace = true, features = ["test-util"] }
