@@ -3,9 +3,10 @@ use std::sync::Arc;
 use ironrdp_bulk::BulkCompressor;
 use ironrdp_core::{ReadCursor, WriteBuf};
 use ironrdp_displaycontrol::client::DisplayControlClient;
-use ironrdp_dvc::{DrdynvcClient, DvcProcessor, DynamicVirtualChannel};
+use ironrdp_dvc::{DrdynvcClient, DvcClientProcessor, DvcProcessor, DynamicChannelMut, DynamicVirtualChannel};
+use ironrdp_egfx::client::GraphicsPipelineClient;
 use ironrdp_graphics::pointer::DecodedPointer;
-use ironrdp_pdu::geometry::InclusiveRectangle;
+use ironrdp_pdu::geometry::{ExclusiveRectangle, InclusiveRectangle, Rectangle as _};
 use ironrdp_pdu::input::fast_path::{FastPathInput, FastPathInputEvent};
 use ironrdp_pdu::rdp::autodetect::AutoDetectRequest;
 use ironrdp_pdu::rdp::client_info::CompressionType as PduCompressionType;
@@ -35,6 +36,7 @@ pub struct ActiveStage {
     x224_processor: x224::Processor,
     fast_path_processor: fast_path::Processor,
     enable_server_pointer: bool,
+    graphics_output_needs_full_refresh: bool,
 }
 
 /// Builder for [`ActiveStage`].
@@ -105,6 +107,7 @@ impl ActiveStageBuilder {
             x224_processor,
             fast_path_processor,
             enable_server_pointer,
+            graphics_output_needs_full_refresh: false,
         }
     }
 }
@@ -202,6 +205,28 @@ impl ActiveStage {
                     }
                 }
 
+                // Drain the client-side EGFX compositor: composite each completed-frame
+                // output region into the image and surface it as a graphics update. EGFX
+                // data only ever arrives over a DVC, which is X224-carried, so this stays
+                // out of the Action::FastPath arm rather than running on every fast-path
+                // frame (the highest-frequency path in a session).
+                let (output_reset, graphics_updates) = self
+                    .get_dvc_mut::<GraphicsPipelineClient>()
+                    .map(|mut gfx| {
+                        let gfx = gfx.processor_mut();
+                        (gfx.take_output_reset(), gfx.drain_output())
+                    })
+                    .unwrap_or_default();
+                if let Some((width, height)) = output_reset {
+                    image.reset_preserving_pointer(width, height)?;
+                    self.graphics_output_needs_full_refresh = true;
+                }
+                if let Some(region) =
+                    composite_graphics_updates(image, graphics_updates.into_iter().map(|u| (u.region, u.data)))?
+                {
+                    stage_outputs.push(ActiveStageOutput::GraphicsUpdate(region));
+                }
+
                 (stage_outputs, processor_updates)
             }
         };
@@ -225,6 +250,23 @@ impl ActiveStage {
                     stage_outputs.push(ActiveStageOutput::PointerBitmap(pointer));
                 }
             }
+        }
+
+        // After an EGFX ResetGraphics the image was resized and cleared, so the next
+        // graphics update has to cover all of it for consumers to repaint (and notice
+        // the new dimensions).
+        if self.graphics_output_needs_full_refresh
+            && let Some(ActiveStageOutput::GraphicsUpdate(region)) = stage_outputs
+                .iter_mut()
+                .find(|output| matches!(output, ActiveStageOutput::GraphicsUpdate(_)))
+        {
+            *region = InclusiveRectangle {
+                left: 0,
+                top: 0,
+                right: image.width().saturating_sub(1),
+                bottom: image.height().saturating_sub(1),
+            };
+            self.graphics_output_needs_full_refresh = false;
         }
 
         Ok(stage_outputs)
@@ -274,6 +316,10 @@ impl ActiveStage {
 
     pub fn get_dvc<T: DvcProcessor + 'static>(&mut self) -> Option<&DynamicVirtualChannel> {
         self.x224_processor.get_dvc::<T>()
+    }
+
+    pub fn get_dvc_mut<T: DvcClientProcessor + 'static>(&mut self) -> Option<DynamicChannelMut<'_, T>> {
+        self.x224_processor.get_dvc_mut::<T>()
     }
 
     pub fn get_dvc_by_channel_id(&mut self, channel_id: u32) -> Option<&DynamicVirtualChannel> {
@@ -477,4 +523,58 @@ fn process_slow_path_pointer(
     let mut src = ReadCursor::new(data);
     let pointer = slow_path::decode_slow_path_pointer(&mut src).map_err(SessionError::decode)?;
     fast_path_processor.process_pointer_update(image, pointer)
+}
+
+/// Apply every compositor delta to `image` and return the single region covering them.
+///
+/// Emitting one update per delta would be correct but ruinous: a consumer is entitled to
+/// redraw whatever a `GraphicsUpdate` names, and `ironrdp-client` rebuilds the entire
+/// framebuffer for each one, so an N-rectangle frame would copy the whole desktop N
+/// times. A single SolidFill or CacheToSurface can name up to `u16::MAX` rectangles, so
+/// N is the server's choice, not ours. The union's worst case is the full desktop, which
+/// is still one copy rather than N.
+fn composite_graphics_updates(
+    image: &mut DecodedImage,
+    updates: impl IntoIterator<Item = (ExclusiveRectangle, Vec<u8>)>,
+) -> SessionResult<Option<InclusiveRectangle>> {
+    let mut dirty: Option<InclusiveRectangle> = None;
+    for (region, data) in updates {
+        // egfx maps regions with exclusive right/bottom; the session's InclusiveRectangle
+        // is one-past-inclusive. Compositor updates are always non-empty, so the
+        // saturating decrements never underflow a real region.
+        let region = InclusiveRectangle {
+            left: region.left,
+            top: region.top,
+            right: region.right.saturating_sub(1),
+            bottom: region.bottom.saturating_sub(1),
+        };
+
+        // `apply_rgba32` reports rejection by returning `InclusiveRectangle::empty()`,
+        // which is `(0, 0, 0, 0)` and not distinguishable from a real 1x1 update at the
+        // origin. Checking fit here first, rather than branching on that return value,
+        // means the delta is skipped outright rather than folded into the accumulator
+        // as a phantom region. A successful ResetGraphics resizes `image` to the
+        // compositor output before deltas are drained; this guard remains for deltas
+        // received before the first reset and future accounting mismatches.
+        let fits = region.left <= region.right
+            && region.top <= region.bottom
+            && region.right < image.width()
+            && region.bottom < image.height();
+        if !fits {
+            warn!(
+                ?region,
+                image_width = image.width(),
+                image_height = image.height(),
+                "Dropping a compositor delta outside the image bounds"
+            );
+            continue;
+        }
+
+        let applied = image.apply_rgba32(&data, &region, false)?;
+        dirty = Some(match dirty {
+            Some(acc) => acc.union(&applied),
+            None => applied,
+        });
+    }
+    Ok(dirty)
 }

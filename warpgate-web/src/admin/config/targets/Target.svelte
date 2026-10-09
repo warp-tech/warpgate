@@ -52,12 +52,14 @@
     let roleIsAllowed: Record<string, boolean> = $state({})
     let connectionsInstructionsModalOpen = $state(false)
     let groups: TargetGroup[] = $state([])
+    let loadRolesPromise: Promise<Role[]> = $state(Promise.resolve([]))
 
     async function init() {
         ;[target, groups] = await Promise.all([
             api.getTarget({ id: params.id }),
             api.listTargetGroups(),
         ])
+        loadRolesPromise = loadRoles()
         return target
     }
 
@@ -68,8 +70,6 @@
         roleIsAllowed = Object.fromEntries(allowedRoles.map(r => [r.id, true]))
         return allRoles
     }
-
-    const loadRolesPromise = loadRoles()
 
     async function update() {
         if (!target) return

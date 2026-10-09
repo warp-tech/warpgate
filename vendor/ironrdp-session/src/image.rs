@@ -8,7 +8,7 @@ use ironrdp_graphics::rectangle_processing::Region;
 use ironrdp_pdu::geometry::{InclusiveRectangle, Rectangle as _};
 use tracing::{debug, trace};
 
-use crate::{SessionResult, custom_err};
+use crate::{SessionError, SessionErrorExt as _, SessionResult, custom_err};
 
 const TILE_SIZE: u16 = 64;
 
@@ -198,6 +198,43 @@ impl DecodedImage {
 
     pub fn height(&self) -> u16 {
         self.height
+    }
+
+    /// Resize and clear the framebuffer for an EGFX ResetGraphics, keeping the current
+    /// pointer sprite so it is redrawn at its position on the new surface.
+    pub(crate) fn reset_preserving_pointer(&mut self, width: u16, height: u16) -> SessionResult<()> {
+        let len = usize::from(width)
+            .checked_mul(usize::from(height))
+            .and_then(|pixels| pixels.checked_mul(usize::from(self.pixel_format.bytes_per_pixel())))
+            .ok_or_else(|| SessionError::general("reset graphics framebuffer dimensions overflow"))?;
+        let additional = len.saturating_sub(self.data.len());
+        self.data
+            .try_reserve_exact(additional)
+            .map_err(|error| SessionError::custom("allocate reset graphics framebuffer", error))?;
+        // `clear` drops the length (keeping capacity) so the following `resize` zero-fills the
+        // whole buffer in one pass, instead of zero-filling the grown tail and then the entire
+        // buffer again.
+        self.data.clear();
+        self.data.resize(len, 0);
+        self.width = width;
+        self.height = height;
+        self.pointer_src_rect = InclusiveRectangle::empty();
+        self.pointer_draw_x = 0;
+        self.pointer_draw_y = 0;
+        self.pointer_backbuffer.clear();
+        self.pointer_visible_on_screen = true;
+
+        if self.pointer.is_some() {
+            let show_pointer = self.show_pointer;
+            self.show_pointer = true;
+            self.recalculate_pointer_geometry();
+            self.show_pointer = show_pointer;
+            if show_pointer {
+                self.apply_pointer_layer(PointerLayer::Pointer)?;
+            }
+        }
+
+        Ok(())
     }
 
     /// Returns `true` if the rectangle fits entirely within the image bounds.
@@ -809,7 +846,6 @@ impl DecodedImage {
         }
     }
 
-    #[cfg(feature = "qoi")]
     fn apply_rgba32_iter<'a, I>(
         &mut self,
         rgba32: I,
@@ -854,7 +890,6 @@ impl DecodedImage {
         Ok(update_rectangle)
     }
 
-    #[cfg(feature = "qoi")]
     pub(crate) fn apply_rgba32(
         &mut self,
         rgba32: &[u8],

@@ -2005,6 +2005,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
 
 [[package]]
+name = "data-url"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
+
+[[package]]
 name = "delegate"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2468,7 +2474,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3410,7 +3416,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -3780,8 +3786,6 @@ dependencies = [
 [[package]]
 name = "ironrdp-dvc"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a5de64988ddabf96928e2f042e1772a5f7201f0001ea99012129c73a105fc52"
 dependencies = [
  "ironrdp-core",
  "ironrdp-pdu",
@@ -3802,6 +3806,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ironrdp-egfx"
+version = "0.3.0"
+dependencies = [
+ "bit_field",
+ "bitflags 2.13.1",
+ "ironrdp-core",
+ "ironrdp-dvc",
+ "ironrdp-graphics",
+ "ironrdp-pdu",
+ "tracing",
+]
+
+[[package]]
 name = "ironrdp-error"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3810,8 +3827,6 @@ checksum = "cd344ce9518ab83f6f7568ca4f1bc6dc8c55bd2da04cb5ee7b3e8740d5041734"
 [[package]]
 name = "ironrdp-graphics"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7493e426b6a8104cd497e518ba7781a9c7fc9a5f58a9cc0c1111e6d66f63bcc"
 dependencies = [
  "bit_field",
  "bitflags 2.13.1",
@@ -3821,6 +3836,7 @@ dependencies = [
  "ironrdp-pdu",
  "num-derive",
  "num-traits",
+ "wide",
  "yuv",
 ]
 
@@ -3907,6 +3923,7 @@ dependencies = [
  "ironrdp-core",
  "ironrdp-displaycontrol",
  "ironrdp-dvc",
+ "ironrdp-egfx",
  "ironrdp-error",
  "ironrdp-graphics",
  "ironrdp-pdu",
@@ -4664,7 +4681,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5039,9 +5056,9 @@ dependencies = [
 
 [[package]]
 name = "pageant"
-version = "0.2.1"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f3a5ae18f65a85c67a77d18d42d3606c07948e3c17c1e5f74852b26589e88a5"
+checksum = "f0786409b5aaa884655c9b4065681db0835db0cc185a6fb19fb17a5d38656866"
 dependencies = [
  "base16ct 1.0.0",
  "byteorder",
@@ -5993,7 +6010,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls 0.23.45",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
@@ -6031,9 +6048,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6813,7 +6830,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6893,7 +6910,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6935,6 +6952,15 @@ name = "ryu"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
+
+[[package]]
+name = "safe_arch"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96b02de82ddbe1b636e6170c21be622223aea188ef2e139be0a5b219ec215323"
+dependencies = [
+ "bytemuck",
+]
 
 [[package]]
 name = "salsa20"
@@ -7676,7 +7702,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -8210,10 +8236,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -8235,7 +8261,7 @@ dependencies = [
  "parking_lot",
  "rustix",
  "signal-hook",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -9335,16 +9361,20 @@ dependencies = [
  "html-escape",
  "poem",
  "poem-openapi",
+ "rcgen",
+ "rustls 0.23.45",
  "serde",
- "subtle",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-rustls 0.26.4",
  "tracing",
  "url",
  "uuid",
+ "warpgate-ca",
  "warpgate-common",
  "warpgate-core",
  "warpgate-db-entities",
+ "warpgate-tls",
 ]
 
 [[package]]
@@ -9420,11 +9450,14 @@ name = "warpgate-db-entities"
 version = "0.29.1"
 dependencies = [
  "bytes",
+ "data-encoding",
+ "data-url",
  "ipnet",
  "poem-openapi",
  "sea-orm",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "sqlx",
  "time",
  "tracing",
@@ -9513,6 +9546,7 @@ dependencies = [
  "poem-openapi",
  "regex",
  "reqwest 0.13.4",
+ "russh",
  "rustls 0.23.45",
  "sea-orm",
  "serde",
@@ -9652,6 +9686,7 @@ dependencies = [
  "bytes",
  "futures",
  "ironrdp",
+ "ironrdp-egfx",
  "ironrdp-server",
  "ironrdp-tokio",
  "openssl",
@@ -9809,7 +9844,11 @@ dependencies = [
 name = "warpgate-web-clients-common"
 version = "0.23.4"
 dependencies = [
+ "futures",
+ "poem",
+ "serde",
  "tokio",
+ "tokio-util",
  "tracing",
  "uuid",
  "warpgate-common",
@@ -9832,6 +9871,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-util",
  "tracing",
  "uuid",
  "warpgate-common",
@@ -9859,6 +9899,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-util",
  "tracing",
  "uuid",
  "warpgate-common",
@@ -10186,6 +10227,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "wide"
+version = "0.7.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ce5da8ecb62bcd8ec8b7ea19f69a51275e91299be594ea5cc6ef7819e16cd03"
+dependencies = [
+ "bytemuck",
+ "safe_arch",
+]
+
+[[package]]
 name = "widestring"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10219,7 +10270,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
