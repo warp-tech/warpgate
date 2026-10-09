@@ -453,6 +453,13 @@ pub async fn create_authenticated_client(
     // Create HTTP client with the configuration
     let mut client_builder = reqwest::Client::builder();
 
+    if let Some(host) = url::Url::parse(&k8s_options.cluster_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned))
+    {
+        client_builder = client_builder.retry(upstream_retry_policy(host));
+    }
+
     if !k8s_options.tls.verify {
         client_builder = client_builder.danger_accept_invalid_certs(true);
     }
@@ -510,6 +517,40 @@ pub async fn create_authenticated_client(
     }
 
     Ok(client_builder)
+}
+
+/// Retry policy for requests to the Kubernetes API server.
+///
+/// Keeps reqwest's default (resend after a graceful GOAWAY or REFUSED_STREAM)
+/// and adds connections that failed to come up: TCP connect or TLS handshake.
+/// Nothing has been sent at that point, so resending is safe for any method.
+/// SNI-routing front ends can miss a ClientHello that spans two TCP segments
+/// and answer with their default certificate (kubernetes/ingress-nginx#11491),
+/// and a ClientHello with a post-quantum key share is big enough to do that.
+fn upstream_retry_policy(host: String) -> reqwest::retry::Builder {
+    reqwest::retry::for_host(host).classify_fn(|req_rep| match req_rep.error() {
+        Some(error) if is_safe_to_resend(error) => req_rep.retryable(),
+        _ => req_rep.success(),
+    })
+}
+
+fn is_safe_to_resend(error: &(dyn std::error::Error + 'static)) -> bool {
+    if error
+        .downcast_ref::<reqwest::Error>()
+        .is_some_and(reqwest::Error::is_connect)
+    {
+        return true;
+    }
+    let mut source = error.source();
+    while let Some(cause) = source {
+        if let Some(error) = cause.downcast_ref::<h2::Error>() {
+            return error.is_remote()
+                && ((error.is_go_away() && error.reason() == Some(h2::Reason::NO_ERROR))
+                    || (error.is_reset() && error.reason() == Some(h2::Reason::REFUSED_STREAM)));
+        }
+        source = cause.source();
+    }
+    false
 }
 
 /// True if `now` falls within the certificate's `[not_before, not_after]`
@@ -612,4 +653,94 @@ fn normalize_certificate_pem(pem: &str) -> String {
         .chars()
         .filter(|c| !c.is_whitespace())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use tokio::net::TcpListener;
+
+    use super::upstream_retry_policy;
+
+    /// Accepts connections and closes them straight away, so every TLS
+    /// handshake fails. Returns a URL on it and a count of accepted connections.
+    async fn closing_server() -> (String, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("https://{}/version", listener.local_addr().unwrap());
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let counter = accepted.clone();
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                counter.fetch_add(1, Ordering::SeqCst);
+                drop(stream);
+            }
+        });
+        (url, accepted)
+    }
+
+    /// Plaintext HTTP/2 server that resets every stream with REFUSED_STREAM.
+    /// Returns a URL on it and a count of requests seen.
+    async fn refusing_server() -> (String, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/version", listener.local_addr().unwrap());
+        let requests = Arc::new(AtomicUsize::new(0));
+        let counter = requests.clone();
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                let counter = counter.clone();
+                tokio::spawn(async move {
+                    let Ok(mut connection) = h2::server::handshake(stream).await else {
+                        return;
+                    };
+                    while let Some(Ok((_, mut respond))) = connection.accept().await {
+                        counter.fetch_add(1, Ordering::SeqCst);
+                        respond.send_reset(h2::Reason::REFUSED_STREAM);
+                    }
+                });
+            }
+        });
+        (url, requests)
+    }
+
+    async fn attempts(client: reqwest::Client) -> usize {
+        let (url, accepted) = closing_server().await;
+        let error = client.get(&url).send().await.unwrap_err();
+        assert!(error.is_connect(), "{error:?}");
+        accepted.load(Ordering::SeqCst)
+    }
+
+    #[tokio::test]
+    async fn failed_handshakes_are_resent() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let client = reqwest::Client::builder()
+            .retry(upstream_retry_policy("127.0.0.1".into()))
+            .build()
+            .unwrap();
+        // The first attempt and two resends.
+        assert_eq!(attempts(client).await, 3);
+
+        let client = reqwest::Client::builder().build().unwrap();
+        assert_eq!(attempts(client).await, 1);
+    }
+
+    #[tokio::test]
+    async fn refused_streams_are_still_resent() {
+        // Setting a classifier replaces reqwest's default protocol-NACK
+        // retries, so this checks the h2 branch of is_safe_to_resend keeps them.
+        let requests = async |policy| {
+            let (url, requests) = refusing_server().await;
+            let client = reqwest::Client::builder()
+                .http2_prior_knowledge()
+                .retry(policy)
+                .build()
+                .unwrap();
+            client.get(&url).send().await.unwrap_err();
+            requests.load(Ordering::SeqCst)
+        };
+        assert_eq!(requests(upstream_retry_policy("127.0.0.1".into())).await, 3);
+        assert_eq!(requests(reqwest::retry::never()).await, 1);
+    }
 }
