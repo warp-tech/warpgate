@@ -35,6 +35,13 @@ pub struct RecordingSinkCleanupGuard {
     scratch_path: Option<PathBuf>,
 }
 
+impl RecordingSinkCleanupGuard {
+    /// Leave the scratch in place, for a recording that is not marked ended.
+    pub fn keep(mut self) {
+        self.scratch_path = None;
+    }
+}
+
 impl Drop for RecordingSinkCleanupGuard {
     fn drop(&mut self) {
         if let Some(path) = self.scratch_path.take()
