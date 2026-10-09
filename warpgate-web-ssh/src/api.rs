@@ -1,7 +1,5 @@
 use std::sync::Arc;
-use std::time::Duration;
 
-use futures::{SinkExt, StreamExt};
 use poem::http::StatusCode;
 use poem::web::websocket::{Message, WebSocket};
 use poem::web::{Data, Path};
@@ -10,7 +8,7 @@ use uuid::Uuid;
 use warpgate_common::UserSessionId;
 use warpgate_common_http::SessionKeepalive;
 use warpgate_common_http::auth::AuthenticatedRequestContext;
-use warpgate_web_clients_common::SessionAccess;
+use warpgate_web_clients_common::{ClientManager, run_stream_loop};
 
 use crate::manager::WebSshClientManager;
 use crate::protocol::{ClientMessage, ServerMessage};
@@ -24,103 +22,63 @@ pub async fn ws_handler(
     session_keepalive: Option<Data<&SessionKeepalive>>,
     ws: WebSocket,
 ) -> poem::Result<impl IntoResponse> {
-    // Closed and inaccessible sessions both read as absent.
-    let access = manager
-        .access(UserSessionId(session_id), ctx.auth.user_id())
+    let session = manager
+        .lookup_user_session(UserSessionId(session_id), ctx.auth.user_id())
         .await;
-    let session = match access {
-        SessionAccess::Granted(session) if !session.is_dead() => session,
-        _ => {
-            return Err(poem::Error::from_string(
-                "Session not found",
-                StatusCode::NOT_FOUND,
-            ));
-        }
+    let Some(session) = session.filter(|session| !session.cancellation().is_cancelled()) else {
+        return Err(poem::Error::from_string(
+            "Session not found",
+            StatusCode::NOT_FOUND,
+        ));
     };
 
     session.cancel_disconnect_timer().await;
 
-    let manager = (*manager).clone();
+    let registry = ClientManager::clone(&manager);
     let session_keepalive = session_keepalive.map(|x| x.guard());
 
     Ok(ws.on_upgrade(move |socket| async move {
-        let (mut sink, mut stream) = socket.split();
+        session.replay_phase().await;
 
-        // drain buffered events first (in case of a reconnect)
-        for msg in session.drain_buffer().await {
-            if let Ok(json) = serde_json::to_string(&msg) {
-                let _ = sink.send(Message::Text(json)).await;
-            }
-        }
-        let mut keepalive = tokio::time::interval(Duration::from_secs(30));
-        keepalive.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        keepalive.tick().await; // consume the immediate first tick
-
-        loop {
-            tokio::select! {
-                () = session.wait_buffer() => {
-                    let msgs = session.drain_buffer().await;
-                    for msg in msgs {
-                        if let Ok(json) = serde_json::to_string(&msg)
-                            && sink.send(Message::Text(json)).await.is_err() {
-                            break;
-                        }
-                    }
-                    if session.is_dead() {
-                        break;
+        let input_session = session.clone();
+        run_stream_loop(
+            &session,
+            registry,
+            socket,
+            |msg| Message::Text(serde_json::to_string(msg).unwrap_or_default()),
+            move |text| {
+                let session = input_session.clone();
+                async move {
+                    if let Ok(client_msg) = serde_json::from_str::<ClientMessage>(&text) {
+                        handle_client_message(&session, client_msg).await;
                     }
                 }
-
-                maybe_msg = stream.next() => {
-                    match maybe_msg {
-                        Some(Ok(Message::Text(text))) => {
-                            #[allow(clippy::collapsible_if)]
-                            if let Ok(client_msg) = serde_json::from_str::<ClientMessage>(&text)
-                                && let Some(reply) = handle_client_message(&session, client_msg).await
-                                && let Ok(json) = serde_json::to_string(&reply) {
-                                if sink.send(Message::Text(json)).await.is_err() {
-                                    break;
-                                }
-                            }
-                        }
-                        Some(Ok(Message::Close(_))) | None => break,
-                        _ => {}
-                    }
-                }
-
-                _ = keepalive.tick() => {
-                    if sink.send(Message::Ping(vec![])).await.is_err() {
-                        break;
-                    }
-                }
-            }
-        }
+            },
+        )
+        .await;
 
         // reject any pending host key prompt on disconnect
         if let Some(pending) = session.take_pending_host_key().await {
             let _ = pending.reply.send(false);
         }
 
-        session.start_disconnect_timer(manager.clone()).await;
-
         drop(session_keepalive);
     }))
 }
 
-async fn handle_client_message(
-    session: &WebSshSession,
-    msg: ClientMessage,
-) -> Option<ServerMessage> {
+async fn handle_client_message(session: &WebSshSession, msg: ClientMessage) {
     match msg {
         ClientMessage::OpenChannel { cols, rows } => {
             let cols = cols.unwrap_or(80);
             let rows = rows.unwrap_or(24);
-            let channel_id = session.open_shell_channel(cols, rows).await;
-            Some(ServerMessage::ChannelOpened { channel_id })
+            if let Some(channel_id) = session.open_shell_channel(cols, rows).await {
+                session
+                    .push(ServerMessage::ChannelOpened { channel_id })
+                    .await;
+            }
         }
         ClientMessage::Input { channel_id, data } => {
             session.send_input(channel_id, data).await;
-            None
         }
         ClientMessage::Resize {
             channel_id,
@@ -128,23 +86,19 @@ async fn handle_client_message(
             rows,
         } => {
             session.resize_channel(channel_id, cols, rows).await;
-            None
         }
         ClientMessage::CloseChannel { channel_id } => {
             session.close_channel(channel_id);
-            None
         }
         ClientMessage::AcceptHostKey => {
             if let Some(pending) = session.take_pending_host_key().await {
                 let _ = pending.reply.send(true);
             }
-            None
         }
         ClientMessage::RejectHostKey => {
             if let Some(pending) = session.take_pending_host_key().await {
                 let _ = pending.reply.send(false);
             }
-            None
         }
     }
 }

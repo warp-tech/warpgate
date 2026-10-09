@@ -1,18 +1,23 @@
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
+import requests
+
 from .api_client import admin_client, sdk
 from .conftest import ProcessManager, WarpgateProcess
 from .util import wait_port
 
 
 class Test:
+    @pytest.mark.parametrize("self_service", [False, True], ids=["admin", "profile-comment"])
     def test_ed25519(
         self,
         processes: ProcessManager,
         wg_c_ed25519_pubkey: Path,
         timeout,
         shared_wg: WarpgateProcess,
+        self_service,
     ):
         ssh_port = processes.start_ssh_server(
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
@@ -26,13 +31,31 @@ class Test:
                 sdk.RoleDataRequest(name=f"role-{uuid4()}"),
             )
             user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
-            api.create_public_key_credential(
-                user.id,
-                sdk.NewPublicKeyCredential(
-                    label="Public Key",
-                    openssh_public_key=open("ssh-keys/id_ed25519.pub").read().strip()
-                ),
-            )
+            if self_service:
+                api.create_password_credential(user.id, sdk.NewPasswordCredential(password="123"))
+                public_key = " ".join(Path("ssh-keys/id_ed25519.pub").read_text().split()[:2])
+                with requests.Session() as session:
+                    session.verify = False
+                    response = session.post(
+                        f"{url}/@warpgate/api/auth/login",
+                        json={"username": user.username, "password": "123"},
+                    )
+                    assert response.status_code == 201, response.text
+                    response = session.post(
+                        f"{url}/@warpgate/api/profile/credentials/public-keys",
+                        json={"label": "Public Key", "openssh_public_key": f"{public_key} user@host"},
+                    )
+                    assert response.status_code == 201, response.text
+                credentials = api.get_public_key_credentials(user.id)
+                assert credentials[0].openssh_public_key == public_key
+            else:
+                api.create_public_key_credential(
+                    user.id,
+                    sdk.NewPublicKeyCredential(
+                        label="Public Key",
+                        openssh_public_key=open("ssh-keys/id_ed25519.pub").read().strip()
+                    ),
+                )
             api.add_user_role(user.id, role.id)
             ssh_target = api.create_target(
                 sdk.TargetDataRequest(

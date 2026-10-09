@@ -182,7 +182,6 @@ pub async fn correlated_authorization(
                             return Err(error.into());
                         }
                     };
-                handle.lock().await.confirm();
                 *authorization = Authorization::Authorized(admitted.clone());
                 Ok((handle, admitted))
             }
@@ -219,7 +218,8 @@ async fn admit_kubernetes_session(
         },
         || async { Ok(()) },
     )
-    .await
+    .await?
+    .admitted()
 }
 
 /// Waits for the request that opened this session to resolve its authorization.

@@ -1,0 +1,111 @@
+THIRD-PARTY NOTICES
+
+This file documents third-party software used by ironrdp-egfx when
+optional integration features are enabled.
+
+================================================================================
+
+OpenH264 Integration Notice
+
+ironrdp-egfx provides optional integration support for H.264 decoding
+through the openh264 crate (https://crates.io/crates/openh264). This
+integration is disabled by default and must be explicitly enabled by
+downstream consumers via the `openh264-bundled` or `openh264-libloading`
+feature flags.
+
+When enabled, the applicable BSD license notices below must be preserved.
+
+--------------------------------------------------------------------------------
+
+1. Cisco OpenH264
+
+   Project: https://github.com/cisco/openh264
+   License: BSD-2-Clause
+
+   Copyright (c) 2013, Cisco Systems
+   All rights reserved.
+
+   Redistribution and use in source and binary forms, with or without
+   modification, are permitted provided that the following conditions
+   are met:
+
+   * Redistributions of source code must retain the above copyright
+     notice, this list of conditions and the following disclaimer.
+
+   * Redistributions in binary form must reproduce the above copyright
+     notice, this list of conditions and the following disclaimer in
+     the documentation and/or other materials provided with the
+     distribution.
+
+   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+   HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+--------------------------------------------------------------------------------
+
+2. openh264 (Rust crate)
+
+   Project: https://github.com/ralfbiedert/openh264-rs
+   Author:  Ralf Biedert <rb@xr.io>
+   License: BSD-2-Clause
+
+   Copyright (c) Ralf Biedert
+   All rights reserved.
+
+   Redistribution and use in source and binary forms, with or without
+   modification, are permitted provided that the following conditions
+   are met:
+
+   * Redistributions of source code must retain the above copyright
+     notice, this list of conditions and the following disclaimer.
+
+   * Redistributions in binary form must reproduce the above copyright
+     notice, this list of conditions and the following disclaimer in
+     the documentation and/or other materials provided with the
+     distribution.
+
+   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+   HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+================================================================================
+
+AVC/H.264 Patent Portfolio License Conditions
+
+When using Cisco's prebuilt OpenH264 binary (via the `openh264-libloading`
+feature), the binary is licensed under Cisco's license from MPEG LA only
+if the following conditions are met:
+
+1. The Cisco-provided binary is separately downloaded to an end user's
+   device, and not integrated into or combined with third party software
+   prior to being downloaded to the end user's device;
+
+2. The end user must have the ability to control (e.g., to enable,
+   disable, or re-enable) the use of the Cisco-provided binary;
+
+3. Third party software, in the location where end users can control
+   the use of the Cisco-provided binary, must display the following
+   text:
+
+   "OpenH264 Video Codec provided by Cisco Systems, Inc."
+
+4. Any third-party software that makes use of the Cisco-provided binary
+   must reproduce all of the above text, as well as this last condition,
+   in the EULA and/or in another location where licensing information is
+   to be presented to the end user.

@@ -123,6 +123,7 @@ pub fn deserialize_ca(
 pub const CLUSTER_TLS_SNI_NAME: &str = "warpgate-cluster.internal";
 
 /// A per-process cluster peer identity
+#[derive(Clone)]
 pub struct ClusterTlsIdentity {
     pub certificate_pem: String,
     pub private_key_pem: String,
@@ -140,7 +141,10 @@ impl ClusterTlsIdentity {
         dn.push(rcgen::DnType::CommonName, CLUSTER_TLS_SNI_NAME);
         params.distinguished_name = dn;
         params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
-        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+        params.extended_key_usages = vec![
+            ExtendedKeyUsagePurpose::ServerAuth,
+            ExtendedKeyUsagePurpose::ClientAuth,
+        ];
 
         // Backdated in case of clock skew
         // long-lived cause it's never rotated until the process dies
