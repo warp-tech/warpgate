@@ -17,6 +17,7 @@ struct TicketRequestTarget {
     pub id: uuid::Uuid,
     pub name: String,
     pub kind: Target::TargetKind,
+    pub ticket_max_duration_seconds: Option<i64>,
 }
 
 #[derive(ApiResponse)]
@@ -82,6 +83,9 @@ impl Api {
                 id: t.id,
                 name: t.name,
                 kind: (&t.options).into(),
+                ticket_max_duration_seconds: t
+                    .ticket_max_duration_seconds
+                    .or(policy.ticket_max_duration_seconds),
             })
             .collect();
 
