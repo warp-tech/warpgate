@@ -4,7 +4,6 @@ mod error;
 mod handler;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
-use std::net::ToSocketAddrs;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{fmt, io};
@@ -759,12 +758,7 @@ impl Connector {
         let first = iter.next().ok_or(ConnectionError::Resolve)?;
 
         let config = self.build_ssh_config(&first).await;
-        let address_str = format!("{}:{}", first.host, first.port);
-        let address = address_str
-            .to_socket_addrs()
-            .map_err(ConnectionError::Io)
-            .and_then(|mut x| x.next().ok_or(ConnectionError::Resolve))
-            .inspect_err(|e| error!(?e, address=%address_str, "Cannot resolve address"))?;
+        let address = (first.host.as_str(), first.port);
         info!(?address, username = %first.username, "Connecting");
         let (event_tx, event_rx) = unbounded_channel();
         let handler = ClientHandler {
