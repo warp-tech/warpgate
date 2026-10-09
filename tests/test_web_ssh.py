@@ -5,8 +5,10 @@ import time
 from pathlib import Path
 from uuid import uuid4
 
+import psutil
+import pytest
 import requests
-from websocket import create_connection
+from websocket import WebSocketBadStatusException, create_connection
 
 from .api_client import admin_client, sdk
 from .approval_util import wait_for_pending_approval
@@ -39,7 +41,7 @@ def _web_ssh_login(processes, wg_c_ed25519_pubkey, shared_wg, require_approval=F
                     sdk.TargetOptionsTargetSSHOptions(
                         kind="Ssh",
                         allow_insecure_algos=False,
-                        host="localhost",
+                        host="127.0.0.1",
                         port=ssh_port,
                         username="root",
                         auth=sdk.SSHTargetAuth(
@@ -249,4 +251,53 @@ class TestWebSsh:
             if resp.status_code == 404:
                 break
             time.sleep(0.25)
+        assert resp.status_code == 404
+
+    def test_admin_close_ends_the_backend_connection(
+        self,
+        processes: ProcessManager,
+        wg_c_ed25519_pubkey: Path,
+        timeout,
+        shared_wg: WarpgateProcess,
+    ):
+        url, http, _, ssh_target = _web_ssh_login(
+            processes, wg_c_ed25519_pubkey, shared_wg
+        )
+        session_id = _create_session(url, http, ssh_target)
+        ws = _open_stream(shared_wg, http, session_id)
+        try:
+            deadline = time.time() + timeout
+            _wait_for_phase(ws, "connected", deadline)
+            _run_shell_roundtrip(ws, deadline)
+        finally:
+            ws.close()
+
+        # Check the target connection independently of websocket cleanup.
+        ssh_port = ssh_target.options.actual_instance.port
+
+        def backend_connected():
+            return any(
+                connection.status == psutil.CONN_ESTABLISHED
+                and connection.raddr
+                and connection.raddr.port == ssh_port
+                for connection in psutil.Process(shared_wg.process.pid).net_connections(
+                    kind="tcp"
+                )
+            )
+
+        assert backend_connected(), "warpgate never connected to the SSH target"
+        with admin_client(url) as api:
+            api.close_session(session_id)
+
+        # Disconnect before the 60-second reconnect grace period expires.
+        deadline = time.time() + min(timeout, 20)
+        while time.time() < deadline and backend_connected():
+            time.sleep(0.25)
+        assert not backend_connected(), "admin close left the SSH backend connected"
+
+        with pytest.raises(WebSocketBadStatusException) as rejected:
+            _open_stream(shared_wg, http, session_id)
+        assert rejected.value.status_code == 404
+
+        resp = http.get(f"{url}/@warpgate/api/web-ssh/sessions/{session_id}")
         assert resp.status_code == 404

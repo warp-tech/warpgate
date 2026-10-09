@@ -22,10 +22,10 @@ pub async fn ws_handler(
     session_keepalive: Option<Data<&SessionKeepalive>>,
     ws: WebSocket,
 ) -> poem::Result<impl IntoResponse> {
-    let Some(session) = manager
+    let session = manager
         .lookup_user_session(UserSessionId(session_id), ctx.auth.user_id())
-        .await
-    else {
+        .await;
+    let Some(session) = session.filter(|session| !session.cancellation().is_cancelled()) else {
         return Err(poem::Error::from_string(
             "Session not found",
             StatusCode::NOT_FOUND,
