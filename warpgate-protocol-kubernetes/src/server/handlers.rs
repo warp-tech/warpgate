@@ -653,14 +653,12 @@ async fn _handle_websocket_request_inner(
     };
 
     // Poem requires a Sync callback; the socket is Send and consumed once.
-    let client_socket = std::sync::Mutex::new(Some(client_socket));
+    let client_socket = std::sync::Mutex::new(client_socket);
 
     let ws_handler_inner = move |socket: WebSocketStream| async move {
         let client_socket = client_socket
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("Upstream Kubernetes websocket was already consumed"))?;
+            .into_inner()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let _session_handle = handle;
         let (client_sink, client_source) = client_socket.split();
         let (server_sink, server_source) = socket.split();
@@ -853,13 +851,8 @@ fn requested_websocket_protocols(headers: &http::HeaderMap) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    /// Reads (and discards) an HTTP request head from `stream`, up to and
-    /// including the blank line that ends it, before a mock server answers.
-    /// A single `read()` isn't guaranteed to see the whole request if the
-    /// client's write is split across TCP segments; on loopback that's
-    /// exceedingly unlikely, but answering while bytes are still unread
-    /// would reset the connection instead of closing it cleanly once the
-    /// mock server's task ends.
+    /// Read the full request head before replying so unread bytes cannot reset
+    /// the mock connection when the server task exits.
     async fn drain_request_head(stream: &mut tokio::net::TcpStream) {
         use tokio::io::AsyncReadExt;
 
