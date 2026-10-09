@@ -321,6 +321,10 @@ pub enum RdpTargetCompression {
     #[serde(rename = "lossless")]
     #[oai(rename = "lossless")]
     Lossless,
+    /// MS-RDPEGFX
+    #[serde(rename = "graphics_pipeline")]
+    #[oai(rename = "graphics_pipeline")]
+    GraphicsPipeline,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
