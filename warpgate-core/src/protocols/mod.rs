@@ -18,7 +18,9 @@ pub use desktop::{
 };
 pub use framebuffer::{Framebuffer, PngEncodeError, Rect, decode_png_rgba};
 pub use handle::{AdmittedTarget, SessionHandle, TargetSessionStart, WarpgateServerHandle};
-pub use terminal_screen::{TerminalScreen, sane_terminal_size};
+pub use terminal_screen::{
+    MAX_TERMINAL_COLS, MAX_TERMINAL_ROWS, TerminalScreen, sane_terminal_size,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum TargetTestError {

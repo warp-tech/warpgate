@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.29.0-14-g2afa13cc-modified"
+    "version": "v0.29.1-47-gcd2038cd-modified"
   },
   "servers": [
     {
@@ -1335,7 +1335,7 @@
             "content": {
               "application/json; charset=utf-8": {
                 "schema": {
-                  "$ref": "#/components/schemas/WebSshSessionCreated"
+                  "$ref": "#/components/schemas/WebClientSessionCreated"
                 }
               }
             }
@@ -1388,7 +1388,7 @@
             "content": {
               "application/json; charset=utf-8": {
                 "schema": {
-                  "$ref": "#/components/schemas/WebSshSessionInfo"
+                  "$ref": "#/components/schemas/WebClientSessionInfo"
                 }
               }
             }
@@ -1428,9 +1428,6 @@
           "204": {
             "description": ""
           },
-          "403": {
-            "description": ""
-          },
           "404": {
             "description": ""
           }
@@ -1467,7 +1464,7 @@
             "content": {
               "application/json; charset=utf-8": {
                 "schema": {
-                  "$ref": "#/components/schemas/WebDesktopSessionCreated"
+                  "$ref": "#/components/schemas/WebClientSessionCreated"
                 }
               }
             }
@@ -1520,7 +1517,7 @@
             "content": {
               "application/json; charset=utf-8": {
                 "schema": {
-                  "$ref": "#/components/schemas/WebDesktopSessionInfo"
+                  "$ref": "#/components/schemas/WebClientSessionInfo"
                 }
               }
             }
@@ -1558,9 +1555,6 @@
         ],
         "responses": {
           "204": {
-            "description": ""
-          },
-          "403": {
             "description": ""
           },
           "404": {
@@ -2220,6 +2214,9 @@
           },
           "show_session_menu": {
             "type": "boolean"
+          },
+          "logo_etag": {
+            "type": "string"
           },
           "config_warnings": {
             "type": "array",
@@ -2892,9 +2889,9 @@
           }
         }
       },
-      "WebDesktopSessionCreated": {
+      "WebClientSessionCreated": {
         "type": "object",
-        "title": "WebDesktopSessionCreated",
+        "title": "WebClientSessionCreated",
         "required": [
           "session_id"
         ],
@@ -2905,38 +2902,9 @@
           }
         }
       },
-      "WebDesktopSessionInfo": {
+      "WebClientSessionInfo": {
         "type": "object",
-        "title": "WebDesktopSessionInfo",
-        "required": [
-          "target_name",
-          "target_kind"
-        ],
-        "properties": {
-          "target_name": {
-            "type": "string"
-          },
-          "target_kind": {
-            "$ref": "#/components/schemas/TargetKind"
-          }
-        }
-      },
-      "WebSshSessionCreated": {
-        "type": "object",
-        "title": "WebSshSessionCreated",
-        "required": [
-          "session_id"
-        ],
-        "properties": {
-          "session_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "WebSshSessionInfo": {
-        "type": "object",
-        "title": "WebSshSessionInfo",
+        "title": "WebClientSessionInfo",
         "required": [
           "target_name",
           "target_kind"
@@ -2954,8 +2922,8 @@
     "securitySchemes": {
       "ClusterSecurityScheme": {
         "type": "apiKey",
-        "description": "Requests forwarded by a cluster peer authenticate with the cluster token\n(plus the forwarded user identity resolved into the request authorization —\nsee `cluster_request_authorization`). The checker only reads the context\nthat `inject_request_authorization` attaches after verifying the token, so\na bogus header value alone never authenticates.",
-        "name": "x-warpgate-cluster-token",
+        "description": "Requests forwarded by a cluster peer are authenticated by the peer's TLS\nclient certificate at the listener (plus the forwarded user identity\nresolved into the request authorization — see\n`cluster_request_authorization`). The node id header only lets this scheme\nfire: the checker reads the context that `inject_request_authorization`\nattaches, so a header alone never authenticates.",
+        "name": "x-warpgate-cluster-node",
         "in": "header"
       },
       "CookieSecurityScheme": {

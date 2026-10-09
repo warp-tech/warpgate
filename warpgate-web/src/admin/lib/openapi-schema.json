@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.29.0-19-g263fa7ca-modified"
+    "version": "v0.29.1-47-gcd2038cd-modified"
   },
   "servers": [
     {
@@ -103,7 +103,7 @@
             "CookieSecurityScheme": []
           },
           {
-            "ClusterTokenSecurityScheme": []
+            "ClusterPeerSecurityScheme": []
           }
         ],
         "operationId": "close_all_sessions"
@@ -222,7 +222,7 @@
             "CookieSecurityScheme": []
           },
           {
-            "ClusterTokenSecurityScheme": []
+            "ClusterPeerSecurityScheme": []
           }
         ],
         "operationId": "close_session"
@@ -266,7 +266,7 @@
             "CookieSecurityScheme": []
           },
           {
-            "ClusterTokenSecurityScheme": []
+            "ClusterPeerSecurityScheme": []
           }
         ],
         "operationId": "get_recording"
@@ -2313,7 +2313,7 @@
             "CookieSecurityScheme": []
           },
           {
-            "ClusterTokenSecurityScheme": []
+            "ClusterPeerSecurityScheme": []
           }
         ],
         "operationId": "delete_user"
@@ -6436,6 +6436,12 @@
           "banner": {
             "type": "string"
           },
+          "logo": {
+            "type": "string",
+            "description": "Only browser-renderable image data URLs are stored: the value is served\nto every visitor as an image, so nothing else must ever end up in it.\n`null` clears the logo. The size cap is mirrored in the Parameters UI.",
+            "maxLength": 4194304,
+            "pattern": "^data:image/(png|jpeg|gif|webp|svg\\+xml);base64,[A-Za-z0-9+/]+={0,2}$"
+          },
           "web_clients_enabled": {
             "type": "boolean"
           },
@@ -6645,6 +6651,9 @@
           "web_clients_enabled": {
             "type": "boolean"
           },
+          "logo_etag": {
+            "type": "string"
+          },
           "web_auth_max_age_seconds": {
             "type": "integer",
             "format": "int64"
@@ -6773,7 +6782,8 @@
         "type": "string",
         "enum": [
           "remotefx",
-          "lossless"
+          "lossless",
+          "graphics_pipeline"
         ]
       },
       "RdpTargetPasswordAuth": {
@@ -9090,10 +9100,10 @@
       }
     },
     "securitySchemes": {
-      "ClusterTokenSecurityScheme": {
+      "ClusterPeerSecurityScheme": {
         "type": "apiKey",
-        "description": "Peer-to-peer cluster token.",
-        "name": "X-Warpgate-Cluster-Token",
+        "description": "Peer-forwarded request.",
+        "name": "X-Warpgate-Cluster-Node",
         "in": "header"
       },
       "CookieSecurityScheme": {

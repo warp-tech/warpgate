@@ -1,7 +1,22 @@
+pub const MAX_TERMINAL_COLS: u16 = 1024;
+pub const MAX_TERMINAL_ROWS: u16 = 512;
+
 pub const fn sane_terminal_size(cols: u16, rows: u16) -> (u16, u16) {
     (
-        if cols < 2 { 80 } else { cols },
-        if rows < 2 { 24 } else { rows },
+        if cols < 2 {
+            80
+        } else if cols > MAX_TERMINAL_COLS {
+            MAX_TERMINAL_COLS
+        } else {
+            cols
+        },
+        if rows < 2 {
+            24
+        } else if rows > MAX_TERMINAL_ROWS {
+            MAX_TERMINAL_ROWS
+        } else {
+            rows
+        },
     )
 }
 
