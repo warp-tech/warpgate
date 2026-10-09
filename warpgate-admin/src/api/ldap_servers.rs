@@ -430,6 +430,8 @@ impl ListApi {
         {
             match warpgate_ldap::test_connection(&ldap_config).await {
                 Ok(_) => {
+                    log_ldap_test_succeeded(&body.host, body.port);
+
                     // Try to discover base DNs
                     let base_dns = warpgate_ldap::discover_base_dns(&ldap_config).await.ok();
 
@@ -441,13 +443,23 @@ impl ListApi {
                         },
                     )))
                 }
-                Err(e) => Ok(TestLdapServerConnectionResponse::Ok(Json(
-                    TestLdapServerResponse {
-                        success: false,
-                        message: format!("Connection failed: {e:#}"),
-                        base_dns: None,
-                    },
-                ))),
+                Err(e) => {
+                    // The message stays verbatim: an admin asked what was
+                    // wrong with a server they are configuring, and that
+                    // answer is the endpoint. What was missing is the record.
+                    // This dials a host and port taken from the request body
+                    // and left nothing behind saying it had run.
+                    let detail = format!("{e:#}");
+                    log_ldap_test_failed(&body.host, body.port, &detail);
+
+                    Ok(TestLdapServerConnectionResponse::Ok(Json(
+                        TestLdapServerResponse {
+                            success: false,
+                            message: format!("Connection failed: {detail}"),
+                            base_dns: None,
+                        },
+                    )))
+                }
             }
         } else {
             Ok(TestLdapServerConnectionResponse::Ok(Json(
@@ -661,5 +673,94 @@ impl QueryApi {
         let mut users = users.into_iter().map(Into::into).collect::<Vec<_>>();
         users.sort_by_key(|u: &LdapUserResponse| u.username.clone());
         Ok(GetLdapUsersResponse::Ok(Json(users)))
+    }
+}
+
+// Both fields are attacker-shaped (request body, remote server text) and the
+// text log layer writes newlines raw, so Debug is what keeps one test from
+// forging extra log lines.
+#[deny(dead_code)]
+fn log_ldap_test_succeeded(host: &str, port: i32) {
+    tracing::info!(host = ?host, port, "LDAP connection test succeeded");
+}
+
+#[deny(dead_code)]
+fn log_ldap_test_failed(host: &str, port: i32, detail: &str) {
+    tracing::warn!(host = ?host, port, error = ?detail, "LDAP connection test failed");
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+
+    use super::{log_ldap_test_failed, log_ldap_test_succeeded};
+
+    const HOSTILE_HOST: &str = "ldap.example\r\nINFO forged: host\n\x1b[31m";
+    const HOSTILE_DETAIL: &str = "refused\r\nWARN forged: detail\n\x1b[31m";
+
+    #[derive(Clone, Default)]
+    struct Buf(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Buf {
+        fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(data);
+            Ok(data.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn capture(f: impl FnOnce()) -> String {
+        let buf = Buf::default();
+        let writer = buf.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, f);
+        let bytes = buf.0.lock().unwrap().clone();
+        String::from_utf8(bytes).unwrap()
+    }
+
+    fn assert_single_line(out: &str, message: &str, escaped: &[&str]) {
+        let body = out.strip_suffix('\n').unwrap_or(out);
+        assert!(!body.contains('\n'), "log output spans lines: {out:?}");
+        assert!(!body.contains('\r'), "log output carries a raw CR: {out:?}");
+        assert!(
+            !body.contains('\x1b'),
+            "log output carries a raw ESC: {out:?}"
+        );
+        assert!(body.contains(message), "message missing: {out:?}");
+        for e in escaped {
+            assert!(body.contains(e), "escaped form {e:?} missing: {out:?}");
+        }
+    }
+
+    #[test]
+    fn succeeded_event_escapes_host() {
+        assert!(HOSTILE_HOST.contains('\n'));
+        let out = capture(|| log_ldap_test_succeeded(HOSTILE_HOST, 389));
+        assert_single_line(
+            &out,
+            "LDAP connection test succeeded",
+            &[r"ldap.example\r\nINFO forged: host\n\u{1b}[31m"],
+        );
+    }
+
+    #[test]
+    fn failed_event_escapes_host_and_error() {
+        assert!(HOSTILE_HOST.contains('\n') && HOSTILE_DETAIL.contains('\n'));
+        let out = capture(|| log_ldap_test_failed(HOSTILE_HOST, 389, HOSTILE_DETAIL));
+        assert_single_line(
+            &out,
+            "LDAP connection test failed",
+            &[
+                r"ldap.example\r\nINFO forged: host\n\u{1b}[31m",
+                r"refused\r\nWARN forged: detail\n\u{1b}[31m",
+            ],
+        );
     }
 }
