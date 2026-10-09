@@ -2046,12 +2046,8 @@ impl ServerSession {
             return russh::server::Auth::reject();
         }
 
-        // The ticket itself is the credential, but standard SSH clients first
-        // send an unsigned public-key offer and wait for PK_OK before sending
-        // the signed authentication request. Do not evaluate the ticket here:
-        // the eager path consumes a ticket use. Accepting this offer only asks
-        // the client for the signed request; _auth_publickey authenticates and
-        // consumes the ticket exactly once.
+        // Accept the unsigned offer without spending the ticket. _auth_publickey
+        // validates and consumes it when the client sends a signed request.
         if let AuthSelector::Ticket { .. } = selector {
             return russh::server::Auth::Accept;
         }
