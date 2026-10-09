@@ -39,8 +39,9 @@ pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) -> Result<
 
     // The AWS SDK logs the credentials it resolved — including the access key ID —
     // at INFO. That is never worth having in Warpgate's log, so it is filtered out
-    // regardless of what RUST_LOG asks for; a target-specific directive outranks a
-    // broad one like `debug`.
+    // at every `-d` level and under a broad RUST_LOG like `debug`, which a
+    // target-specific directive outranks. A directive naming a module inside one of
+    // these crates (`aws_config::imds=trace`) is more specific still and wins.
     //
     // Four crates, not one. `aws_config` was silenced and the crates underneath it
     // were not, which is the same half-applied shape as fixing one call site of a
