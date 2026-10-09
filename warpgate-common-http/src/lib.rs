@@ -1,35 +1,22 @@
 pub mod auth;
+pub mod cluster_tls;
 pub mod errors;
 pub mod ext;
 pub mod internal_page;
 mod keepalive;
 pub mod logging;
+pub mod mtls_acceptor;
 mod request;
 
 pub use auth::{AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization};
+pub use cluster_tls::{ClusterPeer, cluster_peer, cluster_peer_extension, is_cluster_peer_request};
 pub use keepalive::{SessionKeepalive, SessionKeepaliveGuard};
 use poem::Request;
 use poem::http::{HeaderMap, HeaderName, HeaderValue, header};
-use subtle::ConstantTimeEq;
-use warpgate_common::Secret;
 pub use warpgate_common::http_headers::{
-    X_WARPGATE_CLUSTER_CLIENT_IP, X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_TOKEN,
+    X_WARPGATE_CLUSTER_CLIENT_IP, X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_NODE,
     X_WARPGATE_TOKEN,
 };
-
-/// True if the request carries a valid cluster token, i.e. it was forwarded by
-/// a peer node. Gates every other `x-warpgate-cluster-*` header.
-pub fn is_cluster_peer_request(req: &Request, cluster_token: &Secret<String>) -> bool {
-    let Some(provided) = req.header(&X_WARPGATE_CLUSTER_TOKEN) else {
-        return false;
-    };
-    // Constant-time comparison to prevent timing attacks.
-    cluster_token
-        .expose_secret()
-        .as_bytes()
-        .ct_eq(provided.as_bytes())
-        .into()
-}
 
 /// The credential from the first `Authorization` header using `scheme`
 /// (compared case-insensitively, as RFC 7235 requires).
