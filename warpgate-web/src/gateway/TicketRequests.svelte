@@ -84,9 +84,7 @@
         if (durationTouched) {
             return
         }
-        // Track the selected target's limit; fall back to the normal
-        // default when it has none, rather than keeping a stale value
-        // from the previously selected target.
+        // Reset untouched durations when the selected target's limit changes.
         durationText = maxDurationSeconds
             ? formatDurationAsHumantime(maxDurationSeconds)
             : paramDuration || '8h'

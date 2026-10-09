@@ -135,12 +135,8 @@ class TestTicketRequests:
             )
             api.update_parameters(_default_params(ticket_self_service_enabled=True))
 
-            # The generated SDK omits a `None` field instead of sending JSON
-            # `null` (see test_api.py's
-            # test_approval_parameters_can_be_cleared_and_reject_nonsense),
-            # so it can only set the global cap, never clear one left behind
-            # by an earlier case/test. Send the field over raw JSON instead,
-            # which round-trips `global_limit` whether it's a number or None.
+            # The SDK omits None fields; send JSON null explicitly to clear
+            # any global limit left by an earlier test.
             admin_session = requests.Session()
             admin_session.verify = False
             admin_session.headers["X-Warpgate-Token"] = "token-value"
