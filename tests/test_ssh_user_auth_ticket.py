@@ -93,12 +93,7 @@ class Test:
         timeout,
         shared_wg: WarpgateProcess,
     ):
-        # A standard SSH client sends an unsigned public-key offer first and
-        # waits for PK_OK before sending the signed request. For a ticket
-        # username the offer must be accepted without evaluating the ticket
-        # (that would spend a use during the unauthenticated phase); only the
-        # signed request that follows should authenticate and spend it, and
-        # it must spend it exactly once.
+        # Accept the unsigned key offer without spending the one-use ticket.
         ssh_port = processes.start_ssh_server(
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
         )
@@ -146,23 +141,9 @@ class Test:
             ticket_id, secret = created.ticket.id, created.secret
             assert _uses_left(url, ticket_id) == 1
 
-            # Confirm the unsigned offer alone really doesn't spend the ticket
-            # (this is what the final assertion below can't tell on its own,
-            # since a successful login also goes through try_auth_lazy's
-            # single-ticket-auth-per-session cache: if the offer path ever
-            # spent it, the signed request would just hit that cache and this
-            # test would still see uses_left == 0 at the end).
-            #
-            # Point -i directly at a bare *public* key file, with
-            # IdentitiesOnly=yes and no agent available (SSH_AUTH_SOCK
-            # unset). OpenSSH still loads the public half and sends the
-            # unsigned offer for it ("Offering public key" under `ssh -v`),
-            # and the ticket username makes Warpgate accept that offer
-            # (PK_OK) without evaluating the ticket. But since ssh has
-            # neither the matching private key locally nor an agent to sign
-            # with, it cannot follow up with a signed request: the identity
-            # is exhausted unsigned, no other method is offered, and the
-            # overall login fails.
+            # Offer only the public half, with no agent to sign the follow-up.
+            # This failed login must leave the ticket unused: a final zero after
+            # successful auth could hide an early spend behind the auth cache.
             offer_only_env = {**os.environ}
             offer_only_env.pop("SSH_AUTH_SOCK", None)
             offer_only_client = processes.start_ssh_client(
@@ -181,9 +162,9 @@ class Test:
             )
             offer_only_client.communicate(timeout=timeout)
             assert offer_only_client.returncode != 0
-            assert _uses_left(url, ticket_id) == 1, (
-                "the unsigned public-key offer must not spend the ticket"
-            )
+            assert (
+                _uses_left(url, ticket_id) == 1
+            ), "the unsigned public-key offer must not spend the ticket"
 
             ssh_client = processes.start_ssh_client(
                 f"ticket-{secret}@localhost",
