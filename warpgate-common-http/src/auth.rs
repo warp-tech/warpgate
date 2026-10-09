@@ -265,7 +265,7 @@ impl RequestAuthorization {
             Self::Session(auth) => auth.username(),
             Self::UserToken { username, .. } => username,
             Self::AdminToken => TOKEN_ATTRIBUTIONS[0],
-            Self::ClusterToken => TOKEN_ATTRIBUTIONS[1],
+            Self::ClusterPeer => TOKEN_ATTRIBUTIONS[1],
         }
     }
 
@@ -276,7 +276,7 @@ impl RequestAuthorization {
     /// "who is the user" but "is this string ours, to be kept verbatim".
     #[must_use]
     pub const fn attribution_is_gateway(&self) -> bool {
-        matches!(self, Self::AdminToken | Self::ClusterToken)
+        matches!(self, Self::AdminToken | Self::ClusterPeer)
     }
 
     /// Returns a user ID if present in the authorization context or nil UUID
