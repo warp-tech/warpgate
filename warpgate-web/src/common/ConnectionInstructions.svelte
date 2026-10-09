@@ -14,6 +14,8 @@
     import {
         makeCommonSelectorUsername,
         makeExampleKubectlCommand,
+        makeExampleMongoDBCommand,
+        makeExampleMongoDBURI,
         makeExampleMySQLCommand,
         makeExampleMySQLURI,
         makeExamplePostgreSQLCommand,
@@ -21,6 +23,7 @@
         makeExampleSCPCommand,
         makeExampleSSHCommand,
         makeKubeconfig,
+        makeMongoDBUsername,
         makeMySQLUsername,
         makeOidcKubeconfig,
         makePostgreSQLUsername,
@@ -200,7 +203,7 @@
     let exampleKubectlCommand = $derived(makeExampleKubectlCommand(opts))
 
     function protocolEndpoint(
-        protocol: 'ssh' | 'mysql' | 'postgres' | 'rdp' | 'vnc',
+        protocol: 'ssh' | 'mysql' | 'postgres' | 'mongo' | 'rdp' | 'vnc',
     ) {
         return `${protocolHost(opts, protocol)}:${protocolPortString(opts, protocol)}`
     }
@@ -304,6 +307,41 @@
     <Alert color="info" class="mt-3">
         Make sure you've set your client to require TLS and allowed cleartext
         password authentication.
+    </Alert>
+{/if}
+
+{#if targetKind === TargetKind.Mongo}
+    <CopyableTextArea
+        label="Example MongoDB command"
+        value={makeExampleMongoDBCommand(opts)}
+    />
+    <CollapsibleBlock
+        label="Advanced"
+        persistKey="connectionInstructionsAdvancedOpen"
+    >
+        <div class="mt-3">
+            <CopyableTextArea
+                label="Example connection string"
+                value={makeExampleMongoDBURI(opts)}
+            />
+            <CopyableTextArea
+                label="MongoDB endpoint"
+                value={protocolEndpoint('mongo')}
+            />
+            <CopyableTextArea
+                label="MongoDB username"
+                value={makeMongoDBUsername(opts)}
+            />
+        </div>
+    </CollapsibleBlock>
+
+    <Alert color="info" class="mt-3">
+        Warpgate authenticates MongoDB clients with the PLAIN mechanism — add
+        <code>authMechanism=PLAIN</code>
+        to your connection settings. TLS is supported and recommended (<code
+            >tls=true</code
+        >); plain connections are accepted but transmit the password
+        unencrypted.
     </Alert>
 {/if}
 

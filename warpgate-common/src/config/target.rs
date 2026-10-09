@@ -6,7 +6,7 @@ use uuid::Uuid;
 use warpgate_tls::TlsMode;
 
 use super::defaults::{
-    _default_empty_string, _default_empty_vec, _default_mysql_port,
+    _default_empty_string, _default_empty_vec, _default_mongo_port, _default_mysql_port,
     _default_postgres_idle_timeout_str, _default_postgres_port, _default_rdp_port,
     _default_ssh_port, _default_username, _default_vnc_port,
 };
@@ -198,6 +198,29 @@ pub struct TargetPostgresOptions {
 
     #[serde(default)]
     pub protocol_version: PostgresProtocolVersion,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct TargetMongoOptions {
+    #[serde(default = "_default_empty_string")]
+    pub host: String,
+
+    #[serde(default = "_default_mongo_port")]
+    pub port: u16,
+
+    #[serde(default = "_default_username")]
+    pub username: String,
+
+    #[serde(default)]
+    pub auth: DatabaseTargetAuth,
+
+    #[serde(default)]
+    pub tls: Tls,
+
+    /// The database the target's credentials are verified against
+    /// (`authSource` in a MongoDB connection string). Defaults to `admin`.
+    #[serde(default)]
+    pub auth_source: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
@@ -393,6 +416,8 @@ pub enum TargetOptions {
     MySql(TargetMySqlOptions),
     #[serde(rename = "postgres")]
     Postgres(TargetPostgresOptions),
+    #[serde(rename = "mongodb")]
+    Mongo(TargetMongoOptions),
     #[serde(rename = "vnc")]
     Vnc(TargetVncOptions),
     #[serde(rename = "rdp")]
@@ -415,6 +440,7 @@ impl TargetOptions {
             TargetOptions::Kubernetes(_) => Protocol::Kubernetes,
             TargetOptions::MySql(_) => Protocol::MySql,
             TargetOptions::Postgres(_) => Protocol::Postgres,
+            TargetOptions::Mongo(_) => Protocol::Mongo,
             TargetOptions::Vnc(_) => Protocol::Vnc,
             TargetOptions::Rdp(_) => Protocol::Rdp,
         }
@@ -488,6 +514,11 @@ impl TargetSecrets for TargetPostgresOptions {
         self.auth.secrets()
     }
 }
+impl TargetSecrets for TargetMongoOptions {
+    fn secrets(&self) -> Vec<&MaybeSecretRef> {
+        self.auth.secrets()
+    }
+}
 
 impl TargetSecrets for TargetVncOptions {
     fn secrets(&self) -> Vec<&MaybeSecretRef> {
@@ -513,6 +544,7 @@ impl TargetSecrets for TargetOptions {
             TargetOptions::Kubernetes(o) => o.secrets(),
             TargetOptions::MySql(o) => o.secrets(),
             TargetOptions::Postgres(o) => o.secrets(),
+            TargetOptions::Mongo(o) => o.secrets(),
             TargetOptions::Vnc(o) => o.secrets(),
             TargetOptions::Rdp(o) => o.secrets(),
         }
@@ -524,6 +556,7 @@ const SECRET_PATHS: &[&[&str]] = &[
     &["ssh", "auth", "password"],
     &["mysql", "auth", "password"],
     &["postgres", "auth", "password"],
+    &["mongodb", "auth", "password"],
     &["vnc", "auth", "password"],
     &["rdp", "auth", "password"],
     &["kubernetes", "auth", "token"],
@@ -572,8 +605,8 @@ mod tests {
         DatabaseTargetAuth, DatabaseTargetIamRoleAuth, DatabaseTargetPasswordAuth, MaybeSecretRef,
         PostgresProtocolVersion, RdpTargetCompression, RdpTlsSecurity, SSHTargetAuth, SecretRef,
         SshTargetIamRoleAuth, SshTargetPasswordAuth, SshTargetPublicKeyAuth, TargetHTTPOptions,
-        TargetKubernetesOptions, TargetMySqlOptions, TargetOptions, TargetPostgresOptions,
-        TargetRdpOptions, TargetSSHOptions, Tls,
+        TargetKubernetesOptions, TargetMongoOptions, TargetMySqlOptions, TargetOptions,
+        TargetPostgresOptions, TargetRdpOptions, TargetSSHOptions, Tls,
     };
     use crate::TargetSecrets;
 
@@ -679,6 +712,7 @@ mod tests {
         let http: TargetHTTPOptions = serde_json::from_str(r#"{"url":"http://t"}"#).unwrap();
         let mysql: TargetMySqlOptions = serde_json::from_str("{}").unwrap();
         let postgres: TargetPostgresOptions = serde_json::from_str("{}").unwrap();
+        let mongo: TargetMongoOptions = serde_json::from_str("{}").unwrap();
         let rdp: TargetRdpOptions = serde_json::from_str("{}").unwrap();
 
         assert!(!ssh.allow_insecure_algos);
@@ -689,6 +723,7 @@ mod tests {
         let empty_password = DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth::default());
         assert_eq!(mysql.auth, empty_password);
         assert_eq!(postgres.auth, empty_password);
+        assert_eq!(mongo.auth, empty_password);
     }
 
     #[test]
@@ -814,6 +849,10 @@ mod tests {
             (
                 serde_json::json!({"postgres": {"auth": {"kind": "password", "password": "p"}}}),
                 serde_json::json!({"postgres": {"auth": {"kind": "password", "password": "Xp"}}}),
+            ),
+            (
+                serde_json::json!({"mongodb": {"auth": {"kind": "password", "password": "p"}}}),
+                serde_json::json!({"mongodb": {"auth": {"kind": "password", "password": "Xp"}}}),
             ),
             (
                 serde_json::json!({"vnc": {"auth": {"kind": "password", "password": "p"}}}),

@@ -84,6 +84,10 @@ pub(crate) enum Commands {
         #[clap(long)]
         postgres_port: Option<u16>,
 
+        /// Enable MongoDB and set port
+        #[clap(long)]
+        mongo_port: Option<u16>,
+
         /// Enable Kubernetes and set port
         #[clap(long)]
         kubernetes_port: Option<u16>,
