@@ -95,6 +95,7 @@ mod m00088_ssh_host_keys;
 mod m00089_secret_backends;
 mod m00090_logo;
 mod m00091_drop_cluster_token;
+mod m00092_ssh_show_qr_code;
 
 pub(crate) mod helpers;
 
@@ -195,6 +196,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00089_secret_backends::Migration),
             Box::new(m00090_logo::Migration),
             Box::new(m00091_drop_cluster_token::Migration),
+            Box::new(m00092_ssh_show_qr_code::Migration),
         ]
     }
 }
