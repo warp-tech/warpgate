@@ -43,9 +43,11 @@ class Test:
                     username=user.username,
                     credential_policy=sdk.UserRequireCredentialsPolicy(
                         vnc=[
-                            sdk.CredentialKind.PASSWORD,
-                            sdk.CredentialKind.TOTP,
-                            sdk.CredentialKind.WEBUSERAPPROVAL,
+                            [
+                                sdk.CredentialKind.PASSWORD,
+                                sdk.CredentialKind.TOTP,
+                                sdk.CredentialKind.WEBUSERAPPROVAL,
+                            ],
                         ],
                     ),
                 ),
