@@ -274,10 +274,7 @@ async def test_ticket_websocket_uses_same_session(shared_wg, ticket_setup):
 
 
 async def _run_echo_and_watch_upstream():
-    """An upstream mock that echoes over a websocket and, for `watch=true`,
-    streams chunks until the client goes away. Returns (runner, port); the
-    caller must `.cleanup()` the runner.
-    """
+    """Start an echo/watch mock; the caller must clean up its runner."""
     from aiohttp import web
 
     async def upstream(req):
@@ -311,10 +308,7 @@ async def _run_echo_and_watch_upstream():
 
 @pytest.mark.asyncio
 async def test_admin_close_session_ends_websocket(shared_wg, ticket_setup):
-    """Admin-initiated close reaches an open Kubernetes websocket too --
-    `KubernetesSessionHandle::close()` used to be a no-op, so this never
-    worked before.
-    """
+    """Admin close must end an open Kubernetes websocket."""
     import aiohttp
 
     runner, port = await _run_echo_and_watch_upstream()
@@ -349,13 +343,7 @@ async def test_admin_close_session_ends_websocket(shared_wg, ticket_setup):
 async def test_admin_close_session_ends_websocket_stalled_on_upstream_rejection(
     shared_wg, ticket_setup
 ):
-    """A close must not leave the downstream websocket open behind a stalled
-    upstream. Between the raced upstream `send()` and the raced pump loop,
-    two awaits -- reading the body of a rejected (non-101) response, and
-    negotiating the client-side websocket once it *is* accepted -- used to
-    run unguarded. A hung upstream there kept the downstream websocket open
-    even after an admin close.
-    """
+    """Admin close must interrupt a stalled upstream rejection body."""
     import aiohttp
     from aiohttp import web
 
@@ -364,9 +352,7 @@ async def test_admin_close_session_ends_websocket_stalled_on_upstream_rejection(
 
     async def upstream(req):
         assert req.headers["Authorization"] == "Bearer upstream-token"
-        # An RBAC-style rejection (non-101) whose chunked body never finishes
-        # on its own: it stalls right after the first chunk, so ending the
-        # session has to interrupt it rather than wait it out.
+        # Stall a rejected response after its first chunk.
         resp = web.StreamResponse(
             status=403, headers={"Transfer-Encoding": "chunked"}
         )
@@ -392,14 +378,11 @@ async def test_admin_close_session_ends_websocket_stalled_on_upstream_rejection(
             "Authorization": f"Bearer ticket-{ticket.secret}",
         }) as session:
             url = f"https://localhost:{shared_wg.kubernetes_port}"
-            # The downstream upgrade completes on its own -- poem answers it
-            # before the `on_upgrade` closure ever talks to the upstream --
-            # so this connects even though the upstream hasn't answered yet.
+            # Poem upgrades downstream before the upstream request finishes.
             async with session.ws_connect(
                 f"{url}/socket", ssl=False, protocols=["v4.channel.k8s.io"],
             ) as ws:
-                # Proves the upstream request is genuinely in flight (and
-                # stalled) before the session is closed.
+                # Wait until the upstream request stalls before closing.
                 await asyncio.wait_for(received.wait(), timeout=10)
 
                 api.close_session(open_kubernetes_session_id(api, user.username))
@@ -418,10 +401,7 @@ async def test_admin_close_session_ends_websocket_stalled_on_upstream_rejection(
 
 @pytest.mark.asyncio
 async def test_admin_close_session_ends_watch_stream(shared_wg, ticket_setup):
-    """A `?watch=true` chunked stream (`kubectl get --watch`) must end when
-    an admin closes the session that opened it, rather than only being
-    refused on its next request.
-    """
+    """Admin close must end an open watch stream."""
     import aiohttp
 
     runner, port = await _run_echo_and_watch_upstream()
@@ -447,11 +427,7 @@ async def test_admin_close_session_ends_watch_stream(shared_wg, ticket_setup):
                 api.close_session(open_kubernetes_session_id(api, user.username))
 
                 async def drain():
-                    # The upstream keeps streaming forever, so the stream only
-                    # ends here because the close cut it off. How the cutoff
-                    # surfaces (a clean EOF or a payload error) depends on the
-                    # client stack, so either is accepted; what matters is that
-                    # it ends promptly instead of running on.
+                    # Accept EOF or a truncated-body error; either must arrive promptly.
                     try:
                         while True:
                             data = await response.content.readline()
@@ -469,10 +445,7 @@ async def test_admin_close_session_ends_watch_stream(shared_wg, ticket_setup):
 async def test_admin_close_session_lets_a_dispatched_mutation_finish(
     shared_wg, ticket_setup
 ):
-    """A pod creation (an audited mutation) that already reached the API server
-    when the session is closed must still get the API server's full response,
-    even when it arrives chunked, rather than being cut off after the pod was
-    created anyway."""
+    """A dispatched audited mutation must receive its full response across a close."""
     import aiohttp
     from aiohttp import web
 
@@ -531,12 +504,7 @@ async def test_admin_close_session_lets_a_dispatched_mutation_finish(
 
 
 def test_admin_close_session_admits_a_fresh_session(shared_wg, ticket_setup):
-    """The request right after an admin close must authorize a fresh
-    session instead of joining the one the correlator still has cached for
-    the same user/target/ticket key -- otherwise a `kubectl` command issued
-    right after a close would be silently routed through the session that
-    was just ended.
-    """
+    """The next request must open a fresh session after admin close."""
     api, user, _ = ticket_setup
     ticket = create_ticket(ticket_setup)  # unlimited uses
 
@@ -556,15 +524,7 @@ def test_admin_close_session_admits_a_fresh_session(shared_wg, ticket_setup):
 
 
 def test_admin_close_session_ends_a_web_approval_wait(shared_wg, ticket_setup):
-    """A request blocked on a `WebUserApproval` credential policy must not
-    outlive an admin close: `correlated_authorization` races the whole
-    authorize-then-admit sequence against `closed`, not just admission, so a
-    request held here ends with a 401 instead of waiting out the rest of the
-    ten-minute approval timeout.
-
-    Uses a plain API-token user rather than a ticket: a ticket's identity is
-    already resolved by spending it and never waits on a credential policy.
-    """
+    """An API-token request waiting for web approval must return 401 on close."""
     api, user, target = ticket_setup
     api.create_password_credential(user.id, sdk.NewPasswordCredential(password="123"))
     api.update_user(user.id, sdk.UserDataRequest(
@@ -598,10 +558,7 @@ def test_admin_close_session_ends_a_web_approval_wait(shared_wg, ticket_setup):
                 headers=headers, verify=False, timeout=30,
             )
 
-            # Poll the user's own pending web-auth requests (the same
-            # endpoint a browser session uses to approve itself) until the
-            # Kubernetes one shows up, proving the request is genuinely
-            # parked on the approval wait rather than already through.
+            # Wait until the Kubernetes request is held for web approval.
             deadline = time.monotonic() + 10
             pending = False
             while time.monotonic() < deadline:

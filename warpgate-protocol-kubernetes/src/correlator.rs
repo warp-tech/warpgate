@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use poem::Request;
 use tokio::sync::Mutex;
-use tokio_util::sync::{CancellationToken, DropGuard};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthResult, AuthStateUserInfo, RememberApprovalBy};
 use warpgate_common::{TargetKubernetesOptions, UserSessionId, WarpgateError};
@@ -73,21 +73,11 @@ struct SessionEntry {
     handle: Arc<Mutex<WarpgateServerHandle>>,
     created: Instant,
     authorization: SharedAuthorization,
-    /// Cancelled when the session's handle is closed (admin close, or a
-    /// user's deletion) -- raced against in-flight requests in
-    /// `server::handlers`, since a correlated session's fan-out of requests
-    /// otherwise only gets re-admitted at its *next* `kubectl` call.
+    /// Stops in-flight requests and prevents new requests from joining the session.
     closed: CancellationToken,
-    /// Cancels the evictor task's own `stop` token on drop, so that task ends
-    /// instead of leaking when the entry is instead removed some other way (a
-    /// denial, a vacuum).
-    _stop_evictor: DropGuard,
 }
 
-/// Whether a correlator entry is still usable: not aged out, and not
-/// cancelled by a session close reaching it first. Shared by `entry` (an
-/// on-demand check at lookup) and `vacuum` (the periodic sweep) so both
-/// enforce the exact same rule.
+/// Closed or expired entries are rejected on lookup and removed by the vacuum.
 fn entry_is_live(created: Instant, closed: &CancellationToken, max_age: Duration) -> bool {
     created.elapsed() < max_age && !closed.is_cancelled()
 }
@@ -160,28 +150,6 @@ pub async fn correlated_authorization(
                 // Locked before the correlator lock is released, so a request
                 // joining this session can't reach the pending slot ahead of us.
                 let guard = slot.clone().lock_owned().await;
-                // Evicts the entry the moment its session closes (admin close,
-                // or a user's deletion), instead of leaving it to the periodic
-                // vacuum: the DB row is already ended by then (the admin
-                // endpoint revokes it before calling close()), but the
-                // correlator's own reference to the entry would otherwise
-                // linger and keep handing out the closed session.
-                let stop = CancellationToken::new();
-                tokio::spawn({
-                    let correlator = correlator.clone();
-                    let key = key.clone();
-                    let slot = slot.clone();
-                    let closed = closed.clone();
-                    let stop = stop.clone();
-                    async move {
-                        tokio::select! {
-                            () = closed.cancelled() => {
-                                correlator.lock().await.evict(&key, &slot);
-                            }
-                            () = stop.cancelled() => {}
-                        }
-                    }
-                });
                 correlator_state.handles.insert(
                     key.clone(),
                     SessionEntry {
@@ -189,7 +157,6 @@ pub async fn correlated_authorization(
                         created: Instant::now(),
                         authorization: slot.clone(),
                         closed: closed.clone(),
-                        _stop_evictor: stop.drop_guard(),
                     },
                 );
                 Some(guard)
@@ -200,13 +167,7 @@ pub async fn correlated_authorization(
             continue;
         };
 
-        // Raced against a close so a request held here -- including a user's
-        // WebUserApproval credential-policy prompt, which can block for up to
-        // ten minutes -- (and every request joined to it) ends when the
-        // session is closed, instead of only the admission step below.
-        // Cancellation falls into the `Err` arm below the same way a real
-        // denial would, which is what settles the attempt and drops its
-        // pending auth state.
+        // Cancel credential-policy waits on close; joined requests receive the denial too.
         let resolved = tokio::select! {
             biased;
             () = closed.cancelled() => Err(unauthorized()),
@@ -226,9 +187,7 @@ pub async fn correlated_authorization(
         };
         return match resolved {
             Ok(resolved) => {
-                // Raced against a close so a request held for admin approval
-                // (and every request joined to it) ends when the session is
-                // closed; dropping the admission withdraws its approval request.
+                // Closing the session also cancels an admin-approval wait.
                 let admission = tokio::select! {
                     biased;
                     () = closed.cancelled() => Err(WarpgateError::UserSessionEnded),
@@ -257,14 +216,7 @@ pub async fn correlated_authorization(
                 Ok((handle, admitted, closed))
             }
             Err(error) => {
-                // A denied attempt is not cached: the requests waiting on this
-                // one fail with it, and the entry goes so that the next request
-                // can prompt again. A close that cancelled the wait above lands
-                // here too, so every joined request gets `unauthorized()` instead
-                // of waiting out the rest of the ten-minute approval timeout. The
-                // credential-policy prompt's own pending-approval row isn't
-                // necessarily gone yet -- it's inserted by a separate task that
-                // can still be mid-flight -- but it no longer blocks anything here.
+                // Settle joined requests before eviction so the next request can prompt again.
                 *authorization = Authorization::Denied;
                 correlator.lock().await.evict(&key, &slot);
                 settle_failed_attempt(services, &handle, session_id).await;
@@ -299,16 +251,9 @@ async fn admit_kubernetes_session(
 
 /// Waits for the request that opened this session to resolve its authorization.
 ///
-/// `None` means there is nothing to join and the caller should open a session of
-/// its own: the opening request was dropped mid-approval — a cancelled `kubectl`
-/// — so its entry is evicted here rather than left to fail every later request
-/// until the vacuum, and its auth state is dropped so the dead attempt is no
-/// longer reachable by session id. This is best-effort, not a guarantee: the
-/// credential-policy prompt's pending-approval row is written by a separate task
-/// (see `AuthStateStore::open` in `warpgate-core`) that can still be mid-flight
-/// when the state is dropped here, in which case the row lands afterward and
-/// stays visible and approvable until `reap_stale` clears it out. This is a
-/// pre-existing race, not something this change introduces or fixes.
+/// `None` means the opening request was dropped mid-approval; evict it and retry.
+/// An in-flight `AuthStateStore::open` can still insert a pending-approval row
+/// after cleanup. The stale-request reaper handles those rows.
 async fn join_session(
     correlator: &Arc<Mutex<RequestCorrelator>>,
     key: &CorrelationKey,
@@ -339,16 +284,9 @@ async fn join_session(
 
 /// Settles the session of an attempt that failed.
 ///
-/// A terminal auth outcome — a rejection, or an approval whose target lookup
-/// then failed — is recorded in the audit log against the session, so that
-/// session has to outlive the attempt and is confirmed. An approval that merely
-/// timed out leaves no trace to keep: the session stays provisional and is
-/// discarded along with the handle. Either way nothing will come back to the
-/// attempt, so its auth state is dropped here rather than left reachable by
-/// session id. As noted on [`join_session`], this can't guarantee the
-/// credential-policy prompt's pending-approval row is gone too, since that row
-/// is written by a separate, possibly still in-flight task; a pre-existing race,
-/// unrelated to this change.
+/// Confirm sessions with a terminal auth outcome for audit; leave timed-out
+/// attempts provisional. Drop auth state in both cases. See [`join_session`]
+/// for the pending-approval insertion race.
 async fn settle_failed_attempt(
     services: &Services,
     handle: &Arc<Mutex<WarpgateServerHandle>>,
@@ -484,10 +422,6 @@ impl RequestCorrelator {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // `entry` and `vacuum` are exercised through `entry_is_live` rather than a
-    // full `RequestCorrelator`: a real entry needs a `WarpgateServerHandle`,
-    // which drags in a database and the rest of `State`.
 
     #[test]
     fn a_cancelled_entry_is_not_live() {

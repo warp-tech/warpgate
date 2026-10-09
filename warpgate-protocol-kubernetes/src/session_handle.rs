@@ -6,11 +6,7 @@ pub struct KubernetesSessionHandle {
 }
 
 impl KubernetesSessionHandle {
-    /// Returns the handle together with the token it cancels on `close()`, so
-    /// the correlator can race a session's in-flight requests against it --
-    /// otherwise closing a correlated session (admin close, or a user's
-    /// deletion) would only stop *new* requests from being admitted, not the
-    /// potentially long-lived one already streaming.
+    /// Return a handle and the token used to cancel its in-flight requests.
     pub fn new() -> (Self, CancellationToken) {
         let closed = CancellationToken::new();
         (

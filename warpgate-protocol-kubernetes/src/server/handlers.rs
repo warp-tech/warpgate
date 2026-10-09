@@ -140,8 +140,7 @@ pub async fn handle_api_request(
 
     let (handle, admitted, closed) =
         correlated_authorization(correlator.0, req, identity, &target_name, ctx.services()).await?;
-    // The correlated session could have been closed (admin close, or a
-    // user's deletion) between being looked up and reaching here.
+    // Close may have arrived after the correlator lookup.
     if closed.is_cancelled() {
         return Err(unauthorized());
     }
@@ -311,8 +310,7 @@ async fn _handle_normal_request_inner(
     // to a log line; this redacted view is used for both.
     let redacted_headers = redact_headers(&headers);
 
-    // Get request body. Raced against `closed` like the upstream send below:
-    // a slow upload must not be able to keep a closed session's request open.
+    // Cancel slow uploads when the session closes.
     let body_bytes = tokio::select! {
         biased;
         () = closed.cancelled() => return Err(WarpgateError::UserSessionEnded),
@@ -382,24 +380,10 @@ async fn _handle_normal_request_inner(
         "Sending request to upstream Kubernetes API"
     );
 
-    // Classified from the request rather than the response, so it is known
-    // before the send whether this is one of the mutating operations Warpgate
-    // audits (see below).
     let mutating_operation = classify_mutating(method, api_path, req.uri().query(), &body_bytes);
 
-    // A correlated session can be admitted once and reused for a long time
-    // (up to `session_max_age`); racing every request against `closed` is what
-    // makes an admin close take effect immediately rather than only on the
-    // session's next re-admission. A mutating request is the one exception:
-    // once it is sent there is no way to know whether `closed` won the race
-    // because the API server never got it, or because its response (and the
-    // mutation it already made -- a `kubectl debug` pod is real either way) is
-    // just still in flight. Since there is no "aborted" status to audit it
-    // with, it is instead let through and audited normally; only the streams
-    // and later requests a close is really meant to cut off are raced against
-    // it here. It is still refused if the close already landed before
-    // dispatch, and once dispatched its response is read to the end too, so
-    // the client sees the API server's answer rather than a 401.
+    // Let dispatched audited mutations finish so their result can be recorded
+    // and returned. Refuse them if close arrives before dispatch.
     let is_mutation = mutating_operation.is_some();
     let response = if is_mutation {
         if closed.is_cancelled() {
@@ -463,13 +447,7 @@ async fn _handle_normal_request_inner(
         // A dispatched mutation's response is always read in full, even if it
         // is framed as chunked, so a close can't cut off its answer.
         if !is_mutation && (transfer_encoding == "chunked" || is_streaming_response) {
-            // A `kubectl logs -f`/`watch=true` stream can run for as long as
-            // `kubectl` keeps it open, well past `session_max_age` ageing the
-            // correlator's own entry out of its cache. Carrying `handle` in
-            // the stream's state (rather than just racing `closed`) keeps the
-            // session alive for as long as this stream is actually read, so
-            // it can't outlive the thing closing it just because the cache
-            // forgot it.
+            // Keep the session handle alive if the stream outlives its cache entry.
             let upstream = response.bytes_stream().map_err(std::io::Error::other);
             let stream = futures::stream::unfold(
                 (upstream, closed.clone(), handle.clone(), false),
@@ -479,8 +457,7 @@ async fn _handle_normal_request_inner(
                     }
                     tokio::select! {
                         biased;
-                        // Ended with an error rather than a normal end of
-                        // stream, so the close is signalled as a cutoff.
+                        // Signal cancellation as a truncated stream.
                         () = closed.cancelled() => Some((
                             Err(std::io::Error::new(
                                 std::io::ErrorKind::ConnectionAborted,
@@ -644,12 +621,7 @@ async fn _handle_websocket_request_inner(
     let audit_subject = audit_subject.clone();
 
     let ws_handler_inner = async move |socket: WebSocketStream| {
-        // Held for the life of the pump below, not just the request that
-        // upgraded it: `session_max_age` can age this session's entry out of
-        // the correlator's cache while the socket is still open, and without
-        // a strong reference here that would drop the last
-        // `WarpgateServerHandle`, ending the session out from under a
-        // websocket that is still in use.
+        // Keep the session handle alive if the websocket outlives its cache entry.
         let _session_handle = handle;
         let client_response = tokio::select! {
             biased;
