@@ -10,7 +10,6 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_aws::S3StorageConfig;
 use warpgate_common::auth::CredentialKind;
-use warpgate_common::encryption::{EncryptionError, idempotent_maybe_decrypt};
 use warpgate_common::{PasswordPolicy, Protocol, UserAuthCredential, UserRequireCredentialsPolicy};
 
 #[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum)]
@@ -319,10 +318,6 @@ impl Model {
             tracing::warn!("the stored logo is not an image data URL, ignoring it");
         }
         image
-    }
-
-    pub fn ca_private_key(&self) -> Result<String, EncryptionError> {
-        idempotent_maybe_decrypt(&self.ca_private_key_pem)
     }
 }
 

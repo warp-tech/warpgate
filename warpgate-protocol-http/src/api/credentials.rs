@@ -615,7 +615,7 @@ impl Api {
         // Fetch CA params
         let params = ctx.parameters().await?;
         let ca =
-            warpgate_ca::deserialize_ca(&params.ca_certificate_pem, &params.ca_private_key()?)?;
+            warpgate_ca::deserialize_ca(&params.ca_certificate_pem, &params.ca_private_key_pem)?;
         let public_key_pem = body.public_key_pem.trim();
         let client_cert =
             warpgate_ca::issue_client_certificate(&ca, &user.username, public_key_pem, user.id)?;

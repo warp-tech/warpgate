@@ -32,18 +32,11 @@ def _instance_ca(config_path):
 
 
 def _mint_peer_lookalike(ca_cert_pem, ca_key_pem):
-    """A certificate shaped like a node identity, for a key no node has
-    published. Signed by the real instance CA when a database reader can get
-    at its key; when the key is enveloped (an encryption key is configured,
-    e.g. via a `.env` dotenv picks up) the lookalike is self-signed, which the
-    pin check must reject just the same."""
+    """A certificate shaped like a node identity and signed by the real
+    instance CA, but for a key no node has published."""
     key = ec.generate_private_key(ec.SECP384R1())
-    if ca_key_pem.startswith("wgenc:"):
-        issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "rogue")])
-        signer = key
-    else:
-        issuer = x509.load_pem_x509_certificate(ca_cert_pem.encode()).subject
-        signer = serialization.load_pem_private_key(ca_key_pem.encode(), password=None)
+    issuer = x509.load_pem_x509_certificate(ca_cert_pem.encode()).subject
+    signer = serialization.load_pem_private_key(ca_key_pem.encode(), password=None)
     now = datetime.now(timezone.utc)
     cert = (
         x509.CertificateBuilder()

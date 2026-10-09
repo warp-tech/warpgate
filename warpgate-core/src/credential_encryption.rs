@@ -199,30 +199,16 @@ async fn probe_undecryptable(db: &DatabaseConnection) -> Result<Vec<String>, War
     }
 
     let parameters = Parameters::Entity::get(db).await?;
-    for (label, key) in parameter_secrets(&parameters) {
+    for (kind, key) in [
+        (SshHostKeyKind::Ed25519, &parameters.ssh_host_key_ed25519),
+        (SshHostKeyKind::Rsa, &parameters.ssh_host_key_rsa),
+    ] {
         if idempotent_maybe_decrypt(key).is_err() {
-            undecryptable.push(label);
+            undecryptable.push(format!("SSH host key ({kind:?})"));
         }
     }
 
     Ok(undecryptable)
-}
-
-fn parameter_secrets(parameters: &Parameters::Model) -> [(String, &String); 3] {
-    [
-        (
-            format!("SSH host key ({:?})", SshHostKeyKind::Ed25519),
-            &parameters.ssh_host_key_ed25519,
-        ),
-        (
-            format!("SSH host key ({:?})", SshHostKeyKind::Rsa),
-            &parameters.ssh_host_key_rsa,
-        ),
-        (
-            "instance CA private key".into(),
-            &parameters.ca_private_key_pem,
-        ),
-    ]
 }
 
 fn report_undecryptable(undecryptable: &[String], ring: &Keyring) {
@@ -302,10 +288,6 @@ async fn rewrite_all(db: &DatabaseConnection) -> Result<usize, WarpgateError> {
             &mut model.ssh_host_key_ed25519,
         ),
         (&parameters.ssh_host_key_rsa, &mut model.ssh_host_key_rsa),
-        (
-            &parameters.ca_private_key_pem,
-            &mut model.ca_private_key_pem,
-        ),
     ] {
         let Ok(rewritten_key) = maybe_reencrypt_str(key) else {
             continue;

@@ -91,7 +91,7 @@ impl Cluster {
             node_id: NodeId(Uuid::new_v4()),
             tls_identity: ClusterTlsIdentity::issue(
                 &params.ca_certificate_pem,
-                &params.ca_private_key()?,
+                &params.ca_private_key_pem,
             )?,
             address: advertised_peer_address(http_port)?,
             hostname: std::net::hostname()?.to_string_lossy().to_string(),
