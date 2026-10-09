@@ -84,9 +84,9 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
             }),
         };
 
-        let Some(target_domain) = target_domain else {
+        if target_domain.is_none() && !is_https {
             return Ok(resp);
-        };
+        }
 
         // Extract all Set-Cookie headers for modification
         let cookie_values: Vec<String> = {
@@ -106,11 +106,13 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
                 && cookie.name() == SESSION_COOKIE_NAME
             {
                 // Set or remove Domain attribute using cookie crate methods
-                if let Some(ref domain) = target_domain {
-                    cookie.set_domain(domain.clone());
-                } else {
-                    // For localhost/127.0.0.1, omit Domain attribute since browsers won't send cookies with a different domain
-                    cookie.unset_domain();
+                if let Some(target_domain_action) = &target_domain {
+                    if let Some(domain) = target_domain_action {
+                        cookie.set_domain(domain.clone());
+                    } else {
+                        // For localhost/127.0.0.1, omit Domain attribute since browsers won't send cookies with a different domain
+                        cookie.unset_domain();
+                    }
                 }
 
                 // Add Secure and SameSite=None for HTTPS (required for cross-site cookies)
