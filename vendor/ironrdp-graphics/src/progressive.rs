@@ -170,7 +170,8 @@ fn decode_first_pass_to_dwtq(
 ///
 /// # Errors
 ///
-/// Returns [`SrlError`] for a malformed or truncated SRL stream.
+/// Returns [`SrlError`] when an SRL magnitude requires an invalid number of bits.
+/// Missing trailing SRL entries read as zero bits, so truncation is not detected.
 /// See MS-RDPEGFX section 3.3.8.2.1.2.
 pub fn decode_upgrade_pass(
     srl_data: &[u8],
@@ -192,7 +193,7 @@ pub fn decode_upgrade_pass(
             .saturating_sub(curr_prog_quant.for_band(band_idx));
         band_idx != NUM_BANDS - 1 && num_bits != 0 && zero_counts[band_idx] != 0
     });
-    let mut srl_decoder = has_srl_values.then(|| srl::SrlDecoder::new(srl_data)).transpose()?;
+    let mut srl_decoder = has_srl_values.then(|| srl::SrlDecoder::new(srl_data));
     let mut srl_values = Vec::with_capacity(NUM_BANDS);
 
     for (band_idx, _) in bands.iter().enumerate() {
@@ -2080,7 +2081,7 @@ mod tests {
     }
 
     #[test]
-    fn upgrade_pass_rejects_truncated_srl() {
+    fn upgrade_pass_tolerates_truncated_srl() {
         let mut coefficients = [0i16; COEFFICIENTS_PER_COMPONENT];
         let mut sign = [SIGN_POSITIVE; COEFFICIENTS_PER_COMPONENT];
         sign[0] = SIGN_ZERO;
@@ -2088,6 +2089,8 @@ mod tests {
         let mut prev_prog_quant = ComponentCodecQuant::LOSSLESS;
         prev_prog_quant.hl1 = 4;
 
+        // Bits past the end of the SRL stream read as zeros, as in the reference decoder,
+        // so the cut-off unary magnitude decodes as the maximum rather than failing.
         assert_eq!(
             decode_upgrade_pass(
                 &[0x80, 0x00],
@@ -2098,8 +2101,10 @@ mod tests {
                 &mut coefficients,
                 &mut sign,
             ),
-            Err(SrlError::Truncated)
+            Ok(())
         );
+        assert_eq!(coefficients[0], 15);
+        assert_eq!(sign[0], SIGN_POSITIVE);
     }
 
     #[test]
@@ -2113,9 +2118,11 @@ mod tests {
         tile.sign[0][0] = SIGN_ZERO;
         tile.sign[1][0] = SIGN_ZERO;
 
+        // The second component asks for a 20-bit magnitude, which SRL cannot represent.
+        tile.prog_quant[1].hl1 = 20;
+        let prog_quant = tile.prog_quant;
         let coefficients = tile.coefficients;
         let sign = tile.sign;
-
         assert_eq!(
             tile.decode_upgrade(
                 [&[0x90, 0x00], &[0x80, 0x00], &[]],
@@ -2123,12 +2130,12 @@ mod tests {
                 [ComponentCodecQuant::LOSSLESS; 3],
                 75,
             ),
-            Err(SrlError::Truncated)
+            Err(SrlError::InvalidBitCount(20))
         );
 
         assert_eq!(tile.coefficients, coefficients);
         assert_eq!(tile.sign, sign);
-        assert_eq!(tile.prog_quant, [prev_prog_quant; 3]);
+        assert_eq!(tile.prog_quant, prog_quant);
         assert_eq!(tile.pass, 1);
         assert_eq!(tile.quality, 50);
     }

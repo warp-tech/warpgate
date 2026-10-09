@@ -103,7 +103,7 @@
         <option value={RdpTargetCompression.Lossless}>Lossless</option>
         <option value={RdpTargetCompression.Remotefx}>RemoteFX</option>
         <option value={RdpTargetCompression.GraphicsPipeline}>
-            Graphics pipeline (server-selected codecs)
+            Graphics pipeline (experimental)
         </option>
     </Input>
 </FormGroup>

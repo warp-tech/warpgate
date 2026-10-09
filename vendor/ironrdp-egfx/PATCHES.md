@@ -25,5 +25,30 @@ copying a newer master `src/` in.
 `openh264` feature, which Warpgate does not enable) and the vendored-code lint override.
 `warpgate.patch` is the full source difference from 0.3.0.
 
+## Undecodable updates are dropped, not fatal
+
+Backport of upstream [PR #1789][1] (unmerged, head `8ace185`). Upstream master turns every
+WireToSurface decode failure into a session error, so a single payload the codec rejects
+ends the RDP session. Against Windows that happened on the first frame. The backport drops
+and logs the update instead, and a streak of 16 rejected updates from one codec clears
+that codec's state.
+
+The Progressive hunk is ported by hand onto master's reworked handler. Its streak test
+expects a continuation without CONTEXT to decode again once the state is cleared, since
+`ProgressiveDecoder::reset` keeps the wavelet layout each surface last signalled (the
+fallback Windows needs, as it never repeats SYNC + CONTEXT).
+
+## The bitmap cache survives ResetGraphics
+
+Backport of upstream [PR #2011][2] (unmerged, head `46ee89b`), applied verbatim to
+`src/compositor.rs`. Master's `Compositor::reset` empties the bitmap cache, but Windows
+answers every desktop resize with `ResetGraphics` and then keeps pasting toolbars, icons
+and text from slots it filled before the reset. With the cache gone those
+`CacheToSurface` blits are silent no-ops, which leaves stale blocks all over the desktop.
+`compositor.rs` is not in 0.3.0, so `warpgate.patch` only lists it.
+
 Drop this fork once an `ironrdp-egfx` release carries the client compositor (the next
-release after 0.3.0 cut from master past #1461).
+release after 0.3.0 cut from master past #1461), #1789 and #2011.
+
+[1]: https://github.com/Devolutions/IronRDP/pull/1789
+[2]: https://github.com/Devolutions/IronRDP/pull/2011

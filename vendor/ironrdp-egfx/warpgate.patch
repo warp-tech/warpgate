@@ -1,6 +1,6 @@
 diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
---- ironrdp-egfx-0.3.0/src/client.rs	2006-07-24 02:21:28.000000000 +0100
-+++ base/src/client.rs	2026-09-23 00:40:54.080370363 +0100
+--- ironrdp-egfx-0.3.0/src/client.rs	2026-10-09 01:40:37.260112792 +0200
++++ base/src/client.rs	2026-10-09 01:40:37.264542194 +0200
 @@ -1,7 +1,7 @@
  //! Client-side EGFX implementation
  //!
@@ -37,7 +37,17 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
  use crate::decode::H264Decoder;
  use crate::pdu::{
      Avc420BitmapStream, CacheImportReplyPdu, CacheToSurfacePdu, CapabilitiesAdvertisePdu, CapabilitiesV8Flags,
-@@ -182,7 +186,7 @@
+@@ -72,6 +76,9 @@
+     SurfaceToSurfacePdu, WireToSurface2Pdu,
+ };
+ 
++/// Consecutive undecodable updates from one codec that force its state to be cleared.
++const MAX_DROPPED_UPDATES_IN_A_ROW: u64 = 16;
++
+ /// Max capacity to keep for decompressed buffer when cleared.
+ const MAX_DECOMPRESSED_BUFFER_CAPACITY: usize = 16384; // 16 KiB
+ 
+@@ -182,7 +189,7 @@
  /// Decoded bitmap data for a surface region
  ///
  /// Delivered to [`GraphicsPipelineHandler::on_bitmap_updated`] when
@@ -46,7 +56,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
  #[derive(Debug)]
  #[non_exhaustive]
  pub struct BitmapUpdate {
-@@ -190,7 +194,9 @@
+@@ -190,7 +197,9 @@
      pub surface_id: u16,
      /// Destination rectangle within the surface (exclusive `right`/`bottom`)
      pub destination_rectangle: ExclusiveRectangle,
@@ -57,7 +67,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
      pub codec_id: Codec1Type,
      /// RGBA pixel data (4 bytes per pixel), row-major
      ///
-@@ -217,18 +223,25 @@
+@@ -217,18 +226,25 @@
  pub trait GraphicsPipelineHandler: Send {
      /// Returns the capability sets to advertise to the server
      ///
@@ -88,7 +98,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
              CapabilitySet::V8_1 {
                  flags: CapabilitiesV81Flags::AVC420_ENABLED | CapabilitiesV81Flags::SMALL_CACHE,
              },
-@@ -244,6 +257,9 @@
+@@ -244,6 +260,9 @@
      /// Called when the server resets the graphics output buffer
      fn on_reset_graphics(&mut self, _width: u32, _height: u32) {}
  
@@ -98,7 +108,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
      /// Called when a surface is created by the server
      fn on_surface_created(&mut self, _surface: &Surface) {}
  
-@@ -328,11 +344,13 @@
+@@ -328,11 +347,13 @@
      /// [MS-RDPEGFX 2.2.2.23]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpegfx/22fc0ec7-38ce-4d9d-ad6d-93a0e9f3c38c
      fn on_map_surface_to_scaled_window(&mut self, _pdu: &MapSurfaceToScaledWindowPdu) {}
  
@@ -115,7 +125,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
      fn on_wire_to_surface2(&mut self, _pdu: &WireToSurface2Pdu) {}
  
      /// Called when the server deletes a progressive encoding context
-@@ -377,12 +395,19 @@
+@@ -377,12 +398,23 @@
  /// Client for the Graphics Pipeline Virtual Channel (EGFX)
  ///
  /// This client handles capability negotiation, surface tracking,
@@ -133,10 +143,14 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
 +    clearcodec_decoder: Option<ClearCodecDecoder>,
 +    planar_decoder: BitmapStreamDecoder,
 +    progressive_decoder: ProgressiveDecoder,
++    /// Updates dropped because their codec rejected them, and the streak the current codec
++    /// is on. A streak long enough to look permanent clears that codec's state.
++    dropped_updates: u64,
++    dropped_in_a_row: (Codec1Type, u64),
  
      decompressor: zgfx::Decompressor,
      decompressed_buffer: Vec<u8>,
-@@ -392,28 +417,38 @@
+@@ -392,28 +424,40 @@
      codec_caps: CodecCapabilities,
  
      surfaces: BTreeMap<u16, Surface>,
@@ -161,6 +175,8 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
 +            clearcodec_decoder: None,
 +            planar_decoder: BitmapStreamDecoder::default(),
 +            progressive_decoder: ProgressiveDecoder::new(),
++            dropped_updates: 0,
++            dropped_in_a_row: (Codec1Type::Uncompressed, 0),
              decompressor: zgfx::Decompressor::new(),
              decompressed_buffer: Vec::new(),
              state: ClientState::WaitingForConfirm,
@@ -175,7 +191,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
          }
      }
  
-@@ -451,6 +486,27 @@
+@@ -451,6 +495,27 @@
          self.total_frames_decoded
      }
  
@@ -203,7 +219,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
      // ========================================================================
      // PDU Handlers
      // ========================================================================
-@@ -462,7 +518,7 @@
+@@ -462,7 +527,7 @@
                  Ok(vec![])
              }
              GfxPdu::ResetGraphics(reset) => {
@@ -212,7 +228,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
                  Ok(vec![])
              }
              GfxPdu::CreateSurface(create) => {
-@@ -480,6 +536,7 @@
+@@ -480,6 +545,7 @@
              GfxPdu::StartFrame(start) => {
                  self.current_frame_id = Some(start.frame_id);
                  self.frames_queued = self.frames_queued.saturating_add(1);
@@ -220,7 +236,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
                  trace!(frame_id = start.frame_id, "StartFrame");
                  Ok(vec![])
              }
-@@ -490,6 +547,7 @@
+@@ -490,6 +556,7 @@
              GfxPdu::WireToSurface2(pdu) => {
                  trace!("WireToSurface2 (progressive codec)");
                  self.handler.on_wire_to_surface2(&pdu);
@@ -228,7 +244,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
                  Ok(vec![])
              }
              GfxPdu::EndFrame(end) => self.handle_end_frame(end.frame_id),
-@@ -497,6 +555,8 @@
+@@ -497,6 +564,8 @@
              // Surface operations
              GfxPdu::SolidFill(pdu) => {
                  trace!(surface_id = pdu.surface_id, "SolidFill");
@@ -237,7 +253,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
                  self.handler.on_solid_fill(&pdu);
                  Ok(vec![])
              }
-@@ -506,6 +566,12 @@
+@@ -506,6 +575,12 @@
                      dst = pdu.destination_surface_id,
                      "SurfaceToSurface"
                  );
@@ -250,7 +266,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
                  self.handler.on_surface_to_surface(&pdu);
                  Ok(vec![])
              }
-@@ -517,6 +583,8 @@
+@@ -517,6 +592,8 @@
                      cache_slot = pdu.cache_slot,
                      "SurfaceToCache"
                  );
@@ -259,7 +275,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
                  self.handler.on_surface_to_cache(&pdu);
                  Ok(vec![])
              }
-@@ -526,11 +594,14 @@
+@@ -526,11 +603,14 @@
                      surface_id = pdu.surface_id,
                      "CacheToSurface"
                  );
@@ -274,7 +290,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
                  self.handler.on_evict_cache_entry(&pdu);
                  Ok(vec![])
              }
-@@ -552,6 +623,7 @@
+@@ -552,6 +632,7 @@
              }
              GfxPdu::MapSurfaceToScaledOutput(pdu) => {
                  trace!(surface_id = pdu.surface_id, "MapSurfaceToScaledOutput");
@@ -282,7 +298,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
                  self.handler.on_map_surface_to_scaled_output(&pdu);
                  Ok(vec![])
              }
-@@ -568,6 +640,8 @@
+@@ -568,6 +649,8 @@
                      codec_context_id = pdu.codec_context_id,
                      "DeleteEncodingContext"
                  );
@@ -291,7 +307,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
                  self.handler.on_delete_encoding_context(&pdu);
                  Ok(vec![])
              }
-@@ -616,9 +690,13 @@
+@@ -616,9 +699,13 @@
          self.handler.on_capabilities_confirmed(cap);
      }
  
@@ -306,7 +322,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
  
          // Reset frame tracking state so subsequent FrameAcknowledge PDUs
          // don't report stale queue depth from a previous stream.
-@@ -632,9 +710,28 @@
+@@ -632,9 +719,28 @@
          if let Some(ref mut decoder) = self.h264_decoder {
              decoder.reset();
          }
@@ -338,7 +354,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
      }
  
      fn handle_create_surface(&mut self, surface_id: u16, width: u16, height: u16, pixel_format: PixelFormat) {
-@@ -654,12 +751,15 @@
+@@ -654,12 +760,15 @@
          };
  
          debug!(surface_id, width, height, ?pixel_format, "Surface created");
@@ -354,7 +370,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
              debug!(surface_id, "Surface deleted");
              self.handler.on_surface_deleted(surface_id);
          } else {
-@@ -672,6 +772,7 @@
+@@ -672,6 +781,7 @@
              surface.is_mapped = true;
              surface.output_origin_x = origin_x;
              surface.output_origin_y = origin_y;
@@ -362,7 +378,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
              debug!(surface_id, origin_x, origin_y, "Surface mapped to output");
              self.handler.on_surface_mapped(surface_id, origin_x, origin_y);
          } else {
-@@ -679,6 +780,36 @@
+@@ -679,6 +789,36 @@
          }
      }
  
@@ -399,20 +415,38 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
      fn handle_wire_to_surface1(&mut self, pdu: crate::pdu::WireToSurface1Pdu) -> PduResult<()> {
          let surface = self
              .surfaces
-@@ -720,6 +851,12 @@
+@@ -714,12 +854,29 @@
+ 
+         match pdu.codec_id {
+             Codec1Type::Avc420 => {
+-                self.decode_avc420(pdu.surface_id, &pdu.destination_rectangle, &pdu.bitmap_data)?;
++                match self.decode_avc420(pdu.surface_id, &pdu.destination_rectangle, &pdu.bitmap_data) {
++                    Ok(()) => self.dropped_in_a_row.1 = 0,
++                    Err(error) => self.drop_update(Codec1Type::Avc420, pdu.surface_id, pdu.bitmap_data.len(), &error),
++                }
+             }
+             Codec1Type::Avc444 | Codec1Type::Avc444v2 => {
                  debug!("AVC444 codec not yet implemented, forwarding to handler");
                  self.handler.on_unhandled_pdu(&GfxPdu::WireToSurface1(pdu));
              }
 +            Codec1Type::ClearCodec => {
-+                self.decode_clearcodec(pdu.surface_id, &pdu.destination_rectangle, &pdu.bitmap_data)?;
++                match self.decode_clearcodec(pdu.surface_id, &pdu.destination_rectangle, &pdu.bitmap_data) {
++                    Ok(()) => self.dropped_in_a_row.1 = 0,
++                    Err(error) => {
++                        self.drop_update(Codec1Type::ClearCodec, pdu.surface_id, pdu.bitmap_data.len(), &error)
++                    }
++                }
 +            }
 +            Codec1Type::Planar => {
-+                self.decode_planar(pdu.surface_id, &pdu.destination_rectangle, &pdu.bitmap_data)?;
++                match self.decode_planar(pdu.surface_id, &pdu.destination_rectangle, &pdu.bitmap_data) {
++                    Ok(()) => self.dropped_in_a_row.1 = 0,
++                    Err(error) => self.drop_update(Codec1Type::Planar, pdu.surface_id, pdu.bitmap_data.len(), &error),
++                }
 +            }
              Codec1Type::Uncompressed => {
                  self.handle_uncompressed(pdu);
              }
-@@ -732,6 +869,95 @@
+@@ -732,6 +889,146 @@
          Ok(())
      }
  
@@ -425,19 +459,25 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
 +            .ok_or_else(|| pdu_other_err!("unknown surface in WireToSurface2"))?;
 +        let (surface_width, surface_height) = (surface.width, surface.height);
 +
-+        let tiles = self
-+            .progressive_decoder
-+            .decode_bitmap(
-+                pdu.surface_id,
-+                pdu.codec_context_id,
-+                surface_width,
-+                surface_height,
-+                &pdu.bitmap_data,
-+            )
-+            .map_err(|error| {
-+                warn!(?error, "rfx progressive decode failed");
-+                pdu_other_err!("rfx progressive decode failed")
-+            })?;
++        // A payload this client cannot decode costs the tiles it carried, which the next
++        // update repaints; ending the session over it costs the session. Tile state is
++        // unchanged on failure, so later payloads still decode against valid coefficients.
++        let tiles = match self.progressive_decoder.decode_bitmap(
++            pdu.surface_id,
++            pdu.codec_context_id,
++            surface_width,
++            surface_height,
++            &pdu.bitmap_data,
++        ) {
++            Ok(tiles) => {
++                self.dropped_in_a_row.1 = 0;
++                tiles
++            }
++            Err(error) => {
++                self.drop_update(Codec1Type::RemoteFx, pdu.surface_id, pdu.bitmap_data.len(), &error);
++                return Ok(());
++            }
++        };
 +
 +        for tile in tiles {
 +            let tile_left = tile.x_idx.saturating_mul(TILE_DIM);
@@ -505,10 +545,55 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
 +        Ok(())
 +    }
 +
++    /// Drop one update whose codec rejected it.
++    ///
++    /// The update carried a region the next repaint covers, so losing it degrades the
++    /// picture; ending the session over server-controlled data loses the session. A streak
++    /// long enough to look permanent clears that codec's state, since a frozen region with
++    /// no way back is worse than the cost of rebuilding from the next keyframe or CONTEXT.
++    fn drop_update(&mut self, codec: Codec1Type, surface_id: u16, bytes: usize, error: &dyn core::fmt::Debug) {
++        self.dropped_updates = self.dropped_updates.saturating_add(1);
++        if self.dropped_in_a_row.0 == codec {
++            self.dropped_in_a_row.1 = self.dropped_in_a_row.1.saturating_add(1);
++        } else {
++            self.dropped_in_a_row = (codec, 1);
++        }
++
++        if self.dropped_updates == 1 || self.dropped_updates.is_multiple_of(64) {
++            warn!(
++                ?error,
++                ?codec,
++                surface_id,
++                bytes,
++                dropped_total = self.dropped_updates,
++                "dropping an undecodable surface update"
++            );
++        }
++
++        if self.dropped_in_a_row.1 < MAX_DROPPED_UPDATES_IN_A_ROW {
++            return;
++        }
++
++        warn!(?codec, dropped = self.dropped_in_a_row.1, "clearing decoder state");
++        self.dropped_in_a_row.1 = 0;
++        match codec {
++            Codec1Type::Avc420 | Codec1Type::Avc444 | Codec1Type::Avc444v2 => {
++                if let Some(ref mut decoder) = self.h264_decoder {
++                    decoder.reset();
++                }
++            }
++            // Drops the V-bar and glyph caches the stream builds up.
++            Codec1Type::ClearCodec => self.clearcodec_decoder = None,
++            Codec1Type::RemoteFx => self.progressive_decoder.reset(),
++            // Planar decoding carries no state across updates.
++            _ => {}
++        }
++    }
++
      fn decode_avc420(&mut self, surface_id: u16, dest_rect: &ExclusiveRectangle, bitmap_data: &[u8]) -> PduResult<()> {
          let mut cursor = ReadCursor::new(bitmap_data);
          let stream = Avc420BitmapStream::decode(&mut cursor).map_err(|e| decode_err!(e))?;
-@@ -745,8 +971,10 @@
+@@ -745,8 +1042,10 @@
              .decode(stream.data)
              .map_err(|e| pdu_other_err!("H.264 decode", source: e))?;
  
@@ -521,7 +606,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
  
          // Decoded frame must be at least as large as the destination rectangle.
          // Larger is expected (macroblock alignment) and handled by cropping.
-@@ -773,13 +1001,94 @@
+@@ -773,13 +1072,94 @@
              height: dest_height,
          };
  
@@ -618,7 +703,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
  
          // Convert wire-format pixels to RGBA.
          // BitmapUpdate.data is always RGBA8888 regardless of codec -- this is
-@@ -796,6 +1105,8 @@
+@@ -796,6 +1176,8 @@
              height: dest_height,
          };
  
@@ -627,7 +712,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
          self.handler.on_bitmap_updated(&update);
      }
  
-@@ -805,9 +1116,16 @@
+@@ -805,9 +1187,16 @@
          self.current_frame_id = None;
          self.frames_queued = self.frames_queued.saturating_sub(1);
  
@@ -645,7 +730,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
          let ack = GfxPdu::FrameAcknowledge(FrameAcknowledgePdu {
              queue_depth: QueueDepth::from_u32(self.frames_queued),
              frame_id,
-@@ -896,6 +1214,33 @@
+@@ -896,6 +1285,33 @@
  // Frame Cropping
  // ============================================================================
  
@@ -679,7 +764,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
  /// Convert uncompressed 32bpp little-endian pixels to RGBA8888
  ///
  /// The wire format for uncompressed graphics is 0xAARRGGBB in a 32-bit
-@@ -971,6 +1316,8 @@
+@@ -971,6 +1387,8 @@
  /// Integration tests exercising the public DVC API are in ironrdp-testsuite-core/tests/egfx/client.rs.
  #[cfg(test)]
  mod tests {
@@ -688,7 +773,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
      use super::*;
  
      struct TestHandler;
-@@ -986,6 +1333,334 @@
+@@ -986,6 +1404,334 @@
          fn on_unhandled_pdu(&mut self, _pdu: &GfxPdu) {}
      }
  
@@ -1023,7 +1108,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
      #[test]
      fn state_transitions() {
          let mut client = GraphicsPipelineClient::new(Box::new(TestHandler), None);
-@@ -1058,6 +1733,24 @@
+@@ -1058,6 +1804,24 @@
      }
  
      #[test]
@@ -1048,7 +1133,7 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
      fn convert_uncompressed_bgrx_to_rgba() {
          // Wire format: [B, G, R, A] per pixel (0xAARRGGBB little-endian)
          let wire_pixels = vec![
-@@ -1068,4 +1761,521 @@
+@@ -1068,4 +1832,568 @@
          // Expected: [R, G, B, 0xFF] per pixel (alpha forced to opaque)
          assert_eq!(rgba, vec![0xFF, 0x80, 0x00, 0xFF, 0x30, 0x20, 0x10, 0xFF]);
      }
@@ -1503,11 +1588,58 @@ diff '--color=auto' -ru ironrdp-egfx-0.3.0/src/client.rs base/src/client.rs
 +        assert!(client.drain_output().is_empty());
 +    }
 +
++    /// The continuation is rejected by the decoder, proving the context is gone, but the
++    /// session survives it: an undecodable payload is skipped, not fatal.
 +    fn assert_progressive_context_is_deleted(clear: impl FnOnce(&mut GraphicsPipelineClient)) {
 +        let mut client = progressive_client();
 +        wire_progressive(&mut client, progressive_context_stream(true)).unwrap();
 +        clear(&mut client);
-+        assert!(wire_progressive(&mut client, progressive_context_stream(false)).is_err());
++        assert!(wire_progressive(&mut client, progressive_context_stream(false)).is_ok());
++        assert_eq!(client.dropped_updates, 1);
++    }
++
++    #[test]
++    fn a_streak_of_dropped_updates_clears_the_codec_state() {
++        let mut client = progressive_client();
++        wire_progressive(&mut client, progressive_context_stream(true)).unwrap();
++
++        for _ in 0..MAX_DROPPED_UPDATES_IN_A_ROW {
++            assert!(wire_progressive(&mut client, vec![0xFF; 32]).is_ok());
++        }
++        assert_eq!(client.dropped_updates, MAX_DROPPED_UPDATES_IN_A_ROW);
++        assert_eq!(client.dropped_in_a_row.1, 0);
++
++        // Clearing drops the codec contexts but not the wavelet layout the surface last
++        // signalled, so a continuation without CONTEXT decodes again: Windows never repeats
++        // SYNC + CONTEXT, and the surface would otherwise stay frozen. A decodable payload
++        // also clears the streak.
++        assert!(wire_progressive(&mut client, vec![0xFF; 32]).is_ok());
++        assert_eq!(client.dropped_in_a_row.1, 1);
++        wire_progressive(&mut client, progressive_context_stream(false)).unwrap();
++        assert_eq!(client.dropped_updates, MAX_DROPPED_UPDATES_IN_A_ROW + 1);
++        assert_eq!(client.dropped_in_a_row.1, 0);
++    }
++
++    #[test]
++    fn an_undecodable_clearcodec_update_is_dropped_not_fatal() {
++        let mut client = progressive_client();
++
++        let result = client.handle_pdu(GfxPdu::WireToSurface1(crate::pdu::WireToSurface1Pdu {
++            surface_id: 1,
++            codec_id: Codec1Type::ClearCodec,
++            pixel_format: PixelFormat::XRgb,
++            destination_rectangle: ExclusiveRectangle {
++                left: 0,
++                top: 0,
++                right: 64,
++                bottom: 64,
++            },
++            bitmap_data: vec![0xFF; 16],
++        }));
++
++        assert!(result.is_ok());
++        assert_eq!(client.dropped_updates, 1);
++        assert_eq!(client.dropped_in_a_row, (Codec1Type::ClearCodec, 1));
 +    }
 +
 +    #[test]

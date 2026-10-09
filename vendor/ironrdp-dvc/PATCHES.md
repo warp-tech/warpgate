@@ -11,4 +11,6 @@ mirrors the existing `get_by_type_id`.
 Drop this fork once Warpgate builds against an `ironrdp-dvc` release that has
 `get_dvc_mut` (anything after 0.8.0 cut from IronRDP master past #1461).
 
-`Cargo.toml` is the published one; the source change is in `warpgate.patch`.
+`Cargo.toml` additionally sets `[lints.rust] warnings = { level = "allow", priority = 1 }`
+so this vendored path dependency's warnings don't surface in Warpgate's builds. This is
+not in `warpgate.patch` (which is source-only); re-apply it by hand on re-vendor.

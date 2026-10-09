@@ -238,6 +238,7 @@ impl Default for VncTargetAuth {
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Enum, Default)]
 pub enum RdpTargetCompression {
+    #[default]
     #[serde(rename = "remotefx")]
     #[oai(rename = "remotefx")]
     RemoteFX,
@@ -245,7 +246,6 @@ pub enum RdpTargetCompression {
     #[oai(rename = "lossless")]
     Lossless,
     /// MS-RDPEGFX
-    #[default]
     #[serde(rename = "graphics_pipeline")]
     #[oai(rename = "graphics_pipeline")]
     GraphicsPipeline,

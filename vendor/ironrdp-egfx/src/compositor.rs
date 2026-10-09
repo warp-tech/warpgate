@@ -48,6 +48,11 @@ const MAX_OUTPUT_DIM: u16 = 32766;
 /// single-surface case (16384*16384*4) impossible to reach.
 const MAX_COMPOSITOR_BYTES: usize = 256 * 1024 * 1024;
 
+/// The largest bitmap cache a server may fill: MS-RDPEGFX 3.3.1.4 caps it at 100 MB, or 16 MB
+/// when the server confirms SMALL_CACHE or THINCLIENT. The compositor does not see the
+/// confirmed capabilities, so it applies the larger cap.
+const MAX_BITMAP_CACHE_BYTES: usize = 100 * 1024 * 1024;
+
 /// A rectangular region of the graphics output whose pixels changed within a frame.
 ///
 /// `region` is in output space (after a surface-to-output mapping), using the
@@ -114,7 +119,7 @@ struct CanvasMut<'a> {
     height: u16,
 }
 
-/// A cached bitmap tile (MS-RDPEGFX bitmap cache, 2.2.2.10 / 2.2.2.11).
+/// A cached bitmap tile (MS-RDPEGFX 3.3.1.4 bitmap cache, filled by `SurfaceToCache`, 2.2.2.6).
 #[derive(Debug)]
 struct CachedTile {
     width: u16,
@@ -162,8 +167,8 @@ impl Compositor {
             .then_some((width, height))
     }
 
-    /// Handle `ResetGraphics`: set the output size and drop all surfaces, cache and
-    /// pending output.
+    /// Handle `ResetGraphics`: set the output size and drop all surfaces and pending
+    /// output. The bitmap cache is kept while it stays within the protocol's cap.
     ///
     /// Per MS-RDPEGFX 2.2.2.14 a reset implicitly destroys every surface and
     /// redefines the graphics output, so deltas produced before it are discarded
@@ -172,15 +177,36 @@ impl Compositor {
     /// `ResetGraphics` together, and those deltas were clipped against the previous
     /// output, so painting them into the new one repaints stale pixels and, after a
     /// shrink, addresses a region the new output no longer contains.
+    ///
+    /// The bitmap cache (3.3.1.4) is not part of the graphics output and survives a
+    /// reset: MS-RDPEGFX 3.3.5.14 only resizes the Graphics Output Buffer, and cache
+    /// slots are released by `EvictCacheEntry`, a cache import or the end of the
+    /// channel. Windows sends a `ResetGraphics` for every desktop resize and
+    /// then keeps pasting toolbars, icons and text from slots it filled before the
+    /// reset, so dropping them here leaves those regions black until something
+    /// forces a fresh upload.
     pub(crate) fn reset(&mut self, width: u32, height: u32) {
         self.output_width = u16::try_from(width).unwrap_or(u16::MAX);
         self.output_height = u16::try_from(height).unwrap_or(u16::MAX);
         self.surfaces.clear();
-        self.cache.clear();
         self.frame.clear();
         self.ready.clear();
-        // Every charged allocation lived in one of those, so the whole charge goes.
-        self.allocated_bytes = 0;
+        // Only the cache keeps its allocations, so only its charge remains. Within the
+        // 3.3.1.4 cap the cache leaves room in the budget for the surfaces the server creates
+        // after the reset. A server that filled the cache past the cap could otherwise hold
+        // that room for the rest of the session, so such a cache is dropped with the surfaces.
+        let cached_bytes: usize = self.cache.values().map(|tile| tile.data.len()).sum();
+        if cached_bytes > MAX_BITMAP_CACHE_BYTES {
+            debug!(
+                cached_bytes,
+                cap = MAX_BITMAP_CACHE_BYTES,
+                "bitmap cache exceeds the MS-RDPEGFX cap; dropping it on reset"
+            );
+            self.cache.clear();
+            self.allocated_bytes = 0;
+        } else {
+            self.allocated_bytes = cached_bytes;
+        }
     }
 
     /// Reserve `len` pixel bytes, or refuse if that would exceed the budget.
@@ -1125,9 +1151,10 @@ mod tests {
         assert_eq!(c.surfaces.len(), 1);
     }
 
-    /// `ResetGraphics` empties both maps, so it must zero the charge with them.
+    /// `ResetGraphics` empties the surface map, so its charge goes with it; the cache
+    /// survives the reset and so does its charge.
     #[test]
-    fn reset_releases_the_whole_charge() {
+    fn reset_releases_the_surface_charge_and_keeps_the_cache() {
         const EDGE: u16 = 4096;
         let mut c = Compositor::default();
         c.reset(1920, 1080);
@@ -1140,6 +1167,49 @@ mod tests {
             c.allocated_bytes, 0,
             "reset drops every surface, so it drops the charge"
         );
+
+        c.create_surface(1, 16, 16);
+        c.map_surface(1, 0, 0);
+        c.surface_to_cache(1, 7, &rect(0, 0, 16, 16));
+        let cached = c.cache[&7].data.len();
+        assert!(cached > 0);
+
+        c.reset(1920, 1080);
+        assert_eq!(c.cache.len(), 1, "reset keeps the bitmap cache");
+        assert_eq!(
+            c.allocated_bytes, cached,
+            "only the cache's charge remains after a reset"
+        );
+
+        // The kept tile is still usable on a surface created after the reset.
+        c.create_surface(2, 16, 16);
+        c.map_surface(2, 0, 0);
+        c.cache_to_surface(7, 2, &[Point { x: 0, y: 0 }]);
+        c.end_frame();
+        assert_eq!(
+            c.drain_output().len(),
+            1,
+            "a cache paste after the reset still produces output"
+        );
+    }
+
+    /// A cache past the MS-RDPEGFX 3.3.1.4 cap is dropped on reset, so it cannot hold the
+    /// budget the surfaces created after the reset need.
+    #[test]
+    fn reset_drops_a_cache_over_the_protocol_cap() {
+        const EDGE: u16 = 4096; // 64 MiB per surface, and per full-surface tile
+        let mut c = Compositor::default();
+        c.reset(1920, 1080);
+        c.create_surface(1, EDGE, EDGE);
+        for slot in 0..2 {
+            c.surface_to_cache(1, slot, &rect(0, 0, EDGE, EDGE));
+        }
+        assert_eq!(c.cache.len(), 2);
+        assert!(c.cache.values().map(|tile| tile.data.len()).sum::<usize>() > MAX_BITMAP_CACHE_BYTES);
+
+        c.reset(1920, 1080);
+        assert!(c.cache.is_empty(), "a cache over the cap does not survive the reset");
+        assert_eq!(c.allocated_bytes, 0);
     }
 
     /// Cache slots are a second allocation pool keyed by `u16`. Charging them against

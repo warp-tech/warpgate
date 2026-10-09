@@ -7,7 +7,7 @@
 //! Cache cursors advance linearly and wrap around, implementing LRU eviction
 //! as specified in MS-RDPEGFX 3.3.8.1.
 
-use ironrdp_pdu::codecs::clearcodec::{SHORT_VBAR_CACHE_SIZE, VBAR_CACHE_SIZE};
+use crate::clearcodec::pdu::{SHORT_VBAR_CACHE_SIZE, VBAR_CACHE_SIZE};
 
 // VBAR_CACHE_SIZE (32,768) and SHORT_VBAR_CACHE_SIZE (16,384) as u16 for cursor wrapping.
 const VBAR_WRAP: u16 = 32_768;

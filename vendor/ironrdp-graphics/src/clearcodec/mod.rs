@@ -6,6 +6,9 @@
 
 mod glyph_cache;
 mod nscodec;
+// ClearCodec's wire format, from IronRDP master alongside this decoder: the
+// `ironrdp_pdu::codecs::clearcodec` in ironrdp-pdu 0.9.0 misreads the short V-bar header.
+mod pdu;
 mod vbar_cache;
 
 pub use self::glyph_cache::{GLYPH_CACHE_SIZE, GlyphCache, GlyphEntry};
@@ -15,7 +18,7 @@ pub use self::vbar_cache::{FullVBar, ShortVBar, VBarCache};
 const GLYPH_CACHE_WRAP: u16 = 4_000;
 
 use ironrdp_core::{DecodeResult, ReadCursor, invalid_field_err};
-use ironrdp_pdu::codecs::clearcodec::{
+use crate::clearcodec::pdu::{
     ClearCodecBitmapStream, CompositePayload, FLAG_GLYPH_INDEX, RgbRunSegment, SubcodecId, VBar, decode_bands_layer,
     decode_residual_layer, decode_subcodec_layer, encode_residual_layer,
 };
@@ -279,7 +282,7 @@ impl ClearCodecDecoder {
     }
 
     fn decode_subcodec_region(
-        sub: &ironrdp_pdu::codecs::clearcodec::Subcodec<'_>,
+        sub: &crate::clearcodec::pdu::Subcodec<'_>,
         output: &mut [u8],
         surface_width: u16,
     ) -> DecodeResult<()> {
@@ -327,7 +330,7 @@ impl ClearCodecDecoder {
                 }
             }
             SubcodecId::Rlex => {
-                let rlex = ironrdp_pdu::codecs::clearcodec::decode_rlex(sub.bitmap_data)?;
+                let rlex = crate::clearcodec::pdu::decode_rlex(sub.bitmap_data)?;
                 let w = usize::from(sub.width);
                 let h = usize::from(sub.height);
                 let pixel_budget = w * h;
@@ -494,7 +497,7 @@ impl ClearCodecEncoder {
     pub fn encode_cache_reset(&mut self) -> Vec<u8> {
         let seq = self.seq_number;
         self.seq_number = seq.wrapping_add(1);
-        vec![ironrdp_pdu::codecs::clearcodec::FLAG_CACHE_RESET, seq]
+        vec![crate::clearcodec::pdu::FLAG_CACHE_RESET, seq]
     }
 
     fn find_glyph_match(&self, bgra: &[u8], width: u16, height: u16) -> Option<(u16, &GlyphEntry)> {
@@ -515,7 +518,7 @@ impl ClearCodecEncoder {
         let seq = self.seq_number;
         self.seq_number = seq.wrapping_add(1);
 
-        let flags = FLAG_GLYPH_INDEX | ironrdp_pdu::codecs::clearcodec::FLAG_GLYPH_HIT;
+        let flags = FLAG_GLYPH_INDEX | crate::clearcodec::pdu::FLAG_GLYPH_HIT;
         let mut out = Vec::with_capacity(4);
         out.push(flags);
         out.push(seq);
@@ -583,7 +586,7 @@ fn bgra_to_run_segments(bgra: &[u8], pixel_count: usize) -> Vec<RgbRunSegment> {
 
 #[cfg(test)]
 mod tests {
-    use ironrdp_pdu::codecs::clearcodec::{FLAG_CACHE_RESET, FLAG_GLYPH_HIT};
+    use crate::clearcodec::pdu::{FLAG_CACHE_RESET, FLAG_GLYPH_HIT};
 
     use super::*;
 

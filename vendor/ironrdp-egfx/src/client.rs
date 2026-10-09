@@ -76,6 +76,9 @@ use crate::pdu::{
     SurfaceToSurfacePdu, WireToSurface2Pdu,
 };
 
+/// Consecutive undecodable updates from one codec that force its state to be cleared.
+const MAX_DROPPED_UPDATES_IN_A_ROW: u64 = 16;
+
 /// Max capacity to keep for decompressed buffer when cleared.
 const MAX_DECOMPRESSED_BUFFER_CAPACITY: usize = 16384; // 16 KiB
 
@@ -408,6 +411,10 @@ pub struct GraphicsPipelineClient {
     clearcodec_decoder: Option<ClearCodecDecoder>,
     planar_decoder: BitmapStreamDecoder,
     progressive_decoder: ProgressiveDecoder,
+    /// Updates dropped because their codec rejected them, and the streak the current codec
+    /// is on. A streak long enough to look permanent clears that codec's state.
+    dropped_updates: u64,
+    dropped_in_a_row: (Codec1Type, u64),
 
     decompressor: zgfx::Decompressor,
     decompressed_buffer: Vec<u8>,
@@ -438,6 +445,8 @@ impl GraphicsPipelineClient {
             clearcodec_decoder: None,
             planar_decoder: BitmapStreamDecoder::default(),
             progressive_decoder: ProgressiveDecoder::new(),
+            dropped_updates: 0,
+            dropped_in_a_row: (Codec1Type::Uncompressed, 0),
             decompressor: zgfx::Decompressor::new(),
             decompressed_buffer: Vec::new(),
             state: ClientState::WaitingForConfirm,
@@ -845,17 +854,28 @@ impl GraphicsPipelineClient {
 
         match pdu.codec_id {
             Codec1Type::Avc420 => {
-                self.decode_avc420(pdu.surface_id, &pdu.destination_rectangle, &pdu.bitmap_data)?;
+                match self.decode_avc420(pdu.surface_id, &pdu.destination_rectangle, &pdu.bitmap_data) {
+                    Ok(()) => self.dropped_in_a_row.1 = 0,
+                    Err(error) => self.drop_update(Codec1Type::Avc420, pdu.surface_id, pdu.bitmap_data.len(), &error),
+                }
             }
             Codec1Type::Avc444 | Codec1Type::Avc444v2 => {
                 debug!("AVC444 codec not yet implemented, forwarding to handler");
                 self.handler.on_unhandled_pdu(&GfxPdu::WireToSurface1(pdu));
             }
             Codec1Type::ClearCodec => {
-                self.decode_clearcodec(pdu.surface_id, &pdu.destination_rectangle, &pdu.bitmap_data)?;
+                match self.decode_clearcodec(pdu.surface_id, &pdu.destination_rectangle, &pdu.bitmap_data) {
+                    Ok(()) => self.dropped_in_a_row.1 = 0,
+                    Err(error) => {
+                        self.drop_update(Codec1Type::ClearCodec, pdu.surface_id, pdu.bitmap_data.len(), &error)
+                    }
+                }
             }
             Codec1Type::Planar => {
-                self.decode_planar(pdu.surface_id, &pdu.destination_rectangle, &pdu.bitmap_data)?;
+                match self.decode_planar(pdu.surface_id, &pdu.destination_rectangle, &pdu.bitmap_data) {
+                    Ok(()) => self.dropped_in_a_row.1 = 0,
+                    Err(error) => self.drop_update(Codec1Type::Planar, pdu.surface_id, pdu.bitmap_data.len(), &error),
+                }
             }
             Codec1Type::Uncompressed => {
                 self.handle_uncompressed(pdu);
@@ -878,19 +898,25 @@ impl GraphicsPipelineClient {
             .ok_or_else(|| pdu_other_err!("unknown surface in WireToSurface2"))?;
         let (surface_width, surface_height) = (surface.width, surface.height);
 
-        let tiles = self
-            .progressive_decoder
-            .decode_bitmap(
-                pdu.surface_id,
-                pdu.codec_context_id,
-                surface_width,
-                surface_height,
-                &pdu.bitmap_data,
-            )
-            .map_err(|error| {
-                warn!(?error, "rfx progressive decode failed");
-                pdu_other_err!("rfx progressive decode failed")
-            })?;
+        // A payload this client cannot decode costs the tiles it carried, which the next
+        // update repaints; ending the session over it costs the session. Tile state is
+        // unchanged on failure, so later payloads still decode against valid coefficients.
+        let tiles = match self.progressive_decoder.decode_bitmap(
+            pdu.surface_id,
+            pdu.codec_context_id,
+            surface_width,
+            surface_height,
+            &pdu.bitmap_data,
+        ) {
+            Ok(tiles) => {
+                self.dropped_in_a_row.1 = 0;
+                tiles
+            }
+            Err(error) => {
+                self.drop_update(Codec1Type::RemoteFx, pdu.surface_id, pdu.bitmap_data.len(), &error);
+                return Ok(());
+            }
+        };
 
         for tile in tiles {
             let tile_left = tile.x_idx.saturating_mul(TILE_DIM);
@@ -956,6 +982,51 @@ impl GraphicsPipelineClient {
         }
 
         Ok(())
+    }
+
+    /// Drop one update whose codec rejected it.
+    ///
+    /// The update carried a region the next repaint covers, so losing it degrades the
+    /// picture; ending the session over server-controlled data loses the session. A streak
+    /// long enough to look permanent clears that codec's state, since a frozen region with
+    /// no way back is worse than the cost of rebuilding from the next keyframe or CONTEXT.
+    fn drop_update(&mut self, codec: Codec1Type, surface_id: u16, bytes: usize, error: &dyn core::fmt::Debug) {
+        self.dropped_updates = self.dropped_updates.saturating_add(1);
+        if self.dropped_in_a_row.0 == codec {
+            self.dropped_in_a_row.1 = self.dropped_in_a_row.1.saturating_add(1);
+        } else {
+            self.dropped_in_a_row = (codec, 1);
+        }
+
+        if self.dropped_updates == 1 || self.dropped_updates.is_multiple_of(64) {
+            warn!(
+                ?error,
+                ?codec,
+                surface_id,
+                bytes,
+                dropped_total = self.dropped_updates,
+                "dropping an undecodable surface update"
+            );
+        }
+
+        if self.dropped_in_a_row.1 < MAX_DROPPED_UPDATES_IN_A_ROW {
+            return;
+        }
+
+        warn!(?codec, dropped = self.dropped_in_a_row.1, "clearing decoder state");
+        self.dropped_in_a_row.1 = 0;
+        match codec {
+            Codec1Type::Avc420 | Codec1Type::Avc444 | Codec1Type::Avc444v2 => {
+                if let Some(ref mut decoder) = self.h264_decoder {
+                    decoder.reset();
+                }
+            }
+            // Drops the V-bar and glyph caches the stream builds up.
+            Codec1Type::ClearCodec => self.clearcodec_decoder = None,
+            Codec1Type::RemoteFx => self.progressive_decoder.reset(),
+            // Planar decoding carries no state across updates.
+            _ => {}
+        }
     }
 
     fn decode_avc420(&mut self, surface_id: u16, dest_rect: &ExclusiveRectangle, bitmap_data: &[u8]) -> PduResult<()> {
@@ -2212,11 +2283,58 @@ mod tests {
         assert!(client.drain_output().is_empty());
     }
 
+    /// The continuation is rejected by the decoder, proving the context is gone, but the
+    /// session survives it: an undecodable payload is skipped, not fatal.
     fn assert_progressive_context_is_deleted(clear: impl FnOnce(&mut GraphicsPipelineClient)) {
         let mut client = progressive_client();
         wire_progressive(&mut client, progressive_context_stream(true)).unwrap();
         clear(&mut client);
-        assert!(wire_progressive(&mut client, progressive_context_stream(false)).is_err());
+        assert!(wire_progressive(&mut client, progressive_context_stream(false)).is_ok());
+        assert_eq!(client.dropped_updates, 1);
+    }
+
+    #[test]
+    fn a_streak_of_dropped_updates_clears_the_codec_state() {
+        let mut client = progressive_client();
+        wire_progressive(&mut client, progressive_context_stream(true)).unwrap();
+
+        for _ in 0..MAX_DROPPED_UPDATES_IN_A_ROW {
+            assert!(wire_progressive(&mut client, vec![0xFF; 32]).is_ok());
+        }
+        assert_eq!(client.dropped_updates, MAX_DROPPED_UPDATES_IN_A_ROW);
+        assert_eq!(client.dropped_in_a_row.1, 0);
+
+        // Clearing drops the codec contexts but not the wavelet layout the surface last
+        // signalled, so a continuation without CONTEXT decodes again: Windows never repeats
+        // SYNC + CONTEXT, and the surface would otherwise stay frozen. A decodable payload
+        // also clears the streak.
+        assert!(wire_progressive(&mut client, vec![0xFF; 32]).is_ok());
+        assert_eq!(client.dropped_in_a_row.1, 1);
+        wire_progressive(&mut client, progressive_context_stream(false)).unwrap();
+        assert_eq!(client.dropped_updates, MAX_DROPPED_UPDATES_IN_A_ROW + 1);
+        assert_eq!(client.dropped_in_a_row.1, 0);
+    }
+
+    #[test]
+    fn an_undecodable_clearcodec_update_is_dropped_not_fatal() {
+        let mut client = progressive_client();
+
+        let result = client.handle_pdu(GfxPdu::WireToSurface1(crate::pdu::WireToSurface1Pdu {
+            surface_id: 1,
+            codec_id: Codec1Type::ClearCodec,
+            pixel_format: PixelFormat::XRgb,
+            destination_rectangle: ExclusiveRectangle {
+                left: 0,
+                top: 0,
+                right: 64,
+                bottom: 64,
+            },
+            bitmap_data: vec![0xFF; 16],
+        }));
+
+        assert!(result.is_ok());
+        assert_eq!(client.dropped_updates, 1);
+        assert_eq!(client.dropped_in_a_row, (Codec1Type::ClearCodec, 1));
     }
 
     #[test]
