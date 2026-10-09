@@ -210,13 +210,11 @@ class ProcessManager:
             self._stop_child(child)
 
     def mark(self):
-        """Where the children and k3s containers started so far end, for
-        `stop_since`."""
+        """Record the current child and container counts for `stop_since`."""
         return len(self.children), len(self._k3s_containers)
 
     def stop_since(self, mark):
-        """Stop everything started after `mark` (see the per-test cleanup
-        fixture below)."""
+        """Stop and remove children and containers started after `mark`."""
         children, k3s = mark
         for name in self._k3s_containers[k3s:]:
             subprocess.run(
@@ -1125,12 +1123,7 @@ def processes(ctx, timeout, report_generation):
 
 @pytest.fixture(autouse=True)
 def _stop_test_processes(processes):
-    """`processes` is session-scoped, so without this every warpgate, SSH
-    server and other child a test starts itself stays up until the whole run
-    ends; enough of them starve the CI runner late in the suite. Pytest sets
-    up higher-scoped fixtures first, so the mark is taken after any shared
-    session fixtures this test uses have started, and only the test's own
-    children are stopped."""
+    """Stop each test's children; session fixtures are created before the mark."""
     mark = processes.mark()
     yield
     processes.stop_since(mark)
