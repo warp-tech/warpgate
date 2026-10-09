@@ -6783,7 +6783,8 @@
         "type": "string",
         "enum": [
           "remotefx",
-          "lossless"
+          "lossless",
+          "graphics_pipeline"
         ]
       },
       "RdpTargetPasswordAuth": {
