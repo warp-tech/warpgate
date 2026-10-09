@@ -7,7 +7,7 @@ use poem::Request;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use warpgate_aws::EksClusterInfo;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
@@ -343,8 +343,10 @@ async fn authenticate(req: &Request, services: &Services) -> poem::Result<Option
             )
             .await
             .map_err(|e| {
+                // SECURITY: Log the detailed error, but do not return internal details to the client on 500
+                error!(error = %e, "SSO user resolution failed");
                 poem::Error::from_string(
-                    format!("SSO user resolution failed: {e}"),
+                    "SSO user resolution failed",
                     poem::http::StatusCode::INTERNAL_SERVER_ERROR,
                 )
             })?
@@ -373,8 +375,10 @@ async fn authenticate(req: &Request, services: &Services) -> poem::Result<Option
             // decision. Surfacing it as 500 keeps an outage from masquerading as a
             // bad certificate.
             Err(e) => {
+                // SECURITY: Log the detailed error, but do not return internal details to the client on 500
+                error!(error = %e, "Client certificate validation failed");
                 return Err(poem::Error::from_string(
-                    format!("Client certificate validation failed: {e}"),
+                    "Client certificate validation failed",
                     poem::http::StatusCode::INTERNAL_SERVER_ERROR,
                 ));
             }
@@ -432,8 +436,10 @@ async fn user_for_username(services: &Services, username: &str) -> poem::Result<
             )
         })?;
     User::try_from(model).map_err(|e| {
+        // SECURITY: Log the detailed error, but do not return internal details to the client on 500
+        error!(error = %e, "Failed to convert user model");
         poem::Error::from_string(
-            format!("Failed to convert user model: {e}"),
+            "Failed to convert user model",
             poem::http::StatusCode::INTERNAL_SERVER_ERROR,
         )
     })
