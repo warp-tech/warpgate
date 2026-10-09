@@ -54,6 +54,9 @@ x509-cert = { version = "0.2", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = [
+    "fmt",
+] }
 
 [features]
 openssl-tls = [

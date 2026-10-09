@@ -54,7 +54,7 @@ use crate::server::target_menu::{MenuEvent, spawn_target_menu_loop};
 use crate::{
     ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCCommandReply,
     RCEvent, RCState, RemoteClient, ResolvedSshChainHost, ServerChannelId, SshClientError,
-    SshRecordingMetadata, X11Request, resolve_approved_ssh_chain,
+    SshRecordingMetadata, X11Request, client_error_message, resolve_approved_ssh_chain,
 };
 
 const EVENT_QUEUE_CAPACITY: usize = 128;
@@ -218,11 +218,209 @@ fn reject_with_allowed_auth_methods(allowed_auth_methods: MethodSet) -> russh::s
     }
 }
 
+/// What a terminal session is told when the connection to the target fails.
+///
+/// Named, like web-ssh's `BrowserNotice`, so a test has somewhere to
+/// stand: a call inside the event loop does not.
+fn shown_in_the_terminal(error: &ConnectionError) -> String {
+    format!("Target connection failed: {}", error.client_message())
+}
+
+/// The server-side record of a failed target connection.
+///
+/// Rendered and then escaped: remote text reaches some `ConnectionError`
+/// variants with its control characters intact, and a newline in one forges a
+/// whole record in the default text format. `?error` alone is not enough for a
+/// variant that nests an `anyhow::Error` (through `WarpgateError::Anyhow`):
+/// derived Debug escapes strings but defers to anyhow's own Debug, which does
+/// not. `#[deny(dead_code)]` ties the event loop to this function, as below.
+#[deny(dead_code)]
+fn log_target_connection_failure(error: &ConnectionError) {
+    error!(error = ?format!("{error:?}"), "Target connection failed");
+}
+
+/// The debug record of every event the target connection delivers.
+///
+/// Rendered and then escaped for the same reason: `RCEvent::Error` carries the
+/// command loop's `anyhow::Error` and `RCEvent::ConnectionError` may nest one,
+/// so `?event` writes their text raw — a forged record ahead of the escaped one
+/// `handle_remote_event` writes. Rendering the whole event rather than
+/// special-casing those two keeps every variant under one rule.
+#[deny(dead_code)]
+fn log_remote_event(event: &RCEvent) {
+    debug!(event = ?format!("{event:?}"), "Event");
+}
+
+/// The server-side record of a client session error.
+///
+/// Not `?error` alone: an `anyhow::Error`'s own `Debug` prints its cause chain
+/// on separate lines, unescaped, so a newline in wrapped remote text forges a
+/// second record in the default text format. The chain is rendered first and
+/// the resulting string escaped. `#[deny(dead_code)]` keeps the event loop
+/// calling this rather than only the test: `mod tests` is `#[cfg(test)]`.
+#[deny(dead_code)]
+fn log_client_session_error(error: &anyhow::Error) {
+    error!(error = ?format!("{error:#}"), "Client session error");
+}
+
 #[cfg(test)]
 mod tests {
-    use russh::{MethodKind, MethodSet};
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
 
-    use super::reject_with_allowed_auth_methods;
+    use russh::{MethodKind, MethodSet};
+    use tracing_subscriber::fmt::MakeWriter;
+    use warpgate_common::WarpgateError;
+
+    use super::{
+        ConnectionError, log_client_session_error, log_remote_event, log_target_connection_failure,
+        reject_with_allowed_auth_methods, shown_in_the_terminal,
+    };
+    use crate::client::log_command_loop_error;
+    use crate::{RCEvent, SshClientError};
+
+    /// `tracing-subscriber` ships no `MakeWriter` for a buffer the test can
+    /// still read afterwards: its `Arc<W>` impl wants `&W: Write`, which a
+    /// `Mutex` is not.
+    #[derive(Clone, Default)]
+    struct Captured(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().write(buf)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl MakeWriter<'_> for Captured {
+        type Writer = Self;
+
+        fn make_writer(&self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    /// What `log` wrote, with the formatter's trailing break removed.
+    fn captured_output(log: impl FnOnce()) -> String {
+        let captured = Captured::default();
+        // Every level: `log_remote_event` writes at debug, which the
+        // formatter's default level would drop, leaving nothing to assert on.
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_max_level(tracing::Level::TRACE)
+            .with_writer(captured.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, log);
+
+        let logged = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
+        logged.strip_suffix('\n').unwrap_or(&logged).to_owned()
+    }
+
+    /// `RCEvent::Error`'s sink, which logged `?e`: anyhow's Debug writes the
+    /// message and its cause chain as they came.
+    #[test]
+    fn a_newline_in_a_client_session_error_cannot_forge_a_log_record() {
+        let error = anyhow::anyhow!(
+            "permission denied\n  ERROR warpgate::ssh: Authenticated with publickey"
+        );
+        assert!(
+            format!("{error:?}").contains('\n'),
+            "the fixture's Debug carries no raw newline, so nothing below is evidence"
+        );
+
+        let record = captured_output(|| log_client_session_error(&error));
+        assert!(
+            !record.contains('\n'),
+            "the error forged a second record: {record:?}"
+        );
+        assert!(
+            record.contains("\\n"),
+            "the error never reached the log: {record:?}"
+        );
+    }
+
+    /// A `ConnectionError` that nests an `anyhow::Error`, which derived Debug
+    /// does not escape: `?error` passed this newline through as written.
+    #[test]
+    fn a_newline_in_an_anyhow_inside_a_connection_error_cannot_forge_a_log_record() {
+        let error = ConnectionError::Warpgate(WarpgateError::Anyhow(anyhow::anyhow!(
+            "permission denied\n  ERROR warpgate::ssh: Authenticated with publickey"
+        )));
+        assert!(
+            format!("{error:?}").contains('\n'),
+            "the fixture's Debug carries no raw newline, so nothing below is evidence"
+        );
+
+        let record = captured_output(|| log_target_connection_failure(&error));
+        assert!(
+            !record.contains('\n'),
+            "the error forged a second record: {record:?}"
+        );
+        assert!(
+            record.contains("\\n"),
+            "the error never reached the log: {record:?}"
+        );
+    }
+
+    /// The generic per-event debug record, ahead of every escaped sink in
+    /// `handle_remote_event`. The fixture is the command loop's error as it
+    /// sends it, with the newline in the cause.
+    #[test]
+    fn a_newline_in_a_remote_event_cannot_forge_a_debug_record() {
+        let event = RCEvent::Error(
+            anyhow::Error::from(SshClientError::other(std::io::Error::other(
+                "permission denied\n  ERROR warpgate::ssh: Authenticated with publickey",
+            )))
+            .context("handling a client event"),
+        );
+        assert!(
+            format!("{event:?}").contains('\n'),
+            "the fixture's Debug carries no raw newline, so nothing below is evidence"
+        );
+
+        let record = captured_output(|| log_remote_event(&event));
+        assert!(
+            record.contains("DEBUG") && record.contains("Event"),
+            "no debug record was written, so nothing below is evidence: {record:?}"
+        );
+        assert!(
+            !record.contains('\n'),
+            "the event forged a second record: {record:?}"
+        );
+        assert!(
+            record.contains("\\n"),
+            "the error never reached the log: {record:?}"
+        );
+    }
+
+    /// The command loop logs the same error before it is sent on, so the
+    /// sinks downstream being escaped is not enough. The fixture is shaped as
+    /// the loop's errors are — an `SshClientError` from `handle_event`, under a
+    /// context — with the newline in the cause, not the outermost message.
+    #[test]
+    fn a_newline_in_a_command_loop_error_cannot_forge_a_log_record() {
+        let error = anyhow::Error::from(SshClientError::other(std::io::Error::other(
+            "permission denied\n  ERROR warpgate::ssh: Authenticated with publickey",
+        )))
+        .context("handling a client event");
+        assert!(
+            format!("{error:#}").contains('\n'),
+            "the fixture carries no newline, so nothing below is evidence"
+        );
+
+        let record = captured_output(|| log_command_loop_error(&error));
+        assert!(
+            !record.contains('\n'),
+            "the error forged a second record: {record:?}"
+        );
+        assert!(
+            record.contains("\\n"),
+            "the error never reached the log: {record:?}"
+        );
+    }
 
     #[test]
     fn rejected_public_key_auth_advertises_only_configured_methods() {
@@ -240,6 +438,28 @@ mod tests {
         assert_eq!(advertised_methods, configured_methods);
         assert!(!advertised_methods.contains(&MethodKind::Password));
         assert!(!advertised_methods.contains(&MethodKind::KeyboardInteractive));
+    }
+
+    /// The terminal is told a fixed phrase, never the error's own words.
+    ///
+    /// The `Warpgate` variant is the one this boundary exists for; asserting
+    /// the fixture carries the leak first stops it passing vacuously.
+    #[test]
+    fn the_pty_leg_shows_a_fixed_phrase_not_the_error() {
+        let leaky = ConnectionError::Warpgate(WarpgateError::Other(
+            "database error: SELECT secret FROM credentials".into(),
+        ));
+        assert!(leaky.to_string().contains("SELECT"));
+
+        let shown = shown_in_the_terminal(&leaky);
+        assert!(
+            !shown.contains("SELECT"),
+            "the raw error reached the terminal: {shown}"
+        );
+        assert!(
+            !shown.contains("database error"),
+            "the raw error reached the terminal: {shown}"
+        );
     }
 }
 
@@ -851,10 +1071,10 @@ impl ServerSession {
                     } else {
                         e
                     };
-                    debug!(event=?e, "Event");
+                    log_remote_event(&e);
                     let span = self.make_logging_span();
                     if let Err(err) = self.handle_remote_event(e).instrument(span).await {
-                        error!("Client event handler error: {:?}", err);
+                        error!(error = ?format!("{err:#}"), "Client event handler error");
                         // break;
                     }
                 }
@@ -1311,13 +1531,20 @@ impl ServerSession {
                         );
                     }
                     error => {
-                        let _ = self.emit_pty_error(&format!("Target connection failed: {error}"));
+                        // The same boundary as the browser leg. The connect
+                        // path logs the error too, but from the client task,
+                        // whose span carries no username and no client IP —
+                        // this is the record that ties the failure to the
+                        // session that saw it.
+                        log_target_connection_failure(&error);
+                        let _ = self.emit_pty_error(&shown_in_the_terminal(&error));
                     }
                 }
             }
             RCEvent::Error(e) => {
                 self.service_output.stop_progress();
-                let _ = self.emit_pty_error(&format!("Error: {e}"));
+                log_client_session_error(&e);
+                let _ = self.emit_pty_error(&format!("Error: {}", client_error_message(&e)));
                 self.disconnect_server().await;
             }
             RCEvent::Output(channel, data) => {
@@ -2676,15 +2903,6 @@ impl ServerSession {
             for ch in channels {
                 let _ = self.channel_writer.close(handle.clone(), ch.0);
             }
-            // A channel close says nothing about the connection, so a dead
-            // target never gives the client a reason to let go of the socket
-            // (#2520). Queued behind the closes so the ordering holds.
-            let _ = self.channel_writer.disconnect(
-                handle,
-                russh::Disconnect::ByApplication,
-                String::new(),
-                String::new(),
-            );
         }
 
         // Bounded: a client whose window is full never lets the queue
@@ -2705,8 +2923,30 @@ impl ServerSession {
                 warn!("Client is not reading; closing its connection");
                 Duration::ZERO
             };
+            // A channel close says nothing about the connection, so a dead
+            // target never gives the client a reason to let go of the socket
+            // (#2520). It goes out here rather than queued behind the closes:
+            // a client handed the disconnect in the same read as the message
+            // acts on it first and exits without printing what it already
+            // holds, so the session's last words are lost -- which is the one
+            // thing this message exists to prevent. The grace above is what
+            // separates them, and a client that is not reading gets neither.
+            let disconnect = flushed.then(|| self.session_handle.clone()).flatten();
             tokio::spawn(async move {
                 tokio::time::sleep(delay).await;
+                if let Some(handle) = disconnect {
+                    // Bounded for the same reason the flush above is: a client
+                    // that has stopped reading must not hold the socket open.
+                    let _ = tokio::time::timeout(
+                        DISCONNECT_FLUSH_TIMEOUT,
+                        handle.disconnect(
+                            russh::Disconnect::ByApplication,
+                            String::new(),
+                            String::new(),
+                        ),
+                    )
+                    .await;
+                }
                 let _ = socket.shutdown(std::net::Shutdown::Both);
             });
         }

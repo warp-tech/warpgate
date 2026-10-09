@@ -13,7 +13,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use channel_direct_tcpip::DirectTCPIPChannel;
 use channel_session::SessionChannel;
-pub use error::SshClientError;
+pub use error::{SshClientError, client_error_message};
 use futures::{FutureExt, pin_mut};
 use handler::ClientHandler;
 use russh::client::{AuthResult, Handle, KeyboardInteractiveAuthResponse};
@@ -77,6 +77,33 @@ pub enum ConnectionError {
 
     #[error(transparent)]
     Warpgate(#[from] WarpgateError),
+}
+
+impl ConnectionError {
+    /// What a connected user — over a PTY or a browser session — may be shown
+    /// for a failed target connection.
+    ///
+    /// `Io`/`Key`/`Ssh` carry the underlying library's own `Display`, and
+    /// `Warpgate` is `#[error(transparent)]`, so its `Display` can render a
+    /// database failure with its SQL text or name configured key
+    /// fingerprints. The full error still goes to the log.
+    #[must_use]
+    pub fn client_message(&self) -> String {
+        match self {
+            Self::HostKeyMismatch { .. } => "Host key mismatch".to_string(),
+            Self::Aws(_) => "AWS authentication for the SSH target failed".to_string(),
+            Self::Resolve => "Could not resolve target address".to_string(),
+            Self::Aborted => "Connection aborted".to_string(),
+            Self::Authentication => {
+                "SSH target rejected Warpgate's authentication request".to_string()
+            }
+            Self::JumpHostTargetNotFound => "Jump host target not found".to_string(),
+            Self::Io(_) | Self::Key(_) | Self::Ssh(_) => "SSH protocol error".to_string(),
+            // Not `e.to_string()`: that forwards `WarpgateError`'s own
+            // `Display` to whoever is watching the session.
+            Self::Internal | Self::Warpgate(_) => "Internal connection error".to_string(),
+        }
+    }
 }
 
 pub struct ResolvedSshChainHost {
@@ -461,7 +488,7 @@ impl RemoteClient {
                     loop {
                         tokio::select! {
                             Some(event) = self.inner_event_rx.recv() => {
-                                debug!(event=?event, "event");
+                                debug!(event = ?format!("{event:?}"), "event");
                                 if self.handle_event(event).await? {
                                     break
                                 }
@@ -477,7 +504,7 @@ impl RemoteClient {
                 }
                 .await
                 .map_err(|error| {
-                    error!(?error, "error in command loop");
+                    log_command_loop_error(&error);
                     let err = anyhow::anyhow!("Error in command loop: {error}");
                     let _ = self.tx.try_send(RCEvent::Error(error));
                     err
@@ -504,7 +531,13 @@ impl RemoteClient {
                 match result {
                     Ok(connection) => self.on_connected(connection).await?,
                     Err(e) => {
-                        debug!("Connect error: {}", e);
+                        // Was `debug!`, so a user-visible connect failure left no
+                        // record at the default log level. Rendered and then
+                        // escaped: derived Debug escapes strings but hands a
+                        // nested `anyhow::Error` (through `WarpgateError::Anyhow`)
+                        // to anyhow's own Debug, which writes a remote party's
+                        // newline raw and forges a record.
+                        error!(error = ?format!("{e:?}"), "Connect error");
                         let _ = self.tx.send(RCEvent::ConnectionError(e)).await;
                         self.set_disconnected().await;
                         return Ok(true);
@@ -850,7 +883,7 @@ impl Connector {
                                 ClientHandlerError::Ssh(e) => ConnectionError::Ssh(e),
                                 ClientHandlerError::Internal => ConnectionError::Internal,
                             };
-                            error!(error=?connection_error, "Connection error");
+                            error!(error = ?format!("{connection_error:?}"), "Connection error");
                             return Err(connection_error);
                         }
                     };
@@ -1263,6 +1296,24 @@ impl Drop for RemoteClient {
         info!("Closed connection");
         debug!("Dropped");
     }
+}
+
+/// The command loop's own record of the error it ends on, written before the
+/// error is handed on as `RCEvent::Error` and logged again by whichever session
+/// receives it.
+///
+/// Rendered and then escaped, as `log_client_session_error` does: an
+/// `anyhow::Error`'s own `Debug` prints its cause chain on separate lines,
+/// unescaped, so remote text in any link of it forges a record. Named so a test
+/// can stand at it; `#[deny(dead_code)]` stops a revert to logging inline from
+/// leaving only the test calling this.
+#[deny(dead_code)]
+#[allow(
+    clippy::redundant_pub_crate,
+    reason = "`pub` would re-export it through `pub use client::*`, and a public item is never dead code, which is what ties the call site to this sink"
+)]
+pub(crate) fn log_command_loop_error(error: &anyhow::Error) {
+    error!(error = ?format!("{error:#}"), "error in command loop");
 }
 
 #[cfg(test)]
