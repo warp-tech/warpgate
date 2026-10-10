@@ -26,32 +26,26 @@ RUN just npm ci \
     && just npm run build \
     && cargo build --features mysql,postgres,rdp-openssl-tls --release
 
-FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251
-LABEL maintainer=heywoodlh
 ARG USER_ID=1000
+RUN adduser warpgate --disabled-password --gecos "" --uid ${USER_ID} --home /data --shell /usr/sbin/nologin \
+    && mkdir -p /data \
+    && chown -R ${USER_ID}:${USER_ID} /data
 
-ENV DEBIAN_FRONTEND=noninteractive
-RUN <<EOF
-  set -xe
-  apt-get -y update -qq
-  apt-get install --no-install-recommends --no-install-suggests -y \
-    ca-certificates wget sqlite3
-  apt-get clean
-  rm -rf /var/lib/apt/lists/*
-EOF
+FROM gcr.io/distroless/cc-debian12
+LABEL maintainer=heywoodlh
 
-# RUN adduser warpgate --system --home /data
-RUN adduser warpgate --disabled-password --gecos "" --uid ${USER_ID} --home /data --shell /usr/sbin/nologin
-
+COPY --from=build /etc/passwd /etc/passwd
+COPY --from=build /etc/group /etc/group
+COPY --from=build --chown=warpgate:warpgate /data /data
 COPY --from=build /opt/warpgate/target/release/warpgate /usr/local/bin/warpgate
 
 VOLUME /data
 
 ENV WARPGATE_CONFIG=/data/warpgate.yaml
 
-HEALTHCHECK CMD warpgate healthcheck
+HEALTHCHECK CMD ["/usr/local/bin/warpgate", "healthcheck"]
 
 ENV DOCKER=1
 USER warpgate
-ENTRYPOINT ["warpgate"]
+ENTRYPOINT ["/usr/local/bin/warpgate"]
 CMD ["run"]
