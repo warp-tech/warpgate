@@ -34,8 +34,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN <<EOF
   set -xe
   apt-get -y update -qq
+  apt-get -y upgrade --no-install-recommends
   apt-get install --no-install-recommends --no-install-suggests -y \
-    ca-certificates wget sqlite3
+    ca-certificates
   apt-get clean
   rm -rf /var/lib/apt/lists/*
 EOF
