@@ -183,11 +183,43 @@ fn copy_client_response<R: SomeResponse>(
     server_response.set_status(client_response.status());
 }
 
-fn rewrite_request<B: SomeRequestBuilder>(mut req: B, options: &TargetHTTPOptions) -> Result<B> {
+fn rewrite_request<B: SomeRequestBuilder>(
+    mut req: B,
+    options: &TargetHTTPOptions,
+    inbound: &http::HeaderMap,
+) -> Result<B> {
     for (k, v) in &options.headers {
+        let Some(v) = expand_request_header_placeholders(v, inbound) else {
+            // Not sent at all rather than empty or with the placeholder in it.
+            // The client's own copy isn't forwarded either (copy_server_request).
+            debug!(header = %k, "Skipping target header: a request header it uses is missing");
+            continue;
+        };
         req = req.set_header(HeaderName::try_from(k)?, HeaderValue::try_from(v)?);
     }
     Ok(req)
+}
+
+/// `${WARPGATE_REQUEST_HEADER:<name>}` in a target header value is replaced with that
+/// header from the incoming request. For example, behind Cloudflare Access,
+/// `Cf-Access-Token: ${WARPGATE_REQUEST_HEADER:cf-access-jwt-assertion}` passes the
+/// user's Access token on to a target whose Access app accepts linked app tokens.
+const REQUEST_HEADER_PLACEHOLDER: &str = "${WARPGATE_REQUEST_HEADER:";
+
+/// Returns `None` if a placeholder names a header the request doesn't have, or isn't closed.
+fn expand_request_header_placeholders(value: &str, inbound: &http::HeaderMap) -> Option<String> {
+    let mut expanded = String::with_capacity(value.len());
+    let mut rest = value;
+    while let Some(start) = rest.find(REQUEST_HEADER_PLACEHOLDER) {
+        expanded.push_str(&rest[..start]);
+        let after = &rest[start + REQUEST_HEADER_PLACEHOLDER.len()..];
+        let end = after.find('}')?;
+        let name = HeaderName::from_bytes(after[..end].trim().as_bytes()).ok()?;
+        expanded.push_str(inbound.get(name)?.to_str().ok()?);
+        rest = &after[end + 1..];
+    }
+    expanded.push_str(rest);
+    Some(expanded)
 }
 
 fn rewrite_response(
@@ -258,9 +290,20 @@ fn cookie_header_for_target(req: &Request) -> Result<Option<String>> {
     Ok((!cookies.is_empty()).then(|| cookies.join("; ")))
 }
 
-fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> Result<B> {
+fn copy_server_request<B: SomeRequestBuilder>(
+    req: &Request,
+    mut target: B,
+    options: &TargetHTTPOptions,
+) -> Result<B> {
     for k in req.headers().keys() {
-        if !may_forward_header(k) {
+        // A header the target sets is the target's: when its value is skipped
+        // (rewrite_request), the client's must not take its place.
+        if !may_forward_header(k)
+            || options
+                .headers
+                .keys()
+                .any(|name| name.eq_ignore_ascii_case(k.as_str()))
+        {
             continue;
         }
         if k == http::header::COOKIE {
@@ -337,10 +380,10 @@ pub async fn proxy_normal_request(
 
     let mut client_request = client.request(req.method().into(), uri.to_string());
 
-    client_request = copy_server_request(req, client_request)?;
+    client_request = copy_server_request(req, client_request, &options)?;
     client_request = inject_forwarding_headers(req, ctx, client_request);
     client_request = inject_own_headers(req, client_request).await?;
-    client_request = rewrite_request(client_request, &options)?;
+    client_request = rewrite_request(client_request, &options, req.headers())?;
     if let Some(authorization_header) = authorization_header {
         client_request = client_request.header(http::header::AUTHORIZATION, authorization_header);
     }
@@ -551,10 +594,10 @@ async fn proxy_ws_inner(
         client_request = client_request.header(http::header::AUTHORIZATION, authorization_header);
     }
 
-    client_request = copy_server_request(req, client_request)?;
+    client_request = copy_server_request(req, client_request, &options)?;
     client_request = inject_forwarding_headers(req, ctx, client_request);
     client_request = inject_own_headers(req, client_request).await?;
-    client_request = rewrite_request(client_request, &options)?;
+    client_request = rewrite_request(client_request, &options, req.headers())?;
 
     let tls_config = configure_tls_connector(!options.tls.verify, false, None)
         .await
@@ -723,6 +766,7 @@ mod tests {
         let request = rewrite_request(
             http::Request::builder().header(http::header::HOST, "ingress.internal"),
             &options,
+            &http::HeaderMap::new(),
         )
         .unwrap()
         .body(())
@@ -803,6 +847,74 @@ mod tests {
         // A genuine persistent cookie must keep the expiry the origin set.
         let cookie = rewrite_cookie("lsws_uid=abc; Path=/; Expires=Tue, 01 Jan 2999 00:00:00 GMT");
         assert_eq!(cookie.expires(), None);
+    }
+
+    #[test]
+    fn request_header_placeholders_expand() {
+        let mut inbound = http::HeaderMap::new();
+        inbound.insert(
+            "cf-access-jwt-assertion",
+            HeaderValue::from_static("eyJ.user.jwt"),
+        );
+        inbound.insert("x-tenant", HeaderValue::from_static("acme"));
+        let expand = |v: &str| expand_request_header_placeholders(v, &inbound);
+
+        assert_eq!(
+            expand("${WARPGATE_REQUEST_HEADER:cf-access-jwt-assertion}").as_deref(),
+            Some("eyJ.user.jwt")
+        );
+        assert_eq!(
+            expand("Bearer ${WARPGATE_REQUEST_HEADER: Cf-Access-Jwt-Assertion }").as_deref(),
+            Some("Bearer eyJ.user.jwt")
+        );
+        assert_eq!(
+            expand("${WARPGATE_REQUEST_HEADER:x-tenant}/${WARPGATE_REQUEST_HEADER:x-tenant}")
+                .as_deref(),
+            Some("acme/acme")
+        );
+        assert_eq!(expand("static").as_deref(), Some("static"));
+        assert_eq!(expand("${OTHER}").as_deref(), Some("${OTHER}"));
+        assert_eq!(expand("${WARPGATE_REQUEST_HEADER:x-missing}"), None);
+        assert_eq!(expand("a ${WARPGATE_REQUEST_HEADER:x-tenant"), None);
+        assert_eq!(expand("${WARPGATE_REQUEST_HEADER:not a header}"), None);
+    }
+
+    fn proxied_headers(options: &TargetHTTPOptions, client: &[(&str, &str)]) -> http::HeaderMap {
+        let mut request = Request::builder();
+        for (name, value) in client {
+            request = request.header(*name, *value);
+        }
+        let request = request.finish();
+        let builder =
+            copy_server_request(&request, http::request::Builder::new(), options).unwrap();
+        rewrite_request(builder, options, request.headers())
+            .unwrap()
+            .body(())
+            .unwrap()
+            .headers()
+            .clone()
+    }
+
+    #[test]
+    fn target_header_carries_a_request_header() {
+        let mut options = make_options("https://upstream.example");
+        options.headers = std::collections::HashMap::from([(
+            "Cf-Access-Token".to_string(),
+            "${WARPGATE_REQUEST_HEADER:cf-access-jwt-assertion}".to_string(),
+        )]);
+        let headers = proxied_headers(&options, &[("cf-access-jwt-assertion", "eyJ.user.jwt")]);
+        assert_eq!(headers.get("cf-access-token").unwrap(), "eyJ.user.jwt");
+    }
+
+    #[test]
+    fn missing_request_header_skips_the_target_header_and_the_client_copy() {
+        let mut options = make_options("https://upstream.example");
+        options.headers = std::collections::HashMap::from([(
+            "X-User".to_string(),
+            "${WARPGATE_REQUEST_HEADER:x-verified-user}".to_string(),
+        )]);
+        let headers = proxied_headers(&options, &[("x-user", "spoofed")]);
+        assert!(headers.get("x-user").is_none());
     }
 
     fn strip(pq: &str) -> String {
