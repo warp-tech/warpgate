@@ -9,6 +9,7 @@ use uuid::Uuid;
 use warpgate_common::{Target as TargetConfig, WarpgateError};
 use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
 use warpgate_core::ConfigProvider;
+use warpgate_db_entities::Target::fuzzy_filter_targets;
 use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
 use warpgate_db_entities::{Target, TargetGroup};
 
@@ -58,16 +59,10 @@ impl Api {
         let group_map: HashMap<uuid::Uuid, &TargetGroup::Model> =
             groups.iter().map(|g| (g.id, g)).collect();
 
-        let mut targets: Vec<TargetConfig> = services.config_provider.list_targets().await?;
+        let all_targets: Vec<TargetConfig> = services.config_provider.list_targets().await?;
 
-        if let Some(ref search) = *search {
-            let search = search.to_lowercase();
-            targets.retain(|t| {
-                let group = t.group_id.and_then(|group_id| group_map.get(&group_id));
-                t.name.to_lowercase().contains(&search)
-                    || group.is_some_and(|g| g.name.to_lowercase().contains(&search))
-            });
-        }
+        let mut targets =
+            fuzzy_filter_targets(&all_targets, &groups, search.as_deref().unwrap_or_default());
 
         match &ctx.auth {
             RequestAuthorization::Session(SessionAuthorization::Ticket { target_id, .. }) => {
