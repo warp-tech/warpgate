@@ -213,6 +213,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="http://perdu.com"><img src="https://avatars.githubusercontent.com/u/854038?v=4?s=100" width="100px;" alt="Max:"/><br /><sub><b>Max:</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=askz" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Mac898"><img src="https://avatars.githubusercontent.com/u/9291773?v=4?s=100" width="100px;" alt="Mac Lim"/><br /><sub><b>Mac Lim</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=Mac898" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/impuls42"><img src="https://avatars.githubusercontent.com/u/74369328?v=4?s=100" width="100px;" alt="Alex K"/><br /><sub><b>Alex K</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=impuls42" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>
