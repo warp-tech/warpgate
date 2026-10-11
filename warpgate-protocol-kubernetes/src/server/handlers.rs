@@ -241,6 +241,37 @@ fn named_target_path(path: &str) -> poem::Result<(String, String)> {
     Ok((target.into_owned(), path.to_owned()))
 }
 
+/// Ends `upstream` with an error once the session closes, so the client sees a
+/// truncated body rather than a clean end. Holds the session handle so the
+/// session stays open for as long as the stream does, even past its correlator
+/// entry.
+fn end_on_close<S>(
+    upstream: S,
+    closed: CancellationToken,
+    handle: Arc<Mutex<WarpgateServerHandle>>,
+) -> impl futures::Stream<Item = std::io::Result<bytes::Bytes>> + Send + 'static
+where
+    S: futures::Stream<Item = std::io::Result<bytes::Bytes>> + Unpin + Send + 'static,
+{
+    futures::stream::unfold(Some((upstream, closed, handle)), |state| async move {
+        let (mut upstream, closed, handle) = state?;
+        // Close first: a stream that is always ready must not starve it.
+        tokio::select! {
+            biased;
+            () = closed.cancelled() => Some((
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionAborted,
+                    "session closed",
+                )),
+                None,
+            )),
+            item = upstream.next() => {
+                item.map(|item| (item, Some((upstream, closed, handle))))
+            }
+        }
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn _handle_normal_request_inner(
     req: &Request,
@@ -311,11 +342,11 @@ async fn _handle_normal_request_inner(
     let redacted_headers = redact_headers(&headers);
 
     // Cancel slow uploads when the session closes.
-    let body_bytes = tokio::select! {
-        biased;
-        () = closed.cancelled() => return Err(WarpgateError::UserSessionEnded),
-        result = body.into_bytes() => result.context("reading request body")?,
-    };
+    let body_bytes = closed
+        .run_until_cancelled(body.into_bytes())
+        .await
+        .ok_or(WarpgateError::UserSessionEnded)?
+        .context("reading request body")?;
 
     // Record the request if recording is enabled
     let mut recorder_opt = {
@@ -380,22 +411,20 @@ async fn _handle_normal_request_inner(
         "Sending request to upstream Kubernetes API"
     );
 
-    let mutating_operation = classify_mutating(method, api_path, req.uri().query(), &body_bytes);
-
-    // Let dispatched audited mutations finish so their result can be recorded
-    // and returned. Refuse them if close arrives before dispatch.
-    let is_mutation = mutating_operation.is_some();
-    let response = if is_mutation {
+    // A write that reached the cluster runs to completion across a close, so
+    // the client learns whether it was applied and an audited one keeps its
+    // event. A close before dispatch still refuses it.
+    let is_write = !req.method().is_safe();
+    let response = if is_write {
         if closed.is_cancelled() {
             return Err(WarpgateError::UserSessionEnded);
         }
         request_builder.send().await?
     } else {
-        tokio::select! {
-            biased;
-            () = closed.cancelled() => return Err(WarpgateError::UserSessionEnded),
-            result = request_builder.send() => result?,
-        }
+        closed
+            .run_until_cancelled(request_builder.send())
+            .await
+            .ok_or(WarpgateError::UserSessionEnded)??
     };
 
     let status = response.status();
@@ -410,7 +439,7 @@ async fn _handle_normal_request_inner(
     // Emitted after the response so a refused `kubectl debug` is audited as
     // clearly as an accepted one, and before the body is consumed so a failure
     // to read it cannot lose the event.
-    if let Some(operation) = mutating_operation {
+    if let Some(operation) = classify_mutating(method, api_path, req.uri().query(), &body_bytes) {
         for event in operation.audit_events(audit_subject, status.as_u16()) {
             event.emit();
         }
@@ -444,47 +473,24 @@ async fn _handle_normal_request_inner(
             .iter()
             .any(|(k, v)| (k == "watch" || k == "follow") && v == "true");
 
-        // A dispatched mutation's response is always read in full, even if it
-        // is framed as chunked, so a close can't cut off its answer.
-        if !is_mutation && (transfer_encoding == "chunked" || is_streaming_response) {
-            // Keep the session handle alive if the stream outlives its cache entry.
+        // A write's response is always read in full, even if it is framed as
+        // chunked, so a close can't cut off its answer.
+        if !is_write && (transfer_encoding == "chunked" || is_streaming_response) {
             let upstream = response.bytes_stream().map_err(std::io::Error::other);
-            let stream = futures::stream::unfold(
-                (upstream, closed.clone(), handle.clone(), false),
-                |(mut upstream, closed, handle, done)| async move {
-                    if done {
-                        return None;
-                    }
-                    tokio::select! {
-                        biased;
-                        // Signal cancellation as a truncated stream.
-                        () = closed.cancelled() => Some((
-                            Err(std::io::Error::new(
-                                std::io::ErrorKind::ConnectionAborted,
-                                "session closed",
-                            )),
-                            (upstream, closed, handle, true),
-                        )),
-                        item = upstream.next() => {
-                            item.map(|item| (item, (upstream, closed, handle, false)))
-                        }
-                    }
-                },
-            );
-            (Body::from_bytes_stream(stream), None)
+            (
+                Body::from_bytes_stream(end_on_close(upstream, closed, handle)),
+                None,
+            )
         } else {
-            let bytes = if is_mutation {
-                response
-                    .bytes()
-                    .await
-                    .context("reading kubernetes response")?
+            let bytes = if is_write {
+                response.bytes().await
             } else {
-                tokio::select! {
-                    biased;
-                    () = closed.cancelled() => return Err(WarpgateError::UserSessionEnded),
-                    result = response.bytes() => result.context("reading kubernetes response")?,
-                }
-            };
+                closed
+                    .run_until_cancelled(response.bytes())
+                    .await
+                    .ok_or(WarpgateError::UserSessionEnded)?
+            }
+            .context("reading kubernetes response")?;
 
             (Body::from_bytes(bytes.clone()), Some(bytes.to_vec()))
         }
@@ -623,15 +629,17 @@ async fn _handle_websocket_request_inner(
     let ws_handler_inner = async move |socket: WebSocketStream| {
         // Keep the session handle alive if the websocket outlives its cache entry.
         let _session_handle = handle;
-        let client_response = tokio::select! {
-            biased;
-            () = closed.cancelled() => bail!("Session closed while upgrading the Kubernetes websocket"),
-            result = client
-                .get(full_url.clone())
-                .upgrade()
-                .protocols(vec![ws_protocol])
-                .send() => result.context("sending websocket request to Kubernetes API")?,
-        };
+        let client_response = closed
+            .run_until_cancelled(
+                client
+                    .get(full_url.clone())
+                    .upgrade()
+                    .protocols(vec![ws_protocol])
+                    .send(),
+            )
+            .await
+            .context("Session closed while upgrading the Kubernetes websocket")?
+            .context("sending websocket request to Kubernetes API")?;
 
         let status = client_response.status();
         let established = status == http::StatusCode::SWITCHING_PROTOCOLS;
@@ -649,19 +657,18 @@ async fn _handle_websocket_request_inner(
         }
         if !established {
             let client_response = client_response.into_inner();
-            let body = tokio::select! {
-                biased;
-                () = closed.cancelled() => bail!("Session closed while reading Kubernetes API rejection response"),
-                result = client_response.text() => result?,
-            };
+            let body = closed
+                .run_until_cancelled(client_response.text())
+                .await
+                .context("Session closed while reading Kubernetes API rejection response")??;
             bail!("Unexpected websocket response status from Kubernetes API: {status}: {body}");
         }
 
-        let client_socket = tokio::select! {
-            biased;
-            () = closed.cancelled() => bail!("Session closed while negotiating the Kubernetes websocket"),
-            result = client_response.into_websocket() => result.context("negotiating websocket connection with Kubernetes")?,
-        };
+        let client_socket = closed
+            .run_until_cancelled(client_response.into_websocket())
+            .await
+            .context("Session closed while negotiating the Kubernetes websocket")?
+            .context("negotiating websocket connection with Kubernetes")?;
 
         let (client_sink, client_source) = client_socket.split();
         let (server_sink, server_source) = socket.split();
@@ -694,8 +701,8 @@ async fn _handle_websocket_request_inner(
         // Whichever direction ends first takes the stream down; the other is
         // dropped rather than left to fail writing into the closed socket. A
         // session close (admin close, or a user's deletion) takes the stream
-        // down the same way -- otherwise a long-lived `exec`/`attach`/
-        // `port-forward` would outlive the access that opened it.
+        // down the same way, so a long-lived `exec`/`attach`/`port-forward`
+        // cannot outlive the access that opened it.
         let result = tokio::select! {
             biased;
             () = closed.cancelled() => Ok(()),

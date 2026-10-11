@@ -442,10 +442,16 @@ async def test_admin_close_session_ends_watch_stream(shared_wg, ticket_setup):
 
 
 @pytest.mark.asyncio
-async def test_admin_close_session_lets_a_dispatched_mutation_finish(
-    shared_wg, ticket_setup
+@pytest.mark.parametrize("method,path", [
+    # Audited: emits a pod-created event.
+    ("POST", "/api/v1/namespaces/default/pods"),
+    # Not audited.
+    ("DELETE", "/api/v1/namespaces/default/pods/created"),
+])
+async def test_admin_close_session_lets_a_dispatched_write_finish(
+    shared_wg, ticket_setup, method, path
 ):
-    """A dispatched audited mutation must receive its full response across a close."""
+    """A dispatched write must receive its full response across a close."""
     import aiohttp
     from aiohttp import web
 
@@ -465,7 +471,7 @@ async def test_admin_close_session_lets_a_dispatched_mutation_finish(
         return resp
 
     app = web.Application()
-    app.router.add_post("/{path:.*}", upstream)
+    app.router.add_route(method, "/{path:.*}", upstream)
     runner = web.AppRunner(app)
     await runner.setup()
     port = alloc_port()
@@ -486,8 +492,8 @@ async def test_admin_close_session_lets_a_dispatched_mutation_finish(
             url = f"https://localhost:{shared_wg.kubernetes_port}"
 
             async def create():
-                async with session.post(
-                    f"{url}/api/v1/namespaces/default/pods", json=pod, ssl=False
+                async with session.request(
+                    method, f"{url}{path}", json=pod, ssl=False
                 ) as response:
                     return response.status, await response.read()
 

@@ -143,14 +143,14 @@ pub async fn correlated_authorization(
 
         let slot = SharedAuthorization::default();
         let claimed = {
-            let mut correlator_state = correlator.lock().await;
-            if correlator_state.entry(&key, max_age).is_some() {
+            let mut correlator = correlator.lock().await;
+            if correlator.entry(&key, max_age).is_some() {
                 None
             } else {
                 // Locked before the correlator lock is released, so a request
                 // joining this session can't reach the pending slot ahead of us.
                 let guard = slot.clone().lock_owned().await;
-                correlator_state.handles.insert(
+                correlator.handles.insert(
                     key.clone(),
                     SessionEntry {
                         handle: handle.clone(),
@@ -167,23 +167,25 @@ pub async fn correlated_authorization(
             continue;
         };
 
-        // Cancel credential-policy waits on close; joined requests receive the denial too.
-        let resolved = tokio::select! {
-            biased;
-            () = closed.cancelled() => Err(unauthorized()),
-            resolved = async move {
-                match identity {
-                    KubernetesIdentity::User(user) => {
-                        authorize_kubernetes_target(request, &user, target_name, session_id, services).await
-                    }
-                    KubernetesIdentity::Ticket(ticket) => ticket
-                        .spend(&services.db)
-                        .await
-                        .map_err(poem::Error::from)
-                        .and_then(|authorization| authorization.ok_or_else(unauthorized))
-                        .and_then(|authorization| authorization.narrow().map_err(Into::into)),
-                }
-            } => resolved,
+        let resolved = match identity {
+            // close cancels authorization wait
+            KubernetesIdentity::User(user) => closed
+                .run_until_cancelled(authorize_kubernetes_target(
+                    request,
+                    &user,
+                    target_name,
+                    session_id,
+                    services,
+                ))
+                .await
+                .unwrap_or_else(|| Err(unauthorized())),
+            // no run_until_cancelled, close checked in  admit_kubernetes_session below
+            KubernetesIdentity::Ticket(ticket) => ticket
+                .spend(&services.db)
+                .await
+                .map_err(poem::Error::from)
+                .and_then(|authorization| authorization.ok_or_else(unauthorized))
+                .and_then(|authorization| authorization.narrow().map_err(Into::into)),
         };
         return match resolved {
             Ok(resolved) => {
@@ -215,7 +217,9 @@ pub async fn correlated_authorization(
                 Ok((handle, admitted, closed))
             }
             Err(error) => {
-                // Settle joined requests before eviction so the next request can prompt again.
+                // A denied attempt is not cached: the requests waiting on this
+                // one fail with it, and the entry goes so that the next request
+                // can prompt again.
                 *authorization = Authorization::Denied;
                 correlator.lock().await.evict(&key, &slot);
                 settle_failed_attempt(services, &handle, session_id).await;
@@ -232,7 +236,7 @@ async fn admit_kubernetes_session(
     handle: &Arc<Mutex<WarpgateServerHandle>>,
     resolved: TargetAuthorization<TargetKubernetesOptions>,
 ) -> Result<AdmittedTarget<TargetKubernetesOptions>, WarpgateError> {
-    let admission = admit_target_session(
+    admit_target_session(
         services,
         handle,
         resolved,
@@ -245,15 +249,19 @@ async fn admit_kubernetes_session(
         },
         || async { Ok(()) },
     )
-    .await?;
-    admission.admitted()
+    .await?
+    .admitted()
 }
 
 /// Waits for the request that opened this session to resolve its authorization.
 ///
-/// `None` means the opening request was dropped mid-approval; evict it and retry.
-/// An in-flight `AuthStateStore::open` can still insert a pending-approval row
-/// after cleanup. The stale-request reaper handles those rows.
+/// `None` means there is nothing to join and the caller should open a session of
+/// its own: the opening request was dropped mid-approval — a cancelled `kubectl`
+/// — so its entry is evicted here rather than left to fail every later request
+/// until the vacuum, and its auth state is dropped so the dead attempt does not
+/// linger as an approvable orphan in the pending-approvals UI. An in-flight
+/// `AuthStateStore::open` can still insert a pending-approval row after this
+/// cleanup; the stale-request reaper handles those rows.
 async fn join_session(
     correlator: &Arc<Mutex<RequestCorrelator>>,
     key: &CorrelationKey,
@@ -284,9 +292,13 @@ async fn join_session(
 
 /// Settles the session of an attempt that failed.
 ///
-/// Confirm sessions with a terminal auth outcome for audit; leave timed-out
-/// attempts provisional. Drop auth state in both cases. See [`join_session`]
-/// for the pending-approval insertion race.
+/// A terminal auth outcome — a rejection, or an approval whose target lookup
+/// then failed — is recorded in the audit log against the session, so that
+/// session has to outlive the attempt and is confirmed. An approval that merely
+/// timed out leaves no trace to keep: the session stays provisional and is
+/// discarded along with the handle. Either way nothing will come back to the
+/// attempt, so its auth state must not outlive it as an approvable orphan (see
+/// [`join_session`] for the pending-approval insertion race).
 async fn settle_failed_attempt(
     services: &Services,
     handle: &Arc<Mutex<WarpgateServerHandle>>,
