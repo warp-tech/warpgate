@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use futures::{StreamExt, TryStreamExt};
 use poem::web::Data;
 use poem::web::websocket::{WebSocket, WebSocketStream};
@@ -228,6 +228,21 @@ fn named_target_path(path: &str) -> poem::Result<(String, String)> {
     Ok((target.into_owned(), path.to_owned()))
 }
 
+/// Forward upstream headers for normal responses and rejected websocket upgrades.
+fn copy_response_headers(
+    mut builder: poem::ResponseBuilder,
+    headers: &http::HeaderMap,
+) -> poem::ResponseBuilder {
+    for (name, value) in headers {
+        if let Ok(poem_name) = poem::http::HeaderName::from_bytes(name.as_str().as_bytes())
+            && let Ok(poem_value) = poem::http::HeaderValue::from_bytes(value.as_bytes())
+        {
+            builder = builder.header(poem_name, poem_value);
+        }
+    }
+    builder
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn _handle_normal_request_inner(
     req: &Request,
@@ -440,16 +455,8 @@ async fn _handle_normal_request_inner(
         warn!("Failed to record Kubernetes response: {}", e);
     }
 
-    let mut poem_response = Response::builder().status(status);
-
-    // Copy response headers
-    for (name, value) in &response_headers {
-        if let Ok(poem_name) = poem::http::HeaderName::from_bytes(name.as_str().as_bytes())
-            && let Ok(poem_value) = poem::http::HeaderValue::from_bytes(value.as_bytes())
-        {
-            poem_response = poem_response.header(poem_name, poem_value);
-        }
-    }
+    let poem_response =
+        copy_response_headers(Response::builder().status(status), &response_headers);
 
     Ok(poem_response.body(response_body))
 }
@@ -508,12 +515,7 @@ async fn _handle_websocket_request_inner(
     services: &Services,
 ) -> anyhow::Result<impl IntoResponse> {
     let k8s_options = admitted.options();
-    let mut full_url = construct_target_url(req, api_path, k8s_options)?;
-    if full_url.scheme() == "https" {
-        let _ = full_url.set_scheme("wss");
-    } else {
-        let _ = full_url.set_scheme("ws");
-    }
+    let full_url = construct_target_url(req, api_path, k8s_options)?;
 
     let client = create_authenticated_client(k8s_options, services)
         .await?
@@ -543,49 +545,48 @@ async fn _handle_websocket_request_inner(
         }
     };
 
-    let ws_protocol = req
-        .headers()
-        .get("sec-websocket-protocol")
-        .and_then(|h| h.to_str().ok())
-        .context("missing Sec-Websocket-Protocol request header")?
-        .to_string();
+    let ws_protocols = requested_websocket_protocols(req.headers());
 
-    let audit_subject = audit_subject.clone();
-
-    let ws_handler_inner = async move |socket: WebSocketStream| {
-        let client_response = client
-            .get(full_url.clone())
-            .upgrade()
-            .protocols(vec![ws_protocol])
-            .send()
-            .await
-            .context("sending websocket request to Kubernetes API")?;
-
-        let status = client_response.status();
-        let established = status == http::StatusCode::SWITCHING_PROTOCOLS;
-        // Audited on the cluster's verdict, so a stream it refused (most often
-        // RBAC) and one it opened are told apart, and a stream that never
-        // reached it is not recorded as having started.
-        if let Some(operation) = &operation {
-            if established {
-                operation.audit_event(&audit_subject).emit();
-            } else {
-                operation
-                    .rejection_event(&audit_subject, status.as_u16())
-                    .emit();
+    // Poem commits downstream protocol headers at on_upgrade, so negotiate
+    // upstream first. Audit 101 before validation: the cluster's stream has
+    // already started even if its handshake is invalid.
+    let (client_socket, selected_protocol) =
+        match connect_upstream_websocket(&client, full_url, &ws_protocols, || {
+            if let Some(operation) = &operation {
+                operation.audit_event(audit_subject).emit();
             }
-        }
-        if !established {
-            let client_response = client_response.into_inner();
-            let body = client_response.text().await?;
-            bail!("Unexpected websocket response status from Kubernetes API: {status}: {body}");
-        }
+        })
+        .await
+        {
+            Ok(UpstreamWebsocket::Established { socket, protocol }) => (socket, protocol),
+            // Audit before reading the body, then forward the cluster's refusal.
+            Ok(UpstreamWebsocket::Rejected(response)) => {
+                if let Some(operation) = &operation {
+                    operation
+                        .rejection_event(audit_subject, response.status().as_u16())
+                        .emit();
+                }
+                let response = forward_rejected_upstream_response(response).await?;
+                return Ok(response.into_response());
+            }
+            // Transport or invalid-handshake failures have no response to forward.
+            Err(error) => {
+                error!("Kubernetes API websocket connection failed: {error:#}");
+                return Ok(poem::Error::from_string(
+                    "Kubernetes API websocket connection failed",
+                    http::StatusCode::BAD_GATEWAY,
+                )
+                .into_response());
+            }
+        };
 
-        let client_socket = client_response
-            .into_websocket()
-            .await
-            .context("negotiating websocket connection with Kubernetes")?;
+    // Poem requires a Sync callback; the socket is Send and consumed once.
+    let client_socket = std::sync::Mutex::new(client_socket);
 
+    let ws_handler_inner = move |socket: WebSocketStream| async move {
+        let client_socket = client_socket
+            .into_inner()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let (client_sink, client_source) = client_socket.split();
         let (server_sink, server_source) = socket.split();
 
@@ -633,15 +634,13 @@ async fn _handle_websocket_request_inner(
     // only events that fall under a session span.
     let span = tracing::Span::current();
 
+    // Echo the API server's selection, which the library checked was offered.
+    let ws = match selected_protocol {
+        Some(protocol) => ws.protocols(vec![protocol]),
+        None => ws,
+    };
+
     Ok(ws
-        .protocols(vec![
-            "channel.k8s.io",
-            "v2.channel.k8s.io",
-            "v3.channel.k8s.io",
-            "v4.channel.k8s.io",
-            "v5.channel.k8s.io",
-            "SPDY/3.1+portforward.k8s.io",
-        ])
         .on_upgrade(move |socket| {
             async move {
                 if let Err(error) = ws_handler_inner(socket).await {
@@ -653,8 +652,359 @@ async fn _handle_websocket_request_inner(
         .into_response())
 }
 
+/// Kubernetes can send an empty protocol header when the client offered none.
+/// Adapt only that response; reqwest-websocket still owns handshake validation.
+struct KubernetesWebsocketRequest(reqwest::RequestBuilder);
+
+impl reqwest_websocket::RequestBuilder for KubernetesWebsocketRequest {
+    type Client = KubernetesWebsocketClient;
+
+    fn build_split(
+        self,
+    ) -> (
+        Self::Client,
+        Result<reqwest::Request, reqwest_websocket::Error>,
+    ) {
+        let (client, request) = self.0.build_split();
+        (
+            KubernetesWebsocketClient(client),
+            request.map_err(Into::into),
+        )
+    }
+}
+
+struct KubernetesWebsocketClient(reqwest::Client);
+
+impl reqwest_websocket::Client for KubernetesWebsocketClient {
+    async fn execute(
+        &self,
+        request: reqwest::Request,
+    ) -> Result<reqwest::Response, reqwest_websocket::Error> {
+        let offered_protocol = request
+            .headers()
+            .contains_key(http::header::SEC_WEBSOCKET_PROTOCOL);
+        let mut response = self.0.execute(request).await?;
+        if !offered_protocol && response.status() == http::StatusCode::SWITCHING_PROTOCOLS {
+            let mut protocols = response
+                .headers()
+                .get_all(http::header::SEC_WEBSOCKET_PROTOCOL)
+                .iter();
+            let single_empty = protocols
+                .next()
+                .is_some_and(|value| value.as_bytes().is_empty())
+                && protocols.next().is_none();
+            if single_empty {
+                response
+                    .headers_mut()
+                    .remove(http::header::SEC_WEBSOCKET_PROTOCOL);
+            }
+        }
+        Ok(response)
+    }
+}
+
+enum UpstreamWebsocket {
+    // Box the socket to keep the enum small.
+    Established {
+        socket: Box<reqwest_websocket::WebSocket>,
+        protocol: Option<String>,
+    },
+    Rejected(reqwest::Response),
+}
+
+async fn forward_rejected_upstream_response(
+    response: reqwest::Response,
+) -> anyhow::Result<Response> {
+    let status = response.status();
+    let headers = response.headers().clone();
+    let body = response
+        .bytes()
+        .await
+        .context("reading Kubernetes API response")?;
+
+    Ok(copy_response_headers(Response::builder().status(status), &headers).body(body))
+}
+
+/// Connect before replying downstream so both sides use the selected protocol.
+/// Audit a 101 before validation: the cluster has already started the stream.
+async fn connect_upstream_websocket(
+    client: &reqwest::Client,
+    url: Url,
+    protocols: &[String],
+    on_switching_protocols: impl FnOnce(),
+) -> anyhow::Result<UpstreamWebsocket> {
+    let response = KubernetesWebsocketRequest(client.get(url))
+        .upgrade()
+        .protocols(protocols.to_vec())
+        .send()
+        .await
+        .context("sending websocket request to Kubernetes API")?;
+    if response.status() != http::StatusCode::SWITCHING_PROTOCOLS {
+        return Ok(UpstreamWebsocket::Rejected(response.into_inner()));
+    }
+    on_switching_protocols();
+    let socket = response
+        .into_websocket()
+        .await
+        .context("negotiating websocket connection with Kubernetes")?;
+    let protocol = socket.protocol().map(ToOwned::to_owned);
+    Ok(UpstreamWebsocket::Established {
+        socket: Box::new(socket),
+        protocol,
+    })
+}
+
+/// Match Poem's downstream parsing: only the first header, split on commas.
+/// Clients such as kubeterm may offer no subprotocol.
+fn requested_websocket_protocols(headers: &http::HeaderMap) -> Vec<String> {
+    headers
+        .get(http::header::SEC_WEBSOCKET_PROTOCOL)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|protocol| !protocol.is_empty())
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
+    /// Read the full request head before replying so unread bytes cannot reset
+    /// the mock connection when the server task exits.
+    async fn drain_request_head(stream: &mut tokio::net::TcpStream) {
+        use tokio::io::AsyncReadExt;
+
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 1024];
+        loop {
+            let n = stream.read(&mut chunk).await.unwrap();
+            assert_ne!(n, 0, "peer closed before sending a full request head");
+            buf.extend_from_slice(&chunk[..n]);
+            if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+        }
+    }
+
+    #[test]
+    fn websocket_protocols_are_optional_and_read_from_the_first_header_only() {
+        use super::requested_websocket_protocols;
+
+        let mut headers = http::HeaderMap::new();
+        assert!(requested_websocket_protocols(&headers).is_empty());
+
+        headers.append(
+            http::header::SEC_WEBSOCKET_PROTOCOL,
+            http::HeaderValue::from_static("v5.channel.k8s.io, v4.channel.k8s.io"),
+        );
+        assert_eq!(
+            requested_websocket_protocols(&headers),
+            ["v5.channel.k8s.io", "v4.channel.k8s.io"]
+        );
+
+        // Match Poem: a repeated header must not extend the upstream offer.
+        headers.append(
+            http::header::SEC_WEBSOCKET_PROTOCOL,
+            http::HeaderValue::from_static("channel.k8s.io"),
+        );
+        assert_eq!(
+            requested_websocket_protocols(&headers),
+            ["v5.channel.k8s.io", "v4.channel.k8s.io"]
+        );
+    }
+
+    #[tokio::test]
+    #[allow(clippy::result_large_err)] // tungstenite's server callback fixes the error type.
+    async fn library_upgrade_keeps_protocol_negotiation_strict() {
+        use futures::StreamExt;
+        use tokio::net::TcpListener;
+        use tokio_tungstenite::tungstenite::handshake::server::{
+            ErrorResponse, Request as HandshakeRequest, Response as HandshakeResponse,
+        };
+
+        use super::{UpstreamWebsocket, connect_upstream_websocket};
+
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let cases: &[(&[&str], &[&str], bool)] = &[
+            (&[], &[""], true),
+            (&[], &["unrequested"], false),
+            (&[], &["", ""], false),
+            (
+                &["v5.channel.k8s.io", "v4.channel.k8s.io"],
+                &["v4.channel.k8s.io"],
+                true,
+            ),
+            (&["v4.channel.k8s.io"], &[""], false),
+        ];
+        for &(offered, selected, succeeds) in cases {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let callback = |request: &HandshakeRequest, mut response: HandshakeResponse| {
+                    let expected = (!offered.is_empty()).then(|| offered.join(", "));
+                    assert_eq!(
+                        request
+                            .headers()
+                            .get(http::header::SEC_WEBSOCKET_PROTOCOL)
+                            .map(|value| value.to_str().unwrap()),
+                        expected.as_deref(),
+                    );
+                    for protocol in selected {
+                        response.headers_mut().append(
+                            http::header::SEC_WEBSOCKET_PROTOCOL,
+                            http::HeaderValue::from_str(protocol).unwrap(),
+                        );
+                    }
+                    Ok::<_, ErrorResponse>(response)
+                };
+                let mut socket = tokio_tungstenite::accept_hdr_async(stream, callback)
+                    .await
+                    .unwrap();
+                // Keep the upgraded connection alive until the client drops it.
+                let _ = socket.next().await;
+            });
+            let client = reqwest::Client::builder().http1_only().build().unwrap();
+            let url = url::Url::parse(&format!("http://{address}/exec")).unwrap();
+            let protocols = offered.iter().map(|p| p.to_string()).collect::<Vec<_>>();
+            let result = connect_upstream_websocket(&client, url, &protocols, || {}).await;
+            assert_eq!(
+                result.is_ok(),
+                succeeds,
+                "offered={offered:?}, selected={selected:?}"
+            );
+            if let Ok(UpstreamWebsocket::Established { socket, protocol }) = result {
+                assert_eq!(
+                    protocol.as_deref(),
+                    selected.first().copied().filter(|p| !p.is_empty())
+                );
+                drop(socket);
+            }
+            server.await.unwrap();
+        }
+    }
+
+    /// Audit a 101 before validating its handshake: the stream has already started.
+    #[tokio::test]
+    async fn started_callback_runs_on_101_even_when_validation_then_fails() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::TcpListener;
+        use url::Url;
+
+        use super::connect_upstream_websocket;
+
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            drain_request_head(&mut stream).await;
+            stream
+                .write_all(
+                    b"HTTP/1.1 101 Switching Protocols\r\n\
+                      Connection: Upgrade\r\n\
+                      Upgrade: websocket\r\n\
+                      Sec-WebSocket-Accept: not-the-right-accept-key\r\n\
+                      \r\n",
+                )
+                .await
+                .unwrap();
+        });
+
+        let client = reqwest::Client::builder().http1_only().build().unwrap();
+        let url = Url::parse(&format!("http://127.0.0.1:{port}/exec")).unwrap();
+
+        let started = AtomicBool::new(false);
+        let result = connect_upstream_websocket(&client, url, &[], || {
+            started.store(true, Ordering::SeqCst);
+        })
+        .await;
+
+        assert!(
+            result.is_err(),
+            "a bogus Sec-WebSocket-Accept must fail handshake validation"
+        );
+        assert!(
+            started.load(Ordering::SeqCst),
+            "the started callback must run as soon as the status is 101, \
+             before validation - not only once validation also succeeds"
+        );
+
+        server.await.unwrap();
+    }
+
+    /// Preserve the API server's refusal and do not report the stream as started.
+    #[tokio::test]
+    async fn upstream_rejection_is_forwarded_with_its_status_and_body() {
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::TcpListener;
+        use url::Url;
+
+        use super::{
+            UpstreamWebsocket, connect_upstream_websocket, forward_rejected_upstream_response,
+        };
+
+        // Reqwest constructs a TLS connector even for plain HTTP requests.
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let body = br#"{"kind":"Status","status":"Failure","reason":"Forbidden"}"#;
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            // The request itself doesn't matter for this test; only the
+            // response the mock server answers with does.
+            drain_request_head(&mut stream).await;
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            stream.write_all(body).await.unwrap();
+        });
+
+        let client = reqwest::Client::builder().http1_only().build().unwrap();
+        let url = Url::parse(&format!("http://127.0.0.1:{port}/exec")).unwrap();
+
+        let UpstreamWebsocket::Rejected(response) =
+            connect_upstream_websocket(&client, url, &[], || {
+                panic!("a rejected upgrade must not run the started callback")
+            })
+            .await
+            .unwrap()
+        else {
+            panic!("expected the upgrade to be rejected, not established");
+        };
+        assert_eq!(response.status(), http::StatusCode::FORBIDDEN);
+
+        let forwarded = forward_rejected_upstream_response(response).await.unwrap();
+        assert_eq!(forwarded.status(), http::StatusCode::FORBIDDEN);
+        assert_eq!(
+            forwarded.headers().get(http::header::CONTENT_TYPE).unwrap(),
+            "application/json"
+        );
+        assert_eq!(
+            forwarded.into_body().into_bytes().await.unwrap().as_ref(),
+            body
+        );
+
+        server.await.unwrap();
+    }
+
     use std::collections::HashMap;
 
     use super::{is_impersonation_header, named_target_path, redact_headers};
