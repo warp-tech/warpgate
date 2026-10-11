@@ -524,12 +524,17 @@ pub async fn create_authenticated_client(
 /// Keeps reqwest's default (resend after a graceful GOAWAY or REFUSED_STREAM)
 /// and adds connections that failed to come up: TCP connect or TLS handshake.
 /// Nothing has been sent at that point, so resending is safe for any method.
+/// Connect timeouts are not resent: each attempt would wait out the full
+/// timeout again against an unreachable server.
 /// SNI-routing front ends can miss a ClientHello that spans two TCP segments
 /// and answer with their default certificate (kubernetes/ingress-nginx#11491),
 /// and a ClientHello with a post-quantum key share is big enough to do that.
 fn upstream_retry_policy(host: String) -> reqwest::retry::Builder {
     reqwest::retry::for_host(host).classify_fn(|req_rep| match req_rep.error() {
-        Some(error) if is_safe_to_resend(error) => req_rep.retryable(),
+        Some(error) if is_safe_to_resend(error) => {
+            debug!(url = %req_rep.uri(), %error, "Resending Kubernetes upstream request");
+            req_rep.retryable()
+        }
         _ => req_rep.success(),
     })
 }
@@ -537,7 +542,7 @@ fn upstream_retry_policy(host: String) -> reqwest::retry::Builder {
 fn is_safe_to_resend(error: &(dyn std::error::Error + 'static)) -> bool {
     if error
         .downcast_ref::<reqwest::Error>()
-        .is_some_and(reqwest::Error::is_connect)
+        .is_some_and(|error| error.is_connect() && !error.is_timeout())
     {
         return true;
     }
@@ -659,22 +664,32 @@ fn normalize_certificate_pem(pem: &str) -> String {
 mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
 
     use tokio::net::TcpListener;
 
     use super::upstream_retry_policy;
 
-    /// Accepts connections and closes them straight away, so every TLS
-    /// handshake fails. Returns a URL on it and a count of accepted connections.
-    async fn closing_server() -> (String, Arc<AtomicUsize>) {
+    fn client_builder() -> reqwest::ClientBuilder {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        reqwest::Client::builder()
+    }
+
+    /// Accepts connections and either closes them straight away or holds them
+    /// open without answering, so every TLS handshake fails or stalls.
+    /// Returns a URL on it and a count of accepted connections.
+    async fn tls_failing_server(stall: bool) -> (String, Arc<AtomicUsize>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("https://{}/version", listener.local_addr().unwrap());
         let accepted = Arc::new(AtomicUsize::new(0));
         let counter = accepted.clone();
         tokio::spawn(async move {
+            let mut held = vec![];
             while let Ok((stream, _)) = listener.accept().await {
                 counter.fetch_add(1, Ordering::SeqCst);
-                drop(stream);
+                if stall {
+                    held.push(stream);
+                }
             }
         });
         (url, accepted)
@@ -704,8 +719,8 @@ mod tests {
         (url, requests)
     }
 
-    async fn attempts(client: reqwest::Client) -> usize {
-        let (url, accepted) = closing_server().await;
+    async fn attempts(client: reqwest::Client, stall: bool) -> usize {
+        let (url, accepted) = tls_failing_server(stall).await;
         let error = client.get(&url).send().await.unwrap_err();
         assert!(error.is_connect(), "{error:?}");
         accepted.load(Ordering::SeqCst)
@@ -713,17 +728,25 @@ mod tests {
 
     #[tokio::test]
     async fn failed_handshakes_are_resent() {
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-
-        let client = reqwest::Client::builder()
+        let client = client_builder()
             .retry(upstream_retry_policy("127.0.0.1".into()))
             .build()
             .unwrap();
         // The first attempt and two resends.
-        assert_eq!(attempts(client).await, 3);
+        assert_eq!(attempts(client, false).await, 3);
 
-        let client = reqwest::Client::builder().build().unwrap();
-        assert_eq!(attempts(client).await, 1);
+        let client = client_builder().build().unwrap();
+        assert_eq!(attempts(client, false).await, 1);
+    }
+
+    #[tokio::test]
+    async fn connect_timeouts_are_not_resent() {
+        let client = client_builder()
+            .connect_timeout(Duration::from_millis(100))
+            .retry(upstream_retry_policy("127.0.0.1".into()))
+            .build()
+            .unwrap();
+        assert_eq!(attempts(client, true).await, 1);
     }
 
     #[tokio::test]
@@ -732,7 +755,7 @@ mod tests {
         // retries, so this checks the h2 branch of is_safe_to_resend keeps them.
         let requests = async |policy| {
             let (url, requests) = refusing_server().await;
-            let client = reqwest::Client::builder()
+            let client = client_builder()
                 .http2_prior_knowledge()
                 .retry(policy)
                 .build()
