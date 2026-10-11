@@ -12,6 +12,10 @@ base64 = { version = "0.22", default-features = false }
 bytes.workspace = true
 dashmap = { version = "6.2", default-features = false }
 futures.workspace = true
+# Only to downcast reqwest's errors (server/auth.rs). Keep it on the h2 version
+# reqwest uses: if the two drift apart, GOAWAY/REFUSED_STREAM resends silently
+# stop, which refused_streams_are_still_resent catches.
+h2 = { version = "0.4", default-features = false }
 http.workspace = true
 md5 = { version = "0.8", default-features = false }
 percent-encoding = { version = "2.1", default-features = false }
