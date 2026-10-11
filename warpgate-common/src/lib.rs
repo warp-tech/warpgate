@@ -6,6 +6,7 @@ pub mod consts;
 pub mod encryption;
 mod error;
 pub mod eventhub;
+pub mod fuzzy;
 pub mod helpers;
 pub mod http_headers;
 pub mod secrets;
