@@ -405,6 +405,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "impuls42",
+      "name": "Alex K",
+      "avatar_url": "https://avatars.githubusercontent.com/u/74369328?v=4",
+      "profile": "https://github.com/impuls42",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
