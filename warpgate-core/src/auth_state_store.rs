@@ -320,20 +320,32 @@ impl AuthStateStore {
                 let Some(sink) = &request_sink else {
                     continue;
                 };
-                if let Err(error) = crate::approvals::advertise_user_request(
+
+                // bypass before advertising
+                match crate::approvals::try_web_approval_bypass(&sink.db, &sink.cluster, &watched)
+                    .await
+                {
+                    Ok(true) => continue,
+                    Ok(false) => {}
+                    Err(error) => error!(%error, "Failed to check for a remembered web approval"),
+                }
+
+                match crate::approvals::advertise_user_request(
                     &sink.db,
                     sink.cluster.node_id,
                     &watched,
                 )
                 .await
                 {
-                    error!(%error, "Failed to record a session approval request");
+                    Ok(true) => sink
+                        .cluster
+                        .notify_global(ClusterNotification::WebAuthRequested {
+                            session_id: id,
+                            user_id,
+                        }),
+                    Ok(false) => {}
+                    Err(error) => error!(%error, "Failed to record a session approval request"),
                 }
-                sink.cluster
-                    .notify_global(ClusterNotification::WebAuthRequested {
-                        session_id: id,
-                        user_id,
-                    });
             }
         });
 
