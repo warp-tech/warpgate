@@ -2,7 +2,7 @@
 
 use std::fs::{File, create_dir_all};
 use std::io::Write;
-use std::net::{Ipv6Addr, SocketAddr, ToSocketAddrs};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -26,6 +26,28 @@ use warpgate_db_entities::{Parameters, Role, User, UserRoleAssignment};
 use crate::commands::common::{assert_interactive_terminal, is_docker};
 use crate::config::load_config;
 use crate::{Cli, Commands};
+
+#[derive(Clone, Copy, Default, clap::ValueEnum)]
+pub enum IfConfigExists {
+    #[default]
+    Fail,
+    Skip,
+    /// Only create the admin user
+    EnsureAdmin,
+}
+
+fn unattended_admin_password(explicit: Option<&String>) -> Secret<String> {
+    if let Some(password) = explicit
+        .cloned()
+        .or_else(|| std::env::var("WARPGATE_ADMIN_PASSWORD").ok())
+    {
+        Secret::new(password)
+    } else {
+        error!("You must supply the admin password either through the --admin-password option");
+        error!("or the WARPGATE_ADMIN_PASSWORD environment variable.");
+        std::process::exit(1);
+    }
+}
 
 fn prompt_endpoint(prompt: &str, default: &ListenEndpoint) -> ListenEndpoint {
     loop {
@@ -54,9 +76,38 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
     info!("Welcome to Warpgate {version}");
 
     if cli.config.exists() {
-        error!("Config file already exists at {}.", cli.config.display());
-        error!("To generate a new config file, rename or delete the existing one first.");
-        std::process::exit(1);
+        let (if_config_exists, admin_password) = match &cli.command {
+            Commands::UnattendedSetup {
+                if_config_exists,
+                admin_password,
+                ..
+            } => (*if_config_exists, admin_password.as_ref()),
+            _ => (IfConfigExists::Fail, None),
+        };
+        match if_config_exists {
+            IfConfigExists::Fail => {
+                error!("Config file already exists at {}.", cli.config.display());
+                error!("To generate a new config file, rename or delete the existing one first.");
+                std::process::exit(1);
+            }
+            IfConfigExists::Skip => {
+                info!(
+                    "Config file already exists at {}, skipping setup.",
+                    cli.config.display()
+                );
+                return Ok(());
+            }
+            IfConfigExists::EnsureAdmin => {
+                info!("Config file already exists at {}", cli.config.display());
+                return crate::commands::create_user::command(
+                    params,
+                    BUILTIN_ADMIN_USERNAME,
+                    &unattended_admin_password(admin_password),
+                    Some(&BUILTIN_ADMIN_ROLE_NAME.to_string()),
+                )
+                .await;
+            }
+        }
     }
 
     if let Commands::Setup { .. } = cli.command {
@@ -111,6 +162,25 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
         }
     }
 
+    let provided_tls = match &cli.command {
+        Commands::UnattendedSetup {
+            tls_certificate: Some(certificate),
+            tls_key: Some(key),
+            ..
+        } => Some((
+            std::fs::read(certificate)
+                .with_context(|| format!("--tls-certificate: {}", certificate.display()))?,
+            std::fs::read(key).with_context(|| format!("--tls-key: {}", key.display()))?,
+        )),
+        _ => None,
+    };
+
+    let listen_address = match &cli.command {
+        Commands::UnattendedSetup { listen_address, .. } => *listen_address,
+        _ => IpAddr::from(Ipv6Addr::UNSPECIFIED),
+    };
+    let listen_on = |port: u16| ListenEndpoint::from(SocketAddr::new(listen_address, port));
+
     // ---
 
     let data_path: String = if let Commands::UnattendedSetup { data_path, .. } = &cli.command {
@@ -161,8 +231,7 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
     });
 
     if let Commands::UnattendedSetup { http_port, .. } = &cli.command {
-        store.http.listen =
-            ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), *http_port));
+        store.http.listen = listen_on(*http_port);
     } else {
         if !is_docker() {
             store.http.listen = prompt_endpoint(
@@ -175,8 +244,7 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
     if let Commands::UnattendedSetup { ssh_port, .. } = &cli.command {
         if let Some(ssh_port) = ssh_port {
             store.ssh.enable = true;
-            store.ssh.listen =
-                ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), *ssh_port));
+            store.ssh.listen = listen_on(*ssh_port);
         }
     } else {
         if is_docker() {
@@ -204,8 +272,7 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
     if let Commands::UnattendedSetup { mysql_port, .. } = &cli.command {
         if let Some(mysql_port) = mysql_port {
             store.mysql.enable = true;
-            store.mysql.listen =
-                ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), *mysql_port));
+            store.mysql.listen = listen_on(*mysql_port);
         }
     } else {
         if is_docker() {
@@ -228,10 +295,7 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
     if let Commands::UnattendedSetup { postgres_port, .. } = &cli.command {
         if let Some(postgres_port) = postgres_port {
             store.postgres.enable = true;
-            store.postgres.listen = ListenEndpoint::from(SocketAddr::new(
-                Ipv6Addr::UNSPECIFIED.into(),
-                *postgres_port,
-            ));
+            store.postgres.listen = listen_on(*postgres_port);
         }
     } else {
         if is_docker() {
@@ -257,10 +321,7 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
     {
         if let Some(kubernetes_port) = kubernetes_port {
             store.kubernetes.enable = true;
-            store.kubernetes.listen = ListenEndpoint::from(SocketAddr::new(
-                Ipv6Addr::UNSPECIFIED.into(),
-                *kubernetes_port,
-            ));
+            store.kubernetes.listen = listen_on(*kubernetes_port);
         }
     } else {
         if is_docker() {
@@ -285,8 +346,7 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
     if let Commands::UnattendedSetup { vnc_port, .. } = &cli.command {
         if let Some(vnc_port) = vnc_port {
             store.vnc.enable = true;
-            store.vnc.listen =
-                ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), *vnc_port));
+            store.vnc.listen = listen_on(*vnc_port);
         }
     } else {
         if !is_docker() {
@@ -307,8 +367,7 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
     if let Commands::UnattendedSetup { rdp_port, .. } = &cli.command {
         if let Some(rdp_port) = rdp_port {
             store.rdp.enable = true;
-            store.rdp.listen =
-                ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), *rdp_port));
+            store.rdp.listen = listen_on(*rdp_port);
         }
     } else {
         if !is_docker() {
@@ -323,6 +382,20 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
                     &RdpConfig::default().listen,
                 );
             }
+        }
+    }
+
+    if let Commands::UnattendedSetup { .. } = &cli.command {
+        for listen in [
+            &mut store.http.listen,
+            &mut store.ssh.listen,
+            &mut store.mysql.listen,
+            &mut store.postgres.listen,
+            &mut store.kubernetes.listen,
+            &mut store.vnc.listen,
+            &mut store.rdp.listen,
+        ] {
+            *listen = listen_on(listen.address().port());
         }
     }
 
@@ -375,27 +448,15 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
 
     // ---
 
-    let admin_password = Secret::new(
-        if let Commands::UnattendedSetup { admin_password, .. } = &cli.command {
-            if let Some(admin_password) = admin_password {
-                admin_password.to_owned()
-            } else {
-                if let Ok(admin_password) = std::env::var("WARPGATE_ADMIN_PASSWORD") {
-                    admin_password
-                } else {
-                    error!(
-                        "You must supply the admin password either through the --admin-password option"
-                    );
-                    error!("or the WARPGATE_ADMIN_PASSWORD environment variable.");
-                    std::process::exit(1);
-                }
-            }
-        } else {
+    let admin_password = if let Commands::UnattendedSetup { admin_password, .. } = &cli.command {
+        unattended_admin_password(admin_password.as_ref())
+    } else {
+        Secret::new(
             dialoguer::Password::with_theme(&theme)
                 .with_prompt("Set a password for the Warpgate admin user")
-                .interact()?
-        },
-    );
+                .interact()?,
+        )
+    };
 
     if let Commands::UnattendedSetup { external_host, .. } = &cli.command {
         store.external_host = external_host.clone();
@@ -404,7 +465,7 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
     // ---
 
     info!("Generated configuration:");
-    let yaml = serde_yaml::to_string(&store)?;
+    let yaml = yaml_serde::to_string(&store)?;
     println!("{yaml}");
 
     let yaml = format!(
@@ -476,18 +537,27 @@ pub async fn command(cli: &Cli, params: &GlobalParams) -> Result<()> {
     UserRoleAssignment::Entity::idempotent_grant(&db, user.id, access_role.id, None).await?;
 
     {
-        info!("Generating a TLS certificate");
-        let cert = generate_simple_self_signed(vec![
-            "warpgate.local".to_string(),
-            "localhost".to_string(),
-        ])?;
+        let (certificate, key) = if let Some(tls) = provided_tls {
+            info!("Installing the provided TLS certificate");
+            tls
+        } else {
+            info!("Generating a TLS certificate");
+            let cert = generate_simple_self_signed(vec![
+                "warpgate.local".to_string(),
+                "localhost".to_string(),
+            ])?;
+            (
+                cert.cert.pem().into_bytes(),
+                cert.signing_key.serialize_pem().into_bytes(),
+            )
+        };
 
         let certificate_path = params
             .paths_relative_to()
             .join(&config.store.http.certificate);
         let key_path = params.paths_relative_to().join(&config.store.http.key);
-        std::fs::write(&certificate_path, cert.cert.pem())?;
-        std::fs::write(&key_path, cert.signing_key.serialize_pem())?;
+        std::fs::write(&certificate_path, certificate)?;
+        std::fs::write(&key_path, key)?;
         if params.should_secure_files() {
             secure_file(&certificate_path)?;
             secure_file(&key_path)?;

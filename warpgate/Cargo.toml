@@ -37,7 +37,7 @@ sea-orm.workspace = true
 serde.workspace = true
 serde_ignored = "0.1"
 serde_json.workspace = true
-serde_yaml = { version = "0.9", default-features = false }
+yaml_serde = { version = "0.10", default-features = false }
 time = { version = "0.3", default-features = false }
 tokio.workspace = true
 tokio-stream = { workspace = true, features = ["sync"] }

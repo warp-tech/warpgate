@@ -3,6 +3,7 @@ mod config;
 mod listener_supervisor;
 mod logging;
 
+use std::net::IpAddr;
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -119,6 +120,30 @@ pub(crate) enum Commands {
         /// Import SSH client key files (client-ed25519, client-rsa) from this dir
         #[clap(long)]
         import_ssh_client_keys: Option<PathBuf>,
+
+        /// What to do when the config file already exists
+        #[clap(long, value_enum, default_value_t)]
+        if_config_exists: crate::commands::setup::IfConfigExists,
+
+        /// Address all listeners bind to
+        #[clap(long, default_value = "::")]
+        listen_address: IpAddr,
+
+        /// Install this TLS certificate instead of generating a self-signed one
+        #[clap(long, requires = "tls_key")]
+        tls_certificate: Option<PathBuf>,
+
+        /// Private key of --tls-certificate
+        #[clap(long, requires = "tls_certificate")]
+        tls_key: Option<PathBuf>,
+    },
+    #[command(hide = true)]
+    InternalInstallFiles {
+        /// Replace `$NAME` with the value of these environment variables (space-separated)
+        #[clap(long, value_delimiter = ' ')]
+        substitute_env: Vec<String>,
+        source: PathBuf,
+        destination: PathBuf,
     },
     /// Show Warpgate's SSH client keys
     ClientKeys,
@@ -220,6 +245,16 @@ async fn _main() -> Result<()> {
         Commands::Setup { .. } | Commands::UnattendedSetup { .. } => {
             crate::commands::setup::command(&cli, &params).await
         }
+        Commands::InternalInstallFiles {
+            substitute_env,
+            source,
+            destination,
+        } => crate::commands::internal_install_files::command(
+            &params,
+            substitute_env,
+            source,
+            destination,
+        ),
         Commands::ClientKeys => crate::commands::client_keys::command(&params).await,
         Commands::RecoverAccess { username } => {
             crate::commands::recover_access::command(&params, username.as_ref()).await
