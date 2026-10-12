@@ -7,7 +7,6 @@ use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::encryption::{idempotent_maybe_decrypt, idempotent_maybe_encrypt_secret};
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{
     MaybeSecretRef, SecretRef, SecretResolver, SshHostKeyKind, StoredSecret, WarpgateError,
@@ -45,12 +44,18 @@ pub async fn ensure_host_keys(
         let file = host_key_file(keys_path, kind);
         let pem = if file.exists() {
             let pem = std::fs::read_to_string(&file)?;
-            if idempotent_maybe_decrypt(stored).is_ok_and(|stored| stored == pem) {
+            if stored
+                .reveal()
+                .is_ok_and(|stored| stored.expose_secret() == &pem)
+            {
                 continue;
             }
             info!("Importing SSH host key from {file:?} into the database");
             pem
-        } else if idempotent_maybe_decrypt(stored).is_ok_and(|stored| stored.is_empty()) {
+        } else if stored
+            .reveal()
+            .is_ok_and(|stored| stored.expose_secret().is_empty())
+        {
             info!("Generating SSH host key ({kind:?})");
             kind.generate_pem()?
         } else {
@@ -58,8 +63,8 @@ pub async fn ensure_host_keys(
         };
         // CAS write to prevent race between nodes at cluster boot
         Parameters::Entity::update_many()
-            .col_expr(column, Expr::value(idempotent_maybe_encrypt_secret(&pem)?))
-            .filter(column.eq(stored.as_str()))
+            .col_expr(column, Expr::value(StoredSecret::encrypted(pem)?))
+            .filter(column.eq(stored.clone()))
             .exec(db)
             .await?;
     }
@@ -71,12 +76,7 @@ pub async fn load_host_keys(db: &DatabaseConnection) -> Result<Vec<PrivateKey>, 
     let row = Parameters::Entity::get(db).await?;
     [row.ssh_host_key_ed25519, row.ssh_host_key_rsa]
         .into_iter()
-        .map(|stored| {
-            Ok(decode_secret_key(
-                &idempotent_maybe_decrypt(&stored)?,
-                None,
-            )?)
-        })
+        .map(|stored| Ok(decode_secret_key(stored.reveal()?.expose_secret(), None)?))
         .collect()
 }
 
@@ -147,9 +147,7 @@ pub async fn import_client_key(
         db,
         label,
         public_key,
-        MaybeSecretRef::Inline(StoredSecret::from(idempotent_maybe_encrypt_secret(
-            &secret_key,
-        )?)),
+        MaybeSecretRef::Inline(StoredSecret::encrypted(secret_key)?),
         is_default,
     )
     .await
