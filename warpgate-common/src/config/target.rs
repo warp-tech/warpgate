@@ -757,4 +757,34 @@ mod tests {
         assert_eq!(snapshot["mysql"]["host"], "db");
         assert_eq!(snapshot["mysql"]["username"], "root");
     }
+
+    const MALFORMED: &str = "secret://not a valid ref";
+
+    fn malformed_options() -> TargetOptions {
+        let options: TargetOptions = serde_json::from_value(serde_json::json!({
+            "mysql": {"host": "db", "auth": {"kind": "password", "password": MALFORMED}}
+        }))
+        .unwrap();
+        assert!(matches!(
+            &options,
+            TargetOptions::MySql(mysql)
+                if mysql.auth == db_password_auth(MaybeSecretRef::Malformed(MALFORMED.into()))
+        ));
+        options
+    }
+
+    /// A stored string that only looks like a reference may be a legacy
+    /// plaintext password.
+    #[test]
+    fn malformed_reference_is_redacted() {
+        let snapshot = serde_json::to_value(malformed_options().redacted()).unwrap();
+
+        assert_eq!(snapshot["mysql"]["auth"]["password"], "", "{snapshot}");
+        assert_eq!(snapshot["mysql"]["host"], "db");
+    }
+
+    #[test]
+    fn malformed_reference_is_a_stored_secret() {
+        assert_eq!(malformed_options().stored_secrets_mut().len(), 1);
+    }
 }
