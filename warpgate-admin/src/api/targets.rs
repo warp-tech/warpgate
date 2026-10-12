@@ -8,10 +8,9 @@ use sea_orm::{
 };
 use tracing::warn;
 use uuid::Uuid;
-use warpgate_common::encryption::idempotent_maybe_encrypt_secret;
 use warpgate_common::{
-    AdminPermission, Role as RoleConfig, SSHTargetAuth, Target as TargetConfig, TargetOptions,
-    TargetSSHOptions, WarpgateError, map_stored_target_secrets, redact_target_secrets,
+    AdminPermission, Role as RoleConfig, SSHTargetAuth, StoredSecrets, Target as TargetConfig,
+    TargetOptions, TargetSSHOptions, WarpgateError,
 };
 use warpgate_common_http::errors::invalid_field;
 use warpgate_db_entities::Target::fuzzy_filter_targets;
@@ -24,21 +23,21 @@ use crate::api::common::is_unique_violation;
 
 /// Encrypt and serialize options
 fn serialize_options_for_storage(
-    options: TargetOptions,
+    mut options: TargetOptions,
 ) -> Result<serde_json::Value, WarpgateError> {
-    let mut value = serde_json::to_value(options).map_err(WarpgateError::from)?;
-    map_stored_target_secrets(&mut value, &mut idempotent_maybe_encrypt_secret)?;
-    Ok(value)
+    options.encrypt_all()?;
+    Ok(serde_json::to_value(options)?)
 }
 
 pub(crate) fn maybe_redacted_target(
     admin: &AdminContext,
-    mut model: Target::Model,
+    model: Target::Model,
 ) -> Result<TargetConfig, WarpgateError> {
+    let mut target: TargetConfig = model.try_into()?;
     if !admin.has_permission(AdminPermission::TargetsEdit) {
-        redact_target_secrets(&mut model.options);
+        target.redact();
     }
-    model.try_into().map_err(WarpgateError::from)
+    Ok(target)
 }
 
 #[derive(Object)]

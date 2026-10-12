@@ -305,7 +305,7 @@ pub fn is_envelope(value: &str) -> bool {
 }
 
 /// Encrypt if encryption is enabled and value is plaintext
-pub fn idempotent_maybe_encrypt_secret(value: &str) -> Result<String, EncryptionError> {
+pub(crate) fn idempotent_maybe_encrypt_secret(value: &str) -> Result<String, EncryptionError> {
     match env_keyring().primary() {
         Some(key) if !is_envelope(value) => key.encrypt(value),
         _ => Ok(value.to_owned()),
@@ -313,7 +313,7 @@ pub fn idempotent_maybe_encrypt_secret(value: &str) -> Result<String, Encryption
 }
 
 /// Decrypt if encrypted, else passthrough
-pub fn idempotent_maybe_decrypt(value: &str) -> Result<String, EncryptionError> {
+pub(crate) fn idempotent_maybe_decrypt(value: &str) -> Result<String, EncryptionError> {
     {
         let ring: &Keyring = env_keyring();
         ring.decrypt(value)
@@ -321,7 +321,7 @@ pub fn idempotent_maybe_decrypt(value: &str) -> Result<String, EncryptionError> 
 }
 
 /// Bring a stored value up to date in terms of encryption
-pub fn maybe_reencrypt_str(value: &str) -> Result<String, EncryptionError> {
+pub(crate) fn maybe_reencrypt_str(value: &str) -> Result<String, EncryptionError> {
     env_keyring().reencrypt(value)
 }
 
