@@ -76,9 +76,7 @@ pub enum ConnectionError {
     JumpHostTargetNotFound,
 
     #[error("SSH handshake timed out after {timeout:?}")]
-    HandshakeTimeout {
-        timeout: Duration
-    },
+    HandshakeTimeout { timeout: Duration },
 
     #[error(transparent)]
     Warpgate(#[from] WarpgateError),
@@ -762,6 +760,14 @@ impl Connector {
     ) -> Result<Connection, ConnectionError> {
         let mut iter = chain.into_iter();
         let first = iter.next().ok_or(ConnectionError::Resolve)?;
+        let handshake_timeout = self
+            .services
+            .config
+            .lock()
+            .await
+            .store
+            .ssh
+            .target_handshake_timeout;
 
         let config = self.build_ssh_config(&first).await;
         let address_str = format!("{}:{}", first.host, first.port);
@@ -780,7 +786,7 @@ impl Connector {
         };
         let fut = russh::client::connect(config, address, handler);
         let (mut session, mut active_rx) = self
-            .wait_for_connection(&first, fut, event_rx, false)
+            .wait_for_connection(&first, fut, event_rx, handshake_timeout)
             .boxed()
             .await?;
 
@@ -791,16 +797,6 @@ impl Connector {
                 port = ssh_options.port,
                 "Opening direct-tcpip channel through jump host"
             );
-            let channel = session
-                .channel_open_direct_tcpip(
-                    ssh_options.host.clone(),
-                    u32::from(ssh_options.port),
-                    "localhost".to_string(),
-                    0,
-                )
-                .await
-                .map_err(ConnectionError::Ssh)?;
-            let stream = channel.into_stream();
             let config = self.build_ssh_config(&ssh_options).await;
             let (event_tx, event_rx) = unbounded_channel();
             let handler = ClientHandler {
@@ -809,9 +805,21 @@ impl Connector {
                 services: self.services.clone(),
                 session_id: self.id,
             };
-            let fut = russh::client::connect_stream(config, stream, handler);
+            // The jump host confirms the channel only once its own TCP connect to the
+            // next hop succeeds, so the open belongs under the same handshake deadline.
+            let fut = async {
+                let channel = session
+                    .channel_open_direct_tcpip(
+                        ssh_options.host.clone(),
+                        u32::from(ssh_options.port),
+                        "localhost".to_string(),
+                        0,
+                    )
+                    .await?;
+                russh::client::connect_stream(config, channel.into_stream(), handler).await
+            };
             let (new_session, new_rx) = self
-                .wait_for_connection(&ssh_options, fut, event_rx, false)
+                .wait_for_connection(&ssh_options, fut, event_rx, handshake_timeout)
                 .boxed()
                 .await?;
             session = new_session;
@@ -826,21 +834,11 @@ impl Connector {
         ssh_options: &TargetSSHOptions,
         fut_connect: Fut,
         mut event_rx: UnboundedReceiver<ClientHandlerEvent>,
-        _is_jump_host: bool,
+        handshake_timeout: Duration,
     ) -> Result<(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>), ConnectionError>
     where
         Fut: Future<Output = Result<Handle<ClientHandler>, ClientHandlerError>>,
     {
-        let handshake_timeout = {
-            self.services
-                .config
-                .lock()
-                .await
-                .store
-                .ssh
-                .target_handshake_timeout
-        };
-
         pin_mut!(fut_connect);
 
         let deadline = tokio::time::sleep(handshake_timeout);

@@ -458,8 +458,9 @@ pub struct SshConfig {
     #[schemars(with = "Option<String>")]
     pub keepalive_interval: Option<Duration>,
 
-    /// How long to wait for a target to finish the SSH handshake. Some targets
-    /// accept the connection and then never reply. Set to `0s` to wait forever.
+    /// Deadline for a target to accept the connection and complete key exchange.
+    /// Covers the TCP connect (or the direct-tcpip hop through a jump host) and the
+    /// SSH handshake, but not authentication. Set to `0s` to wait forever.
     #[serde(
         default = "_default_ssh_target_handshake_timeout",
         with = "humantime_serde"

@@ -506,7 +506,7 @@
           "default": false
         },
         "target_handshake_timeout": {
-          "description": "How long to wait for a target to finish the SSH handshake. Some targets\naccept the connection and then never reply. Set to `0s` to wait forever.",
+          "description": "Deadline for a target to accept the connection and complete key exchange.\nCovers the TCP connect (or the direct-tcpip hop through a jump host) and the\nSSH handshake, but not authentication. Set to `0s` to wait forever.",
           "type": "string",
           "default": "30s"
         }
