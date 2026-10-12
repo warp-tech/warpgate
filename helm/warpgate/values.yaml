@@ -7,7 +7,7 @@ replicaCount: 1
 image:
   repository: ghcr.io/warp-tech/warpgate
   pullPolicy: IfNotPresent
-  tag: "0.29.1"
+  tag: "0.30.0-beta.1"
 
 # References to Kubernetes secrets for pulling images (if using a private registry)
 imagePullSecrets: []
@@ -64,10 +64,9 @@ affinity: {}
 #
 # Expected keys: client-ed25519, client-rsa, host-ed25519, host-rsa.
 #
-# job mode: copied to /data/ssh-keys, where the old config's `ssh.keys` still
-#   points, and mirrored into the database on start. Remove the `ssh.keys`
-#   option, the files and this value to finish the switch.
-# podinit mode: imported into the database by setup on every start.
+# Copied to /data/ssh-keys on every start, where an old config's `ssh.keys`
+# still points, and imported into the database by setup. Remove the `ssh.keys`
+# option, the files and this value to finish the switch.
 ssh_keys_secret: ""
 
 # Secret containing TLS certs (tls.key, tls.crt)
@@ -150,10 +149,9 @@ postgresql:
 setup:
   enabled: true
 
-  # Setup mode:
-  # - job: (recommended) one-time Kubernetes Job runs setup
-  # - podinit: initContainer mode (use only if you don't persist data via PVC)
-  type: "job"
+  # Deprecated and ignored: setup always runs in an init container, which
+  # generates the config on an empty volume and initialises an empty database.
+  # type: "job"
 
   # Secret containing initial admin password
   # Format: <secret-name>/<key>

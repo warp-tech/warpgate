@@ -1,10 +1,9 @@
-{{- if gt (int .Values.replicaCount) 1 }}
-{{- if not (include "warpgate.databaseUrl" .) }}
+{{- $tag := .Values.image.tag | default .Chart.AppVersion }}
+{{- if and (regexMatch "^v?[0-9]+(\\.[0-9]+)+" $tag) (semverCompare "< 0.30.0-0" $tag) }}
+{{- fail (printf "image.tag %q is too old: the setup init container needs Warpgate 0.30 or newer" $tag) }}
+{{- end }}
+{{- if and (gt (int .Values.replicaCount) 1) (not (include "warpgate.databaseUrl" .)) }}
 {{- fail "replicaCount > 1 needs a shared database: set postgresql.enabled=true or setup.databaseUrl" }}
-{{- end }}
-{{- if eq .Values.setup.type "podinit" }}
-{{- fail "replicaCount > 1 needs setup.type=job: podinit re-runs setup against the shared database on every pod start" }}
-{{- end }}
 {{- end }}
 apiVersion: apps/v1
 kind: Deployment
@@ -21,6 +20,11 @@ metadata:
   {{- end }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  {{- if .Values.data.pvc.enabled }}
+  # A ReadWriteOnce volume can't attach to the new pod while the old one holds it
+  strategy:
+    type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       {{- include "warpgate.selectorLabels" . | nindent 6 }}
@@ -51,25 +55,9 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- $podinit := and .Values.setup.enabled (eq .Values.setup.type "podinit") }}
       {{- $seed := include "warpgate.seedSources" . }}
-      {{- if or $podinit $seed }}
+      {{- if or $seed .Values.setup.enabled }}
       initContainers:
-        {{- if $podinit }}
-        - name: {{ .Chart.Name }}-setup
-          {{- include "warpgate.setupContainer" . | trim | nindent 10 }}
-          args:
-            - --config=/data/warpgate.yaml
-            - unattended-setup
-            - --if-config-exists=skip
-            {{- if .Values.ssh_keys_secret }}
-            - --import-ssh-host-keys=/seed/ssh-keys
-            - --import-ssh-client-keys=/seed/ssh-keys
-            {{- end }}
-            {{- include "warpgate.unattendedSetupArgs" . | nindent 12 }}
-          volumeMounts:
-            {{- include "warpgate.initVolumeMounts" . | nindent 12 }}
-        {{- end }}
         {{- if $seed }}
         - name: {{ .Chart.Name }}-install-files
           {{- include "warpgate.setupContainer" . | trim | nindent 10 }}
@@ -80,6 +68,27 @@ spec:
             {{- end }}
             - /seed
             - /data
+          volumeMounts:
+            {{- include "warpgate.initVolumeMounts" . | nindent 12 }}
+        {{- end }}
+        {{- if .Values.setup.enabled }}
+        # Generates the config unless one was seeded above, and in both cases
+        # initialises an empty database (admin user, defaults, SSH keys).
+        - name: {{ .Chart.Name }}-setup
+          {{- include "warpgate.setupContainer" . | trim | nindent 10 }}
+          args:
+            - --config=/data/warpgate.yaml
+            - unattended-setup
+            - --if-config-exists=bootstrap
+            {{- if .Values.ssh_keys_secret }}
+            - --import-ssh-host-keys=/seed/ssh-keys
+            - --import-ssh-client-keys=/seed/ssh-keys
+            {{- end }}
+            {{- if include "warpgate.tlsSecretName" . }}
+            - --tls-certificate=/seed/tls.certificate.pem
+            - --tls-key=/seed/tls.key.pem
+            {{- end }}
+            {{- include "warpgate.unattendedSetupArgs" . | nindent 12 }}
           volumeMounts:
             {{- include "warpgate.initVolumeMounts" . | nindent 12 }}
         {{- end }}
@@ -109,6 +118,13 @@ spec:
             - -c
             - /data/warpgate.yaml
             - run
+          readinessProbe:
+            exec:
+              command:
+                - warpgate
+                - --config=/data/warpgate.yaml
+                - healthcheck
+            timeoutSeconds: 10
           ports:
             {{- if .Values.setup.ssh }}
             - name: ssh

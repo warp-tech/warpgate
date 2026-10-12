@@ -114,8 +114,8 @@ the operator's own when they supply one, otherwise the chart's generated Secret.
 {{/*
 Database URL for setup and for the rendered config. The bundled database's
 password stays out of the manifests as a literal $WARPGATE_DB_PASSWORD:
-Kubernetes expands it in the setup arguments, and `install-files` substitutes
-it into the config.
+Kubernetes expands it in the setup arguments, and `internal-install-files`
+substitutes it into the config.
 */}}
 {{- define "warpgate.databaseUrl" -}}
 {{- if .Values.setup.databaseUrl -}}
@@ -126,8 +126,8 @@ it into the config.
 {{- end }}
 
 {{/*
-Names of the environment variables `install-files` substitutes into the config
-file.
+Names of the environment variables `internal-install-files` substitutes into
+the config file.
 */}}
 {{- define "warpgate.configEnvVarReplace" -}}
 {{- $vars := list }}
@@ -159,8 +159,7 @@ bundled database's password.
 {{- end }}
 
 {{/*
-`unattended-setup` arguments shared by the setup Job and the podinit init
-container. `$VAR` / `${VAR}` in the database URL become Kubernetes' `$(VAR)`,
+`unattended-setup` arguments of the setup init container. `$VAR` / `${VAR}` in the database URL become Kubernetes' `$(VAR)`,
 expanded from the container's environment.
 */}}
 {{- define "warpgate.unattendedSetupArgs" -}}
@@ -209,7 +208,7 @@ env:
 
 {{/*
 Projected volume sources laid out as the files must end up in /data, where
-`install-files` copies them on every pod start. Empty when there is nothing to
+`internal-install-files` copies them on every pod start. Empty when there is nothing to
 copy.
 */}}
 {{- define "warpgate.seedSources" -}}
@@ -257,13 +256,13 @@ Volume mounts of the deployment's init containers.
 
 {{/*
 Non-empty when the chart itself has to provide /data/warpgate.yaml and a
-certificate: the setup Job writes them to its own volume, so without a shared
-PVC or an overrides_config the Warpgate pods would come up without either.
-Only for a shared database - a config pointing at a per-pod SQLite file would
-be a working config for an empty database.
+certificate: on an emptyDir they are gone with every pod, and regenerating
+them means running setup from scratch against the shared database on every
+start. Only for a shared database - a config pointing at a per-pod SQLite file
+would be a working config for an empty database.
 */}}
 {{- define "warpgate.renderConfig" -}}
-{{- if and (include "warpgate.databaseUrl" .) (not .Values.overrides_config) (not .Values.data.pvc.enabled) (ne .Values.setup.type "podinit") -}}
+{{- if and (include "warpgate.databaseUrl" .) (not .Values.overrides_config) (not .Values.data.pvc.enabled) -}}
 true
 {{- end -}}
 {{- end }}
