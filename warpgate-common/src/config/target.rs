@@ -523,7 +523,13 @@ impl StoredSecrets for TargetOptions {
     fn stored_secrets_mut(&mut self) -> Vec<&mut StoredSecret> {
         self.secrets_mut()
             .into_iter()
-            .filter_map(MaybeSecretRef::inline_mut)
+            .filter_map(|slot| {
+                // Only looks like a reference; it may be a legacy plaintext password
+                if let MaybeSecretRef::Malformed(raw) = slot {
+                    *slot = MaybeSecretRef::Inline(std::mem::take(raw).into());
+                }
+                slot.inline_mut()
+            })
             .collect()
     }
 }

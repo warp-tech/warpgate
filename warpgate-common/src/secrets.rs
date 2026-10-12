@@ -205,8 +205,8 @@ pub enum MaybeSecretRef {
     Inline(StoredSecret),
     Reference(SecretRef),
     /// A stored string that starts with the reference scheme but does not
-    /// parse. Kept verbatim, never treated as a credential and never
-    /// encrypted, so it stays visible and correctable; resolving it fails.
+    /// parse. Kept verbatim so it stays visible and correctable; resolving
+    /// it fails. A target's walk still redacts and encrypts it.
     Malformed(String),
 }
 
