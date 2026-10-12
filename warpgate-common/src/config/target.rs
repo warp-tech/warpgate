@@ -618,9 +618,10 @@ mod tests {
     use super::{
         DatabaseTargetAuth, DatabaseTargetIamRoleAuth, DatabaseTargetPasswordAuth, MaybeSecretRef,
         PostgresProtocolVersion, RdpTargetCompression, RdpTlsSecurity, SSHTargetAuth, SecretRef,
-        SshTargetCertificateAuth, SshTargetIamRoleAuth, SshTargetPasswordAuth,
-        SshTargetPublicKeyAuth, TargetHTTPOptions, TargetKubernetesOptions, TargetMySqlOptions,
-        TargetOptions, TargetPostgresOptions, TargetRdpOptions, TargetSSHOptions, Tls,
+        SshCertificateCriticalOption, SshTargetCertificateAuth, SshTargetIamRoleAuth,
+        SshTargetPasswordAuth, SshTargetPublicKeyAuth, TargetHTTPOptions, TargetKubernetesOptions,
+        TargetMySqlOptions, TargetOptions, TargetPostgresOptions, TargetRdpOptions,
+        TargetSSHOptions, Tls,
     };
     use crate::{StoredSecrets, TargetSecrets};
 
@@ -801,9 +802,11 @@ mod tests {
             certificate: "c".to_string().into(),
             private_key: secret(),
         });
+        let ssh_cert = ssh_options(SSHTargetAuth::Certificate(certificate_auth()));
 
         for mut options in [
             TargetOptions::Ssh(ssh),
+            ssh_cert,
             TargetOptions::MySql(mysql),
             TargetOptions::Postgres(postgres),
             TargetOptions::Vnc(vnc),
@@ -819,6 +822,32 @@ mod tests {
                 "{rendered}"
             );
         }
+    }
+
+    fn certificate_auth() -> SshTargetCertificateAuth {
+        SshTargetCertificateAuth {
+            role: Some("deploy".into()),
+            allowed_critical_options: vec![SshCertificateCriticalOption {
+                name: "force-command".into(),
+                value: Some("/usr/bin/backup".into()),
+            }],
+            allowed_extensions: vec!["permit-pty".into()],
+        }
+    }
+
+    /// Certificate auth carries a policy, not a credential: the key is minted per
+    /// connection and the CA credential lives in the server config. Blanking the
+    /// policy for a viewer without TargetsEdit would show a target that signs
+    /// nothing; encrypting it would hide what the target permits.
+    #[test]
+    fn certificate_policy_survives_redaction_and_encryption() {
+        let mut options = ssh_options(SSHTargetAuth::Certificate(certificate_auth()));
+        let original = options.clone();
+
+        assert!(options.stored_secrets_mut().is_empty());
+        assert_eq!(options.redacted(), original);
+        options.encrypt_all().unwrap();
+        assert_eq!(options, original);
     }
 
     /// Session snapshots are stored redacted; everything else about the target has
