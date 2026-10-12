@@ -13,6 +13,7 @@ use futures::{Future, FutureExt};
 use russh::keys::{PublicKey, PublicKeyBase64};
 use russh::server::ChannelOpenHandle;
 use russh::{ChannelId, ChannelOpenFailure, MethodKind, MethodSet, Sig};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use termcolor::Color;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{Mutex, broadcast, oneshot};
@@ -37,10 +38,10 @@ use warpgate_core::recordings::{self, TerminalRecorder, TrafficConnectionParams,
 use warpgate_core::{
     AdmittedTarget, ApprovedTarget, AuthorizedIdentity, ConfigProvider, Services,
     TargetAuthorization, TargetSessionStart, WarpgateServerHandle, authorize_and_spend_ticket,
-    authorize_for_target, authorize_for_target_by_name,
+    authorize_for_target, authorize_for_target_by_name, target_access_condition,
 };
-use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
+use warpgate_db_entities::{Parameters, Target};
 
 use super::channel_registry::{Channel, ChannelRegistry};
 use super::channel_writer::ChannelWriter;
@@ -981,43 +982,41 @@ impl ServerSession {
             .subscribe(|e| matches!(e, Event::MenuRedraw(_, _) | Event::ConsoleInput(_)))
             .await;
 
-        let username = self
+        let user_info = self
             .user_info
             .as_ref()
-            .map(|u| u.username.as_str())
             .ok_or(WarpgateError::InconsistentState("No username".into()))?;
+        let username = user_info.username.as_str();
 
-        let ssh_targets = {
-            self.services
-                .config_provider
-                .list_targets()
-                .await?
-                .into_iter()
-                .filter_map(|target| match target.options.clone() {
-                    TargetOptions::Ssh(options) => Some((target, options)),
+        // Filter by kind and access in a single query - checking each target
+        // separately doesn't scale to large numbers of targets.
+        let authorized_targets = Target::Entity::find()
+            .filter(Target::Column::Kind.eq(Target::TargetKind::Ssh))
+            .filter(
+                target_access_condition(&self.services.db, user_info.id)
+                    .await
+                    .map_err(WarpgateError::from)?,
+            )
+            .order_by_asc(Target::Column::Name)
+            .all(&self.services.db)
+            .await
+            .map_err(WarpgateError::from)?
+            .into_iter()
+            .map(|model| {
+                let target: warpgate_common::Target =
+                    model.try_into().map_err(WarpgateError::from)?;
+                Ok(match target.options.clone() {
+                    TargetOptions::Ssh(mut ssh_options) => {
+                        if ssh_options.username.is_empty() {
+                            ssh_options.username = username.to_string();
+                        }
+                        Some((target, ssh_options))
+                    }
                     _ => None,
                 })
-                .collect::<Vec<_>>()
-        };
-
-        let mut authorized_targets = Vec::new();
-
-        for (target, mut ssh_options) in ssh_targets {
-            let is_authorized = self
-                .services
-                .config_provider
-                .authorize_target(username, &target.name)
-                .await?;
-
-            if is_authorized {
-                if ssh_options.username.is_empty() {
-                    ssh_options.username = username.to_string();
-                }
-                authorized_targets.push((target, ssh_options));
-            }
-        }
-
-        authorized_targets.sort_by(|(left, _), (right, _)| left.name.cmp(&right.name));
+            })
+            .filter_map(Result::transpose)
+            .collect::<Result<Vec<_>, WarpgateError>>()?;
 
         let (terminal_width, terminal_height) = self
             .channels

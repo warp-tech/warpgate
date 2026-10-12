@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use poem_openapi::{Enum, Object};
 use sea_orm::entity::prelude::*;
+use sea_orm::sea_query::Func;
+use sea_orm::QueryOrder;
 use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::fuzzy::fuzzy_rank;
@@ -90,6 +92,23 @@ impl Related<super::TargetGroup::Entity> for Entity {
 
 impl ActiveModelBehavior for ActiveModel {}
 
+impl Entity {
+    /// Targets left-joined with their group, in the order target lists are
+    /// shown: grouped targets first, then by group name, then by target name.
+    /// Combine with [`Select::select_also`] to also load the group.
+    pub fn find_grouped() -> Select<Self> {
+        Self::find()
+            .left_join(super::TargetGroup::Entity)
+            .order_by_asc(Expr::col((Self, Column::GroupId)).is_null())
+            .order_by_asc(Expr::expr(Func::lower(Expr::col((
+                super::TargetGroup::Entity,
+                super::TargetGroup::Column::Name,
+            )))))
+            .order_by_asc(Expr::expr(Func::lower(Expr::col((Self, Column::Name)))))
+            .order_by_asc(Column::Id)
+    }
+}
+
 impl TryFrom<Model> for Target {
     type Error = serde_json::Error;
 
@@ -137,4 +156,22 @@ where
     .iter()
     .map(|x| x.0)
     .collect()
+}
+
+/// Like [`fuzzy_filter_targets`], but with each group's targets pulled together,
+/// for lists that group targets by adjacency. Groups, and the ungrouped targets,
+/// are ordered by their best match.
+pub fn fuzzy_filter_targets_grouped<'a>(
+    targets: &'a [Model],
+    groups: &'a [TargetGroup::Model],
+    query: &str,
+) -> Vec<&'a Model> {
+    let mut by_group: Vec<(Option<Uuid>, Vec<&Model>)> = vec![];
+    for target in fuzzy_filter_targets(targets, groups, query) {
+        match by_group.iter_mut().find(|(id, _)| *id == target.group_id) {
+            Some((_, members)) => members.push(target),
+            None => by_group.push((target.group_id, vec![target])),
+        }
+    }
+    by_group.into_iter().flat_map(|(_, members)| members).collect()
 }

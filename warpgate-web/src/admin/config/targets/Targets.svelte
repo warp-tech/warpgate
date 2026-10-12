@@ -20,9 +20,8 @@
     import ListOverflowMenu from 'common/ListOverflowMenu.svelte'
     import { TargetKind } from 'gateway/lib/api'
     import { compare as naturalCompareFactory } from 'natural-orderby'
-    import { from, map, type Observable } from 'rxjs'
+    import { from, type Observable } from 'rxjs'
     import { link } from 'svelte-spa-router'
-    import { firstBy } from 'thenby'
     import { adminPermissions } from '../../lib/store'
 
     let error: string | undefined = $state()
@@ -47,42 +46,20 @@
             groups = []
         })
 
+    // Searching, sorting (grouped targets first) and paging all happen on the
+    // server, so that this stays fast with a large number of targets.
     function getTargets(
         options: LoadOptions,
     ): Observable<PaginatedResponse<Target>> {
         return from(
-            Promise.all([
-                groupsPromise,
-                api.getTargets({
+            groupsPromise.then(() =>
+                api.getTargetsPage({
                     search: options.search,
                     groupId: selectedGroup?.id,
+                    offset: options.offset,
+                    limit: options.limit,
                 }),
-            ]),
-        ).pipe(
-            map(([_, targets]) => {
-                const natural = naturalCompareFactory()
-                const groupName = (target: Target) =>
-                    (
-                        groups.find(g => g.id === target.groupId)?.name ?? ''
-                    ).toLowerCase()
-
-                return targets.sort(
-                    firstBy((x: Target) => !x.groupId)
-                        // Natural sort between groups
-                        .thenBy((a: Target, b: Target) =>
-                            natural(groupName(a), groupName(b)),
-                        )
-                        // Natural sort within a group
-                        .thenBy((a, b) =>
-                            natural(a.name.toLowerCase(), b.name.toLowerCase()),
-                        ),
-                )
-            }),
-            map(targets => ({
-                items: targets,
-                offset: 0,
-                total: targets.length,
-            })),
+            ),
         )
     }
 
@@ -142,6 +119,7 @@
     {#key selectedGroup}
         <ItemList
             load={getTargets}
+            pageSize={100}
             showSearch={true}
             groupObject={groupInfoFromTarget}
             groupKey={group => group.id}

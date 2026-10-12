@@ -8,6 +8,7 @@
         type TargetOptionsTargetSSHOptions,
     } from 'admin/lib/api'
     import { adminPermissions } from 'admin/lib/store'
+    import SearchSelect from 'common/SearchSelect.svelte'
     import SecretRefInput from 'common/SecretRefInput.svelte'
     import { TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
@@ -24,7 +25,8 @@
     let { id, name, options }: Props = $props()
 
     let hostKeyCheckInvalidated = $state(false)
-    let sshTargets = $state<Target[]>([])
+    let hasOtherSshTargets = $state(false)
+    let jumpHostTarget = $state<Target | undefined>()
     let clientKeys = $state<SSHClientKey[]>([])
 
     api.getSshOwnKeys().then(keys => {
@@ -36,27 +38,39 @@
         hostKeyCheckInvalidated = false
     })
 
-    api.getTargets().then(targets => {
-        sshTargets = targets.filter(
-            t => t.options.kind === TargetKind.Ssh && t.id !== id,
-        )
-    })
-
-    // svelte-ignore state_referenced_locally
-    let jumpHostSelectValue = $state(options.jumpHost ?? '')
-
-    $effect(() => {
-        const val = jumpHostSelectValue
-        untrack(() => {
-            options.jumpHost = val || undefined
+    // Other SSH targets are searched for as the user types rather than
+    // loaded up front, as there may be very many of them.
+    async function searchJumpHosts(search: string) {
+        const page = await api.getTargetsPage({
+            search,
+            kind: TargetKind.Ssh,
+            limit: 50,
         })
+        const items = page.items.filter(t => t.id !== id)
+        return { items, total: page.total - (page.items.length - items.length) }
+    }
+
+    searchJumpHosts('').then(page => {
+        hasOtherSshTargets = page.items.length > 0
     })
 
-    // Re-sync from options when the prop is reassigned (e.g. after save)
+    // Resolve the configured jump host's id to show its name, including when
+    // the prop is reassigned (e.g. after save)
     $effect(() => {
         const jumpHost = options.jumpHost
         untrack(() => {
-            jumpHostSelectValue = jumpHost ?? ''
+            if (!jumpHost) {
+                jumpHostTarget = undefined
+            } else if (jumpHostTarget?.id !== jumpHost) {
+                api.getTarget({ id: jumpHost })
+                    .then(target => {
+                        if (options.jumpHost === target.id) {
+                            jumpHostTarget = target
+                        }
+                    })
+                    // A deleted jump host has no name to show
+                    .catch(() => {})
+            }
         })
     })
 
@@ -86,15 +100,20 @@
 <h4 class="mt-4">Connection</h4>
 
 <div class="row">
-    {#if sshTargets.length}
+    {#if hasOtherSshTargets || options.jumpHost}
         <div class="col">
             <FormGroup floating label="Jump host">
-                <select class="form-control" bind:value={jumpHostSelectValue}>
-                    <option value="">Direct connection</option>
-                    {#each sshTargets as target (target.id)}
-                        <option value={target.id}>{target.name}</option>
-                    {/each}
-                </select>
+                <SearchSelect
+                    bind:value={jumpHostTarget}
+                    load={searchJumpHosts}
+                    itemLabel={target => target.name}
+                    itemKey={target => target.id}
+                    emptyOption="Direct connection"
+                    placeholder="Direct connection"
+                    onchange={target => {
+                        options.jumpHost = target?.id
+                    }}
+                />
             </FormGroup>
         </div>
     {/if}

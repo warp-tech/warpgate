@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.29.1-47-gcd2038cd-modified"
+    "version": "v0.29.1-45-g35caea14-modified"
   },
   "servers": [
     {
@@ -352,6 +352,69 @@
           }
         ],
         "operationId": "get_targets"
+      }
+    },
+    "/targets/page": {
+      "get": {
+        "summary": "Like `get_targets`, but paginated, with searching, sorting and access\nfiltering done in the database - for when there are many targets.",
+        "parameters": [
+          {
+            "name": "search",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "offset",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_TargetSnapshot"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
+          }
+        ],
+        "operationId": "get_targets_page"
       }
     },
     "/sso/providers": {
@@ -1315,6 +1378,82 @@
           }
         ],
         "operationId": "get_ticket_request_targets"
+      }
+    },
+    "/ticket-request-targets/page": {
+      "get": {
+        "summary": "Like `get_ticket_request_targets`, but paginated and searchable, with\nthe filtering done in the database - for when there are many targets.",
+        "parameters": [
+          {
+            "name": "search",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "offset",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_TicketRequestTarget"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
+          }
+        ],
+        "operationId": "get_ticket_request_targets_page"
       }
     },
     "/web-ssh/sessions": {
@@ -2393,6 +2532,56 @@
         "properties": {
           "otp": {
             "type": "string"
+          }
+        }
+      },
+      "PaginatedResponse_TargetSnapshot": {
+        "type": "object",
+        "title": "PaginatedResponse_TargetSnapshot",
+        "required": [
+          "items",
+          "offset",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TargetSnapshot"
+            }
+          },
+          "offset": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "total": {
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
+      },
+      "PaginatedResponse_TicketRequestTarget": {
+        "type": "object",
+        "title": "PaginatedResponse_TicketRequestTarget",
+        "required": [
+          "items",
+          "offset",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TicketRequestTarget"
+            }
+          },
+          "offset": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "total": {
+            "type": "integer",
+            "format": "uint64"
           }
         }
       },

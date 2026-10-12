@@ -40,7 +40,7 @@
         switchMap,
         tap,
     } from 'rxjs'
-    import { onDestroy, onMount, type Snippet } from 'svelte'
+    import { onDestroy, onMount, type Snippet, tick } from 'svelte'
     import DelayedSpinner from './DelayedSpinner.svelte'
     import EmptyState from './EmptyState.svelte'
     import Pagination from './Pagination.svelte'
@@ -82,6 +82,11 @@
     let loaded = $state(false)
     let list = $state.raw<T[] | null>(null)
     let total = $state(0)
+    // Page of the items in `list`
+    let shownPage = 0
+    // Marks where the list starts, for bringing a new page's first items into
+    // view: the pagination sits below a page's worth of items
+    let listStart: HTMLElement | undefined = $state()
 
     const page$ = new Subject<number>()
     const filter$ = new Subject<string>()
@@ -111,6 +116,19 @@
             loaded = true
             list = response.items
             total = response.total
+            if (page !== shownPage) {
+                shownPage = page
+                // Once the new items are rendered. Instantly, as re-rendering
+                // the list cuts Bootstrap's smooth scrolling short
+                void tick().then(() => {
+                    if (
+                        listStart &&
+                        listStart.getBoundingClientRect().top < 0
+                    ) {
+                        listStart.scrollIntoView({ behavior: 'instant' })
+                    }
+                })
+            }
         })
 
     type Entry =
@@ -158,13 +176,19 @@
         return { entries, keys }
     }
 
+    // Whether every item is loaded, rather than one page of them
+    const complete = $derived((list?.length ?? 0) >= total)
+
     // Keys of groups that no longer exist are dropped on every write, so the
-    // persisted set can't accumulate them as groups come and go.
+    // persisted set can't accumulate them as groups come and go. That's only
+    // known when every item is loaded - other pages have groups of their own.
     function toggleGroup(key: GK, present: GK[]) {
         const next = collapsedGroups.includes(key)
             ? collapsedGroups.filter(k => k !== key)
             : [...collapsedGroups, key]
-        collapsedGroups = next.filter(k => present.includes(k))
+        collapsedGroups = complete
+            ? next.filter(k => present.includes(k))
+            : next
     }
 
     onMount(() => {
@@ -220,25 +244,32 @@
         {@render header?.(list, {
             available: built.keys.length > 0 && !filter,
             collapseAll: () => {
-                collapsedGroups = built.keys
+                collapsedGroups = complete
+                    ? built.keys
+                    : [...new Set([...collapsedGroups, ...built.keys])]
             },
             expandAll: () => {
-                collapsedGroups = []
+                collapsedGroups = complete
+                    ? []
+                    : collapsedGroups.filter(k => !built.keys.includes(k))
             },
         })}
     </div>
-    {#if virtual}
-        <VirtualList items={built.entries} {row} />
-    {:else}
-        <div
-            class="list-group list-group-flush mb-3"
-            hidden={!built.entries.length}
-        >
-            {#each built.entries as _entry (_entry.kind === 'item' ? _entry.item : _entry.key)}
-                {@render row(_entry)}
-            {/each}
-        </div>
-    {/if}
+    <!-- Until the next page arrives, the current one stays on screen, dimmed -->
+    <div bind:this={listStart} class="items" class:loading={!loaded}>
+        {#if virtual}
+            <VirtualList items={built.entries} {row} />
+        {:else}
+            <div
+                class="list-group list-group-flush mb-3"
+                hidden={!built.entries.length}
+            >
+                {#each built.entries as _entry (_entry.kind === 'item' ? _entry.item : _entry.key)}
+                    {@render row(_entry)}
+                {/each}
+            </div>
+        {/if}
+    </div>
     {@render footer?.(list)}
 
     {#if loaded && !list.length}
@@ -253,3 +284,16 @@
 {#if pageSize && total > pageSize}
     <Pagination {total} bind:page {pageSize} />
 {/if}
+
+<style lang="scss">
+    .items {
+        transition: opacity 0.15s;
+
+        &.loading {
+            opacity: 0.5;
+            // Only for loads slow enough to notice, so that quick ones don't
+            // flicker
+            transition-delay: 0.2s;
+        }
+    }
+</style>

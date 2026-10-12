@@ -206,6 +206,11 @@ zune-jpeg = "0.5"
 [profile.dev]
 debug = "line-tables-only"
 
+# Unoptimised, the bundled SQLite makes queries over a large number of rows
+# (e.g. paging through many targets) several times slower in dev builds
+[profile.dev.package.libsqlite3-sys]
+opt-level = 3
+
 [profile.release]
 lto = true
 strip = "debuginfo"

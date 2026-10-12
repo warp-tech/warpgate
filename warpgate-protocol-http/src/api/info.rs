@@ -4,17 +4,16 @@ use poem::session::Session;
 use poem::web::Data;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::{EntityTrait, IntoActiveModel, Set};
+use sea_orm::{EntityTrait, IntoActiveModel, QuerySelect, Set};
 use serde::Serialize;
 use warpgate_common::version::warpgate_version;
-use warpgate_common::{AdminPermission, AdminPermissionSet, warnings};
+use warpgate_common::{AdminPermission, AdminPermissionSet, WarpgateError, warnings};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
 };
-use warpgate_core::ConfigProvider;
-use warpgate_db_entities::{LdapServer, Parameters};
+use warpgate_db_entities::{LdapServer, Parameters, Target, User};
 
 use crate::common::{SessionExt, is_user_admin};
 
@@ -180,21 +179,27 @@ impl Api {
         let parameters = ctx.parameters().await?;
 
         let setup_state = {
-            let (users, targets) = {
-                let p = &ctx.services().config_provider;
-                let users = p.list_users().await?;
-                let targets = p.list_targets().await?;
-                (users, targets)
-            };
             let user_is_admin = if let Some(ctx) = &auth_ctx {
                 is_user_admin(ctx).await?
             } else {
                 false
             };
             if user_is_admin {
+                // Only existence matters here - this runs on every page load,
+                // so never pull the full user or target tables.
+                let db = &ctx.services().db;
                 let state = SetupState {
-                    has_targets: !targets.is_empty(),
-                    has_users: users.len() > 1,
+                    has_targets: Target::Entity::find()
+                        .one(db)
+                        .await
+                        .map_err(WarpgateError::from)?
+                        .is_some(),
+                    has_users: User::Entity::find()
+                        .offset(1)
+                        .one(db)
+                        .await
+                        .map_err(WarpgateError::from)?
+                        .is_some(),
                     tutorial_dismissed: parameters.tutorial_dismissed,
                 };
                 if state.completed() { None } else { Some(state) }
