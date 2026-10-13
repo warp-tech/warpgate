@@ -1,5 +1,3 @@
-use std::error::Error;
-
 use openidconnect::{
     ClaimsVerificationError, ConfigurationError, SignatureVerificationError, SigningError, reqwest,
 };
@@ -40,6 +38,4 @@ pub enum SsoError {
         "the OIDC provider advertised a {endpoint} of `{url}`: only http and https endpoints are accepted"
     )]
     UnsupportedEndpointScheme { endpoint: String, url: String },
-    #[error(transparent)]
-    Other(Box<dyn Error + Send + Sync>),
 }

@@ -30,17 +30,17 @@ pub enum MySqlError {
     Io(#[from] std::io::Error),
     #[error("packet decode error: {0}")]
     Decode(Box<dyn Error + Send + Sync>),
+    #[error("RSA public key: {0}")]
+    RsaPublicKey(#[from] rsa::pkcs8::spki::Error),
+    #[error("RSA: {0}")]
+    Rsa(#[from] rsa::Error),
+    #[error("UTF-8: {0}")]
+    Utf8(#[from] std::str::Utf8Error),
     #[error(transparent)]
     Warpgate(#[from] WarpgateError),
-    #[error(transparent)]
-    Other(Box<dyn Error + Send + Sync>),
 }
 
 impl MySqlError {
-    pub fn other<E: Error + Send + Sync + 'static>(err: E) -> Self {
-        Self::Other(Box::new(err))
-    }
-
     pub fn decode(err: SqlxError) -> Self {
         match err {
             SqlxError::Decode(err) => Self::Decode(err),

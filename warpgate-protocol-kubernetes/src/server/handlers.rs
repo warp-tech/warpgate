@@ -348,18 +348,10 @@ async fn _handle_normal_request_inner(
         .ok_or(WarpgateError::UserSessionEnded)?
         .context("reading request body")?;
 
-    // Record the request if recording is enabled
-    let mut recorder_opt = {
-        let enabled = services.recordings.is_enabled().await.unwrap_or(false);
-        if enabled {
-            match start_recording_api(&admitted.id(), &services.recordings).await {
-                Ok(recorder) => Some(recorder),
-                Err(e) => {
-                    warn!("Failed to start recording: {}", e);
-                    None
-                }
-            }
-        } else {
+    let mut recorder_opt = match start_recording_api(&admitted.id(), &services.recordings).await {
+        Ok(recorder) => recorder,
+        Err(e) => {
+            warn!("Failed to start recording: {}", e);
             None
         }
     };
@@ -599,23 +591,20 @@ async fn _handle_websocket_request_inner(
     let operation = classify_stream(api_path, req.uri().query());
 
     let (recorder_tx, recorder_rx) = mpsc::channel::<Vec<u8>>(1000);
+    if let Some(metadata) = operation
+        .as_ref()
+        .and_then(StreamOperation::recording_metadata)
     {
-        let enabled = services.recordings.is_enabled().await.unwrap_or(false);
-        if enabled
-            && let Some(metadata) = operation
-                .as_ref()
-                .and_then(StreamOperation::recording_metadata)
-        {
-            match start_recording_exec(&admitted.id(), &services.recordings, metadata).await {
-                Err(e) => {
-                    error!("Failed to start recording: {}", e);
-                }
-                Ok(recorder) => {
-                    tokio::spawn(run_websocket_recording(recorder, recorder_rx));
-                }
+        match start_recording_exec(&admitted.id(), &services.recordings, metadata).await {
+            Err(e) => {
+                error!("Failed to start recording: {}", e);
             }
+            Ok(Some(recorder)) => {
+                tokio::spawn(run_websocket_recording(recorder, recorder_rx));
+            }
+            Ok(None) => {}
         }
-    };
+    }
 
     let ws_protocol = req
         .headers()
