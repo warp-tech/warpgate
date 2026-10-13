@@ -37,21 +37,6 @@ pub struct CertifiedKey {
     pub private_key_der: Vec<u8>,
 }
 
-impl CertifiedKey {
-    /// Get the certificate as PEM-encoded string
-    pub fn certificate_pem(&self) -> Result<String, CaError> {
-        let der = self.certificate.to_der()?;
-        let pem_data = pem::Pem::new("CERTIFICATE", der);
-        Ok(pem::encode(&pem_data))
-    }
-
-    /// Get the private key as PEM-encoded string
-    pub fn private_key_pem(&self) -> String {
-        let pem_data = pem::Pem::new("EC PRIVATE KEY", self.private_key_der.clone());
-        pem::encode(&pem_data)
-    }
-}
-
 pub fn issue_ca_root_certificate() -> Result<(String, String), CaError> {
     // Create a new key pair
     let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384)?;
