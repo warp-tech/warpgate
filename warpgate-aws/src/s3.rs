@@ -207,7 +207,6 @@ impl S3Storage {
             buf: Vec::new(),
             part_number: 0,
             parts: Vec::new(),
-            lost_part: false,
         })
     }
 }
@@ -222,9 +221,6 @@ pub struct S3MultipartUpload {
     buf: Vec<u8>,
     part_number: i32,
     parts: Vec<CompletedPart>,
-    /// A part left the buffer but never reached S3. The remaining parts would
-    /// still complete into a valid object, silently missing that range.
-    lost_part: bool,
 }
 
 impl S3MultipartUpload {
@@ -236,10 +232,7 @@ impl S3MultipartUpload {
         self.buf.extend_from_slice(data);
         while self.buf.len() >= PART_SIZE {
             let chunk = self.buf.drain(..PART_SIZE).collect::<Vec<u8>>();
-            if let Err(error) = self.upload_part(chunk).await {
-                self.lost_part = true;
-                return Err(error);
-            }
+            self.upload_part(chunk).await?;
         }
         Ok(())
     }
@@ -283,7 +276,10 @@ impl S3MultipartUpload {
     }
 
     async fn try_finish(&mut self) -> Result<(), AwsError> {
-        if self.lost_part {
+        // `upload_part` numbers a part before sending it and records it only once
+        // S3 accepted it, so a shortfall here is a part that never arrived.
+        // Completing would still succeed, with that range silently missing.
+        if usize::try_from(self.part_number).is_ok_and(|sent| self.parts.len() < sent) {
             return Err(AwsError::Other("a part of the upload failed".into()));
         }
         if !self.buf.is_empty() || self.parts.is_empty() {

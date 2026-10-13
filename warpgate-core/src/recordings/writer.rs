@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -14,7 +15,7 @@ use uuid::Uuid;
 use warpgate_common::try_block;
 use warpgate_db_entities::Recording;
 
-use super::storage::{RecordingSink, RecordingSinkCleanupGuard};
+use super::storage::RecordingSink;
 use super::{Error, LiveMap, Result};
 
 /// Capacity of both the disk-write queue and the live broadcast ring. They must
@@ -112,15 +113,11 @@ impl RawRecordingWriter {
                 error!(%error, "Failed to write recording");
             });
 
-            // On upload failure the local scratch is kept and `ended` is never set
-            // (the recording is at least not lost). The same goes for a failed
-            // write, whose upload is missing what did not reach the scratch.
+            // Crashed writer leaves the recording scratch as-is
             try_block!(async {
-                let cleanup_guard = sink.finalize().await?;
+                let scratch = sink.finalize().await?;
                 if written {
-                    ticket.finished(Some(cleanup_guard)).await?;
-                } else {
-                    cleanup_guard.keep();
+                    ticket.finished(scratch).await?;
                 }
                 Ok::<(), Error>(())
             } catch (error: Error) {
@@ -199,17 +196,8 @@ mod completion {
     #[derive(Default)]
     struct CompletionState {
         open_writers: usize,
-        scratch_guards: Vec<RecordingSinkCleanupGuard>,
-    }
-
-    impl Drop for CompletionState {
-        /// Still holding guards here means a ticket never finished, so the
-        /// recording stays unended and is read from its scratch.
-        fn drop(&mut self) {
-            self.scratch_guards
-                .drain(..)
-                .for_each(RecordingSinkCleanupGuard::keep);
-        }
+        /// Scratch files of the finished writers to be removed on completion
+        scratch_paths: Vec<PathBuf>,
     }
 
     impl RecordingCompletion {
@@ -240,23 +228,21 @@ mod completion {
             self.completion.recording_id
         }
 
-        /// Takes over the scratch guard and then drops them all together and finalizes recording
-        /// once the last ticket is closed
-        pub async fn finished(self, guard: Option<RecordingSinkCleanupGuard>) -> Result<()> {
+        /// Hands over the writer's scratch path. The last ticket to finish marks the
+        /// recording ended and only then removes every scratch, so a failure before
+        /// that point leaves them all in place.
+        pub async fn finished(self, scratch: Option<PathBuf>) -> Result<()> {
             use sea_orm::ActiveValue::Set;
 
             let completion = &self.completion;
             {
                 let mut state = completion.state.lock().await;
-                state.scratch_guards.extend(guard);
+                state.scratch_paths.extend(scratch);
                 state.open_writers = state.open_writers.saturating_sub(1);
                 if state.open_writers > 0 {
                     return Ok(());
                 }
             }
-
-            // The guards stay in the state until `ended` is stored, so a database
-            // error leaves them to be kept on drop.
 
             let recording = Recording::Entity::find_by_id(completion.recording_id)
                 .one(&completion.db)
@@ -268,7 +254,12 @@ mod completion {
             model.ended = Set(Some(OffsetDateTime::now_utc()));
             model.update(&completion.db).await?;
 
-            completion.state.lock().await.scratch_guards.clear();
+            let scratch_paths = std::mem::take(&mut completion.state.lock().await.scratch_paths);
+            for path in scratch_paths {
+                if let Err(error) = tokio::fs::remove_file(&path).await {
+                    error!(%error, ?path, "Failed to remove local recording scratch");
+                }
+            }
             Ok(())
         }
     }
