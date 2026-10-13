@@ -133,18 +133,26 @@ async fn resolve_ssh_chain(
     target_id: Uuid,
     logged_in_username: Option<&String>,
 ) -> Result<Vec<ResolvedSshChainHost>, WarpgateError> {
-    let targets = services.config_provider.list_targets().await?;
+    // Load just the targets along the jump chain, not every target
+    let mut targets = HashMap::new();
+    let mut next = Some(target_id);
+    while let Some(id) = next.filter(|id| !targets.contains_key(id)) {
+        let Some(target) = services.config_provider.get_target_by_id(id).await? else {
+            break;
+        };
+        next = TargetSSHOptions::extract(&target.options).and_then(|opts| opts.jump_host);
+        targets.insert(id, target);
+    }
 
     let chain_ids = resolve_chain_ids(target_id, |id| {
         targets
-            .iter()
-            .find(|t| t.id == id)
+            .get(&id)
             .and_then(|t| TargetSSHOptions::extract(&t.options).map(|opts| opts.jump_host))
     })?;
 
     let mut jumps = vec![];
     for id in chain_ids {
-        let Some(t) = targets.iter().find(|t| t.id == id) else {
+        let Some(t) = targets.get(&id) else {
             return Err(unresolvable_jump_host(id));
         };
         let Some(opts) = TargetSSHOptions::extract(&t.options) else {

@@ -2,7 +2,8 @@ use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, QuerySelect,
+    Set,
 };
 use tracing::warn;
 use uuid::Uuid;
@@ -11,12 +12,13 @@ use warpgate_common::{
     TargetSSHOptions, WarpgateError,
 };
 use warpgate_common_http::errors::invalid_field;
-use warpgate_db_entities::Target::fuzzy_filter_targets;
+use warpgate_db_entities::Target::{fuzzy_filter_targets, fuzzy_filter_targets_grouped};
 use warpgate_db_entities::{
     KnownHost, Role, Target, TargetGroup, TargetRoleAssignment, Ticket, TicketRequest,
 };
 
 use super::AdminContext;
+use super::pagination::{DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, PaginatedResponse, count_unordered};
 use crate::api::common::is_unique_violation;
 
 /// Encrypt and serialize options
@@ -58,6 +60,12 @@ struct TargetDataRequest {
 enum GetTargetsResponse {
     #[oai(status = 200)]
     Ok(Json<Vec<TargetConfig>>),
+}
+
+#[derive(ApiResponse)]
+enum GetTargetsPageResponse {
+    #[oai(status = 200)]
+    Ok(Json<PaginatedResponse<TargetConfig>>),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -104,6 +112,68 @@ impl ListApi {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(GetTargetsResponse::Ok(Json(targets)))
+    }
+
+    /// Like `get_targets`, but paginated, with grouped targets first - for when
+    /// there are many targets. A search is fuzzy-ranked like in `get_targets`.
+    #[oai(
+        path = "/targets/page",
+        method = "get",
+        operation_id = "get_targets_page"
+    )]
+    async fn api_get_targets_page(
+        &self,
+        admin: AdminContext,
+        search: Query<Option<String>>,
+        group_id: Query<Option<Uuid>>,
+        kind: Query<Option<Target::TargetKind>>,
+        offset: Query<Option<u64>>,
+        limit: Query<Option<u64>>,
+    ) -> Result<GetTargetsPageResponse, WarpgateError> {
+        let db = &admin.services().db;
+        let offset = offset.unwrap_or(0);
+        let limit = limit.unwrap_or(DEFAULT_PAGE_SIZE).clamp(1, MAX_PAGE_SIZE);
+
+        let mut query = Target::Entity::find_grouped();
+
+        if let Some(group_id) = *group_id {
+            query = query.filter(Target::Column::GroupId.eq(group_id));
+        }
+        if let Some(kind) = kind.0 {
+            query = query.filter(Target::Column::Kind.eq(kind));
+        }
+
+        if let Some(search) = search.as_deref().filter(|s| !s.is_empty()) {
+            // Fuzzy ranking can't be done in SQL, so this loads every matching
+            // target and only returns the requested page of them
+            let (targets, groups) =
+                futures::try_join!(query.all(db), TargetGroup::Entity::find().all(db))?;
+            let ranked = fuzzy_filter_targets_grouped(&targets, &groups, search);
+            let total = ranked.len() as u64;
+            let targets = ranked
+                .into_iter()
+                .skip(offset as usize)
+                .take(limit as usize)
+                .map(|t| maybe_redacted_target(&admin, t.clone()))
+                .collect::<Result<Vec<_>, _>>()?;
+
+            return Ok(GetTargetsPageResponse::Ok(Json(
+                PaginatedResponse::from_parts(targets, offset, total),
+            )));
+        }
+
+        let (total, targets) = futures::try_join!(
+            count_unordered(query.clone(), db),
+            query.offset(offset).limit(limit).all(db),
+        )?;
+        let targets = targets
+            .into_iter()
+            .map(|t| maybe_redacted_target(&admin, t))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(GetTargetsPageResponse::Ok(Json(
+            PaginatedResponse::from_parts(targets, offset, total),
+        )))
     }
 
     #[oai(path = "/targets", method = "post", operation_id = "create_target")]

@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use data_encoding::BASE64;
 use sea_orm::sea_query::{Expr, Func, IntoIden, Query};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection,
-    EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection, DbErr,
+    EntityTrait, ModelTrait, QueryFilter, QueryOrder, QuerySelect, Set,
 };
 use time::OffsetDateTime;
 use tracing::{debug, error, info, warn};
@@ -49,6 +49,70 @@ fn active_role_assignment_query() -> sea_orm::sea_query::SelectStatement {
             entities::UserRoleAssignment::Entity.into_iden(),
         ))
         .to_owned()
+}
+
+/// IDs of the targets `user_id` currently has access to.
+fn authorized_target_ids_query(user_id: Uuid) -> sea_orm::sea_query::SelectStatement {
+    active_role_assignment_query()
+        .column((
+            entities::TargetRoleAssignment::Entity,
+            entities::TargetRoleAssignment::Column::TargetId,
+        ))
+        .distinct()
+        .and_where(
+            Expr::col((
+                entities::UserRoleAssignment::Entity,
+                entities::UserRoleAssignment::Column::UserId,
+            ))
+            .eq(user_id),
+        )
+        .to_owned()
+}
+
+/// Condition on the `targets` table matching the targets `user_id` currently
+/// has access to, so that target lists can filter by access in the database.
+///
+/// It is a per-row `EXISTS` against the `target_roles` primary key rather
+/// than `id IN (<all accessible ids>)`: the latter has the database collect
+/// and deduplicate every accessible target id before it can return a single
+/// row, which is about twice as slow with tens of thousands of targets.
+///
+/// The user's roles are looked up beforehand and inlined, rather than joined
+/// in. `user_roles` rarely changes enough for PostgreSQL to analyze it on its
+/// own, and without statistics on it, the planner picks a plan about three
+/// times slower.
+pub async fn target_access_condition(
+    db: &DatabaseConnection,
+    user_id: Uuid,
+) -> Result<sea_orm::sea_query::SimpleExpr, DbErr> {
+    let role_ids: Vec<Uuid> = entities::UserRoleAssignment::Entity::find_active()
+        .filter(entities::UserRoleAssignment::Column::UserId.eq(user_id))
+        .select_only()
+        .column(entities::UserRoleAssignment::Column::RoleId)
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    Ok(Expr::exists(
+        Query::select()
+            .expr(Expr::val(1))
+            .from(entities::TargetRoleAssignment::Entity)
+            .and_where(
+                Expr::col((
+                    entities::TargetRoleAssignment::Entity,
+                    entities::TargetRoleAssignment::Column::TargetId,
+                ))
+                .equals((entities::Target::Entity, entities::Target::Column::Id)),
+            )
+            .and_where(
+                Expr::col((
+                    entities::TargetRoleAssignment::Entity,
+                    entities::TargetRoleAssignment::Column::RoleId,
+                ))
+                .is_in(role_ids),
+            )
+            .to_owned(),
+    ))
 }
 
 /// SQL `EXISTS`-style check for a query built with [`Query::select`].
@@ -790,20 +854,7 @@ impl ConfigProvider for DatabaseConfigProvider {
     }
 
     async fn authorized_target_ids(&self, user_id: Uuid) -> Result<HashSet<Uuid>, WarpgateError> {
-        let query = active_role_assignment_query()
-            .column((
-                entities::TargetRoleAssignment::Entity,
-                entities::TargetRoleAssignment::Column::TargetId,
-            ))
-            .distinct()
-            .and_where(
-                Expr::col((
-                    entities::UserRoleAssignment::Entity,
-                    entities::UserRoleAssignment::Column::UserId,
-                ))
-                .eq(user_id),
-            )
-            .to_owned();
+        let query = authorized_target_ids_query(user_id);
 
         self.db
             .query_all(self.db.get_database_backend().build(&query))
@@ -1364,5 +1415,164 @@ mod tests {
                 .unwrap(),
             None,
         );
+    }
+
+    /// Target lists page, sort and filter by access in the database: grouped
+    /// targets first, ordered case-insensitively, and only what the user may
+    /// access - with the group table joined in, so columns must stay qualified.
+    #[tokio::test]
+    async fn grouped_target_list_is_ordered_and_scoped_in_the_database() {
+        use sea_orm::{PaginatorTrait, QuerySelect};
+
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+
+        let user_id = Uuid::new_v4();
+        entities::User::ActiveModel {
+            id: Set(user_id),
+            username: Set("user".to_owned()),
+            description: Set(String::new()),
+            credential_policy: Set(serde_json::json!(null)),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        let role_id = Uuid::new_v4();
+        entities::Role::ActiveModel {
+            id: Set(role_id),
+            name: Set("role".to_owned()),
+            description: Set(String::new()),
+            is_default: Set(false),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        entities::UserRoleAssignment::ActiveModel {
+            user_id: Set(user_id),
+            role_id: Set(role_id),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        let mut group_ids = HashMap::new();
+        for name in ["beta", "Alpha"] {
+            let id = Uuid::new_v4();
+            entities::TargetGroup::ActiveModel {
+                id: Set(id),
+                name: Set(name.to_owned()),
+                description: Set(String::new()),
+                color: Set(None),
+            }
+            .insert(&db)
+            .await
+            .unwrap();
+            group_ids.insert(name, id);
+        }
+
+        for (name, group, accessible) in [
+            ("zeta", None, true),
+            ("b-srv", Some("Alpha"), true),
+            ("A-srv", Some("Alpha"), true),
+            ("secret", Some("Alpha"), false),
+            ("c", Some("beta"), true),
+        ] {
+            let id = Uuid::new_v4();
+            entities::Target::ActiveModel {
+                id: Set(id),
+                name: Set(name.to_owned()),
+                description: Set(String::new()),
+                kind: Set(entities::Target::TargetKind::Ssh),
+                options: Set(serde_json::json!({})),
+                group_id: Set(group.map(|g| group_ids[g])),
+                ..Default::default()
+            }
+            .insert(&db)
+            .await
+            .unwrap();
+            if accessible {
+                entities::TargetRoleAssignment::ActiveModel {
+                    target_id: Set(id),
+                    role_id: Set(role_id),
+                }
+                .insert(&db)
+                .await
+                .unwrap();
+            }
+        }
+
+        let visible = entities::Target::Entity::find_grouped()
+            .filter(target_access_condition(&db, user_id).await.unwrap());
+        let names = |rows: Vec<(
+            entities::Target::Model,
+            Option<entities::TargetGroup::Model>,
+        )>| {
+            rows.into_iter()
+                .map(|(t, g)| format!("{}/{}", g.map(|g| g.name).unwrap_or_default(), t.name))
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(visible.clone().count(&db).await.unwrap(), 4);
+        assert_eq!(
+            names(
+                visible
+                    .clone()
+                    .select_also(entities::TargetGroup::Entity)
+                    .all(&db)
+                    .await
+                    .unwrap()
+            ),
+            ["Alpha/A-srv", "Alpha/b-srv", "beta/c", "/zeta"],
+        );
+        assert_eq!(
+            names(
+                visible
+                    .clone()
+                    .select_also(entities::TargetGroup::Entity)
+                    .offset(1)
+                    .limit(2)
+                    .all(&db)
+                    .await
+                    .unwrap()
+            ),
+            ["Alpha/b-srv", "beta/c"],
+        );
+
+        // Searching across both tables, as the gateway list does by group name
+        let by_group = visible.filter(
+            Expr::expr(Func::lower(Expr::col((
+                entities::TargetGroup::Entity,
+                entities::TargetGroup::Column::Name,
+            ))))
+            .like("%alpha%"),
+        );
+        assert_eq!(by_group.clone().count(&db).await.unwrap(), 2);
+        assert_eq!(
+            names(
+                by_group
+                    .select_also(entities::TargetGroup::Entity)
+                    .all(&db)
+                    .await
+                    .unwrap()
+            ),
+            ["Alpha/A-srv", "Alpha/b-srv"],
+        );
+
+        // A revoked role grants nothing, which leaves the user without roles
+        entities::UserRoleAssignment::Entity::update_many()
+            .col_expr(
+                entities::UserRoleAssignment::Column::RevokedAt,
+                Expr::value(OffsetDateTime::now_utc()),
+            )
+            .filter(entities::UserRoleAssignment::Column::UserId.eq(user_id))
+            .exec(&db)
+            .await
+            .unwrap();
+        let visible = entities::Target::Entity::find()
+            .filter(target_access_condition(&db, user_id).await.unwrap());
+        assert_eq!(visible.count(&db).await.unwrap(), 0);
     }
 }

@@ -1,6 +1,4 @@
 <script lang="ts">
-    import 'core-js/actual/map/group-by'
-
     import {
         faArrowRight,
         faEllipsisV,
@@ -36,11 +34,9 @@
         TargetKind,
         type TargetSnapshot,
     } from 'gateway/lib/api'
-    import { compare as naturalCompareFactory } from 'natural-orderby'
-    import { from, map, type Observable } from 'rxjs'
+    import { from, type Observable } from 'rxjs'
     import { get } from 'svelte/store'
     import Fa from 'svelte-fa'
-    import { firstBy } from 'thenby'
     import {
         collapsedTargetGroups,
         openTargetsInNewTab,
@@ -62,48 +58,16 @@
     )
     const webClientsEnabled = $derived($serverInfo?.webClientsEnabled ?? true)
 
+    // Searching, sorting (grouped targets first) and paging all happen on the
+    // server, so that this stays fast with a large number of targets.
     function loadTargets(
         options: LoadOptions,
     ): Observable<PaginatedResponse<TargetSnapshot>> {
-        return from(api.getTargets({ search: options.search })).pipe(
-            map(result => {
-                if (options.search) {
-                    // Keep the server's relevance order, only pulling each
-                    // group together (ItemList groups by adjacency): groups
-                    // are ordered by their best match.
-                    result = [
-                        ...Map.groupBy(result, t => t.group?.id).values(),
-                    ].flat()
-                    return { items: result, offset: 0, total: result.length }
-                }
-
-                const naturalCompare = naturalCompareFactory()
-
-                result = result.sort(
-                    firstBy<TargetSnapshot, boolean>(
-                        (x: TargetSnapshot) => !x.group,
-                    )
-                        // Natural sort between groups
-                        .thenBy((a: TargetSnapshot, b: TargetSnapshot) =>
-                            naturalCompare(
-                                (a.group?.name ?? '').toLowerCase(),
-                                (b.group?.name ?? '').toLowerCase(),
-                            ),
-                        )
-                        // Natural sort within a group
-                        .thenBy((a: TargetSnapshot, b: TargetSnapshot) =>
-                            naturalCompare(
-                                a.name.toLowerCase(),
-                                b.name.toLowerCase(),
-                            ),
-                        ),
-                )
-
-                return {
-                    items: result,
-                    offset: 0,
-                    total: result.length,
-                }
+        return from(
+            api.getTargetsPage({
+                search: options.search,
+                offset: options.offset,
+                limit: options.limit,
             }),
         )
     }
@@ -209,6 +173,7 @@
 
 <ItemList
     load={loadTargets}
+    pageSize={100}
     showSearch={true}
     groupObject={groupInfoFromTarget}
     groupKey={group => group.id}

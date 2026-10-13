@@ -424,6 +424,15 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         expected_statuses={200},
     ),
     AdminApiTestCase(
+        id="get_targets_page",
+        permission=None,
+        # A non-empty search takes the fuzzy-ranked path, filtered by kind in SQL
+        call=lambda api, r: api.get_targets_page_with_http_info(
+            search="target", kind=sdk.TargetKind.SSH, limit=10
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
         id="create_target",
         permission="targets_create",
         call=lambda api, r: api.create_target_with_http_info(

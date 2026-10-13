@@ -5,7 +5,7 @@ use std::ops::Deref;
 mod db;
 mod sso_user;
 
-pub use db::DatabaseConfigProvider;
+pub use db::{DatabaseConfigProvider, target_access_condition};
 use enum_dispatch::enum_dispatch;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 pub use sso_user::resolve_and_map_sso_user;

@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.29.1-47-gcd2038cd-modified"
+    "version": "v0.29.1-45-g35caea14-modified"
   },
   "servers": [
     {
@@ -1569,6 +1569,87 @@
           }
         ],
         "operationId": "create_target"
+      }
+    },
+    "/targets/page": {
+      "get": {
+        "summary": "Like `get_targets`, but paginated, with grouped targets first - for when\nthere are many targets.",
+        "parameters": [
+          {
+            "name": "search",
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "group_id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "kind",
+            "schema": {
+              "$ref": "#/components/schemas/TargetKind"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "offset",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_Target"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_targets_page"
       }
     },
     "/targets/{id}": {
@@ -6268,6 +6349,31 @@
           "ForcedOff"
         ]
       },
+      "PaginatedResponse_Target": {
+        "type": "object",
+        "title": "PaginatedResponse_Target",
+        "required": [
+          "items",
+          "offset",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Target"
+            }
+          },
+          "offset": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "total": {
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
+      },
       "PaginatedResponse_UserSessionSnapshot": {
         "type": "object",
         "title": "PaginatedResponse_UserSessionSnapshot",
@@ -7899,6 +8005,18 @@
             "type": "string"
           }
         }
+      },
+      "TargetKind": {
+        "type": "string",
+        "enum": [
+          "Http",
+          "Kubernetes",
+          "MySql",
+          "Ssh",
+          "Postgres",
+          "Vnc",
+          "Rdp"
+        ]
       },
       "TargetKubernetesOptions": {
         "type": "object",

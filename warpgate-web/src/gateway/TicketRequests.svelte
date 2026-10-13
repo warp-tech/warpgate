@@ -20,6 +20,7 @@
     import InfoBox from 'common/InfoBox.svelte'
     import Loadable from 'common/Loadable.svelte'
     import RelativeDate from 'common/RelativeDate.svelte'
+    import SearchSelect from 'common/SearchSelect.svelte'
     import { statusColor, statusIcon } from 'common/ticketRequestStatus'
     import {
         type ActivatedTicketTargetInfo,
@@ -50,7 +51,9 @@
     let lastTarget: ActivatedTicketTargetInfo | undefined = $state()
     let requests: TicketRequestModel[] | undefined = $state()
     let tickets: MyTicketModel[] | undefined = $state()
-    let ticketRequestTargets: TicketRequestTarget[] | undefined = $state()
+    // Whether any target can be requested at all - the targets themselves are
+    // searched for as the user types, as there may be very many of them
+    let hasTicketRequestTargets: boolean | undefined = $state()
     let showForm = $state(!!paramTarget)
     let showAllRequests = $state(false)
 
@@ -65,7 +68,9 @@
         return requests.slice(0, REQUEST_PAGE_SIZE)
     })
 
-    let selectedTarget = $state(paramTarget ?? '')
+    let selectedTarget: TicketRequestTarget | undefined = $state()
+    // A target named in the URL that can't be requested
+    let unavailableParamTarget: string | undefined = $state()
     let description = $state(
         [...(paramDescription ?? '')].slice(0, DESCRIPTION_MAX_LENGTH).join(''),
     )
@@ -74,14 +79,9 @@
 
     let maxDurationSeconds = $derived($serverInfo?.ticketMaxDurationSeconds)
 
-    let unavailableTarget = $derived.by(() => {
-        if (!selectedTarget || !ticketRequestTargets) {
-            return undefined
-        }
-        return ticketRequestTargets.some(t => t.name === selectedTarget)
-            ? undefined
-            : selectedTarget
-    })
+    let unavailableTarget = $derived(
+        selectedTarget ? undefined : unavailableParamTarget,
+    )
 
     let durationSeconds = $derived(parseHumantimeDuration(durationText))
 
@@ -106,28 +106,46 @@
     )
 
     let formInvalid = $derived(
-        !!durationError || descriptionMissing || !!unavailableTarget,
+        !!durationError ||
+            descriptionMissing ||
+            !!unavailableTarget ||
+            !selectedTarget,
     )
 
     async function load() {
         const [r, t, trt] = await Promise.all([
             api.getMyTicketRequests(),
             api.getMyTickets(),
-            api.getTicketRequestTargets(),
+            paramTarget
+                ? api.getTicketRequestTargetsPage({
+                      search: paramTarget,
+                      limit: 500,
+                  })
+                : api.getTicketRequestTargetsPage({ limit: 1 }),
         ])
         requests = r
         tickets = t
-        ticketRequestTargets = trt
-        // Never override an explicit selection
-        if (ticketRequestTargets[0] && !selectedTarget) {
-            selectedTarget = ticketRequestTargets[0].name
+        if (paramTarget) {
+            // Never override an explicit selection
+            selectedTarget = trt.items.find(x => x.name === paramTarget)
+            unavailableParamTarget = selectedTarget ? undefined : paramTarget
+            hasTicketRequestTargets =
+                !!selectedTarget ||
+                (await api.getTicketRequestTargetsPage({ limit: 1 })).total > 0
+        } else {
+            selectedTarget = trt.items[0]
+            hasTicketRequestTargets = trt.total > 0
         }
+    }
+
+    function searchTicketRequestTargets(search: string) {
+        return api.getTicketRequestTargetsPage({ search, limit: 50 })
     }
 
     const initPromise = load()
 
     async function createRequest() {
-        if (formInvalid) {
+        if (formInvalid || !selectedTarget) {
             return
         }
         error = undefined
@@ -137,7 +155,7 @@
         try {
             const result = await api.createTicketRequest({
                 createTicketRequestBody: {
-                    targetName: selectedTarget,
+                    targetName: selectedTarget.name,
                     durationSeconds: durationSeconds || undefined,
                     description: description || undefined,
                 },
@@ -245,7 +263,7 @@
         <ModalBody>
             <h4 class="mb-3">Request a ticket</h4>
 
-            {#if ticketRequestTargets?.length}
+            {#if hasTicketRequestTargets}
                 {#if unavailableTarget}
                     <Alert color="warning" fade={false}>
                         <strong>{unavailableTarget}</strong>
@@ -256,17 +274,14 @@
 
                 <form onsubmit={e => e.preventDefault()}>
                     <FormGroup floating label="Target">
-                        <select
+                        <SearchSelect
                             bind:value={selectedTarget}
-                            class="form-control"
+                            load={searchTicketRequestTargets}
+                            itemLabel={target => target.name}
+                            itemKey={target => target.id}
+                            placeholder="Search targets"
                             required
-                        >
-                            {#each ticketRequestTargets as target (target.name)}
-                                <option value={target.name}>
-                                    {target.name}
-                                </option>
-                            {/each}
-                        </select>
+                        />
                     </FormGroup>
 
                     <FormGroup
@@ -311,7 +326,7 @@
                         {/if}
                     </FormGroup>
                 </form>
-            {:else if ticketRequestTargets}
+            {:else if hasTicketRequestTargets === false}
                 <EmptyState
                     title="No targets available"
                     hint={unavailableTarget ? `${unavailableTarget} is not available for ticket requests.` : ''}
@@ -323,7 +338,7 @@
                 color="primary"
                 class="modal-button"
                 click={createRequest}
-                disabled={formInvalid || !ticketRequestTargets?.length}
+                disabled={formInvalid || !hasTicketRequestTargets}
             >
                 Request ticket
             </AsyncButton>

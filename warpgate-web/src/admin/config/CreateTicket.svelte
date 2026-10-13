@@ -10,12 +10,12 @@
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import { stringifyError } from 'common/errors'
     import { handleReauthError } from 'common/reauth'
+    import SearchSelect from 'common/SearchSelect.svelte'
     import { TargetKind } from 'gateway/lib/api'
     import { link } from 'svelte-spa-router'
     import { firstBy } from 'thenby'
 
     let error: string | null = $state(null)
-    let targets: Target[] | undefined = $state()
     let users: User[] | undefined = $state()
     let selectedTarget: Target | undefined = $state()
     let selectedUser: User | undefined = $state()
@@ -25,12 +25,12 @@
     let selectedDescription: string = $state('')
 
     async function load() {
-        ;[targets, users] = await Promise.all([
-            api.getTargets(),
-            api.getUsers(),
-        ])
-        targets.sort(firstBy('name'))
+        users = await api.getUsers()
         users.sort(firstBy('username'))
+    }
+
+    function searchTargets(search: string) {
+        return api.getTargetsPage({ search, limit: 50 })
     }
 
     load().catch(async e => {
@@ -107,17 +107,15 @@
                 </FormGroup>
             {/if}
 
-            {#if targets}
-                <FormGroup floating label="Target">
-                    <select bind:value={selectedTarget} class="form-control">
-                        {#each targets as target (target.id)}
-                            <option value={target}>
-                                {target.name}
-                            </option>
-                        {/each}
-                    </select>
-                </FormGroup>
-            {/if}
+            <FormGroup floating label="Target">
+                <SearchSelect
+                    bind:value={selectedTarget}
+                    load={searchTargets}
+                    itemLabel={target => target.name}
+                    itemKey={target => target.id}
+                    placeholder="Search targets"
+                />
+            </FormGroup>
 
             <FormGroup floating label="Description">
                 <input

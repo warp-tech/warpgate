@@ -45,7 +45,8 @@
             <Fa icon={faAngleLeft} />
         </PaginationLink>
     </PaginationItem>
-    {#each pages as i (i)}
+    <!-- Gaps are null, and there can be two of them, so they need their own keys -->
+    {#each pages as i, idx (i ?? `gap-${idx}`)}
         {#if i !== null}
             <PaginationItem active={page === i}>
                 <PaginationLink on:click={e => goto(e, i)} href="#">
