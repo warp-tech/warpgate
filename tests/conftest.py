@@ -1120,13 +1120,28 @@ class ProcessManager:
             log_path=log_path,
         )
 
+    def _askpass(self) -> Path:
+        path = self.ctx.tmpdir / "askpass.sh"
+        if not path.exists():
+            path.write_text('#!/bin/sh\nprintf "%s\\n" "$WARPGATE_TEST_SSH_PASSWORD"\n')
+            path.chmod(0o700)
+        return path
+
     def start_ssh_client(self, *args, password=None, **kwargs):
-        preargs = []
+        password_options = []
         if password:
-            preargs = ["sshpass", "-p", password]
+            # ssh asks this helper for the password, so it needs no terminal.
+            # One prompt per run keeps a wrong password to a single server-side
+            # attempt per client, which the login-protection tests count on.
+            password_options = ["-o", "NumberOfPasswordPrompts=1"]
+            kwargs["env"] = {
+                **(kwargs.get("env") or os.environ),
+                "SSH_ASKPASS": str(self._askpass()),
+                "SSH_ASKPASS_REQUIRE": "force",
+                "WARPGATE_TEST_SSH_PASSWORD": password,
+            }
         p = self.start(
             [
-                *preargs,
                 "ssh",
                 # '-v',
                 "-o",
@@ -1135,6 +1150,7 @@ class ProcessManager:
                 "StrictHostKeychecking=no",
                 "-o",
                 "UserKnownHostsFile=/dev/null",
+                *password_options,
                 *args,
             ],
             stdin=subprocess.PIPE,

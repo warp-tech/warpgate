@@ -324,10 +324,9 @@ class Test:
         checked = 0
         spawns = 0
         while checked < 8:
-            # An ssh client that dies before the listener is up (sshpass
-            # occasionally garbles the password on this kind of rapid spawn
-            # loop) never opened a channel, so it can't count as a pass —
-            # respawn it, within a budget that still fails on systemic death.
+            # An ssh client that dies before the listener is up never opened a
+            # channel, so it can't count as a pass — respawn it, within a
+            # budget that still fails on systemic death.
             spawns += 1
             assert spawns <= 12, "too many ssh client startup failures"
 
