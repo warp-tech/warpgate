@@ -33,6 +33,8 @@ pub enum WarpgateError {
     UrlParse(#[from] url::ParseError),
     #[error("deserialization failed: {0}")]
     DeserializeJson(#[from] serde_json::Error),
+    #[error("invalid UTF-8: {0}")]
+    Utf8(#[from] std::string::FromUtf8Error),
     #[error("no valid Host header found and `external_host` config option is not set")]
     ExternalHostUnknown,
     #[error("current hostname ({0}) is not on the whitelist ({1:?})")]
@@ -142,6 +144,7 @@ impl UserFacingReason for WarpgateError {
             Self::DatabaseError(_) => "database error".into(),
             Self::UrlParse(_) => "failed to parse URL".into(),
             Self::DeserializeJson(_) => "deserialization failed".into(),
+            Self::Utf8(_) => "invalid UTF-8".into(),
             Self::InconsistentState(_) => "inconsistent state".into(),
             Self::ExternalHostNotWhitelisted(..) => "hostname is not on the whitelist".into(),
             Self::RoleNotFound(_) => "role not found".into(),
@@ -180,7 +183,6 @@ impl UserFacingReason for SsoError {
             | Self::SignatureVerification(_) => "SSO token verification failed".into(),
             Self::Reqwest(_) | Self::Io(_) => "SSO provider request failed".into(),
             Self::GoogleDirectory(_) => "Google Directory API error".into(),
-            Self::Other(_) => "SSO error".into(),
         }
     }
 }
@@ -196,7 +198,7 @@ impl UserFacingReason for LdapError {
             Self::NoUsername(_) => "cannot determine username for user",
             Self::NoUUID(_) => "cannot determine UUID for user",
             Self::AmbiguousMatch { .. } => "LDAP lookup matched more than one entry",
-            Self::LdapClientError(_) | Self::JsonError(_) | Self::Other(_) => "LDAP error",
+            Self::LdapClientError(_) | Self::JsonError(_) => "LDAP error",
         }
         .into()
     }
@@ -223,12 +225,6 @@ impl ResponseError for WarpgateError {
 impl From<Box<dyn Error + Send + Sync + 'static>> for WarpgateError {
     fn from(err: Box<dyn Error + Send + Sync + 'static>) -> Self {
         Self::Other(err)
-    }
-}
-
-impl WarpgateError {
-    pub fn other<E: Error + Send + Sync + 'static>(err: E) -> Self {
-        Self::Other(Box::new(err))
     }
 }
 

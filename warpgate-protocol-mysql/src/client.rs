@@ -281,9 +281,7 @@ async fn caching_sha2_full_auth(
         .ok_or_else(|| {
             MySqlError::ProtocolError("expected an RSA public key response".to_owned())
         })?;
-    let key =
-        RsaPublicKey::from_public_key_pem(std::str::from_utf8(pem).map_err(MySqlError::other)?)
-            .map_err(MySqlError::other)?;
+    let key = RsaPublicKey::from_public_key_pem(std::str::from_utf8(pem)?)?;
 
     let mut masked_password = password_nul(password);
     masked_password
@@ -291,6 +289,5 @@ async fn caching_sha2_full_auth(
         .zip(nonce.iter().cycle())
         .for_each(|(byte, nonce_byte)| *byte ^= *nonce_byte);
 
-    key.encrypt(&mut get_crypto_rng(), Oaep::<Sha1>::new(), &masked_password)
-        .map_err(MySqlError::other)
+    Ok(key.encrypt(&mut get_crypto_rng(), Oaep::<Sha1>::new(), &masked_password)?)
 }

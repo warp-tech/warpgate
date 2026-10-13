@@ -1786,11 +1786,14 @@ impl ServerSession {
             return;
         };
         let recorder = async {
-            let recorder = self
+            let Some(recorder) = self
                 .services
                 .recordings
                 .start::<TerminalRecorder, _>(&target_session_id, None, metadata)
-                .await?;
+                .await?
+            else {
+                return Ok(None);
+            };
             if let Some(request) = self
                 .channels
                 .get(&channel_id)
@@ -1800,11 +1803,11 @@ impl ServerSession {
                     .write_pty_resize(request.col_width, request.row_height)
                     .await?;
             }
-            Ok::<_, recordings::Error>(recorder)
+            Ok::<_, recordings::Error>(Some(recorder))
         }
         .await;
         match recorder {
-            Ok(recorder) => {
+            Ok(Some(recorder)) => {
                 // Starting the recording awaits, so the channel can be gone by
                 // now — e.g. target selection failed and tore the session down.
                 if let Some(channel_state) = self.channels.get_mut(&channel_id) {
@@ -1813,10 +1816,8 @@ impl ServerSession {
                     debug!(channel=%channel_id, "Recording started for a channel that is already gone");
                 }
             }
-            Err(error) => match error {
-                recordings::Error::Disabled => (),
-                error => error!(channel=%channel_id, ?error, "Failed to start recording"),
-            },
+            Ok(None) => (),
+            Err(error) => error!(channel=%channel_id, ?error, "Failed to start recording"),
         }
     }
 
@@ -1894,10 +1895,10 @@ impl ServerSession {
                 .start(&target_session_id, None, metadata)
                 .await
             {
-                Ok(recorder) => {
+                Ok(Some(recorder)) => {
                     e.insert(recorder);
                 }
-                Err(recordings::Error::Disabled) => (),
+                Ok(None) => (),
                 Err(error) => {
                     error!(?key, ?error, "Failed to start recording");
                 }

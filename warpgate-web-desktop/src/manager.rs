@@ -164,11 +164,11 @@ async fn connect(
         .start::<DesktopRecorder, _>(&target_session_id, None, DesktopRecordingMetadata::Desktop)
         .await
     {
-        Ok(recorder) => {
+        Ok(Some(recorder)) => {
             recorder.track_logon_state(handles.logon_state.clone());
             Some(Arc::new(recorder))
         }
-        Err(warpgate_core::recordings::Error::Disabled) => None,
+        Ok(None) => None,
         Err(error) => {
             warn!(%error, "Failed to start desktop recording");
             None

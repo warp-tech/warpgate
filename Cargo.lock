@@ -9405,7 +9405,6 @@ dependencies = [
  "async-trait",
  "bytes",
  "data-encoding",
- "dialoguer",
  "enum_dispatch",
  "futures",
  "governor",
