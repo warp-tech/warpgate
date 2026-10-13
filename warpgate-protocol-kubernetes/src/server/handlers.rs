@@ -537,7 +537,8 @@ async fn run_websocket_recording(recorder: TerminalRecorder, mut rx: mpsc::Recei
         let data = data[1..].to_vec();
 
         let result = match msg_type {
-            0..2 => {
+            // stdin, stdout, stderr
+            0..=2 => {
                 recorder
                     .write(
                         TerminalRecordingStreamId::from_usual_fd_number(msg_type)
