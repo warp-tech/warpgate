@@ -2,7 +2,7 @@ use std::time::{Duration, SystemTime};
 
 use aws_lc_rs::digest;
 use aws_lc_rs::error::KeyRejected;
-use aws_lc_rs::signature::{ECDSA_P384_SHA3_384_ASN1_SIGNING, EcdsaKeyPair};
+use aws_lc_rs::signature::{ECDSA_P384_SHA384_ASN1_SIGNING, EcdsaKeyPair};
 use data_encoding::BASE64;
 use der::{Decode, DecodePem, Encode};
 use rcgen::{
@@ -200,7 +200,7 @@ pub fn issue_client_certificate(
     use x509_cert::name::{RdnSequence, RelativeDistinguishedName};
 
     let ca_key_pair =
-        EcdsaKeyPair::from_pkcs8(&ECDSA_P384_SHA3_384_ASN1_SIGNING, &ca.private_key_der)?;
+        EcdsaKeyPair::from_pkcs8(&ECDSA_P384_SHA384_ASN1_SIGNING, &ca.private_key_der)?;
 
     let validity = {
         let validity = Duration::from_hours(8760);
@@ -308,5 +308,36 @@ mod tests {
             certificate_der_spki_sha256_hex(&cert.to_der().unwrap()).unwrap(),
             identity.spki_sha256_hex,
         );
+    }
+
+    /// A client certificate has to verify under the signature algorithm it declares, or no
+    /// standard verifier will accept it as issued by this CA.
+    #[test]
+    fn client_certificate_verifies_against_the_ca() {
+        use aws_lc_rs::signature::{ECDSA_P384_SHA384_ASN1, UnparsedPublicKey};
+
+        let (ca_cert, ca_key) = issue_ca_root_certificate().unwrap();
+        let ca = deserialize_ca(&ca_cert, &ca_key).unwrap();
+        let client_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let cert =
+            issue_client_certificate(&ca, "someone", &client_key.public_key_pem(), Uuid::new_v4())
+                .unwrap();
+
+        assert_eq!(
+            cert.signature_algorithm.oid,
+            const_oid::db::rfc5912::ECDSA_WITH_SHA_384
+        );
+        let ca_public_key = ca
+            .certificate
+            .tbs_certificate
+            .subject_public_key_info
+            .subject_public_key
+            .raw_bytes();
+        UnparsedPublicKey::new(&ECDSA_P384_SHA384_ASN1, ca_public_key)
+            .verify(
+                &cert.tbs_certificate.to_der().unwrap(),
+                cert.signature.raw_bytes(),
+            )
+            .expect("the signature must verify as ecdsa-with-SHA384");
     }
 }
