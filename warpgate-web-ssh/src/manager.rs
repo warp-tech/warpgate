@@ -1,18 +1,17 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use anyhow::Context;
 use russh::keys::PublicKeyBase64;
 use tokio::sync::mpsc::Receiver;
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, error, info_span, warn};
-use warpgate_common::{TargetSSHOptions, UserSessionId, WarpgateError};
+use warpgate_common::{TargetSSHOptions, UserFacingReason, UserSessionId, WarpgateError};
 use warpgate_core::{Services, TargetAuthorization};
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_protocol_ssh::{
-    ConnectionError, RCEvent, RCState, RemoteClient, RemoteClientHandles, client_error_message,
+    ConnectionError, RCEvent, RCState, RemoteClient, RemoteClientHandles, SshClientError,
     resolve_approved_ssh_chain,
 };
 use warpgate_web_clients_common::{
@@ -23,7 +22,7 @@ use warpgate_web_clients_common::{
 /// A failure the browser is about to be told of, as `notice` takes it.
 ///
 /// A type rather than a `String` parameter, because the guard here is the
-/// *choice* — `client_message()` and not `Display` — and a `String` can be
+/// *choice* — `user_facing_reason()` and not `Display` — and a `String` can be
 /// built from either. The raw form carries the issuer's own words, mounts,
 /// policies and hostnames, which the SSH path keeps from users and this entry
 /// point renders alike. There is no constructor from text, so a `notice` call
@@ -35,27 +34,27 @@ use warpgate_web_clients_common::{
 /// where the full error belongs, escaped so that remote text cannot forge a
 /// record.
 enum BrowserNotice<'a> {
-    Client(&'a anyhow::Error),
+    Client(&'a SshClientError),
     Connection(&'a ConnectionError),
 }
 
 impl BrowserNotice<'_> {
     fn message(&self) -> String {
         match self {
-            Self::Client(error) => client_error_message(error).to_owned(),
-            Self::Connection(error) => error.client_message(),
+            Self::Client(error) => error.user_facing_reason(),
+            Self::Connection(error) => error.user_facing_reason(),
         }
     }
 
     /// Rendered and then escaped, as the SSH path's sinks: `ConnectionError::Io`
     /// is transparent, so a newline in remote text would otherwise forge a
     /// second record in the default text format. An `anyhow::Error`'s own
-    /// `Debug` is multi-line and unescaped, and a `ConnectionError` can nest one
-    /// that its derived Debug passes through raw, so both are rendered first
-    /// and the string escaped.
+    /// `Debug` is multi-line and unescaped, and either error can nest one that
+    /// its derived Debug passes through raw, so both are rendered first and the
+    /// string escaped.
     fn log(&self) {
         match self {
-            Self::Client(error) => error!(error = ?format!("{error:#}"), "Client session error"),
+            Self::Client(error) => error!(error = ?format!("{error:?}"), "Client session error"),
             // `Vault`, `Aws` and `Warpgate` arrive here with no error-level log
             // anywhere upstream — the connect path logs at debug!, under the
             // default `warpgate=info` filter — so without this a certificate
@@ -113,8 +112,7 @@ impl WebSshClientManager {
             event_rx,
             command_tx,
             abort_tx,
-        } = RemoteClient::create(session_id, services.clone())
-            .context("creating SSH remote client")?;
+        } = RemoteClient::create(session_id, services.clone())?;
 
         let session = Arc::new(WebSshSession::new(
             session_id,
@@ -177,7 +175,7 @@ async fn run_session(
                     session.connect(chain);
                     relay_events(&session, &mut event_rx, &services).await
                 }
-                Err(error) => Err(error),
+                Err(error) => Err(error.into()),
             };
             if let Some(pending) = session.take_pending_host_key().await {
                 let _ = pending.reply.send(false);
@@ -192,9 +190,9 @@ async fn relay_events(
     session: &WebSshSession,
     event_rx: &mut Receiver<RCEvent>,
     services: &Services,
-) -> Result<(), WarpgateError> {
+) -> Result<(), SshClientError> {
     let session_id = session.id();
-    let mut final_result: Result<(), WarpgateError> = Ok(());
+    let mut final_result = Ok(());
     while let Some(event) = event_rx.recv().await {
         match event {
             RCEvent::State(RCState::Connecting) => {
@@ -225,11 +223,11 @@ async fn relay_events(
             }
             RCEvent::Error(e) => {
                 notice(session, &BrowserNotice::Client(&e)).await;
-                final_result = Err(e.into());
+                final_result = Err(e);
             }
             RCEvent::ConnectionError(e) => {
                 notice(session, &BrowserNotice::Connection(&e)).await;
-                final_result = Err(anyhow::Error::from(e).into());
+                final_result = Err(e.into());
             }
             RCEvent::HostKeyReceived(key, host, port) => {
                 debug!(%session_id, "Host key received for {host}:{port}: {}", key.algorithm());
@@ -292,7 +290,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use tracing_subscriber::fmt::MakeWriter;
-    use warpgate_common::WarpgateError;
+    use warpgate_common::{UserFacingReason, WarpgateError};
     use warpgate_protocol_ssh::SshClientError;
 
     use super::{BrowserNotice, ConnectionError};
@@ -321,19 +319,17 @@ mod tests {
             !shown.contains(SENTINEL),
             "the raw error reached the browser: {shown}"
         );
-        assert_eq!(shown, leaky.client_message());
+        assert_eq!(shown, leaky.user_facing_reason());
     }
 
     /// The other event the browser is told of, shaped as the command loop
-    /// sends it: an `SshClientError` from `handle_event`, converted to
-    /// `anyhow::Error`, sent as `RCEvent::Error` unwrapped. `Russh` is chosen
-    /// because its phrase differs from the unknown-type fallback, so the
-    /// assertion on it shows the downcast in `client_error_message` was taken.
+    /// sends it: an `SshClientError` from `handle_event`, sent as
+    /// `RCEvent::Error`. `Russh` is chosen because its phrase differs from the
+    /// `Warpgate` one below, so the assertion on it shows the variant's own
+    /// arm was taken.
     #[test]
     fn a_browser_never_sees_a_client_session_error_s_own_words() {
-        let leaky = anyhow::Error::from(SshClientError::Russh(russh::Error::IO(
-            std::io::Error::other(SENTINEL),
-        )));
+        let leaky = SshClientError::Russh(russh::Error::IO(std::io::Error::other(SENTINEL)));
         assert!(
             leaky.to_string().contains(SENTINEL),
             "the fixture does not carry the sentinel, so nothing below is evidence"
@@ -344,14 +340,20 @@ mod tests {
             !shown.contains(SENTINEL),
             "the raw error reached the browser: {shown}"
         );
-        assert_eq!(shown, "SSH protocol error", "the downcast was not taken");
+        assert_eq!(
+            shown, "SSH protocol error",
+            "the variant's own arm was not taken"
+        );
     }
 
-    /// An `anyhow::Error` that is not an `SshClientError` — nothing in the
-    /// command loop sends one today — gets the fixed fallback, not its text.
+    /// Warpgate's own failure inside the command loop — `Warpgate` is
+    /// `#[error(transparent)]` — gets the fixed phrase, not its text and not
+    /// even `WarpgateError`'s own category.
     #[test]
-    fn an_unrecognised_client_session_error_gets_the_fallback_phrase() {
-        let leaky = anyhow::anyhow!("Error in command loop: database error: {SENTINEL}");
+    fn an_internal_client_session_error_gets_the_fixed_phrase() {
+        let leaky = SshClientError::Warpgate(WarpgateError::Anyhow(anyhow::anyhow!(
+            "Error in command loop: database error: {SENTINEL}"
+        )));
         assert!(
             leaky.to_string().contains(SENTINEL),
             "the fixture does not carry the sentinel, so nothing below is evidence"
@@ -439,7 +441,7 @@ mod tests {
 
     #[test]
     fn a_newline_in_a_client_session_error_cannot_forge_a_web_ssh_log_record() {
-        let error = anyhow::anyhow!(FORGED);
+        let error = SshClientError::Warpgate(WarpgateError::Anyhow(anyhow::anyhow!(FORGED)));
         assert!(
             error.to_string().contains('\n'),
             "the fixture carries no newline, so nothing below is evidence"

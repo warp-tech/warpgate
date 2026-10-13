@@ -30,20 +30,8 @@ pub struct ClientHandler {
     pub session_id: UserSessionId,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum ClientHandlerError {
-    #[error("Connection error")]
-    ConnectionError(ConnectionError),
-
-    #[error("SSH")]
-    Ssh(#[from] russh::Error),
-
-    #[error("Internal error")]
-    Internal,
-}
-
 impl russh::client::Handler for ClientHandler {
-    type Error = ClientHandlerError;
+    type Error = ConnectionError;
 
     async fn check_server_key(
         &mut self,
@@ -55,13 +43,13 @@ impl russh::client::Handler for ClientHandler {
             .send(ClientHandlerEvent::HostKeyReceived(
                 server_public_key.clone(),
             ))
-            .map_err(|_| ClientHandlerError::ConnectionError(ConnectionError::Internal))?;
+            .map_err(|_| ConnectionError::Internal)?;
 
         let mode = Parameters::Entity::get(&self.services.db)
             .await
             .map_err(|error| {
                 error!(?error, session=%self.session_id, "Failed to read the host key verification mode");
-                ClientHandlerError::Internal
+                ConnectionError::Internal
             })?
             .ssh_host_key_verification;
 
@@ -84,14 +72,12 @@ impl russh::client::Handler for ClientHandler {
                 key_base64,
             }) => {
                 warn!(session=%self.session_id, "Host key is invalid!");
-                Err(ClientHandlerError::ConnectionError(
-                    ConnectionError::HostKeyMismatch {
-                        received_key_type: server_public_key.algorithm(),
-                        received_key_base64: server_public_key.public_key_base64(),
-                        known_key_type: key_type,
-                        known_key_base64: key_base64,
-                    },
-                ))
+                Err(ConnectionError::HostKeyMismatch {
+                    received_key_type: server_public_key.algorithm(),
+                    received_key_base64: server_public_key.public_key_base64(),
+                    known_key_type: key_type,
+                    known_key_base64: key_base64,
+                })
             }
             Ok(KnownHostValidationResult::Unknown) => {
                 warn!(session=%self.session_id, "Host key is unknown");
@@ -102,8 +88,8 @@ impl russh::client::Handler for ClientHandler {
                         server_public_key.clone(),
                         tx,
                     ))
-                    .map_err(|_| ClientHandlerError::Internal)?;
-                let accepted = rx.await.map_err(|_| ClientHandlerError::Internal)?;
+                    .map_err(|_| ConnectionError::Internal)?;
+                let accepted = rx.await.map_err(|_| ConnectionError::Internal)?;
                 if accepted {
                     if let Err(error) = known_hosts
                         .trust(
@@ -122,7 +108,7 @@ impl russh::client::Handler for ClientHandler {
             }
             Err(error) => {
                 error!(?error, session=%self.session_id, "Failed to verify the host key");
-                Err(ClientHandlerError::Internal)
+                Err(ConnectionError::Internal)
             }
         }
     }

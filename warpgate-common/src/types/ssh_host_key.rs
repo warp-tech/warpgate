@@ -32,8 +32,12 @@ impl SshHostKeyKind {
     pub fn generate_pem(self) -> Result<String, WarpgateError> {
         let key = PrivateKey::random(&mut get_crypto_rng(), self.algorithm())
             .map_err(russh::keys::Error::from)?;
-        let mut buf = Vec::new();
-        encode_pkcs8_pem(&key, &mut buf)?;
-        String::from_utf8(buf).map_err(WarpgateError::other)
+        pkcs8_pem_string(&key)
     }
+}
+
+pub fn pkcs8_pem_string(key: &PrivateKey) -> Result<String, WarpgateError> {
+    let mut buf = Vec::new();
+    encode_pkcs8_pem(key, &mut buf)?;
+    Ok(String::from_utf8(buf)?)
 }

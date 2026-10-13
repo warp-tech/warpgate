@@ -72,6 +72,7 @@ jobs:
           file: docker/Dockerfile
           context: .
           push: false
+          load: true
           labels: ${{ steps.meta.outputs.labels }}
           platforms: ${{ matrix.docker-platform }}
           cache-from: type=gha,scope=build-${{ matrix.docker-platform }}
@@ -94,6 +95,41 @@ jobs:
           attests: ''
           provenance: false
 
+      - name: Tag image for tests
+        env:
+          IMAGE: ${{ steps.build.outputs.digest && format('{0}/{1}@{2}', env.REGISTRY, env.IMAGE_NAME, steps.build.outputs.digest) || steps.build-no-push.outputs.imageid }}
+        run: |
+          docker image inspect "$IMAGE" >/dev/null 2>&1 || docker pull "$IMAGE"
+          docker tag "$IMAGE" warpgate:ci
+
+      - name: Test image
+        run: |
+          docker run --rm warpgate:ci version
+          docker volume create warpgate-smoke
+          docker run --rm -v warpgate-smoke:/data -e WARPGATE_ADMIN_PASSWORD=smoke warpgate:ci \
+            unattended-setup --data-path /data --http-port 8888 --ssh-port 2222
+          docker run -d --name warpgate-smoke -v warpgate-smoke:/data warpgate:ci
+          for _ in $(seq 30); do
+            if docker exec warpgate-smoke /usr/local/bin/warpgate healthcheck >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs warpgate-smoke
+          exit 1
+
+      - name: Save image for the chart test
+        if: matrix.matrix-id == 'amd64'
+        run: docker save warpgate:ci | gzip > ${{ runner.temp }}/warpgate-image.tar.gz
+
+      - name: Upload image for the chart test
+        if: matrix.matrix-id == 'amd64'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chart-test-image
+          path: ${{ runner.temp }}/warpgate-image.tar.gz
+          retention-days: 1
+
       - name: Export digest
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         run: |
@@ -109,6 +145,29 @@ jobs:
           path: ${{ runner.temp }}/digests/*
           if-no-files-found: error
           retention-days: 1
+
+  helm-chart-test:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Download image
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: chart-test-image
+          path: ${{ runner.temp }}
+
+      - name: Test Helm chart
+        run: |
+          shellcheck helm/e2e.sh
+          docker load < ${{ runner.temp }}/warpgate-image.tar.gz
+          kind create cluster --wait 2m
+          kind load docker-image warpgate:ci
+          helm/e2e.sh warpgate ci
 
   merge:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository

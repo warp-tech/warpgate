@@ -227,14 +227,14 @@ MUTATIONS = [
         # takes the type, not a `String`, so `e.to_string()` at the call site
         # does not compile. The previous anchor was a helper the call site was
         # free to skip, and the merge of #2684 skipped it with the test green.
-        "            Self::Connection(error) => error.client_message(),",
+        "            Self::Connection(error) => error.user_facing_reason(),",
         "            Self::Connection(error) => error.to_string(),",
     ),
     (
         "web-ssh: client session errors are sanitised before the user sees them",
         "warpgate-web-ssh/src/manager.rs",
         # The other variant, `RCEvent::Error`, which had no guard at all.
-        "            Self::Client(error) => client_error_message(error).to_owned(),",
+        "            Self::Client(error) => error.user_facing_reason(),",
         "            Self::Client(error) => error.to_string(),",
     ),
     (
@@ -286,7 +286,7 @@ MUTATIONS = [
         # separate lines.
         "logging: a command loop error is escaped before it reaches the log",
         "warpgate-protocol-ssh/src/client/mod.rs",
-        '    error!(error = ?format!("{error:#}"), "error in command loop");',
+        '    error!(error = ?format!("{error:?}"), "error in command loop");',
         '    error!(?error, "error in command loop");',
     ),
     (
@@ -307,8 +307,8 @@ MUTATIONS = [
     (
         "connection: the inter-hop tunnel open is bounded",
         "warpgate-protocol-ssh/src/client/mod.rs",
-        "            let channel = tokio::time::timeout(\n                HANDSHAKE_TIMEOUT,",
-        "            let channel = tokio::time::timeout(\n                Duration::from_secs(86400),",
+        "                tokio::time::timeout(handshake_timeout, open)",
+        "                tokio::time::timeout(Duration::from_secs(86400), open)",
     ),
     (
         # The split. Collapsing authentication back onto the transport
@@ -354,7 +354,7 @@ MUTATIONS = [
     (
         "connection: handshake deadline",
         "warpgate-protocol-ssh/src/client/mod.rs",
-        "let handshake_deadline = tokio::time::sleep(HANDSHAKE_TIMEOUT);",
+        "let handshake_deadline = tokio::time::sleep(handshake_timeout);",
         "let handshake_deadline = tokio::time::sleep(Duration::from_secs(86400));",
     ),
     (
@@ -401,12 +401,8 @@ MUTATIONS = [
         # while the test that discriminated it compared two constants, so the
         # pair agreed with each other and nothing established that either was
         # ever called.
-        """fn resume_after_host_key_answer(deadline: Pin<&mut tokio::time::Sleep>) {
-    deadline.reset(tokio::time::Instant::now() + once_the_host_key_is_answered());
-}""",
-        """fn resume_after_host_key_answer(deadline: Pin<&mut tokio::time::Sleep>) {
-    deadline.reset(tokio::time::Instant::now() + while_a_host_key_answer_is_outstanding());
-}""",
+        """    deadline.reset(tokio::time::Instant::now() + once_the_host_key_is_answered(handshake_timeout));""",
+        """    deadline.reset(tokio::time::Instant::now() + while_a_host_key_answer_is_outstanding());""",
     ),
     (
         "certificate: a username cannot shift the key ID fields",
@@ -577,15 +573,8 @@ MUTATIONS = [
         # one whose key is not trusted — one sentence for two different jobs.
         "connection: unreachable and untrusted do not read alike",
         "warpgate-protocol-ssh/src/client/mod.rs",
-        """            ConnectionError::Io(e) | ConnectionError::Ssh(russh::Error::IO(e)) => {
-                format!(
-                    "Could not open an SSH connection to the target: {}",
-                    unreachable_reason(e.kind())
-                )
-            }""",
-        """            ConnectionError::Io(_) | ConnectionError::Ssh(russh::Error::IO(_)) => {
-                "SSH protocol error".to_string()
-            }""",
+        """            Self::Io(e) | Self::Ssh(russh::Error::IO(e)) => io_connect_reason(e).into(),""",
+        """            Self::Io(_) | Self::Ssh(russh::Error::IO(_)) => "SSH protocol error".into(),""",
     ),
     (
         # Raised externally, round J: the sanitiser had no test at all, and the
@@ -593,8 +582,8 @@ MUTATIONS = [
         # `Display` too, so it passes with the sanitising removed.
         "error surfacing: internal error text never reaches a client message",
         "warpgate-protocol-ssh/src/client/mod.rs",
-        """            ConnectionError::Warpgate(_) => "Internal connection error".to_string(),""",
-        """            ConnectionError::Warpgate(e) => e.to_string(),""",
+        """            Self::Warpgate(_) => "Internal connection error".into(),""",
+        """            Self::Warpgate(e) => e.to_string(),""",
     ),
     (
         # Raised externally, round J: the whole authentication step was bounded
@@ -817,7 +806,7 @@ DISCRIMINATES = {
         "an_unreachable_target_does_not_read_like_an_untrusted_key"
     ],
     "error surfacing: internal error text never reaches a client message": [
-        "no_internal_error_text_reaches_a_client_message"
+        "no_internal_error_text_reaches_a_user_facing_reason"
     ],
     "connection: the target's own USERAUTH answer is bounded": [
         "a_target_that_never_answers_userauth_is_given_up_on"

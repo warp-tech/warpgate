@@ -1,20 +1,6 @@
-use std::error::Error;
+use warpgate_common::{UserFacingReason, WarpgateError};
 
-use warpgate_common::WarpgateError;
-
-/// What a connected user may be shown for an error carried as `anyhow::Error`.
-///
-/// `RCEvent::Error` is typed `anyhow::Error`, so the concrete error has to be
-/// recovered before it can be sanitised. Anything that does not downcast falls
-/// back to a constant — the safe direction, and the only one available when the
-/// type is unknown.
-#[must_use]
-pub fn client_error_message(error: &anyhow::Error) -> &'static str {
-    error.downcast_ref::<SshClientError>().map_or(
-        "Internal error in the target connection",
-        SshClientError::client_message,
-    )
-}
+use super::ConnectionError;
 
 #[derive(thiserror::Error, Debug)]
 pub enum SshClientError {
@@ -23,33 +9,37 @@ pub enum SshClientError {
     #[error("russh error: {0}")]
     Russh(#[from] russh::Error),
     #[error(transparent)]
-    Warpgate(#[from] WarpgateError),
+    Connection(#[from] ConnectionError),
     #[error(transparent)]
-    Other(Box<dyn Error + Send + Sync>),
+    Warpgate(#[from] WarpgateError),
 }
 
-impl SshClientError {
-    pub fn other<E: Error + Send + Sync + 'static>(err: E) -> Self {
-        Self::Other(Box::new(err))
-    }
-
-    /// What a connected user may be shown.
-    ///
-    /// The same job `ConnectionError::client_message` does, and it exists for
-    /// the same reason: `Warpgate` here is `#[error(transparent)]`, so
-    /// `WarpgateError`'s own `Display` passes straight through — a database
-    /// failure renders as `database error: {DbErr}` carrying SQL text, and an
-    /// encryption-key mismatch names the configured key fingerprints.
-    ///
-    /// This error reaches a terminal through `RCEvent::Error`, which wrote
-    /// `format!("Error: {e}")` directly and so went around the sanitiser
-    /// entirely. One hardened path and one unhardened path to the same sink is
-    /// not a boundary.
-    pub const fn client_message(&self) -> &'static str {
+impl UserFacingReason for SshClientError {
+    fn user_facing_reason(&self) -> String {
         match self {
-            Self::MpscError => "Internal connection error",
-            Self::Russh(_) => "SSH protocol error",
-            Self::Warpgate(_) | Self::Other(_) => "Internal error in the target connection",
+            Self::MpscError => "Internal connection error".into(),
+            Self::Russh(_) => "SSH protocol error".into(),
+            Self::Connection(e) => e.user_facing_reason(),
+            // Not `e.user_facing_reason()`, for the reason
+            // `ConnectionError::Warpgate` gives: what went wrong inside Warpgate
+            // is not the connecting user's business, not even by category.
+            Self::Warpgate(_) => "Internal error in the target connection".into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use warpgate_common::{UserFacingReason, WarpgateError};
+
+    use super::SshClientError;
+
+    #[test]
+    fn a_transparent_error_does_not_show_its_text() {
+        let leaky = SshClientError::Warpgate(WarpgateError::Other(
+            "database error: SELECT secret FROM credentials".into(),
+        ));
+        assert!(leaky.to_string().contains("SELECT"));
+        assert!(!leaky.user_facing_reason().contains("SELECT"));
     }
 }

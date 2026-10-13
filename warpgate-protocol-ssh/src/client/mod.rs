@@ -15,7 +15,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use channel_direct_tcpip::DirectTCPIPChannel;
 use channel_session::SessionChannel;
-pub use error::{SshClientError, client_error_message};
+pub use error::SshClientError;
 use futures::{FutureExt, pin_mut};
 use handler::ClientHandler;
 use russh::client::{AuthResult, Handle, KeyboardInteractiveAuthResponse};
@@ -36,14 +36,13 @@ use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{
     MAX_CERTIFICATE_LIFETIME, SSHTargetAuth, Secret, SecretError, SecretResolver,
     SshCertificateCriticalOption, SshTargetCertificateAuth, TargetOptionsVariant, TargetSSHOptions,
-    UserFacingReason, UserSessionId, WarpgateError,
+    UserFacingReason, UserSessionId, WarpgateError, io_connect_reason,
 };
 use warpgate_common_http::auth::TOKEN_ATTRIBUTIONS;
 use warpgate_core::{AdmittedTarget, ConfigProvider, Services};
 
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
-use crate::client::handler::ClientHandlerError;
 use crate::{ForwardedStreamlocalParams, ForwardedTcpIpParams, load_client_keys};
 
 /// What a hop in the chain is to the caller.
@@ -87,12 +86,6 @@ impl HopRole {
     }
 }
 
-/// How long a target may take to finish the SSH handshake. Generous for any
-/// real server on any real link, and the only thing standing between a target
-/// that accepts a connection and then goes quiet and a gateway task held for as
-/// long as it likes.
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
-
 /// How far out the handshake bound is pushed while a host-key question is
 /// outstanding.
 ///
@@ -104,14 +97,15 @@ const fn while_a_host_key_answer_is_outstanding() -> Duration {
 }
 
 /// And what it comes back to once the answer arrives: the remaining handshake
-/// is the target's again, so it gets the target's bound.
+/// is the target's again, so it gets the target's bound —
+/// `ssh.target_handshake_timeout`.
 ///
-/// A separate function from the constant because this is the thing that can be
-/// got wrong. A pause that is pushed out and never brought back lets a target
-/// answer with a host key, go quiet, and hold the session, the ephemeral key
-/// and a live certificate until russh's inactivity timeout.
-const fn once_the_host_key_is_answered() -> Duration {
-    HANDSHAKE_TIMEOUT
+/// A separate function because this is the thing that can be got wrong. A
+/// pause that is pushed out and never brought back lets a target answer with a
+/// host key, go quiet, and hold the session, the ephemeral key and a live
+/// certificate until russh's inactivity timeout.
+const fn once_the_host_key_is_answered(handshake_timeout: Duration) -> Duration {
+    handshake_timeout
 }
 
 /// How long authentication may take, when nothing else decides.
@@ -167,7 +161,7 @@ const VAULT_CALLS_PER_AUTHENTICATION: u32 = 5;
 
 /// How long authentication may take, as distinct from the transport handshake.
 ///
-/// The two shared `HANDSHAKE_TIMEOUT` until now: different phases, different
+/// The two shared the handshake's constant until now: different phases, different
 /// causes, one constant by accident. A certificate target's authentication is
 /// dominated by the issuer, and five calls at the default 10s `vault.timeout`
 /// is fifty seconds against a thirty-second bound — so a Vault that was slow
@@ -283,11 +277,12 @@ pub enum ConnectionError {
     #[error("Aborted")]
     Aborted,
 
-    /// The peer accepted the connection and then did not finish the handshake.
-    /// Distinct from a refusal, because nothing was refused — and distinct from
-    /// an ordinary timeout, because it names the stage.
-    #[error("The SSH target did not complete the handshake in time")]
-    HandshakeTimeout,
+    /// The target did not finish connecting and key exchange within
+    /// `ssh.target_handshake_timeout`. Distinct from a refusal, because nothing
+    /// was refused — and distinct from an ordinary timeout, because it names
+    /// the stage.
+    #[error("SSH handshake timed out after {timeout:?}")]
+    HandshakeTimeout { timeout: Duration },
 
     /// Carries why, because the target's own reason is the only thing that
     /// distinguishes a wrong credential from a clock that disagrees — and a
@@ -365,39 +360,40 @@ impl ConnectionError {
             other => Self::Warpgate(other),
         }
     }
+}
 
-    pub fn client_message(&self) -> String {
+impl UserFacingReason for ConnectionError {
+    fn user_facing_reason(&self) -> String {
         match self {
-            ConnectionError::Vault(e) => e.client_message().to_string(),
-            ConnectionError::Aws(e) => e.client_message().to_string(),
-            ConnectionError::Authentication(reason) => {
+            Self::HostKeyMismatch { .. }
+            | Self::Resolve
+            | Self::Internal
+            | Self::Aborted
+            | Self::JumpHostTargetNotFound => self.to_string(),
+            Self::Vault(e) => e.client_message().to_string(),
+            Self::Aws(_) => "AWS authentication for the SSH target failed".into(),
+            Self::Authentication(reason) => {
                 format!("SSH target rejected Warpgate's authentication request: {reason}")
             }
-            ConnectionError::CertificateRefused(reason) => {
+            Self::CertificateRefused(reason) => {
                 format!("Warpgate refused the certificate issued for this session: {reason}")
             }
-            ConnectionError::HostKeyMismatch { .. } => "Host key mismatch".to_string(),
-            ConnectionError::Resolve => "Could not resolve target address".to_string(),
-            ConnectionError::Aborted => "Connection aborted".to_string(),
-            ConnectionError::HandshakeTimeout => {
-                "The SSH target accepted the connection but never completed the handshake"
-                    .to_string()
+            Self::HandshakeTimeout { timeout } => {
+                format!("SSH handshake timed out after {timeout:?}: the target never completed the handshake")
             }
-            ConnectionError::TargetAuthenticationTimeout => {
+            Self::TargetAuthenticationTimeout => {
                 "The SSH target accepted Warpgate's authentication request and never answered it"
-                    .to_string()
+                    .into()
             }
-            ConnectionError::Internal => "Internal connection error".to_string(),
-            ConnectionError::JumpHostTargetNotFound => "Jump host target not found".to_string(),
-            ConnectionError::UntrustedJumpHost => {
+            Self::UntrustedJumpHost => {
                 "A jump host on the way to this target has an untrusted host key; check that host first"
-                    .to_string()
+                    .into()
             }
-            ConnectionError::AuthenticationTimeout => {
+            Self::AuthenticationTimeout => {
                 "Authentication did not complete in time — the target or, for a certificate target, the issuer"
-                    .to_string()
+                    .into()
             }
-            ConnectionError::TunnelOpenTimeout { host } => {
+            Self::TunnelOpenTimeout { host } => {
                 // `{:?}`, as the other arms that carry a configured string do.
                 // The host comes from a target's configuration, so it reaches a
                 // terminal belonging to whoever connects rather than to whoever
@@ -412,34 +408,17 @@ impl ConnectionError {
                 "Warpgate could not obtain the credential for this target from its secret backend: {}",
                 e.user_facing_reason()
             ),
-            // Split out from the protocol errors below, for the admin
-            // host-key-check endpoint. Everywhere else this function's caller is
-            // an unauthenticated party and one flat category is right; there the
-            // caller is an authenticated operator, and "I cannot reach this host
-            // at all" and "this host's key is not trusted" are the same sentence
-            // today while being two entirely different jobs. Nothing is
-            // disclosed by separating them — the operator supplied the address.
-            //
-            // The kind, not the operating system's own string: this is the
-            // sanitiser, and a fixed set of phrases cannot carry anything
-            // through it.
-            ConnectionError::Io(e) | ConnectionError::Ssh(russh::Error::IO(e)) => {
-                format!(
-                    "Could not open an SSH connection to the target: {}",
-                    unreachable_reason(e.kind())
-                )
-            }
-            ConnectionError::Key(_) | ConnectionError::Ssh(_) => {
-                "SSH protocol error".to_string()
-            }
-            // Not `to_string()`. This is the sanitiser, and that arm passed
-            // `WarpgateError`'s `Display` through verbatim to a PTY and a
-            // browser — reachable from inside `authenticate_session`, where a
-            // database failure renders as `database error: {DbErr}` carrying SQL
-            // text, and an encryption-key mismatch names the configured key
-            // fingerprints. The one arm of the function that did not do the job
-            // the function exists for.
-            ConnectionError::Warpgate(_) => "Internal connection error".to_string(),
+            // Kept apart from the protocol errors below, for the admin
+            // host-key-check endpoint: "I cannot reach this host at all" and
+            // "this host's key is not trusted" are two different jobs for the
+            // operator who supplied the address.
+            Self::Io(e) | Self::Ssh(russh::Error::IO(e)) => io_connect_reason(e).into(),
+            Self::Key(_) | Self::Ssh(_) => "SSH protocol error".into(),
+            // Not `e.user_facing_reason()`. This is reachable from inside
+            // `authenticate_session`, and an encryption-key mismatch or a
+            // database failure there is Warpgate's own business, not the
+            // connecting user's — not even by category.
+            Self::Warpgate(_) => "Internal connection error".into(),
         }
     }
 }
@@ -448,7 +427,7 @@ impl ConnectionError {
 ///
 /// A named operation rather than a `reset` written out at the call site, so the
 /// pair below can be driven by a test. The test that guarded this compared
-/// `once_the_host_key_is_answered()` against `HANDSHAKE_TIMEOUT` and never
+/// `once_the_host_key_is_answered()` against the handshake constant and never
 /// called either function — it would have passed with a call site deleted, or
 /// with the two durations swapped between them.
 fn pause_for_host_key_question(deadline: Pin<&mut tokio::time::Sleep>) {
@@ -457,8 +436,11 @@ fn pause_for_host_key_question(deadline: Pin<&mut tokio::time::Sleep>) {
 
 /// And bring it back once the answer arrives: the rest of the handshake is the
 /// target's again, so it gets the target's bound.
-fn resume_after_host_key_answer(deadline: Pin<&mut tokio::time::Sleep>) {
-    deadline.reset(tokio::time::Instant::now() + once_the_host_key_is_answered());
+fn resume_after_host_key_answer(
+    deadline: Pin<&mut tokio::time::Sleep>,
+    handshake_timeout: Duration,
+) {
+    deadline.reset(tokio::time::Instant::now() + once_the_host_key_is_answered(handshake_timeout));
 }
 
 /// One end of a certificate's validity window, for a message a person reads.
@@ -484,25 +466,6 @@ fn describe_certificate_time(at: Option<std::time::SystemTime>) -> String {
         return "a date beyond any this can render".to_owned();
     }
     rendered
-}
-
-/// Why a connection could not be opened, in a fixed set of words.
-///
-/// Deliberately not `io::Error`'s own `Display`. This feeds the sanitiser, and
-/// the whole point of that function is that nothing reaches a caller except
-/// text this file chose.
-const fn unreachable_reason(kind: std::io::ErrorKind) -> &'static str {
-    match kind {
-        std::io::ErrorKind::ConnectionRefused => "it refused the connection",
-        std::io::ErrorKind::TimedOut => "it did not answer in time",
-        std::io::ErrorKind::HostUnreachable | std::io::ErrorKind::NetworkUnreachable => {
-            "there is no route to it"
-        }
-        std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted => {
-            "it closed the connection"
-        }
-        _ => "the connection could not be established",
-    }
 }
 
 /// Vault is a second gate, not a trusted party, so what comes back is checked
@@ -945,7 +908,7 @@ pub enum RCEvent {
     ChannelFailure(Uuid),
     Eof(Uuid),
     Close(Uuid),
-    Error(anyhow::Error),
+    Error(SshClientError),
     ExitStatus(Uuid, u32),
     ExitSignal {
         channel: Uuid,
@@ -1276,7 +1239,7 @@ impl RemoteClient {
                             }
                         };
                     }
-                    Ok::<(), anyhow::Error>(())
+                    Ok::<(), SshClientError>(())
                 }
                 .await
                 .map_err(|error| {
@@ -1292,7 +1255,7 @@ impl RemoteClient {
         )
     }
 
-    async fn handle_event(&mut self, event: InnerEvent) -> Result<bool> {
+    async fn handle_event(&mut self, event: InnerEvent) -> Result<bool, SshClientError> {
         match event {
             InnerEvent::RCCommand(cmd, mut reply) => {
                 let result = self.handle_command(cmd, &mut reply).await;
@@ -1376,7 +1339,7 @@ impl RemoteClient {
     async fn setup_server_initiated_channel(
         &mut self,
         channel: russh::Channel<russh::client::Msg>,
-    ) -> Result<Uuid> {
+    ) -> Result<Uuid, SshClientError> {
         let id = Uuid::new_v4();
 
         let (tx, rx) = unbounded_channel();
@@ -1387,7 +1350,8 @@ impl RemoteClient {
         self.child_tasks.push(
             tokio::task::Builder::new()
                 .name(&format!("SSH {} {:?} ops", self.id, id))
-                .spawn(session_channel.run())?,
+                .spawn(session_channel.run())
+                .map_err(WarpgateError::from)?,
         );
 
         Ok(id)
@@ -1626,6 +1590,14 @@ impl Connector {
         let first_hop = iter.next().ok_or(ConnectionError::Resolve)?;
         let first_id = first_hop.id;
         let first = first_hop.ssh_options;
+        let handshake_timeout = self
+            .services
+            .config
+            .lock()
+            .await
+            .store
+            .ssh
+            .target_handshake_timeout;
 
         let config = self.build_ssh_config(&first).await;
         let address_str = format!("{}:{}", first.host, first.port);
@@ -1644,7 +1616,13 @@ impl Connector {
         };
         let fut = russh::client::connect(config, address, handler);
         let Some((mut session, mut active_rx)) = self
-            .wait_for_connection(&first, fut, event_rx, role(check_target, first_id))
+            .wait_for_connection(
+                &first,
+                fut,
+                event_rx,
+                role(check_target, first_id),
+                handshake_timeout,
+            )
             .boxed()
             .await?
         else {
@@ -1670,22 +1648,30 @@ impl Connector {
             // five minutes by default and hours wherever an operator has raised
             // it. Reachable from the admin host-key check too, which adds no
             // timeout of its own.
-            let channel = tokio::time::timeout(
-                HANDSHAKE_TIMEOUT,
-                session.channel_open_direct_tcpip(
-                    ssh_options.host.clone(),
-                    u32::from(ssh_options.port),
-                    "localhost".to_string(),
-                    0,
-                ),
-            )
-            .await
-            .map_err(|_| {
-                error!(host = ?ssh_options.host, "Jump host did not open the tunnel in time");
-                ConnectionError::TunnelOpenTimeout {
-                    host: ssh_options.host.clone(),
-                }
-            })?
+            //
+            // The same configured value as the handshake, and `0s` lifts this
+            // bound too: `ssh.target_handshake_timeout` is documented to cover
+            // the direct-tcpip hop. Kept outside the handshake future, unlike
+            // upstream's version, so a jump host that stalls is named as
+            // itself rather than as the target.
+            let open = session.channel_open_direct_tcpip(
+                ssh_options.host.clone(),
+                u32::from(ssh_options.port),
+                "localhost".to_string(),
+                0,
+            );
+            let channel = if handshake_timeout.is_zero() {
+                open.await
+            } else {
+                tokio::time::timeout(handshake_timeout, open)
+                    .await
+                    .map_err(|_| {
+                        error!(host = ?ssh_options.host, "Jump host did not open the tunnel in time");
+                        ConnectionError::TunnelOpenTimeout {
+                            host: ssh_options.host.clone(),
+                        }
+                    })?
+            }
             .map_err(ConnectionError::Ssh)?;
             let stream = channel.into_stream();
             let config = self.build_ssh_config(&ssh_options).await;
@@ -1698,7 +1684,13 @@ impl Connector {
             };
             let fut = russh::client::connect_stream(config, stream, handler);
             let Some((new_session, new_rx)) = self
-                .wait_for_connection(&ssh_options, fut, event_rx, role(check_target, hop_id))
+                .wait_for_connection(
+                    &ssh_options,
+                    fut,
+                    event_rx,
+                    role(check_target, hop_id),
+                    handshake_timeout,
+                )
                 .boxed()
                 .await?
             else {
@@ -1740,12 +1732,13 @@ impl Connector {
         fut_connect: Fut,
         mut event_rx: UnboundedReceiver<ClientHandlerEvent>,
         hop: HopRole,
+        handshake_timeout: Duration,
     ) -> Result<
         Option<(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>)>,
         ConnectionError,
     >
     where
-        Fut: Future<Output = Result<Handle<ClientHandler>, ClientHandlerError>>,
+        Fut: Future<Output = Result<Handle<ClientHandler>, ConnectionError>>,
     {
         pin_mut!(fut_connect);
 
@@ -1762,7 +1755,9 @@ impl Connector {
         // being bounded by the *inbound* session's patience — which governs how
         // long an idle interactive session may live and is legitimately raised
         // to hours. Borrowing it here would extend this hold to match.
-        let handshake_deadline = tokio::time::sleep(HANDSHAKE_TIMEOUT);
+        //
+        // `0s` disables it, as `ssh.target_handshake_timeout` documents.
+        let handshake_deadline = tokio::time::sleep(handshake_timeout);
         pin_mut!(handshake_deadline);
 
         // The deadline pauses while a host key is outstanding and resumes the
@@ -1860,20 +1855,25 @@ impl Connector {
                 // `check_server_key`. The remaining handshake is the target's
                 // again from here, so the bound comes back with it.
                 Some(answer) = host_key_answers.recv() => {
-                    resume_after_host_key_answer(handshake_deadline.as_mut());
+                    resume_after_host_key_answer(handshake_deadline.as_mut(), handshake_timeout);
                     if let Some(reply) = outstanding_host_key.take() {
                         // A closed receiver means the connection future is
                         // already gone; there is nothing left to answer.
                         let _ = reply.send(answer);
                     }
                 }
-                () = &mut handshake_deadline => {
-                    error!(host = ?ssh_options.host, "Target did not finish the SSH handshake in time");
+                () = &mut handshake_deadline, if !handshake_timeout.is_zero() => {
+                    error!(
+                        host = ?ssh_options.host,
+                        port = ssh_options.port,
+                        timeout = ?handshake_timeout,
+                        "Target did not finish the SSH handshake in time"
+                    );
                     // No `set_disconnected()` here: the `InnerEvent::Connected`
                     // arm calls it immediately after sending the error, so doing
                     // it first would only reorder `Done` ahead of the reason. The
                     // test below pins the message either way.
-                    return Err(ConnectionError::HandshakeTimeout);
+                    return Err(ConnectionError::HandshakeTimeout { timeout: handshake_timeout });
                 }
                 // No abort arm here since #2603: the attempt runs in its own
                 // task, `abort_rx` stays with the `RemoteClient` that owns it,
@@ -1884,13 +1884,8 @@ impl Connector {
                     let mut session = match session {
                         Ok(session) => session,
                         Err(error) => {
-                            let connection_error = match error {
-                                ClientHandlerError::ConnectionError(e) => e,
-                                ClientHandlerError::Ssh(e) => ConnectionError::Ssh(e),
-                                ClientHandlerError::Internal => ConnectionError::Internal,
-                            };
-                            error!(error = ?format!("{connection_error:?}"), "Connection error");
-                            return Err(connection_error);
+                            error!(error = ?format!("{error:?}"), "Connection error");
+                            return Err(error);
                         }
                     };
 
@@ -2393,7 +2388,7 @@ impl RemoteClient {
             tokio::task::Builder::new()
                 .name(&format!("SSH {} {:?} ops", self.id, channel_id))
                 .spawn(task)
-                .map_err(|e| SshClientError::Other(Box::new(e)))?,
+                .map_err(WarpgateError::from)?,
         );
 
         Ok(())
@@ -2486,15 +2481,6 @@ impl Drop for RemoteClient {
     }
 }
 
-/// The command loop's own record of the error it ends on, written before the
-/// error is handed on as `RCEvent::Error` and logged again by whichever session
-/// receives it.
-///
-/// Rendered and then escaped, as `log_client_session_error` does: an
-/// `anyhow::Error`'s own `Debug` prints its cause chain on separate lines,
-/// unescaped, so remote text in any link of it forges a record. Named so a test
-/// can stand at it; `#[deny(dead_code)]` stops a revert to logging inline from
-/// leaving only the test calling this.
 /// The record of an X11 channel the target opened.
 ///
 /// The originator address is the target's own text, forwarded unchanged by
@@ -2509,13 +2495,22 @@ pub(crate) fn log_x11_connection(originator_address: &str, originator_port: u32)
     info!(?originator_address, originator_port, "New X11 connection");
 }
 
+/// The command loop's own record of the error it ends on, written before the
+/// error is handed on as `RCEvent::Error` and logged again by whichever session
+/// receives it.
+///
+/// Rendered and then escaped, as `log_client_session_error` does: an
+/// `SshClientError` can nest an `anyhow::Error`, whose own `Debug` prints its
+/// cause chain on separate lines, unescaped, so remote text in any link of it
+/// forges a record. Named so a test can stand at it; `#[deny(dead_code)]` stops
+/// a revert to logging inline from leaving only the test calling this.
 #[deny(dead_code)]
 #[allow(
     clippy::redundant_pub_crate,
     reason = "`pub` would re-export it through `pub use client::*`, and a public item is never dead code, which is what ties the call site to this sink"
 )]
-pub(crate) fn log_command_loop_error(error: &anyhow::Error) {
-    error!(error = ?format!("{error:#}"), "error in command loop");
+pub(crate) fn log_command_loop_error(error: &SshClientError) {
+    error!(error = ?format!("{error:?}"), "error in command loop");
 }
 
 #[cfg(test)]
@@ -3127,16 +3122,17 @@ mod tests {
         async fn answering_a_host_key_question_puts_the_targets_own_bound_back() {
             use std::time::Duration;
 
-            use crate::client::{
-                HANDSHAKE_TIMEOUT, pause_for_host_key_question, resume_after_host_key_answer,
-            };
+            use crate::client::{pause_for_host_key_question, resume_after_host_key_answer};
+
+            // The shipped default of `ssh.target_handshake_timeout`.
+            let handshake_timeout = Duration::from_secs(30);
 
             // The real `Sleep` the connect loop holds, moved by the real
             // functions the connect loop calls. The previous version of this
             // test compared two constants and called neither — it would have
             // passed with a call site deleted, or with the two durations
             // swapped between them, which is the regression it exists to catch.
-            let deadline = tokio::time::sleep(HANDSHAKE_TIMEOUT);
+            let deadline = tokio::time::sleep(handshake_timeout);
             tokio::pin!(deadline);
             let armed = deadline.deadline();
 
@@ -3148,7 +3144,7 @@ mod tests {
                  reading a fingerprint"
             );
 
-            resume_after_host_key_answer(deadline.as_mut());
+            resume_after_host_key_answer(deadline.as_mut(), handshake_timeout);
             let resumed = deadline.deadline();
             assert!(
                 resumed < paused,
@@ -3156,7 +3152,7 @@ mod tests {
                  goes quiet after offering a host key is never given up on"
             );
             assert!(
-                resumed <= tokio::time::Instant::now() + HANDSHAKE_TIMEOUT,
+                resumed <= tokio::time::Instant::now() + handshake_timeout,
                 "the answer left the connection on a bound longer than the \
                  target's own"
             );
@@ -3214,15 +3210,16 @@ mod tests {
         /// unrelated variant's `Display` — so it passes identically with the
         /// sanitising removed. Raised externally.
         #[test]
-        fn no_internal_error_text_reaches_a_client_message() {
-            use warpgate_common::WarpgateError;
+        fn no_internal_error_text_reaches_a_user_facing_reason() {
+            use warpgate_common::{UserFacingReason, WarpgateError};
 
             use crate::ConnectionError;
 
             let internals = "relation warpgate_user column password_hash";
-            let shown =
-                ConnectionError::Warpgate(WarpgateError::other(std::io::Error::other(internals)))
-                    .client_message();
+            let shown = ConnectionError::Warpgate(WarpgateError::Other(Box::new(
+                std::io::Error::other(internals),
+            )))
+            .user_facing_reason();
 
             assert!(
                 !shown.contains(internals),
@@ -3237,16 +3234,18 @@ mod tests {
         /// while being the first.
         #[test]
         fn an_unreachable_target_does_not_read_like_an_untrusted_key() {
+            use warpgate_common::UserFacingReason;
+
             use crate::ConnectionError;
 
             let unreachable = ConnectionError::Ssh(russh::Error::IO(std::io::Error::from(
                 std::io::ErrorKind::ConnectionRefused,
             )))
-            .client_message();
+            .user_facing_reason();
 
             assert_ne!(
                 unreachable,
-                ConnectionError::UntrustedJumpHost.client_message(),
+                ConnectionError::UntrustedJumpHost.user_facing_reason(),
                 "unreachable and untrusted render identically"
             );
             assert!(
@@ -3337,6 +3336,7 @@ mod tests {
             use std::time::{Duration, Instant};
 
             use sea_orm::DatabaseConnection;
+            use warpgate_common::UserFacingReason;
 
             use crate::client::{PreparedAuth, prepare_auth, prepare_then_authenticate};
 
@@ -3368,7 +3368,7 @@ mod tests {
             assert!(
                 result.is_ok(),
                 "a slow but working backend failed the login: {:?}",
-                result.map_err(|e| e.client_message())
+                result.map_err(|e| e.user_facing_reason())
             );
         }
 
@@ -3378,6 +3378,7 @@ mod tests {
             use std::time::Duration;
 
             use sea_orm::DatabaseConnection;
+            use warpgate_common::UserFacingReason;
 
             use crate::ConnectionError;
             use crate::client::{prepare_auth, prepare_then_authenticate};
@@ -3428,7 +3429,7 @@ mod tests {
                 "the backend's text reached the log unescaped: {error}"
             );
             assert_eq!(
-                error.client_message(),
+                error.user_facing_reason(),
                 "Warpgate could not obtain the credential for this target from its secret \
                  backend: Secret backend error"
             );

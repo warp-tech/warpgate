@@ -3,9 +3,9 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::PublicKeyBase64;
 use tracing::error;
 use uuid::Uuid;
-use warpgate_common::{AdminPermission, UserSessionId, WarpgateError};
+use warpgate_common::{AdminPermission, UserFacingReason, UserSessionId, WarpgateError};
 use warpgate_protocol_ssh::{
-    ConnectionError, IdentityHint, RCCommand, RCEvent, RemoteClient, client_error_message,
+    ConnectionError, IdentityHint, RCCommand, RCEvent, RemoteClient, SshClientError,
     resolve_ssh_chain_for_admin,
 };
 
@@ -95,7 +95,7 @@ impl Api {
                     // and arrives here as `ConnectionError::UntrustedJumpHost`.
                     Some(RCEvent::HostKeyReceived(key, _, _)) => break key,
                     Some(RCEvent::ConnectionError(err)) => return Err(anyhow::Error::from(err)),
-                    Some(RCEvent::Error(err)) => return Err(err),
+                    Some(RCEvent::Error(err)) => return Err(anyhow::Error::from(err)),
                     None => anyhow::bail!("Failed to connect to target"),
                     _ => (),
                 }
@@ -127,17 +127,17 @@ impl Api {
                 // server side.
                 error!(target_id=%body.target_id, error=%format!("{err:#}"), "SSH host key check failed");
                 Ok(CheckSshHostKeyResponse::Error(PlainText(
-                    // The loop above returns `RCEvent::Error` unchanged, and the
-                    // command loop wraps that in `anyhow!("Error in command loop:
-                    // …")`, so it downcasts to neither error type this endpoint
-                    // knows — and the old fallback rendered the whole chain,
+                    // Never the chain itself: an older fallback rendered it,
                     // `WarpgateError::DatabaseError`'s SQL text included, into
-                    // the response. `client_error_message` is the constant the
-                    // session path falls back to for exactly that case.
-                    err.downcast_ref::<ConnectionError>().map_or_else(
-                        || client_error_message(&err).to_owned(),
-                        ConnectionError::client_message,
-                    ),
+                    // the response. What downcasts to neither type is the
+                    // closed-channel bail above, and gets a fixed phrase.
+                    if let Some(err) = err.downcast_ref::<ConnectionError>() {
+                        err.user_facing_reason()
+                    } else if let Some(err) = err.downcast_ref::<SshClientError>() {
+                        err.user_facing_reason()
+                    } else {
+                        "Internal error in the target connection".to_owned()
+                    },
                 )))
             }
         }

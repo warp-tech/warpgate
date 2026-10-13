@@ -37,7 +37,6 @@ sea-orm.workspace = true
 serde.workspace = true
 serde_ignored = "0.1"
 serde_json.workspace = true
-serde_yaml = { version = "0.9", default-features = false }
 time = { version = "0.3", default-features = false }
 tokio.workspace = true
 tokio-stream = { workspace = true, features = ["sync"] }
@@ -66,6 +65,7 @@ warpgate-protocol-ssh = { path = "../warpgate-protocol-ssh" }
 warpgate-protocol-vnc = { path = "../warpgate-protocol-vnc" }
 warpgate-tls = { path = "../warpgate-tls" }
 warpgate-vault = { path = "../warpgate-vault" }
+yaml_serde = { version = "0.10", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"

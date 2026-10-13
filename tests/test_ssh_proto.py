@@ -701,11 +701,7 @@ class Test:
         user, ssh_target = setup_user_and_target(
             processes, shared_wg, wg_c_ed25519_pubkey
         )
-        # Point the target at a port nothing listens on, so the connection this
-        # test is named for actually fails. `"user:ssh-bad-domain@localhost"`
-        # used to sit in the argument list where `ssh` takes the remote command,
-        # not the destination, so it selected nothing and the session reached the
-        # reachable target from `setup_user_and_target` and succeeded.
+        # Point the target at a port nothing listens on.
         with admin_client(f"https://localhost:{shared_wg.http_port}") as api:
             options = ssh_target.options.actual_instance
             options.port = alloc_port()
@@ -724,6 +720,7 @@ class Test:
             f"{user.username}:{ssh_target.name}@localhost",
             "-p",
             str(shared_wg.ssh_port),
+            # Service messages only go to channels with a PTY.
             "-tt",
             "-i",
             "/dev/null",
@@ -732,15 +729,13 @@ class Test:
             password="123",
         )
 
-        # `communicate` before the assertion: `returncode` is `None` until the
-        # client exits, and `None != 0` is true, so this passed without ever
-        # waiting for the client -- and then asked nothing about what it was
-        # shown.
         shown = ssh_client.communicate(timeout=60)[0].decode(errors="replace")
         assert ssh_client.returncode != 0
-        # The failure, not merely a line from Warpgate: the session banner
-        # carries the name on every connection, including a successful one.
-        assert "Target connection failed" in shown, repr(shown[-400:])
+        # The user is told what happened, not what the OS said.
+        assert "Target connection failed: Target refused the connection" in shown, repr(
+            shown[-400:]
+        )
+        assert "os error" not in shown, repr(shown[-400:])
 
     def test_sftp(
         self,

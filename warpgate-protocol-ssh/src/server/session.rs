@@ -27,7 +27,8 @@ use warpgate_common::auth::{
 use warpgate_common::eventhub::{EventHub, EventSender};
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{
-    Secret, TargetOptions, TargetSSHOptions, TargetSessionId, UserSessionId, WarpgateError,
+    Secret, TargetOptions, TargetSSHOptions, TargetSessionId, UserFacingReason, UserSessionId,
+    WarpgateError,
 };
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::approvals::{GateOutcome, GatedConnection};
@@ -56,15 +57,19 @@ use crate::server::target_menu::{MenuEvent, spawn_target_menu_loop};
 use crate::{
     ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCCommandReply,
     RCEvent, RCState, RemoteClient, ResolvedSshChainHost, ServerChannelId, SshClientError,
-    SshRecordingMetadata, X11Request, client_error_message, resolve_approved_ssh_chain,
+    SshRecordingMetadata, X11Request, resolve_approved_ssh_chain,
 };
 
 const EVENT_QUEUE_CAPACITY: usize = 128;
 
 /// How long a teardown waits for the channel writer's own queue to drain —
-/// i.e. for `Handle::close`/`Handle::disconnect` to have been *sent* — before
-/// giving up on them.
+/// i.e. for `Handle::close` to have been *sent* — before giving up on it, and
+/// how long a reading client then gets to receive what was sent.
 const DISCONNECT_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long the session's last message gets ahead of the connection-level
+/// disconnect. A client that reads both in one batch acts on the disconnect
+/// and exits without printing the message.
+const DISCONNECT_NOTICE_GAP: Duration = Duration::from_secs(1);
 
 #[allow(clippy::large_enum_variant)]
 enum TargetSelection {
@@ -246,8 +251,8 @@ fn log_target_connection_failure(error: &ConnectionError) {
 /// The debug record of every event the target connection delivers.
 ///
 /// Rendered and then escaped like the sinks above, and for the same reason:
-/// `RCEvent::Error` carries the command loop's `anyhow::Error` and
-/// `RCEvent::ConnectionError` may nest one, so `?event` writes their text raw —
+/// `RCEvent::Error` and `RCEvent::ConnectionError` may both nest the command
+/// loop's `anyhow::Error`, so `?event` writes their text raw —
 /// a forged record ahead of the escaped one `handle_remote_event` writes.
 /// Rendering the whole event rather than special-casing those two keeps every
 /// variant under one rule, including any added later.
@@ -258,12 +263,13 @@ fn log_remote_event(event: &RCEvent) {
 
 /// The server-side record of a client session error, under the same rule.
 ///
-/// Not `?error` alone: an `anyhow::Error`'s own `Debug` prints its cause chain
-/// on separate lines, unescaped, which forges records just as `Display` does.
-/// The chain is rendered first and the resulting string escaped.
+/// Not `?error` alone: an `SshClientError` can nest an `anyhow::Error`, whose
+/// own `Debug` prints its cause chain on separate lines, unescaped, which forges
+/// records just as `Display` does. It is rendered first and the resulting
+/// string escaped.
 #[deny(dead_code)]
-fn log_client_session_error(error: &anyhow::Error) {
-    error!(error = ?format!("{error:#}"), "Client session error");
+fn log_client_session_error(error: &SshClientError) {
+    error!(error = ?format!("{error:?}"), "Client session error");
 }
 
 #[cfg(test)]
@@ -379,9 +385,10 @@ mod tests {
     /// wrapped, written as it came.
     #[test]
     fn a_newline_in_a_client_session_error_cannot_forge_a_log_record() {
-        let error = anyhow::anyhow!(
-            "permission denied\n  ERROR warpgate::ssh: Authenticated with certificate"
-        );
+        let error =
+            SshClientError::Warpgate(warpgate_common::WarpgateError::Anyhow(anyhow::anyhow!(
+                "permission denied\n  ERROR warpgate::ssh: Authenticated with certificate"
+            )));
         assert!(
             error.to_string().contains('\n'),
             "the fixture carries no newline, so nothing below is evidence"
@@ -400,16 +407,18 @@ mod tests {
 
     /// The command loop logs the same error before it is sent on, so the
     /// sinks downstream being escaped is not enough. The fixture is shaped as
-    /// the loop's errors are — an `SshClientError` from `handle_event`, under a
-    /// context — with the newline in the cause, not the outermost message.
+    /// the loop's errors are — an `SshClientError` from `handle_event` — with
+    /// the newline in a nested cause, not the outermost message.
     #[test]
     fn a_newline_in_a_command_loop_error_cannot_forge_a_log_record() {
-        let error = anyhow::Error::from(SshClientError::other(std::io::Error::other(
-            "permission denied\n  ERROR warpgate::ssh: Authenticated with certificate",
-        )))
-        .context("handling a client event");
+        let error = SshClientError::Warpgate(warpgate_common::WarpgateError::Anyhow(
+            anyhow::anyhow!(
+                "permission denied\n  ERROR warpgate::ssh: Authenticated with certificate"
+            )
+            .context("handling a client event"),
+        ));
         assert!(
-            format!("{error:#}").contains('\n'),
+            format!("{error:?}").contains('\n'),
             "the fixture carries no newline, so nothing below is evidence"
         );
 
@@ -453,12 +462,14 @@ mod tests {
     /// sends it, with the newline in the cause.
     #[test]
     fn a_newline_in_a_remote_event_cannot_forge_a_debug_record() {
-        let event = RCEvent::Error(
-            anyhow::Error::from(SshClientError::other(std::io::Error::other(
-                "permission denied\n  ERROR warpgate::ssh: Authenticated with certificate",
-            )))
-            .context("handling a client event"),
-        );
+        let event = RCEvent::Error(SshClientError::Warpgate(
+            warpgate_common::WarpgateError::Anyhow(
+                anyhow::anyhow!(
+                    "permission denied\n  ERROR warpgate::ssh: Authenticated with certificate"
+                )
+                .context("handling a client event"),
+            ),
+        ));
         assert!(
             format!("{event:?}").contains('\n'),
             "the fixture's Debug carries no raw newline, so nothing below is evidence"
@@ -1622,25 +1633,23 @@ impl ServerSession {
                     }
                     error => {
                         log_target_connection_failure(&error);
-                        // `client_message()` and not `{error}`: the full text is
-                        // for the log above, and carries Vault URLs and role
-                        // names a connected user must not be handed.
+                        // `user_facing_reason()` and not `{error}`: the full
+                        // text is for the log above, and carries Vault URLs and
+                        // role names a connected user must not be handed.
                         let _ = self.emit_pty_error(&format!(
                             "Target connection failed: {}",
-                            error.client_message()
+                            error.user_facing_reason()
                         ));
                     }
                 }
             }
             RCEvent::Error(e) => {
                 self.service_output.stop_progress();
-                // The full error to the log, a constant to the terminal. The
-                // detail is what an operator needs and what a connected user
-                // must not be handed; printing `{e}` gave it to the user and
-                // was the one path to this sink that no round of hardening had
-                // touched.
+                // The full error to the log, a fixed phrase to the terminal.
+                // The detail is what an operator needs and what a connected
+                // user must not be handed.
                 log_client_session_error(&e);
-                let _ = self.emit_pty_error(client_error_message(&e));
+                let _ = self.emit_pty_error(&format!("Error: {}", e.user_facing_reason()));
                 self.disconnect_server().await;
             }
             RCEvent::Output(channel, data) => {
@@ -2100,11 +2109,14 @@ impl ServerSession {
             return;
         };
         let recorder = async {
-            let recorder = self
+            let Some(recorder) = self
                 .services
                 .recordings
                 .start::<TerminalRecorder, _>(&target_session_id, None, metadata)
-                .await?;
+                .await?
+            else {
+                return Ok(None);
+            };
             if let Some(request) = self
                 .channels
                 .get(&channel_id)
@@ -2114,11 +2126,11 @@ impl ServerSession {
                     .write_pty_resize(request.col_width, request.row_height)
                     .await?;
             }
-            Ok::<_, recordings::Error>(recorder)
+            Ok::<_, recordings::Error>(Some(recorder))
         }
         .await;
         match recorder {
-            Ok(recorder) => {
+            Ok(Some(recorder)) => {
                 // Starting the recording awaits, so the channel can be gone by
                 // now — e.g. target selection failed and tore the session down.
                 if let Some(channel_state) = self.channels.get_mut(&channel_id) {
@@ -2127,10 +2139,8 @@ impl ServerSession {
                     debug!(channel=%channel_id, "Recording started for a channel that is already gone");
                 }
             }
-            Err(error) => match error {
-                recordings::Error::Disabled => (),
-                error => error!(channel=%channel_id, ?error, "Failed to start recording"),
-            },
+            Ok(None) => (),
+            Err(error) => error!(channel=%channel_id, ?error, "Failed to start recording"),
         }
     }
 
@@ -2208,10 +2218,10 @@ impl ServerSession {
                 .start(&target_session_id, None, metadata)
                 .await
             {
-                Ok(recorder) => {
+                Ok(Some(recorder)) => {
                     e.insert(recorder);
                 }
-                Err(recordings::Error::Disabled) => (),
+                Ok(None) => (),
                 Err(error) => {
                     error!(?key, ?error, "Failed to start recording");
                 }
@@ -3021,18 +3031,12 @@ impl ServerSession {
             };
             // A channel close says nothing about the connection, so a dead
             // target never gives the client a reason to let go of the socket
-            // (#2520). It goes out here rather than queued behind the closes:
-            // a client handed the disconnect in the same read as the message
-            // acts on it first and exits without printing what it already
-            // holds, so the session's last words are lost -- which is the one
-            // thing this message exists to prevent. The grace above is what
-            // separates them, and a client that is not reading gets neither.
-            let disconnect = flushed.then(|| self.session_handle.clone()).flatten();
+            // (#2520). It goes only to a client that is still reading, and
+            // only after `DISCONNECT_NOTICE_GAP`.
+            let handle = flushed.then(|| self.session_handle.clone()).flatten();
             tokio::spawn(async move {
-                tokio::time::sleep(delay).await;
-                if let Some(handle) = disconnect {
-                    // Bounded for the same reason the flush above is: a client
-                    // that has stopped reading must not hold the socket open.
+                if let Some(handle) = handle {
+                    tokio::time::sleep(DISCONNECT_NOTICE_GAP).await;
                     let _ = tokio::time::timeout(
                         DISCONNECT_FLUSH_TIMEOUT,
                         handle.disconnect(
@@ -3043,6 +3047,7 @@ impl ServerSession {
                     )
                     .await;
                 }
+                tokio::time::sleep(delay.saturating_sub(DISCONNECT_NOTICE_GAP)).await;
                 let _ = socket.shutdown(std::net::Shutdown::Both);
             });
         }
