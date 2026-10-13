@@ -200,7 +200,9 @@ impl SessionRecordings {
         Storage::load(&self.db, &self.params).await
     }
 
-    /// Starting a recording with the same name again will append to it.
+    /// Starting a recording with the same name again will append to it. On S3
+    /// storage this is not supported: each start completes its own upload of the
+    /// same keys, and `ended` is not reset on append.
     /// `None` when recording is disabled.
     pub async fn start<T, M>(
         &self,
@@ -274,7 +276,12 @@ impl SessionRecordings {
             shutdown_tracker: self.shutdown_tracker.clone(),
         };
 
-        T::new(&opener).await.map(Some)
+        // Held until every file is open, so a recorder that fails or is cancelled
+        // half-way cannot let its first file end the recording.
+        let construction = opener.completion.register_writer().await;
+        let recorder = T::new(&opener).await?;
+        construction.finished(None).await?;
+        Ok(Some(recorder))
     }
 
     pub async fn subscribe_live(&self, id: &Uuid) -> Option<broadcast::Receiver<LiveChunk>> {
@@ -297,3 +304,7 @@ impl SessionRecordings {
         Ok(self.storage().await?.access(recording, file))
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "sqlite")]
+mod tests;
