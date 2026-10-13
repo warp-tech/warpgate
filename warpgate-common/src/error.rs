@@ -100,6 +100,14 @@ pub trait UserFacingReason {
     fn user_facing_reason(&self) -> String;
 }
 
+pub fn io_connect_reason(error: &std::io::Error) -> &'static str {
+    match error.kind() {
+        std::io::ErrorKind::ConnectionRefused => "Target refused the connection",
+        std::io::ErrorKind::TimedOut => "Connection to the target timed out",
+        _ => "Could not connect to the target",
+    }
+}
+
 impl UserFacingReason for WarpgateError {
     fn user_facing_reason(&self) -> String {
         match self {

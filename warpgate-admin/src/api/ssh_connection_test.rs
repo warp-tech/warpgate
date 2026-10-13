@@ -78,7 +78,7 @@ impl Api {
                         anyhow::bail!("Jump host {host}:{port} has an untrusted host key");
                     }
                     Some(RCEvent::ConnectionError(err)) => return Err(anyhow::Error::from(err)),
-                    Some(RCEvent::Error(err)) => return Err(err),
+                    Some(RCEvent::Error(err)) => return Err(err.into()),
                     None => anyhow::bail!("Failed to connect to target"),
                     _ => (),
                 }

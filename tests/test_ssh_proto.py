@@ -701,12 +701,27 @@ class Test:
         user, ssh_target = setup_user_and_target(
             processes, shared_wg, wg_c_ed25519_pubkey
         )
+        # Point the target at a port nothing listens on.
+        with admin_client(f"https://localhost:{shared_wg.http_port}") as api:
+            options = ssh_target.options.actual_instance
+            options.port = alloc_port()
+            api.update_target(
+                ssh_target.id,
+                sdk.TargetDataRequest(
+                    name=ssh_target.name,
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
+                    options=sdk.TargetOptions(options),
+                ),
+            )
+
         ssh_client = processes.start_ssh_client(
             f"{user.username}:{ssh_target.name}@localhost",
             "-p",
             str(shared_wg.ssh_port),
+            # Service messages only go to channels with a PTY.
             "-tt",
-            "user:ssh-bad-domain@localhost",
             "-i",
             "/dev/null",
             "-o",
@@ -714,7 +729,13 @@ class Test:
             password="123",
         )
 
+        shown = ssh_client.communicate(timeout=60)[0].decode(errors="replace")
         assert ssh_client.returncode != 0
+        # The user is told what happened, not what the OS said.
+        assert "Target connection failed: Target refused the connection" in shown, repr(
+            shown[-400:]
+        )
+        assert "os error" not in shown, repr(shown[-400:])
 
     def test_sftp(
         self,
