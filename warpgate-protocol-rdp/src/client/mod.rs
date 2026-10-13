@@ -40,7 +40,9 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tracing::{debug, warn};
 use warpgate_common::{RdpTargetAuth, RdpTargetCompression, SecretResolver, TargetRdpOptions};
-use warpgate_core::{DesktopEvent, DesktopInput, DesktopRect, DesktopState};
+use warpgate_core::{
+    DesktopConnectionError, DesktopEvent, DesktopInput, DesktopRect, DesktopState,
+};
 
 pub(crate) use self::logon::LogonWatcher;
 use crate::clipboard::{Clipboard, ClipboardSink, TextClipboard};
@@ -86,7 +88,7 @@ pub async fn run(
     mut abort_rx: UnboundedReceiver<()>,
     logon: LogonWatcher,
     secrets: Arc<dyn SecretResolver>,
-) -> Result<()> {
+) -> Result<(), DesktopConnectionError> {
     event_tx
         .send(DesktopEvent::State(DesktopState::Connecting))
         .await
@@ -120,8 +122,11 @@ pub async fn run(
         ),
     )
     .await
-    .context("RDP handshake timed out")?
-    .context("RDP connection")?;
+    .unwrap_or_else(|_| {
+        Err(DesktopConnectionError::Io(
+            std::io::ErrorKind::TimedOut.into(),
+        ))
+    })?;
 
     event_tx
         .send(DesktopEvent::State(DesktopState::Connected))
@@ -148,6 +153,7 @@ pub async fn run(
         &logon,
     )
     .await
+    .map_err(DesktopConnectionError::Session)
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -773,16 +779,18 @@ async fn connect(
     verify_tls: bool,
     tls_security: warpgate_common::RdpTlsSecurity,
     clipboard: TextClipboard<ClientClipboardSink>,
-) -> Result<(ConnectionResult, Framed)> {
+) -> Result<(ConnectionResult, Framed), DesktopConnectionError> {
     let tcp_stream = tokio::time::timeout(
         CONNECT_TIMEOUT,
         TcpStream::connect((server_name.as_str(), port)),
     )
     .await
-    .context("TCP connect timed out")?
-    .context("TCP connect")?;
+    .unwrap_or_else(|_| Err(std::io::ErrorKind::TimedOut.into()))
+    .map_err(DesktopConnectionError::Io)?;
     tcp_stream.set_nodelay(true).ok();
-    let client_addr = tcp_stream.local_addr().context("local addr")?;
+    let client_addr = tcp_stream
+        .local_addr()
+        .map_err(DesktopConnectionError::Io)?;
 
     let mut framed = TokioFramed::new(tcp_stream);
     // Advertise the Display Control DVC so viewer-driven resolution changes can be pushed
@@ -804,7 +812,7 @@ async fn connect(
 
     let should_upgrade = ironrdp_tokio::connect_begin(&mut framed, &mut connector)
         .await
-        .context("connect_begin")?;
+        .map_err(|error| connector_error("connect_begin", error))?;
 
     let initial_stream = framed.into_inner_no_leftover();
     let (upgraded_stream, server_public_key) = tls::upgrade(
@@ -814,7 +822,7 @@ async fn connect(
         tls_security,
     )
     .await
-    .context("TLS upgrade")?;
+    .map_err(DesktopConnectionError::Tls)?;
 
     let upgraded = ironrdp_tokio::mark_as_upgraded(should_upgrade, &mut connector);
     let mut upgraded_framed = TokioFramed::new(upgraded_stream);
@@ -830,13 +838,26 @@ async fn connect(
         None,
     )
     .await
-    .context("connect_finalize")?;
+    .map_err(|error| connector_error("connect_finalize", error))?;
 
     if connection_result.desktop_size.width == 0 || connection_result.desktop_size.height == 0 {
         warn!("target reported a zero desktop size");
     }
 
     Ok((connection_result, upgraded_framed))
+}
+
+fn connector_error(step: &'static str, error: connector::ConnectorError) -> DesktopConnectionError {
+    let rejected = matches!(
+        error.kind(),
+        connector::ConnectorErrorKind::Credssp(_) | connector::ConnectorErrorKind::AccessDenied
+    );
+    let chain = anyhow::Error::from(error).context(step);
+    if rejected {
+        DesktopConnectionError::TargetRejectedCredentials(chain)
+    } else {
+        DesktopConnectionError::Handshake(chain)
+    }
 }
 
 #[cfg(test)]

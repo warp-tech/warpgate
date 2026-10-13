@@ -6,7 +6,7 @@ use russh::keys::PublicKeyBase64;
 use tokio::sync::mpsc::Receiver;
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, error, info_span, warn};
-use warpgate_common::{TargetSSHOptions, UserSessionId, WarpgateError};
+use warpgate_common::{TargetSSHOptions, UserFacingReason, UserSessionId, WarpgateError};
 use warpgate_core::{Services, TargetAuthorization};
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
@@ -176,10 +176,20 @@ async fn relay_events(
                     .await;
             }
             RCEvent::Error(e) => {
-                final_result = Err(notice(session, e).await.into());
+                session
+                    .push(ServerMessage::Error {
+                        message: e.user_facing_reason(),
+                    })
+                    .await;
+                final_result = Err(anyhow::Error::from(e).into());
             }
             RCEvent::ConnectionError(e) => {
-                final_result = Err(notice(session, e.into()).await.into());
+                session
+                    .push(ServerMessage::Error {
+                        message: e.user_facing_reason(),
+                    })
+                    .await;
+                final_result = Err(anyhow::Error::from(e).into());
             }
             RCEvent::HostKeyReceived(key, host, port) => {
                 debug!(%session_id, "Host key received for {host}:{port}: {}", key.algorithm());
@@ -221,13 +231,4 @@ async fn relay_events(
         }
     }
     final_result
-}
-
-async fn notice(session: &WebSshSession, error: anyhow::Error) -> anyhow::Error {
-    session
-        .push(ServerMessage::Error {
-            message: error.to_string(),
-        })
-        .await;
-    error
 }

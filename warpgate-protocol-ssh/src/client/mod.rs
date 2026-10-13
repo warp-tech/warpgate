@@ -29,7 +29,8 @@ use tracing::*;
 use uuid::Uuid;
 use warpgate_aws::AwsError;
 use warpgate_common::{
-    SSHTargetAuth, TargetOptionsVariant, TargetSSHOptions, UserSessionId, WarpgateError,
+    SSHTargetAuth, TargetOptionsVariant, TargetSSHOptions, UserFacingReason, UserSessionId,
+    WarpgateError, io_connect_reason,
 };
 use warpgate_core::{AdmittedTarget, ConfigProvider, Services};
 
@@ -77,6 +78,23 @@ pub enum ConnectionError {
 
     #[error(transparent)]
     Warpgate(#[from] WarpgateError),
+}
+
+impl UserFacingReason for ConnectionError {
+    fn user_facing_reason(&self) -> String {
+        match self {
+            Self::HostKeyMismatch { .. }
+            | Self::Resolve
+            | Self::Internal
+            | Self::Aborted
+            | Self::Authentication
+            | Self::JumpHostTargetNotFound => self.to_string(),
+            Self::Io(e) | Self::Ssh(russh::Error::IO(e)) => io_connect_reason(e).into(),
+            Self::Key(_) | Self::Ssh(_) => "SSH protocol error".into(),
+            Self::Aws(_) => "AWS authentication for the SSH target failed".into(),
+            Self::Warpgate(e) => e.user_facing_reason(),
+        }
+    }
 }
 
 pub struct ResolvedSshChainHost {
@@ -197,7 +215,7 @@ pub enum RCEvent {
     ChannelFailure(Uuid),
     Eof(Uuid),
     Close(Uuid),
-    Error(anyhow::Error),
+    Error(SshClientError),
     ExitStatus(Uuid, u32),
     ExitSignal {
         channel: Uuid,
@@ -473,7 +491,7 @@ impl RemoteClient {
                             }
                         };
                     }
-                    Ok::<(), anyhow::Error>(())
+                    Ok::<(), SshClientError>(())
                 }
                 .await
                 .map_err(|error| {
@@ -489,7 +507,7 @@ impl RemoteClient {
         )
     }
 
-    async fn handle_event(&mut self, event: InnerEvent) -> Result<bool> {
+    async fn handle_event(&mut self, event: InnerEvent) -> Result<bool, SshClientError> {
         match event {
             InnerEvent::RCCommand(cmd, mut reply) => {
                 let result = self.handle_command(cmd, &mut reply).await;
@@ -555,7 +573,7 @@ impl RemoteClient {
     async fn setup_server_initiated_channel(
         &mut self,
         channel: russh::Channel<russh::client::Msg>,
-    ) -> Result<Uuid> {
+    ) -> Result<Uuid, SshClientError> {
         let id = Uuid::new_v4();
 
         let (tx, rx) = unbounded_channel();
@@ -566,7 +584,8 @@ impl RemoteClient {
         self.child_tasks.push(
             tokio::task::Builder::new()
                 .name(&format!("SSH {} {:?} ops", self.id, id))
-                .spawn(session_channel.run())?,
+                .spawn(session_channel.run())
+                .map_err(SshClientError::other)?,
         );
 
         Ok(id)
