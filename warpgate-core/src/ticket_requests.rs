@@ -9,6 +9,7 @@ use sea_orm::{
 use time::{Duration, OffsetDateTime};
 use tracing::*;
 use uuid::Uuid;
+use warpgate_common::audit::AuditEvent;
 use warpgate_common::helpers::hash::{generate_ticket_secret, hash_secret};
 use warpgate_common::{Secret, WarpgateError};
 use warpgate_db_entities::TicketRequest::TicketRequestStatus;
@@ -188,6 +189,12 @@ pub async fn create_ticket_request(
 
         txn.commit().await?;
 
+        audit_self_service_ticket(
+            ticket_id,
+            params.user_id,
+            params.username.clone(),
+            params.target_name.clone(),
+        );
         info!(
             "Auto-approved ticket request {} for user {} to target {}",
             request_id, params.username, params.target_name
@@ -226,6 +233,19 @@ pub async fn create_ticket_request(
             auto_approved_secret: None,
         })
     }
+}
+
+/// A self-service ticket is a working credential, so it is audited like an admin-issued one;
+/// the user it was issued to is the actor. Emitted only after the minting transaction commits.
+fn audit_self_service_ticket(ticket_id: Uuid, user_id: Uuid, username: String, target: String) {
+    AuditEvent::TicketCreated {
+        ticket_id,
+        user_id,
+        username,
+        target,
+        actor_user_id: user_id,
+    }
+    .emit();
 }
 
 async fn insert_self_service_ticket(
@@ -367,6 +387,13 @@ pub async fn activate_ticket_request(
 
     let max_uses = target.ticket_max_uses.or(policy.ticket_max_uses);
 
+    // Looked up before minting, so a failure here cannot leave a ticket the user never receives.
+    let username = warpgate_db_entities::User::Entity::find_by_id(user_id)
+        .one(db_conn)
+        .await?
+        .map(|user| user.username)
+        .unwrap_or_default();
+
     let txn = db_conn.begin().await?;
 
     let (ticket_id, secret) = insert_self_service_ticket(
@@ -385,6 +412,7 @@ pub async fn activate_ticket_request(
 
     txn.commit().await?;
 
+    audit_self_service_ticket(ticket_id, user_id, username, target.name.clone());
     info!(
         "User activated approved ticket request {}, ticket {} created",
         request_id, ticket_id
