@@ -114,8 +114,7 @@ impl WebSshSession {
             )
             .await
         {
-            Ok(recorder) => Some(recorder),
-            Err(warpgate_core::recordings::Error::Disabled) => None,
+            Ok(recorder) => recorder,
             Err(e) => {
                 error!(%channel_id, ?e, "Failed to start terminal recording");
                 None

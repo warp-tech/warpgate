@@ -36,21 +36,17 @@ pub struct CreateTicketRequestParams {
     pub description: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum CreateTicketRequestError {
+    #[error("{0}")]
     InvalidInput(String),
-    Internal(WarpgateError),
+    #[error(transparent)]
+    Internal(#[from] WarpgateError),
 }
 
 impl From<sea_orm::DbErr> for CreateTicketRequestError {
     fn from(e: sea_orm::DbErr) -> Self {
         Self::Internal(e.into())
-    }
-}
-
-impl From<WarpgateError> for CreateTicketRequestError {
-    fn from(e: WarpgateError) -> Self {
-        Self::Internal(e)
     }
 }
 
@@ -303,23 +299,21 @@ pub async fn approve_ticket_request(
     Ok(Some(updated))
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ActivateTicketRequestError {
+    #[error("ticket request not found")]
     NotFound,
+    #[error("ticket request already activated")]
     AlreadyActivated,
+    #[error("the requested target no longer exists")]
     TargetGone,
-    Internal(WarpgateError),
+    #[error(transparent)]
+    Internal(#[from] WarpgateError),
 }
 
 impl From<sea_orm::DbErr> for ActivateTicketRequestError {
     fn from(e: sea_orm::DbErr) -> Self {
         Self::Internal(e.into())
-    }
-}
-
-impl From<WarpgateError> for ActivateTicketRequestError {
-    fn from(e: WarpgateError) -> Self {
-        Self::Internal(e)
     }
 }
 

@@ -12,7 +12,6 @@ argon2.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
 data-encoding.workspace = true
-dialoguer.workspace = true
 enum_dispatch.workspace = true
 futures.workspace = true
 governor.workspace = true
