@@ -3,15 +3,25 @@
     import { adminPermissions } from 'admin/lib/store'
     import EmptyState from 'common/EmptyState.svelte'
     import GroupColorIcon from 'common/GroupColorIcon.svelte'
-    import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
+    import ItemList, {
+        type LoadOptions,
+        type PaginatedResponse,
+    } from 'common/ItemList.svelte'
     import { compare as naturalCompareFactory } from 'natural-orderby'
     import { from, map, type Observable } from 'rxjs'
     import { link } from 'svelte-spa-router'
 
-    function getTargetGroups(): Observable<PaginatedResponse<TargetGroup>> {
+    function getTargetGroups(
+        options: LoadOptions,
+    ): Observable<PaginatedResponse<TargetGroup>> {
+        // The API has no search parameter, so the search box filters here.
+        const search = options.search?.toLowerCase()
         return from(api.listTargetGroups()).pipe(
             map(groups => {
-                const sorted = groups.sort((a, b) =>
+                const matching = search
+                    ? groups.filter(g => g.name.toLowerCase().includes(search))
+                    : groups
+                const sorted = matching.sort((a, b) =>
                     naturalCompareFactory()(
                         a.name.toLowerCase(),
                         b.name.toLowerCase(),
