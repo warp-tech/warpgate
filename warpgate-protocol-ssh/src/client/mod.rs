@@ -1,3 +1,4 @@
+mod certificate;
 mod channel_direct_tcpip;
 mod channel_session;
 mod error;
@@ -75,6 +76,11 @@ pub enum ConnectionError {
     #[error("Jump host target not found")]
     JumpHostTargetNotFound,
 
+    /// Warpgate refused the issued certificate before offering it, so the
+    /// target never saw a request.
+    #[error("Certificate refused by Warpgate: {0}")]
+    CertificateRefusedLocally(String),
+
     #[error("SSH handshake timed out after {timeout:?}")]
     HandshakeTimeout { timeout: Duration },
 
@@ -91,6 +97,7 @@ impl UserFacingReason for ConnectionError {
             | Self::Aborted
             | Self::Authentication
             | Self::HandshakeTimeout { .. }
+            | Self::CertificateRefusedLocally(_)
             | Self::JumpHostTargetNotFound => self.to_string(),
             Self::Io(e) | Self::Ssh(russh::Error::IO(e)) => io_connect_reason(e).into(),
             Self::Key(_) | Self::Ssh(_) => "SSH protocol error".into(),
@@ -289,6 +296,14 @@ enum ChannelOpen {
 #[derive(Clone, Debug)]
 pub enum RCCommand {
     Connect(Vec<TargetSSHOptions>),
+    /// Connects as far as the last hop's host key, reports it and stops before
+    /// authenticating to that hop. Jump hosts before it are still
+    /// authenticated, and `requested_by` names who asked in the key ID of a
+    /// certificate-auth jump host.
+    CheckHostKey {
+        chain: Vec<TargetSSHOptions>,
+        requested_by: String,
+    },
     Channel(Uuid, ChannelOperation),
     ForwardTCPIP(String, u32),
     CancelTCPIPForward(String, u32),
@@ -309,7 +324,8 @@ pub enum RCState {
 enum InnerEvent {
     RCCommand(RCCommand, Option<RCCommandReply>),
     ClientHandlerEvent(ClientHandlerEvent),
-    Connected(Result<Connection, ConnectionError>),
+    /// `None` = host key check that stopped before auth
+    Connected(Result<Option<Connection>, ConnectionError>),
 }
 
 struct Connection(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>);
@@ -324,6 +340,8 @@ struct Connector {
     id: UserSessionId,
     tx: Sender<RCEvent>,
     services: Services,
+    /// Who to name in a certificate key ID when `id` is not a session.
+    requested_by: Option<String>,
 }
 
 pub struct RemoteClient {
@@ -523,9 +541,18 @@ impl RemoteClient {
             InnerEvent::Connected(result) => {
                 self.connecting = None;
                 match result {
-                    Ok(connection) => self.on_connected(connection).await?,
+                    Ok(Some(connection)) => self.on_connected(connection).await?,
+                    // Nothing was authenticated, so there is nothing to take
+                    // into service.
+                    Ok(None) => {
+                        self.set_disconnected().await;
+                        return Ok(true);
+                    }
                     Err(e) => {
-                        debug!("Connect error: {}", e);
+                        // The one record of a failed connection: the SSH
+                        // session, the web client and the admin host key check
+                        // all show the user a sanitised reason and nothing more.
+                        error!(error = ?e, "Target connection failed");
                         let _ = self.tx.send(RCEvent::ConnectionError(e)).await;
                         self.set_disconnected().await;
                         return Ok(true);
@@ -601,22 +628,19 @@ impl RemoteClient {
     ) -> Result<bool, SshClientError> {
         match cmd {
             RCCommand::Connect(chain) => {
-                let connector = Connector {
-                    id: self.id,
-                    tx: self.tx.clone(),
-                    services: self.services.clone(),
-                };
-                let inner_event_tx = self.inner_event_tx.clone();
-                let attempt = tokio::spawn(
-                    async move {
-                        let _ = inner_event_tx
-                            .send(InnerEvent::Connected(connector.connect_chain(chain).await));
-                    }
-                    .instrument(Span::current()),
-                );
-                if let Some(previous) = self.connecting.replace(attempt) {
-                    previous.abort();
-                }
+                let connector = self.connector(None);
+                self.spawn_connection(async move { connector.connect_chain(chain, false).await });
+            }
+            RCCommand::CheckHostKey {
+                chain,
+                requested_by,
+            } => {
+                let connector = self.connector(Some(requested_by));
+                // A check never hands over a connection, even one that came up
+                // without the last hop reporting its key.
+                self.spawn_connection(async move {
+                    connector.connect_chain(chain, true).await.map(|_| None)
+                });
             }
             RCCommand::Channel(ch, op) => {
                 self.apply_channel_op(ch, op, reply).await?;
@@ -639,6 +663,33 @@ impl RemoteClient {
             }
         }
         Ok(false)
+    }
+
+    fn connector(&self, requested_by: Option<String>) -> Connector {
+        Connector {
+            id: self.id,
+            tx: self.tx.clone(),
+            services: self.services.clone(),
+            requested_by,
+        }
+    }
+
+    /// Runs a connection attempt off the command loop, replacing any attempt
+    /// still in flight; the outcome arrives as `InnerEvent::Connected`.
+    fn spawn_connection(
+        &mut self,
+        attempt: impl Future<Output = Result<Option<Connection>, ConnectionError>> + Send + 'static,
+    ) {
+        let inner_event_tx = self.inner_event_tx.clone();
+        let attempt = tokio::spawn(
+            async move {
+                let _ = inner_event_tx.send(InnerEvent::Connected(attempt.await));
+            }
+            .instrument(Span::current()),
+        );
+        if let Some(previous) = self.connecting.replace(attempt) {
+            previous.abort();
+        }
     }
 
     /// Take an established connection into service and flush everything queued
@@ -773,12 +824,17 @@ impl Connector {
     /// Connect through a pre-resolved chain of SSH hops, each tunnelled through the previous.
     /// `chain` must be non-empty; the first entry is connected directly, subsequent ones via
     /// `channel_open_direct_tcpip` through the previous session.
+    ///
+    /// With `stop_at_last_host_key`, the walk ends once the last hop has shown
+    /// its host key, before anything is authenticated to it, and returns `None`.
     async fn connect_chain(
         &self,
         chain: Vec<TargetSSHOptions>,
-    ) -> Result<Connection, ConnectionError> {
-        let mut iter = chain.into_iter();
-        let first = iter.next().ok_or(ConnectionError::Resolve)?;
+        stop_at_last_host_key: bool,
+    ) -> Result<Option<Connection>, ConnectionError> {
+        let last = chain.len().saturating_sub(1);
+        let mut hops = chain.into_iter().enumerate();
+        let (_, first) = hops.next().ok_or(ConnectionError::Resolve)?;
         let handshake_timeout = self
             .services
             .config
@@ -804,12 +860,21 @@ impl Connector {
             session_id: self.id,
         };
         let fut = russh::client::connect(config, address, handler);
-        let (mut session, mut active_rx) = self
-            .wait_for_connection(&first, fut, event_rx, handshake_timeout)
+        let Some((mut session, mut active_rx)) = self
+            .wait_for_connection(
+                &first,
+                fut,
+                event_rx,
+                handshake_timeout,
+                stop_at_last_host_key && last == 0,
+            )
             .boxed()
-            .await?;
+            .await?
+        else {
+            return Ok(None);
+        };
 
-        for ssh_options in iter {
+        for (index, ssh_options) in hops {
             let _ = self.tx.send(RCEvent::HopConnected).await;
             info!(
                 host = %ssh_options.host,
@@ -837,15 +902,24 @@ impl Connector {
                     .await?;
                 russh::client::connect_stream(config, channel.into_stream(), handler).await
             };
-            let (new_session, new_rx) = self
-                .wait_for_connection(&ssh_options, fut, event_rx, handshake_timeout)
+            let Some((new_session, new_rx)) = self
+                .wait_for_connection(
+                    &ssh_options,
+                    fut,
+                    event_rx,
+                    handshake_timeout,
+                    stop_at_last_host_key && index == last,
+                )
                 .boxed()
-                .await?;
+                .await?
+            else {
+                return Ok(None);
+            };
             session = new_session;
             active_rx = new_rx;
         }
 
-        Ok(Connection(session, active_rx))
+        Ok(Some(Connection(session, active_rx)))
     }
 
     async fn wait_for_connection<Fut>(
@@ -854,7 +928,11 @@ impl Connector {
         fut_connect: Fut,
         mut event_rx: UnboundedReceiver<ClientHandlerEvent>,
         handshake_timeout: Duration,
-    ) -> Result<(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>), ConnectionError>
+        stop_after_host_key: bool,
+    ) -> Result<
+        Option<(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>)>,
+        ConnectionError,
+    >
     where
         Fut: Future<Output = Result<Handle<ClientHandler>, ConnectionError>>,
     {
@@ -869,6 +947,10 @@ impl Connector {
 
         loop {
             tokio::select! {
+                // The handler queues the host key during key exchange, before the
+                // connection can resolve, so taking events first means a host key
+                // check always stops before authenticating.
+                biased;
                 () = &mut deadline, if !handshake_timeout.is_zero() && !host_key_prompted => {
                     let error = ConnectionError::HandshakeTimeout { timeout: handshake_timeout };
                     error!(?error, host=%ssh_options.host, port=ssh_options.port, "Connection error");
@@ -878,6 +960,9 @@ impl Connector {
                     match event {
                         ClientHandlerEvent::HostKeyReceived(key) => {
                             self.tx.send(RCEvent::HostKeyReceived(key, ssh_options.host.clone(), ssh_options.port)).await.map_err(|_| ConnectionError::Internal)?;
+                            if stop_after_host_key {
+                                return Ok(None);
+                            }
                         }
                         ClientHandlerEvent::HostKeyUnknown(key, reply) => {
                             host_key_prompted = true;
@@ -903,10 +988,35 @@ impl Connector {
                         ssh_options.allow_insecure_algos
                     ).await?;
 
-                    return Ok((session, event_rx));
+                    return Ok(Some((session, event_rx)));
                 }
             }
         }
+    }
+
+    /// Names the session's user, or whoever asked when there is no session.
+    async fn certificate_key_id(&self) -> String {
+        let session = self
+            .services
+            .state
+            .lock()
+            .await
+            .user_sessions
+            .get(&self.id)
+            .cloned();
+        let username = match session {
+            Some(session) => session
+                .lock()
+                .await
+                .user_info
+                .as_ref()
+                .map(|user| user.username.clone()),
+            None => None,
+        };
+        certificate::key_id(
+            username.as_deref().or(self.requested_by.as_deref()),
+            self.id,
+        )
     }
 
     async fn authenticate_session(
@@ -995,6 +1105,38 @@ impl Connector {
                     }
                     auth_error_msg =
                         Some("Public key authentication was rejected by the SSH target".into());
+                }
+            }
+            SSHTargetAuth::Certificate(auth) => {
+                let key_id = self.certificate_key_id().await;
+                let (key, certificate) =
+                    certificate::issue(&self.services.secret_backends, auth, username, &key_id)
+                        .await?;
+
+                let (valid_after, valid_before) =
+                    (certificate.valid_after(), certificate.valid_before());
+                let response = session
+                    .authenticate_openssh_cert(username.to_string(), key, certificate)
+                    .await?;
+                // Not `_handle_auth_result`: its keyboard-interactive fallback
+                // would let a permissive PAM stack accept empty answers after
+                // sshd refused the certificate, leaving no key ID in the
+                // target's log.
+                auth_result = matches!(response, AuthResult::Success);
+                if auth_result {
+                    debug!(
+                        username = username,
+                        key_id, "Authenticated with certificate"
+                    );
+                } else {
+                    // A target whose clock lags refuses a minutes-long
+                    // certificate as not yet valid without saying so.
+                    warn!(
+                        valid_after,
+                        valid_before, "Certificate rejected by the SSH target; check its clock"
+                    );
+                    auth_error_msg =
+                        Some("Certificate authentication was rejected by the SSH target".into());
                 }
             }
             SSHTargetAuth::IamRole(_) => {

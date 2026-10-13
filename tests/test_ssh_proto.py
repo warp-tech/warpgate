@@ -35,12 +35,19 @@ def setup_user_and_target(
     wg: WarpgateProcess,
     warpgate_client_key,
     extra_config='',
+    *,
+    ssh_port=None,
+    host="localhost",
+    username="root",
+    auth=None,
+    jump_host=None,
 ):
-    ssh_port = processes.start_ssh_server(
-        trusted_keys=[warpgate_client_key.read_text()],
-        extra_config=extra_config,
-    )
-    wait_port(ssh_port)
+    if ssh_port is None:
+        ssh_port = processes.start_ssh_server(
+            trusted_keys=[warpgate_client_key.read_text()],
+            extra_config=extra_config,
+        )
+        wait_port(ssh_port)
 
     url = f"https://localhost:{wg.http_port}"
     with admin_client(url) as api:
@@ -69,12 +76,14 @@ def setup_user_and_target(
                     sdk.TargetOptionsTargetSSHOptions(
                         kind="Ssh",
                         allow_insecure_algos=False,
-                        host="localhost",
+                        host=host,
                         port=ssh_port,
-                        username="root",
-                        auth=sdk.SSHTargetAuth(
+                        username=username,
+                        auth=auth
+                        or sdk.SSHTargetAuth(
                             sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
                         ),
+                        jump_host=jump_host,
                     )
                 ),
             )
@@ -315,10 +324,9 @@ class Test:
         checked = 0
         spawns = 0
         while checked < 8:
-            # An ssh client that dies before the listener is up (sshpass
-            # occasionally garbles the password on this kind of rapid spawn
-            # loop) never opened a channel, so it can't count as a pass —
-            # respawn it, within a budget that still fails on systemic death.
+            # An ssh client that dies before the listener is up never opened a
+            # channel, so it can't count as a pass — respawn it, within a
+            # budget that still fails on systemic death.
             spawns += 1
             assert spawns <= 12, "too many ssh client startup failures"
 

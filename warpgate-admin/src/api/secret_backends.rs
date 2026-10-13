@@ -204,14 +204,14 @@ impl From<SecretError> for TestResolveApiResponse {
     fn from(error: SecretError) -> Self {
         let message = Json(error.to_string());
         match error {
-            SecretError::InvalidRef(_) | SecretError::InvalidBackendName(_) => {
-                Self::BadRequest(message)
-            }
+            SecretError::InvalidRef(_)
+            | SecretError::InvalidBackendName(_)
+            | SecretError::InvalidSshSigningRequest(_) => Self::BadRequest(message),
             SecretError::PathNotAllowed { .. } => Self::Forbidden(message),
             SecretError::BackendNotConfigured { .. } | SecretError::NotFound { .. } => {
                 Self::NotFound(message)
             }
-            SecretError::Backend(_) => Self::BadGateway(message),
+            SecretError::Backend(_) | SecretError::SshSigning { .. } => Self::BadGateway(message),
         }
     }
 }

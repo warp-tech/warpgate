@@ -8,11 +8,14 @@
         type TargetOptionsTargetSSHOptions,
     } from 'admin/lib/api'
     import { adminPermissions } from 'admin/lib/store'
-    import SecretRefInput from 'common/SecretRefInput.svelte'
+    import SecretRefInput, {
+        loadSecretBackends,
+    } from 'common/SecretRefInput.svelte'
     import { TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import { untrack } from 'svelte'
     import Fa from 'svelte-fa'
+    import CertificateOptions from './CertificateOptions.svelte'
     import TargetSshHostKeyChecker from './KeyChecker.svelte'
 
     interface Props {
@@ -29,6 +32,11 @@
 
     api.getSshOwnKeys().then(keys => {
         clientKeys = keys
+    })
+
+    let hasSecretBackends = $state(false)
+    loadSecretBackends().then(backends => {
+        hasSecretBackends = backends.length > 0
     })
 
     $effect(() => {
@@ -103,7 +111,7 @@
             <input
                 class="form-control"
                 bind:value={options.host}
-                onchange={() => hostKeyCheckInvalidated = true}
+                onchange={() => (hostKeyCheckInvalidated = true)}
             >
         </FormGroup>
     </div>
@@ -116,7 +124,7 @@
                 min="1"
                 max="65535"
                 step="1"
-                onchange={() => hostKeyCheckInvalidated = true}
+                onchange={() => (hostKeyCheckInvalidated = true)}
             >
         </FormGroup>
     </div>
@@ -149,6 +157,11 @@
         <select bind:value={options.auth.kind} class="form-control">
             <option value="PublicKey">Warpgate's own private keys</option>
             <option value="Password">Password</option>
+            {#if hasSecretBackends || options.auth.kind === 'Certificate'}
+                <option value="Certificate">
+                    Certificate signed by a secret backend's SSH CA
+                </option>
+            {/if}
             {#if $serverInfo?.runningOnEc2}
                 <option value="IamRole">IAM Role</option>
             {/if}
@@ -183,12 +196,16 @@
                 intendedUsage={{
                     kind: 'Target',
                     id,
-                    name
+                    name,
                 }}
             />
         </div>
     {/if}
 </div>
+
+{#if options.auth.kind === 'Certificate'}
+    <CertificateOptions bind:auth={options.auth} />
+{/if}
 
 <div class="d-flex">
     <Input
