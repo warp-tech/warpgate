@@ -4,6 +4,8 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
+use vaultrs::api::ssh::requests::SignSSHKeyRequest;
+use vaultrs::api::ssh::responses::SignSSHKeyResponse;
 use vaultrs::client::{Client, VaultClient, VaultClientSettingsBuilder};
 use vaultrs::error::ClientError;
 use warpgate_common::{
@@ -22,6 +24,9 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const REAUTH_MIN_INTERVAL: Duration = Duration::from_secs(30);
 /// Where a pod's service account token is mounted.
 const KUBERNETES_JWT_PATH: &str = "/var/run/secrets/kubernetes.io/serviceaccount/token";
+/// The target's sshd logs the certificate key ID verbatim; this keeps a long
+/// username from flooding that log.
+const MAX_SSH_KEY_ID: usize = 256;
 
 pub struct VaultBackend {
     /// Readers share the client; only (re)authentication takes the write lock.
@@ -156,10 +161,67 @@ impl VaultBackend {
             }
             *last = Some(Instant::now());
         }
-        warn!("Vault read was denied, re-authenticating");
+        warn!("Vault request was denied, re-authenticating");
         let mut client = self.client.write().await;
         authenticate(&mut client, &self.auth_config).await?;
         Ok(true)
+    }
+
+    /// Signs `public_key` into an OpenSSH user certificate for `principal`
+    /// with the SSH secrets engine at `mount`, returned in OpenSSH wire format.
+    pub async fn sign_ssh_key(
+        &self,
+        mount: &str,
+        role: &str,
+        public_key: &str,
+        principal: &str,
+        key_id: &str,
+    ) -> Result<String, SecretError> {
+        validate_path_segment(mount)?;
+        validate_path_segment(role)?;
+        // Vault reads `valid_principals` as a comma-separated list, so a comma
+        // would widen the certificate to accounts nobody named.
+        if principal.is_empty()
+            || principal.contains(',')
+            || principal.chars().any(char::is_control)
+        {
+            return Err(SecretError::InvalidSshSigningRequest(format!(
+                "principal {principal:?}"
+            )));
+        }
+        if key_id.len() > MAX_SSH_KEY_ID || key_id.chars().any(char::is_control) {
+            return Err(SecretError::InvalidSshSigningRequest(format!(
+                "key ID {key_id:?}"
+            )));
+        }
+
+        let result = match self
+            .sign_once(mount, role, public_key, principal, key_id)
+            .await
+        {
+            Err(ClientError::APIError { code: 403, .. }) if self.reauthenticate().await? => {
+                self.sign_once(mount, role, public_key, principal, key_id)
+                    .await
+            }
+            other => other,
+        };
+        result.map(|r| r.signed_key).map_err(sign_error)
+    }
+
+    async fn sign_once(
+        &self,
+        mount: &str,
+        role: &str,
+        public_key: &str,
+        principal: &str,
+        key_id: &str,
+    ) -> Result<SignSSHKeyResponse, ClientError> {
+        let mut opts = SignSSHKeyRequest::builder();
+        opts.cert_type("user")
+            .valid_principals(principal)
+            .key_id(key_id);
+        let client = self.client.read().await;
+        vaultrs::ssh::ca::sign(&*client, mount, role, public_key, Some(&mut opts)).await
     }
 
     /// A token lookup proves the server is reachable and unsealed and that
@@ -215,6 +277,32 @@ fn read_error(reference: &SecretRef, error: ClientError) -> SecretError {
             path: reference.kv_path(),
         },
         other => SecretError::Backend(format!("KV v2 read {}: {other}", reference.kv_path())),
+    }
+}
+
+/// A mount or role is interpolated into the request path, so it has to be a
+/// single segment.
+fn validate_path_segment(name: &str) -> Result<(), SecretError> {
+    if !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        Ok(())
+    } else {
+        Err(SecretError::InvalidSshSigningRequest(format!(
+            "mount or role {name:?}"
+        )))
+    }
+}
+
+fn sign_error(error: ClientError) -> SecretError {
+    match error {
+        ClientError::APIError { code, errors } => SecretError::SshSigning {
+            status: code,
+            message: errors.join("; "),
+        },
+        other => SecretError::Backend(format!("SSH sign: {other}")),
     }
 }
 
@@ -379,5 +467,32 @@ mod tests {
             },
         );
         assert!(matches!(other, SecretError::Backend(_)));
+    }
+
+    #[test]
+    fn sign_errors_keep_the_status_and_message() {
+        let refused = sign_error(ClientError::APIError {
+            code: 400,
+            errors: vec!["root is not a valid value for valid_principals".into()],
+        });
+        assert!(matches!(
+            refused,
+            SecretError::SshSigning { status: 400, ref message } if message.contains("valid_principals")
+        ));
+        assert!(matches!(
+            sign_error(ClientError::APIError {
+                code: 500,
+                errors: vec![],
+            }),
+            SecretError::SshSigning { status: 500, .. }
+        ));
+    }
+
+    #[test]
+    fn mounts_and_roles_are_single_path_segments() {
+        assert!(validate_path_segment("ssh-client_signer1").is_ok());
+        for bad in ["", "a/b", "../x", "a b"] {
+            assert!(validate_path_segment(bad).is_err(), "{bad:?}");
+        }
     }
 }

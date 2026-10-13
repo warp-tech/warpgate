@@ -1316,7 +1316,6 @@ impl ServerSession {
                         );
                     }
                     error => {
-                        error!(?error, "Target connection failed");
                         let _ = self.emit_pty_error(&format!(
                             "Target connection failed: {}",
                             error.user_facing_reason()

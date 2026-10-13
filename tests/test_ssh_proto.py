@@ -35,12 +35,19 @@ def setup_user_and_target(
     wg: WarpgateProcess,
     warpgate_client_key,
     extra_config='',
+    *,
+    ssh_port=None,
+    host="localhost",
+    username="root",
+    auth=None,
+    jump_host=None,
 ):
-    ssh_port = processes.start_ssh_server(
-        trusted_keys=[warpgate_client_key.read_text()],
-        extra_config=extra_config,
-    )
-    wait_port(ssh_port)
+    if ssh_port is None:
+        ssh_port = processes.start_ssh_server(
+            trusted_keys=[warpgate_client_key.read_text()],
+            extra_config=extra_config,
+        )
+        wait_port(ssh_port)
 
     url = f"https://localhost:{wg.http_port}"
     with admin_client(url) as api:
@@ -69,12 +76,14 @@ def setup_user_and_target(
                     sdk.TargetOptionsTargetSSHOptions(
                         kind="Ssh",
                         allow_insecure_algos=False,
-                        host="localhost",
+                        host=host,
                         port=ssh_port,
-                        username="root",
-                        auth=sdk.SSHTargetAuth(
+                        username=username,
+                        auth=auth
+                        or sdk.SSHTargetAuth(
                             sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
                         ),
+                        jump_host=jump_host,
                     )
                 ),
             )
