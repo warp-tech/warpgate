@@ -123,29 +123,38 @@ impl ListApi {
         };
 
         let user = values.insert(db).await.map_err(WarpgateError::from)?;
-        let default_roles = Role::Entity::grant_default_roles(db, user.id).await?;
-
-        AuditEvent::UserCreated {
-            user_id: user.id,
-            username: user.username.clone(),
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
-
-        for role in default_roles {
-            AuditEvent::AccessRoleGranted {
-                grantee_id: user.id,
-                grantee_username: user.username.clone(),
-                role_id: role.id,
-                role_name: role.name,
-                actor_user_id: admin.auth.user_id(),
-                related_access_roles: format_related_ids(&[role.id]),
-            }
-            .emit();
-        }
+        on_user_created(db, &user, admin.auth.user_id()).await?;
 
         Ok(CreateUserResponse::Created(Json(user.try_into()?)))
     }
+}
+
+pub(crate) async fn on_user_created(
+    db: &sea_orm::DatabaseConnection,
+    user: &User::Model,
+    actor_user_id: Uuid,
+) -> Result<(), WarpgateError> {
+    let default_roles = Role::Entity::grant_default_roles(db, user.id).await?;
+
+    AuditEvent::UserCreated {
+        user_id: user.id,
+        username: user.username.clone(),
+        actor_user_id,
+    }
+    .emit();
+
+    for role in default_roles {
+        AuditEvent::AccessRoleGranted {
+            grantee_id: user.id,
+            grantee_username: user.username.clone(),
+            role_id: role.id,
+            role_name: role.name,
+            actor_user_id,
+            related_access_roles: format_related_ids(&[role.id]),
+        }
+        .emit();
+    }
+    Ok(())
 }
 
 #[derive(ApiResponse)]
