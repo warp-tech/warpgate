@@ -277,10 +277,10 @@ impl DetailApi {
 
         let allowed_ip_ranges = match body.allowed_ip_ranges.clone() {
             Some(ranges) => match User::parse_allowed_ip_ranges(ranges) {
-                Ok(ranges) => serde_json::to_value(
-                    ranges.iter().map(ToString::to_string).collect::<Vec<_>>(),
-                )
-                .map_err(WarpgateError::from)?,
+                Ok(ranges) => {
+                    serde_json::to_value(ranges.iter().map(ToString::to_string).collect::<Vec<_>>())
+                        .map_err(WarpgateError::from)?
+                }
                 Err(WarpgateError::InvalidNetworkAddress(range)) => {
                     return Ok(UpdateUserResponse::BadRequest(invalid_field(
                         "allowed_ip_ranges",
