@@ -266,6 +266,23 @@ impl DetailApi {
             )));
         }
 
+        let allowed_ip_ranges = match body.allowed_ip_ranges.clone() {
+            Some(ranges) => match User::parse_allowed_ip_ranges(ranges) {
+                Ok(ranges) => serde_json::to_value(
+                    ranges.iter().map(ToString::to_string).collect::<Vec<_>>(),
+                )
+                .map_err(WarpgateError::from)?,
+                Err(WarpgateError::InvalidNetworkAddress(range)) => {
+                    return Ok(UpdateUserResponse::BadRequest(invalid_field(
+                        "allowed_ip_ranges",
+                        &format!("not a valid IP network: {range}"),
+                    )));
+                }
+                Err(error) => return Err(error),
+            },
+            None => serde_json::Value::Null,
+        };
+
         let mut model: User::ActiveModel = user.into();
 
         model.username = Set(body.username.clone());
@@ -274,11 +291,7 @@ impl DetailApi {
             Set(serde_json::to_value(body.credential_policy.clone())
                 .map_err(WarpgateError::from)?);
         model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(i64::from));
-        model.allowed_ip_ranges = Set(match body.allowed_ip_ranges.clone() {
-            Some(ranges) => serde_json::to_value(ranges.into_iter().collect::<Vec<_>>())
-                .map_err(WarpgateError::from)?,
-            None => serde_json::Value::Null,
-        });
+        model.allowed_ip_ranges = Set(allowed_ip_ranges);
         let user = model.update(db).await?;
 
         warpgate_core::rate_limiting::apply_new_rate_limits(
