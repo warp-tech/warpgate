@@ -4,7 +4,6 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use poem::listener::Listener;
 use poem::{EndpointExt, Route, Server};
 use rustls::ServerConfig;
 use tracing::info;
@@ -73,7 +72,7 @@ pub async fn bind_server(
             certificate_and_key.clone().into(),
         ))));
 
-    let tcp_acceptor = address.poem_listener()?.into_acceptor().await?;
+    let tcp_acceptor = address.poem_acceptor().await?;
     let tcp_acceptor = MaybeProxyProtocolAcceptor::new(tcp_acceptor, proxy_protocol);
     let cert_capturing_acceptor = certificate_capturing_acceptor(tcp_acceptor, tls_config);
 

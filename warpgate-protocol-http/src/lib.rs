@@ -19,7 +19,6 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use http::HeaderValue;
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
-use poem::listener::Listener;
 use poem::middleware::SetHeader;
 use poem::session::ServerSession;
 use poem::web::Data;
@@ -340,7 +339,7 @@ impl ProtocolServer for HTTPProtocolServer {
 
         // Bind the socket now (errors here are non-fatal to the supervisor); the
         // returned future drives the accept loop (errors there restart the listener).
-        let acceptor = address.poem_listener()?.into_acceptor().await?;
+        let acceptor = address.poem_acceptor().await?;
         let acceptor = cluster_aware_tls_acceptor(
             MaybeProxyProtocolAcceptor::new(acceptor, proxy_protocol),
             tls_configs,
