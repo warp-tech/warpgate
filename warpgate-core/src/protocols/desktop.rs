@@ -4,8 +4,10 @@
 //! protocol into these events/inputs so that a single renderer and a single
 //! recording format can serve every desktop protocol.
 
+use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use bytes::Bytes;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedSender};
@@ -123,6 +125,28 @@ impl DesktopEvent {
             error.user_facing_reason()
         ))
     }
+}
+
+/// Deadline for the TCP connect to a desktop target.
+pub const DESKTOP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Deadline for the protocol handshake with a desktop target (for RDP this includes TLS and
+/// CredSSP, which may reach out to a KDC). Without it a target that accepts the TCP connection
+/// but stalls mid-handshake would wedge the session forever with no event to report.
+pub const DESKTOP_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Run one step of connecting to a desktop target under `deadline`. An overrun is reported
+/// as a timed-out connection.
+pub async fn within_deadline<T>(
+    deadline: Duration,
+    step: impl Future<Output = Result<T, DesktopConnectionError>>,
+) -> Result<T, DesktopConnectionError> {
+    tokio::time::timeout(deadline, step)
+        .await
+        .unwrap_or_else(|_| {
+            Err(DesktopConnectionError::Io(
+                std::io::ErrorKind::TimedOut.into(),
+            ))
+        })
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use poem::listener::RustlsCertificate;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use rustls::server::ResolvesServerCert;
 use rustls::sign::{CertifiedKey, SigningKey};
 use rustls_pki_types::pem::PemObject;
 use time::OffsetDateTime;
@@ -192,24 +191,6 @@ impl From<TlsCertificateAndPrivateKey> for CertifiedKey {
             key: key.key,
             ocsp: None,
         }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct SingleCertResolver(Arc<CertifiedKey>);
-
-impl SingleCertResolver {
-    pub fn new(inner: TlsCertificateAndPrivateKey) -> Self {
-        Self(Arc::new(inner.into()))
-    }
-}
-
-impl ResolvesServerCert for SingleCertResolver {
-    fn resolve(
-        &self,
-        _client_hello: rustls::server::ClientHello<'_>,
-    ) -> Option<Arc<rustls::sign::CertifiedKey>> {
-        Some(self.0.clone())
     }
 }
 

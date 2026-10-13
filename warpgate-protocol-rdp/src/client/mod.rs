@@ -9,7 +9,6 @@ mod logon;
 mod tls;
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
@@ -41,18 +40,13 @@ use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender, un
 use tracing::{debug, warn};
 use warpgate_common::{RdpTargetAuth, RdpTargetCompression, SecretResolver, TargetRdpOptions};
 use warpgate_core::{
-    DesktopConnectionError, DesktopEvent, DesktopInput, DesktopRect, DesktopState,
+    DESKTOP_CONNECT_TIMEOUT, DESKTOP_HANDSHAKE_TIMEOUT, DesktopConnectionError, DesktopEvent,
+    DesktopInput, DesktopRect, DesktopState, within_deadline,
 };
 
 pub(crate) use self::logon::LogonWatcher;
 use crate::clipboard::{Clipboard, ClipboardSink, TextClipboard};
-
-/// Deadline for the TCP connect to the target.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-/// Deadline for the RDP handshake (X.224, TLS, CredSSP — the last of which may reach out
-/// to a KDC). Without it a target that accepts the TCP connection but stalls mid-handshake
-/// would wedge the session forever with no event to report.
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+use crate::desktop_size::bound_desktop_size;
 
 type Framed = TokioFramed<tls::TargetTlsStream>;
 
@@ -95,8 +89,9 @@ pub async fn run(
         .ok();
 
     let RdpTargetAuth::Password(auth) = &options.auth;
-    // The viewer-supplied size may be odd or out of range; keep the initial desktop within
-    // the same bounds the Display Control resize path enforces.
+    // The viewer-supplied size is untrusted; bound it the same way the native viewer's is,
+    // then make it a size the layout PDU accepts (even width), as the resize path does.
+    let (width, height) = bound_desktop_size(width, height);
     let (width, height) =
         MonitorLayoutEntry::adjust_display_size(u32::from(width), u32::from(height));
     let password = auth.password.resolve(&*secrets).await?;
@@ -110,8 +105,8 @@ pub async fn run(
     let (clipboard_tx, clipboard_rx) = unbounded_channel();
     let clipboard = Clipboard::deferred(ClientClipboardSink(clipboard_tx));
 
-    let (connection_result, framed) = tokio::time::timeout(
-        HANDSHAKE_TIMEOUT,
+    let (connection_result, framed) = within_deadline(
+        DESKTOP_HANDSHAKE_TIMEOUT,
         connect(
             config,
             options.host.clone(),
@@ -121,12 +116,7 @@ pub async fn run(
             clipboard.backend(),
         ),
     )
-    .await
-    .unwrap_or_else(|_| {
-        Err(DesktopConnectionError::Io(
-            std::io::ErrorKind::TimedOut.into(),
-        ))
-    })?;
+    .await?;
 
     event_tx
         .send(DesktopEvent::State(DesktopState::Connected))
@@ -242,6 +232,7 @@ async fn active_loop(
                 }
                 if let Some((width, height)) = resize {
                     // The layout PDU rejects odd widths and sizes outside 200..=8192.
+                    let (width, height) = bound_desktop_size(width, height);
                     let size = MonitorLayoutEntry::adjust_display_size(
                         u32::from(width),
                         u32::from(height),
@@ -780,13 +771,12 @@ async fn connect(
     tls_security: warpgate_common::RdpTlsSecurity,
     clipboard: TextClipboard<ClientClipboardSink>,
 ) -> Result<(ConnectionResult, Framed), DesktopConnectionError> {
-    let tcp_stream = tokio::time::timeout(
-        CONNECT_TIMEOUT,
-        TcpStream::connect((server_name.as_str(), port)),
-    )
-    .await
-    .unwrap_or_else(|_| Err(std::io::ErrorKind::TimedOut.into()))
-    .map_err(DesktopConnectionError::Io)?;
+    let tcp_stream = within_deadline(DESKTOP_CONNECT_TIMEOUT, async {
+        TcpStream::connect((server_name.as_str(), port))
+            .await
+            .map_err(DesktopConnectionError::Io)
+    })
+    .await?;
     tcp_stream.set_nodelay(true).ok();
     let client_addr = tcp_stream
         .local_addr()

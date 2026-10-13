@@ -8,6 +8,7 @@
 
 mod client;
 mod clipboard;
+mod desktop_size;
 mod server;
 mod session_handle;
 

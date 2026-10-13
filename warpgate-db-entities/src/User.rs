@@ -243,38 +243,18 @@ impl Model {
 
     pub async fn require_otp_in_policy(self, db: &DatabaseConnection) -> Result<(), WarpgateError> {
         let details = self.load_details(db).await?;
-        let mut user = details.inner;
-        user.credential_policy = Some(
-            user.credential_policy
-                .unwrap_or_default()
-                .upgrade_to_otp(&details.credentials),
-        );
-        ActiveModel::try_from(user)?.update(db).await?;
+        let credential_policy = details
+            .inner
+            .credential_policy
+            .unwrap_or_default()
+            .upgrade_to_otp(&details.credentials);
+        ActiveModel {
+            id: Set(details.inner.id),
+            credential_policy: Set(serde_json::to_value(Some(credential_policy))?),
+            ..Default::default()
+        }
+        .update(db)
+        .await?;
         Ok(())
-    }
-}
-
-impl TryFrom<User> for ActiveModel {
-    type Error = WarpgateError;
-
-    fn try_from(user: User) -> Result<Self, Self::Error> {
-        Ok(Self {
-            id: Set(user.id),
-            username: Set(user.username),
-            credential_policy: Set(serde_json::to_value(&user.credential_policy)?),
-            description: Set(user.description),
-            rate_limit_bytes_per_second: Set(user.rate_limit_bytes_per_second),
-            ldap_server_id: Set(None),
-            ldap_object_uuid: Set(None),
-            allowed_ip_ranges: Set(match user.allowed_ip_ranges {
-                Some(ranges) => serde_json::to_value(
-                    ranges
-                        .into_iter()
-                        .map(|x| x.to_string())
-                        .collect::<Vec<_>>(),
-                )?,
-                None => serde_json::Value::Null,
-            }),
-        })
     }
 }

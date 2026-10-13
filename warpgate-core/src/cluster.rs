@@ -9,7 +9,7 @@ use poem::IntoResponse;
 use poem::web::websocket::{Message, WebSocket};
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{Expr, IntoCondition, OnConflict};
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect};
+use sea_orm::{ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tokio::sync::broadcast;
@@ -379,49 +379,41 @@ pub fn refresh_notification_stream(
 /// ending a session mid-birth.
 const SHARED_SESSION_ORPHAN_GRACE: time::Duration = time::Duration::minutes(5);
 
-/// bound sessions reap 1/2: mark user sessions matching filter as ended
+/// bound sessions reap 1/2: end user sessions matching filter
 async fn end_connection_bound_sessions(
     db: &DatabaseConnection,
     node_filter: impl IntoCondition,
 ) -> Result<(), WarpgateError> {
-    UserSession::Entity::update_many()
-        .col_expr(
-            UserSession::Column::Ended,
-            Expr::value(OffsetDateTime::now_utc()),
-        )
-        .filter(node_filter)
-        .filter(UserSession::Column::NodeId.is_not_null())
-        .filter(UserSession::Column::Ended.is_null())
-        .exec(db)
-        .await?;
-    Ok(())
+    UserSession::revoke_open_matching(
+        db,
+        Condition::all()
+            .add(node_filter.into_condition())
+            .add(UserSession::Column::NodeId.is_not_null()),
+    )
+    .await
 }
 
 /// End unowned (HTTP browser) sessions whose backing is gone: they are kept
 /// alive by their stored cookie sessions, not by any node.
 async fn end_sessions_without_cookie(db: &DatabaseConnection) -> Result<(), WarpgateError> {
     let grace_cutoff = OffsetDateTime::now_utc() - SHARED_SESSION_ORPHAN_GRACE;
-    UserSession::Entity::update_many()
-        .col_expr(
-            UserSession::Column::Ended,
-            Expr::value(OffsetDateTime::now_utc()),
-        )
-        .filter(UserSession::Column::Protocol.eq(Protocol::Http.name()))
-        .filter(UserSession::Column::NodeId.is_null())
-        .filter(UserSession::Column::Ended.is_null())
-        .filter(UserSession::Column::Started.lt(grace_cutoff))
-        .filter(
-            UserSession::Column::Id.not_in_subquery(
-                sea_orm::sea_query::Query::select()
-                    .column(HttpSession::Column::UserSessionId)
-                    .from(HttpSession::Entity)
-                    .and_where(Expr::col(HttpSession::Column::UserSessionId).is_not_null())
-                    .to_owned(),
+    UserSession::revoke_open_matching(
+        db,
+        Condition::all()
+            .add(UserSession::Column::Protocol.eq(Protocol::Http.name()))
+            .add(UserSession::Column::NodeId.is_null())
+            .add(UserSession::Column::Started.lt(grace_cutoff))
+            .add(
+                UserSession::Column::Id.not_in_subquery(
+                    sea_orm::sea_query::Query::select()
+                        .column(HttpSession::Column::UserSessionId)
+                        .from(HttpSession::Entity)
+                        .and_where(Expr::col(HttpSession::Column::UserSessionId).is_not_null())
+                        .to_owned(),
+                ),
             ),
-        )
-        .exec(db)
-        .await?;
-    Ok(())
+    )
+    .await
 }
 
 /// Safety net: no target access may read as open past its parent. The normal

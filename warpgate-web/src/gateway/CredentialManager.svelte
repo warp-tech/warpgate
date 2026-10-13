@@ -163,7 +163,7 @@
             </div>
         </div>
 
-        {#if creds.publicKeys.length === 0 && Object.values(creds.credentialPolicy).some(l => l?.includes(CredentialKind.Password))}
+        {#if creds.password === PasswordState.Unset && Object.values(creds.credentialPolicy).some(l => l?.includes(CredentialKind.Password))}
             <Alert color="warning">
                 Your credential policy requires using a password for
                 authentication. Without one, you won't be able to log in.

@@ -13,9 +13,9 @@ use poem::{IntoResponse, Request, Response};
 use tokio::sync::Mutex;
 use warpgate_common::TargetHTTPOptions;
 use warpgate_common::auth::RememberApprovalBy;
-use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_common_http::internal_page::internal_page;
 use warpgate_common_http::logging::get_client_ip_addr;
+use warpgate_common_http::{AuthenticatedRequestContext, insert_security_headers};
 use warpgate_core::approvals::{GatedConnection, PolledGate};
 use warpgate_core::{AdmittedTarget, TargetAuthorization, WarpgateServerHandle};
 
@@ -77,11 +77,39 @@ fn gate_response(target_name: &str, heading: &str, message: &str, pending: bool)
         pending.then_some(RETRY_AFTER_SECONDS),
     );
 
-    if pending {
+    let mut response = if pending {
         page.with_status(StatusCode::ACCEPTED)
             .with_header(http::header::RETRY_AFTER, RETRY_AFTER_SECONDS)
             .into_response()
     } else {
         page.with_status(StatusCode::FORBIDDEN).into_response()
+    };
+    // proxy route is excluded by the security-header middleware
+    insert_security_headers(response.headers_mut());
+    response
+}
+
+#[cfg(test)]
+mod gate_page_tests {
+    use super::gate_response;
+
+    /// The interstitial is served on the target's routes, outside the middleware that
+    /// adds security headers everywhere else, so it has to carry them itself.
+    #[test]
+    fn gate_pages_carry_security_headers() {
+        for pending in [true, false] {
+            let response = gate_response("target", "heading", "message", pending);
+            for header in [
+                http::header::CONTENT_SECURITY_POLICY,
+                http::header::X_CONTENT_TYPE_OPTIONS,
+                http::header::X_FRAME_OPTIONS,
+                http::header::REFERRER_POLICY,
+            ] {
+                assert!(
+                    response.headers().contains_key(&header),
+                    "{header} missing (pending: {pending})"
+                );
+            }
+        }
     }
 }
