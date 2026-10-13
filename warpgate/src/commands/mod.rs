@@ -4,6 +4,7 @@ mod common;
 pub mod copy_database;
 pub mod create_user;
 pub mod healthcheck;
+pub mod internal_install_files;
 pub mod migrate;
 pub mod recover_access;
 pub mod run;
