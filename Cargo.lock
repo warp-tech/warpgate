@@ -4692,6 +4692,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nucleo-matcher"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf33f538733d1a5a3494b836ba913207f14d9d4a1d3cd67030c5061bdd2cac85"
+dependencies = [
+ "memchr",
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "num-bigint"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9157,7 +9167,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate"
-version = "0.29.1"
+version = "0.30.0-beta.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9209,7 +9219,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-admin"
-version = "0.29.1"
+version = "0.30.0-beta.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9278,7 +9288,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-ca"
-version = "0.29.1"
+version = "0.30.0-beta.1"
 dependencies = [
  "aws-lc-rs",
  "const-oid 0.9.6",
@@ -9297,7 +9307,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common"
-version = "0.29.1"
+version = "0.30.0-beta.1"
 dependencies = [
  "aes-gcm 0.11.0",
  "anyhow",
@@ -9313,6 +9323,7 @@ dependencies = [
  "humantime-serde",
  "ipnet",
  "nix 0.31.3",
+ "nucleo-matcher",
  "password-hash 0.5.0",
  "poem",
  "poem-openapi",
@@ -9363,7 +9374,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common-http"
-version = "0.29.1"
+version = "0.30.0-beta.1"
 dependencies = [
  "anyhow",
  "html-escape",
@@ -9387,7 +9398,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-core"
-version = "0.29.1"
+version = "0.30.0-beta.1"
 dependencies = [
  "anyhow",
  "argon2 0.5.3",
@@ -9442,7 +9453,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-database-protocols"
-version = "0.29.1"
+version = "0.30.0-beta.1"
 dependencies = [
  "bitflags 2.13.1",
  "bytes",
@@ -9455,7 +9466,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-entities"
-version = "0.29.1"
+version = "0.30.0-beta.1"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -9478,7 +9489,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-migrations"
-version = "0.29.1"
+version = "0.30.0-beta.1"
 dependencies = [
  "data-encoding",
  "regex",
@@ -9523,7 +9534,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-ldap"
-version = "0.29.1"
+version = "0.30.0-beta.1"
 dependencies = [
  "anyhow",
  "ldap3",
@@ -9539,7 +9550,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-http"
-version = "0.29.1"
+version = "0.30.0-beta.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9586,7 +9597,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-kubernetes"
-version = "0.29.1"
+version = "0.30.0-beta.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9594,6 +9605,7 @@ dependencies = [
  "bytes",
  "dashmap",
  "futures",
+ "h2 0.4.16",
  "http 1.5.0",
  "md5",
  "percent-encoding",
@@ -9612,6 +9624,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.26.4",
  "tokio-tungstenite 0.30.0",
+ "tokio-util",
  "tracing",
  "url",
  "uuid",
@@ -9628,7 +9641,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-mysql"
-version = "0.29.1"
+version = "0.30.0-beta.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9658,7 +9671,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-postgres"
-version = "0.29.1"
+version = "0.30.0-beta.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9718,7 +9731,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-ssh"
-version = "0.29.1"
+version = "0.30.0-beta.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9784,7 +9797,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-secrets-vault"
-version = "0.28.5"
+version = "0.30.0-beta.1"
 dependencies = [
  "async-trait",
  "serde",
@@ -9798,7 +9811,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-sso"
-version = "0.29.1"
+version = "0.30.0-beta.1"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -9819,7 +9832,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-tls"
-version = "0.29.1"
+version = "0.30.0-beta.1"
 dependencies = [
  "bytes",
  "poem",
@@ -9841,7 +9854,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-web"
-version = "0.29.1"
+version = "0.30.0-beta.1"
 dependencies = [
  "rust-embed",
  "serde",

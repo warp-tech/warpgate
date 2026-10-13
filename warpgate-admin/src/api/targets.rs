@@ -1,41 +1,41 @@
 use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::prelude::Expr;
-use sea_orm::sea_query::{Func, SimpleExpr};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
 use tracing::warn;
 use uuid::Uuid;
-use warpgate_common::encryption::idempotent_maybe_encrypt_secret;
 use warpgate_common::{
-    AdminPermission, Role as RoleConfig, Target as TargetConfig, TargetOptions, TargetSSHOptions,
-    WarpgateError, map_stored_target_secrets, redact_target_secrets,
+    AdminPermission, Role as RoleConfig, StoredSecrets, Target as TargetConfig, TargetOptions,
+    TargetSSHOptions, WarpgateError,
 };
 use warpgate_common_http::errors::invalid_field;
-use warpgate_db_entities::{KnownHost, Role, Target, TargetRoleAssignment, Ticket, TicketRequest};
+use warpgate_db_entities::Target::fuzzy_filter_targets;
+use warpgate_db_entities::{
+    KnownHost, Role, Target, TargetGroup, TargetRoleAssignment, Ticket, TicketRequest,
+};
 
 use super::AdminContext;
-use crate::api::common::{case_insensitive_search, is_unique_violation};
+use crate::api::common::is_unique_violation;
 
 /// Encrypt and serialize options
 fn serialize_options_for_storage(
-    options: TargetOptions,
+    mut options: TargetOptions,
 ) -> Result<serde_json::Value, WarpgateError> {
-    let mut value = serde_json::to_value(options).map_err(WarpgateError::from)?;
-    map_stored_target_secrets(&mut value, &mut idempotent_maybe_encrypt_secret)?;
-    Ok(value)
+    options.encrypt_all()?;
+    Ok(serde_json::to_value(options)?)
 }
 
 pub(crate) fn maybe_redacted_target(
     admin: &AdminContext,
-    mut model: Target::Model,
+    model: Target::Model,
 ) -> Result<TargetConfig, WarpgateError> {
+    let mut target: TargetConfig = model.try_into()?;
     if !admin.has_permission(AdminPermission::TargetsEdit) {
-        redact_target_secrets(&mut model.options);
+        target.redact();
     }
-    model.try_into().map_err(WarpgateError::from)
+    Ok(target)
 }
 
 #[derive(Object)]
@@ -86,39 +86,21 @@ impl ListApi {
     ) -> Result<GetTargetsResponse, WarpgateError> {
         let db = &admin.services().db;
 
-        let mut targets = Target::Entity::find();
+        let groups: Vec<TargetGroup::Model> = TargetGroup::Entity::find().all(db).await?;
 
-        if let Some(ref search) = *search {
-            let search_pattern = format!("%{}%", search.to_lowercase());
-            targets = targets
-                .filter(case_insensitive_search(
-                    search,
-                    [Target::Column::Name, Target::Column::Description],
-                ))
-                .order_by_asc({
-                    let case_expr: SimpleExpr = Expr::case(
-                        Expr::expr(Func::lower(Expr::col(Target::Column::Name)))
-                            .like(&search_pattern),
-                        0,
-                    )
-                    .finally(1)
-                    .into();
-                    case_expr
-                })
-                .order_by_asc(Target::Column::Name);
-        } else {
-            targets = targets.order_by_asc(Target::Column::Name);
-        }
-
+        let mut targets = Target::Entity::find().order_by_asc(Target::Column::Name);
         if let Some(group_id) = *group_id {
             targets = targets.filter(Target::Column::GroupId.eq(group_id));
         }
 
-        let targets = targets.all(db).await.map_err(WarpgateError::from)?;
+        let all_targets = targets.all(db).await.map_err(WarpgateError::from)?;
+
+        let targets =
+            fuzzy_filter_targets(&all_targets, &groups, search.as_deref().unwrap_or_default());
 
         let targets = targets
             .into_iter()
-            .map(|t| maybe_redacted_target(&admin, t))
+            .map(|t| maybe_redacted_target(&admin, t.clone()))
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(GetTargetsResponse::Ok(Json(targets)))

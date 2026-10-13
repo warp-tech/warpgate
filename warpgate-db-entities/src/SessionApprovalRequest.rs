@@ -23,7 +23,8 @@ pub enum ApprovalRequestStatus {
     /// nobody answered the approval
     #[sea_orm(string_value = "timed_out")]
     TimedOut,
-    /// the connection died before the approval got answered
+    /// the ask ended unanswered: the connection died, or a remembered
+    /// approval satisfied it
     #[sea_orm(string_value = "abandoned")]
     Abandoned,
 }

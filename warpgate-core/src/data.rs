@@ -2,7 +2,7 @@ use poem_openapi::Object;
 use serde::Serialize;
 use time::OffsetDateTime;
 use uuid::Uuid;
-use warpgate_common::{NodeId, Target, TargetSessionId, UserSessionId, redact_target_secrets};
+use warpgate_common::{NodeId, StoredSecrets, Target, TargetSessionId, UserSessionId};
 use warpgate_db_entities::{SessionApprovalRequest, TargetSession, UserSession};
 
 #[derive(Serialize, Object)]
@@ -87,12 +87,9 @@ impl From<TargetSession::Model> for TargetSessionSnapshot {
             // Redacted on read as well as on write: rows predating snapshot
             // redaction (m00073 handled them, but defense in depth) must never
             // surface a secret through the API.
-            target: serde_json::from_str(&model.target_snapshot)
+            target: serde_json::from_str::<Target>(&model.target_snapshot)
                 .ok()
-                .and_then(|mut value| {
-                    redact_target_secrets(&mut value);
-                    serde_json::from_value::<Target>(value).ok()
-                }),
+                .map(|target| target.redacted()),
             target_id: model.target_id,
             started: model.started,
             ended: model.ended,

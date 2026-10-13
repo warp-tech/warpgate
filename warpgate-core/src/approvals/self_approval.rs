@@ -6,11 +6,62 @@ use warpgate_common::auth::{ApprovalKind, AuthCredential, AuthResult, AuthState,
 use warpgate_common::{NodeId, UserSessionId, WarpgateError};
 use warpgate_db_entities::SessionApprovalRequest;
 use warpgate_db_entities::SessionApprovalRequest::{
-    mark_consumed, undelivered_user_approvals_for_session, upsert_request,
+    UndecidedApprovalRequestStatus, close_request, mark_consumed,
+    undelivered_user_approvals_for_session, upsert_request,
 };
 
 use super::*;
+use crate::cluster::{Cluster, ClusterNotification};
 use crate::services::Services;
+
+fn needs_web_approval(state: &AuthState) -> bool {
+    matches!(
+        state.verify(),
+        AuthResult::Need(ref kinds) if kinds.contains(&CredentialKind::WebUserApproval)
+    )
+}
+
+pub(crate) async fn try_web_approval_bypass(
+    db: &DatabaseConnection,
+    cluster: &Arc<Cluster>,
+    state_arc: &Arc<Mutex<AuthState>>,
+) -> Result<bool, WarpgateError> {
+    let Some(grace) = web_approval_grace_period(db).await? else {
+        return Ok(false);
+    };
+    let Some(key) = state_arc.lock().await.web_approval_match_key() else {
+        return Ok(false);
+    };
+    if !approval_is_remembered(db, &key, grace).await? {
+        return Ok(false);
+    }
+
+    // interlocks with advertise_user_request
+    let mut state = state_arc.lock().await;
+
+    if !needs_web_approval(&state) {
+        return Ok(false);
+    }
+
+    state.add_web_user_approval();
+    state.emit_web_approval_bypassed_event();
+
+    let withdrawn = close_request(
+        db,
+        *state.session_id(),
+        ApprovalKind::User,
+        state.target_name(),
+        UndecidedApprovalRequestStatus::Abandoned,
+    )
+    .await?;
+    if withdrawn {
+        cluster.notify_global(ClusterNotification::WebAuthRequested {
+            session_id: *state.session_id(),
+            user_id: state.user_info().id,
+        });
+    }
+    Ok(true)
+}
 
 impl Services {
     // For protocols where the user actively "confirms" that an approval has already been made (SSH keyboard-interactive)
@@ -76,10 +127,7 @@ impl Services {
             }
 
             // Verify that the state is still waiting for an approval
-            if !matches!(
-                state.verify(),
-                AuthResult::Need(ref kinds) if kinds.contains(&CredentialKind::WebUserApproval)
-            ) {
+            if !needs_web_approval(&state) {
                 drop(state);
                 mark_consumed(&self.db, consumed()).await?;
                 return Ok(false);
@@ -108,28 +156,31 @@ pub(crate) async fn advertise_user_request(
     db: &DatabaseConnection,
     node_id: NodeId,
     state_arc: &Arc<Mutex<AuthState>>,
-) -> Result<(), WarpgateError> {
-    let row = {
-        let state = state_arc.lock().await;
-        let session_id = *state.session_id();
-        SessionApprovalRequest::NewRequest {
-            session_id,
-            target: state.target_name().to_string(),
-            node_id,
-            protocol: state.protocol().to_string(),
-            username: state.user_info().username.clone(),
-            user_id: state.user_info().id,
-            remote_address: state.remote_ip().map(|ip| ip.to_string()),
-            match_digest: state
-                .web_approval_match_key()
-                .map(|key| key.identity().digest()),
-            started: *state.started(),
-            about: SessionApprovalRequest::RequestAsk::User {
-                identification_string: state.identification_string().to_owned(),
-            },
-        }
+) -> Result<bool, WarpgateError> {
+    // interlocks with try_web_approval_bypass
+    let state = state_arc.lock().await;
+
+    if !needs_web_approval(&state) {
+        return Ok(false);
+    }
+
+    let row = SessionApprovalRequest::NewRequest {
+        session_id: *state.session_id(),
+        target: state.target_name().to_string(),
+        node_id,
+        protocol: state.protocol().to_string(),
+        username: state.user_info().username.clone(),
+        user_id: state.user_info().id,
+        remote_address: state.remote_ip().map(|ip| ip.to_string()),
+        match_digest: state
+            .web_approval_match_key()
+            .map(|key| key.identity().digest()),
+        started: *state.started(),
+        about: SessionApprovalRequest::RequestAsk::User {
+            identification_string: state.identification_string().to_owned(),
+        },
     };
 
     upsert_request(db, row).await?;
-    Ok(())
+    Ok(true)
 }

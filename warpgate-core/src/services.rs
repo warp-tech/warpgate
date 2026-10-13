@@ -8,7 +8,7 @@ use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, Quer
 use tokio::sync::{Mutex, broadcast};
 use tracing::warn;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthResult, AuthState, CredentialKind};
+use warpgate_common::auth::{AuthState, CredentialKind};
 use warpgate_common::{
     GlobalParams, Protocol, Secret, UserSessionId, WarpgateConfig, WarpgateError,
 };
@@ -279,10 +279,7 @@ impl Services {
 
     /// Configured web-approval caching window, or `None` if caching is disabled.
     pub async fn web_approval_grace_period(&self) -> Result<Option<Duration>, WarpgateError> {
-        Ok(Parameters::Entity::get(&self.db)
-            .await?
-            .web_approval_grace_period_seconds
-            .and_then(i64_seconds_to_duration))
+        crate::approvals::web_approval_grace_period(&self.db).await
     }
 
     /// If a matching web approval is still within the grace period, satisfies the
@@ -291,26 +288,6 @@ impl Services {
         &self,
         state_arc: &Arc<Mutex<AuthState>>,
     ) -> Result<bool, WarpgateError> {
-        let Some(grace) = self.web_approval_grace_period().await? else {
-            return Ok(false);
-        };
-        let Some(key) = state_arc.lock().await.web_approval_match_key() else {
-            return Ok(false);
-        };
-        if !crate::approvals::approval_is_remembered(&self.db, &key, grace).await? {
-            return Ok(false);
-        }
-
-        let mut state = state_arc.lock().await;
-
-        // check that we are still waiting for an approval
-        if !matches!(state.verify(), AuthResult::Need(ref kinds) if kinds.contains(&CredentialKind::WebUserApproval))
-        {
-            return Ok(false);
-        }
-
-        state.add_web_user_approval();
-        state.emit_web_approval_bypassed_event();
-        Ok(true)
+        crate::approvals::try_web_approval_bypass(&self.db, &self.cluster, state_arc).await
     }
 }

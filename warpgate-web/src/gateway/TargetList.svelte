@@ -1,4 +1,6 @@
 <script lang="ts">
+    import 'core-js/actual/map/group-by'
+
     import {
         faArrowRight,
         faEllipsisV,
@@ -65,6 +67,16 @@
     ): Observable<PaginatedResponse<TargetSnapshot>> {
         return from(api.getTargets({ search: options.search })).pipe(
             map(result => {
+                if (options.search) {
+                    // Keep the server's relevance order, only pulling each
+                    // group together (ItemList groups by adjacency): groups
+                    // are ordered by their best match.
+                    result = [
+                        ...Map.groupBy(result, t => t.group?.id).values(),
+                    ].flat()
+                    return { items: result, offset: 0, total: result.length }
+                }
+
                 const naturalCompare = naturalCompareFactory()
 
                 result = result.sort(
