@@ -150,7 +150,7 @@ async fn connect(
                 size.unwrap_or(warpgate_protocol_rdp::DEFAULT_SIZE),
                 services.secret_backends.clone(),
             )?;
-            // The RDP helper only ever emits raw RGBA.
+            // The RDP helper only ever emits raw BGRA.
             (handles, true)
         }
         _ => return Err(WarpgateError::InvalidTarget),
