@@ -11,7 +11,7 @@ use sea_orm::{ConnectionTrait, Database, IntoActiveModel};
 use tokio::io::AsyncReadExt;
 use warpgate_aws::{S3Credentials, S3Storage, S3StorageConfig, StaticCredentials};
 use warpgate_db_entities::Parameters::{
-    ConfigMigrationValues, RecordingsStorageConfig, set_config_migration_values,
+    self, ConfigMigrationValues, RecordingsStorageConfig, set_config_migration_values,
 };
 use warpgate_db_migrations::migrate_database;
 
@@ -269,7 +269,12 @@ fn exists(path: &Path) -> bool {
 async fn a_recording_ends_only_after_its_last_file_is_finalized() {
     let h = Harness::new(None).await;
 
-    let recording: TwoFiles = h.recordings.start(&h.session_id, None, ()).await.unwrap();
+    let recording: TwoFiles = h
+        .recordings
+        .start(&h.session_id, None, ())
+        .await
+        .unwrap()
+        .unwrap();
     h.wait_for_writers(2).await;
 
     drop(recording.index);
@@ -292,7 +297,12 @@ async fn a_failed_finalize_keeps_the_other_files_scratch() {
     }))
     .await;
 
-    let recording: TwoFiles = h.recordings.start(&h.session_id, None, ()).await.unwrap();
+    let recording: TwoFiles = h
+        .recordings
+        .start(&h.session_id, None, ())
+        .await
+        .unwrap()
+        .unwrap();
     recording.data.write(b"data\n").await.unwrap();
     recording.index.write(b"index\n").await.unwrap();
     drop(recording);
@@ -436,7 +446,12 @@ async fn a_failed_s3_part_does_not_end() {
     }))
     .await;
 
-    let recording: TwoFiles = h.recordings.start(&h.session_id, None, ()).await.unwrap();
+    let recording: TwoFiles = h
+        .recordings
+        .start(&h.session_id, None, ())
+        .await
+        .unwrap()
+        .unwrap();
     let data = vec![b'x'; 6 * 1024 * 1024];
     recording.data.write(&data).await.unwrap();
     drop(recording);
@@ -483,7 +498,12 @@ async fn a_failed_s3_part_does_not_end() {
 async fn a_failed_ended_update_keeps_the_scratch() {
     let h = Harness::new(Some(FakeS3::default())).await;
 
-    let recording: TwoFiles = h.recordings.start(&h.session_id, None, ()).await.unwrap();
+    let recording: TwoFiles = h
+        .recordings
+        .start(&h.session_id, None, ())
+        .await
+        .unwrap()
+        .unwrap();
     recording.data.write(b"data\n").await.unwrap();
     recording.index.write(b"index\n").await.unwrap();
     drop(recording.index);

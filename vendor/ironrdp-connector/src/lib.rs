@@ -260,6 +260,28 @@ pub struct Config {
     /// [\[MS-RDPBCGR\] 2.2.1.3.7]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/861f2bbb-6ca2-4c5a-8c44-0714fa901e70
     /// [`MultiTransportChannelData`]: ironrdp_pdu::gcc::MultiTransportChannelData
     pub multitransport_flags: Option<gcc::MultiTransportFlags>,
+
+    /// Advertise client support for the Remote Desktop Protocol: Graphics Pipeline Extension.
+    ///
+    /// When `true`, the connector sets `RNS_UD_CS_SUPPORT_DYNVC_GFX_PROTOCOL` in `earlyCapabilityFlags`.
+    /// [\[MS-RDPBCGR\] 2.2.1.3.2] defines this Client Core Data flag.
+    /// [\[MS-RDPEGFX\] 1.5.1] requires clients to advertise it before using EGFX.
+    ///
+    /// Enable this only after registering an EGFX-capable [`DvcClientProcessor`].
+    /// [`GraphicsPipelineClient`] provides IronRDP's implementation.
+    /// Register it with [`DrdynvcClient::with_dynamic_channel`].
+    /// Then attach the DRDYNVC client through [`ClientConnector::with_static_channel`].
+    /// Advertising the flag without a processor can make a server route graphics to an unhandled channel.
+    /// The desktop then remains blank.
+    ///
+    /// The default is `false`, so EGFX is not advertised.
+    ///
+    /// [\[MS-RDPBCGR\] 2.2.1.3.2]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/00f1da4a-ee9c-421a-852f-c19f92343d73
+    /// [\[MS-RDPEGFX\] 1.5.1]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpegfx/da5c75f9-cd99-450c-98c4-014a496942b0
+    /// [`DvcClientProcessor`]: https://docs.rs/ironrdp-dvc/latest/ironrdp_dvc/trait.DvcClientProcessor.html
+    /// [`DrdynvcClient::with_dynamic_channel`]: https://docs.rs/ironrdp-dvc/latest/ironrdp_dvc/struct.DrdynvcClient.html#method.with_dynamic_channel
+    /// [`GraphicsPipelineClient`]: https://docs.rs/ironrdp-egfx/latest/ironrdp_egfx/client/struct.GraphicsPipelineClient.html
+    pub support_dyn_vc_gfx_protocol: bool,
 }
 
 ironrdp_core::assert_impl!(Config: Send, Sync);

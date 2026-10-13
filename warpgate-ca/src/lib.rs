@@ -1,7 +1,6 @@
 use std::time::{Duration, SystemTime};
 
 use aws_lc_rs::digest;
-use aws_lc_rs::error::KeyRejected;
 use aws_lc_rs::signature::{ECDSA_P384_SHA3_384_ASN1_SIGNING, EcdsaKeyPair};
 use data_encoding::BASE64;
 use der::{Decode, DecodePem, Encode};
@@ -18,15 +17,6 @@ use x509_parser::pem::parse_x509_pem;
 
 mod error;
 pub use error::CaError;
-
-impl From<KeyRejected> for CaError {
-    fn from(err: KeyRejected) -> Self {
-        Self::Other(Box::new(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("Key rejected: {err:?}"),
-        )))
-    }
-}
 
 /// A certificate and its associated private key
 #[derive(Debug)]
@@ -97,13 +87,7 @@ pub fn deserialize_ca(
 ) -> Result<CertifiedKey, CaError> {
     let certificate = deserialize_certificate(certificate_pem)?;
 
-    // Parse the private key PEM
-    let key_pem = pem::parse(private_key_pem).map_err(|e| {
-        CaError::Other(Box::new(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("Failed to parse private key PEM: {e:?}"),
-        )))
-    })?;
+    let key_pem = pem::parse(private_key_pem)?;
 
     // Validate it's a private key by checking the tag
     let tag = key_pem.tag();
@@ -123,6 +107,7 @@ pub fn deserialize_ca(
 pub const CLUSTER_TLS_SNI_NAME: &str = "warpgate-cluster.internal";
 
 /// A per-process cluster peer identity
+#[derive(Clone)]
 pub struct ClusterTlsIdentity {
     pub certificate_pem: String,
     pub private_key_pem: String,
@@ -140,7 +125,10 @@ impl ClusterTlsIdentity {
         dn.push(rcgen::DnType::CommonName, CLUSTER_TLS_SNI_NAME);
         params.distinguished_name = dn;
         params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
-        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+        params.extended_key_usages = vec![
+            ExtendedKeyUsagePurpose::ServerAuth,
+            ExtendedKeyUsagePurpose::ClientAuth,
+        ];
 
         // Backdated in case of clock skew
         // long-lived cause it's never rotated until the process dies

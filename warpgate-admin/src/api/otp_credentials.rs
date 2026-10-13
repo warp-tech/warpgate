@@ -102,13 +102,15 @@ impl ListApi {
         let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
             return Ok(CreateOtpCredentialResponse::NotFound);
         };
+        let username = user.username.clone();
+        user.require_otp_in_policy(db).await?;
 
         AuditEvent::CredentialCreated {
             credential_type: "otp".to_string(),
             credential_name: None,
             via: CredentialChangedVia::Admin,
             user_id: *user_id,
-            username: user.username,
+            username,
             actor_user_id: admin.auth.user_id(),
         }
         .emit();

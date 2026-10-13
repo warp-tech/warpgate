@@ -12,6 +12,7 @@ use warpgate_common_http::errors::invalid_field;
 use warpgate_db_entities::{Role, Target, TargetRoleAssignment, User, UserRoleAssignment};
 
 use super::AdminContext;
+use super::targets::maybe_redacted_target;
 use crate::api::common::case_insensitive_search;
 
 #[derive(Object)]
@@ -228,8 +229,8 @@ impl DetailApi {
         Ok(GetRoleTargetsResponse::Ok(Json(
             targets
                 .into_iter()
-                .map(TryInto::try_into)
-                .collect::<Result<Vec<_>, serde_json::Error>>()?,
+                .map(|t| maybe_redacted_target(&admin, t))
+                .collect::<Result<Vec<_>, _>>()?,
         )))
     }
 

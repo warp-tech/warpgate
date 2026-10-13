@@ -12,6 +12,7 @@
         type TargetClickAction,
     } from 'admin/lib/api'
     import HelpText from 'admin/lib/HelpText.svelte'
+    import LogoInput from 'admin/lib/LogoInput.svelte'
     import PermissionGate from 'admin/lib/PermissionGate.svelte'
     import Section from 'admin/lib/Section.svelte'
     import SectionedForm from 'admin/lib/SectionedForm.svelte'
@@ -60,6 +61,7 @@
                 : { mode: 'Auto' }
     }
     let updateError: string | undefined = $state()
+    let pendingLogo: string | null | undefined = $state()
     let testResult: { success: boolean; error?: string } | undefined = $state()
 
     // Sends the edited config as-is; an untouched secret round-trips as
@@ -133,8 +135,13 @@
                     parameters.adminApprovalTimeoutSeconds ?? null,
                 adminApprovalGracePeriodSeconds:
                     parameters.adminApprovalGracePeriodSeconds ?? null,
+                logo: pendingLogo,
             } as unknown as ParameterValues
             await api.updateParameters({ parameterUpdate })
+            if (pendingLogo !== undefined) {
+                parameters.logoEtag = (await api.getParameters({})).logoEtag
+                pendingLogo = undefined
+            }
             await reloadServerInfo()
         } catch (err) {
             updateError = await stringifyError(err)
@@ -511,6 +518,13 @@
                             </Section>
 
                             <Section id="ui" title="UI">
+                                <Subsection title="Logo">
+                                    <LogoInput
+                                        etag={parameters.logoEtag}
+                                        bind:value={pendingLogo}
+                                    />
+                                </Subsection>
+
                                 <label
                                     for="webClientsEnabled"
                                     class="d-flex align-items-center"

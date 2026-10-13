@@ -1,0 +1,30 @@
+[package]
+name = "ironrdp-dvc"
+version = "0.8.0"
+readme = "README.md"
+description = "DRDYNVC static channel implementation and traits to implement dynamic virtual channels"
+edition.workspace = true
+rust-version = "1.89"
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+doctest = false
+test = false
+
+[features]
+default = []
+std = []
+
+[dependencies]
+ironrdp-core = { path = "../ironrdp-core", version = "0.2", features = ["alloc"] } # public
+ironrdp-svc = { path = "../ironrdp-svc", version = "0.8" } # public
+ironrdp-pdu = { path = "../ironrdp-pdu", version = "0.9", features = ["alloc"] } # public
+tracing = { version = "0.1", features = ["log"] }
+
+[lints]
+workspace = true

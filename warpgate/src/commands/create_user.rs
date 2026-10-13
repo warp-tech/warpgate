@@ -1,4 +1,4 @@
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, SqlErr};
 use tracing::info;
 use uuid::Uuid;
 use warpgate_common::{GlobalParams, Secret, UserPasswordCredential, WarpgateError};
@@ -15,7 +15,7 @@ pub async fn command(
     username: &str,
     password: &Secret<String>,
     role: Option<&String>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     let config = load_config(params, true)?;
     let services = Services::new(config.clone(), None, params.clone()).await?;
 
@@ -29,9 +29,9 @@ pub async fn command(
         .first()
         .map(ToOwned::to_owned);
 
-    let db_user = if let Some(x) = existing_user {
+    let (db_user, created) = if let Some(x) = existing_user {
         info!("User {username} already exists, leaving its credentials untouched");
-        x
+        (x, false)
     } else {
         let values = User::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -45,17 +45,29 @@ pub async fn command(
             ldap_object_uuid: Set(None),
             allowed_ip_ranges: Set(serde_json::Value::Null),
         };
-        let user = values.insert(db).await.map_err(WarpgateError::from)?;
-
-        PasswordCredential::ActiveModel {
-            user_id: Set(user.id),
-            id: Set(Uuid::new_v4()),
-            ..UserPasswordCredential::from_password(password).into()
+        match values.insert(db).await {
+            Ok(user) => {
+                PasswordCredential::ActiveModel {
+                    user_id: Set(user.id),
+                    id: Set(Uuid::new_v4()),
+                    ..UserPasswordCredential::from_password(password).into()
+                }
+                .insert(db)
+                .await?;
+                (user, true)
+            }
+            // Another node raced, realistically during DB bootstrap in cluster
+            Err(err) if matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) => {
+                info!("User {username} was just created elsewhere");
+                let user = User::Entity::find()
+                    .filter(User::Entity::username_eq_ci(username))
+                    .one(db)
+                    .await?
+                    .ok_or_else(|| anyhow::anyhow!("User {username} vanished after a conflict"))?;
+                (user, false)
+            }
+            Err(err) => return Err(WarpgateError::from(err).into()),
         }
-        .insert(db)
-        .await?;
-
-        user
     };
 
     Role::Entity::grant_default_roles(db, db_user.id).await?;
@@ -90,5 +102,5 @@ pub async fn command(
         }
     }
 
-    Ok(())
+    Ok(created)
 }

@@ -94,7 +94,7 @@ pub enum RequestAuthorization {
     },
     AdminToken,
     /// Auth between cluster peers
-    ClusterToken,
+    ClusterPeer,
 }
 
 #[derive(Clone)]
@@ -227,7 +227,7 @@ impl FullUserAuthorization {
 
 impl RequestAuthorization {
     pub const fn is_cluster_peer(&self) -> bool {
-        matches!(self, Self::ClusterToken)
+        matches!(self, Self::ClusterPeer)
     }
 
     /// Returns a username if one is present (admin token has none)
@@ -235,7 +235,7 @@ impl RequestAuthorization {
         match self {
             Self::Session(auth) => Some(auth.username()),
             Self::UserToken { username, .. } => Some(username),
-            Self::AdminToken | Self::ClusterToken => None,
+            Self::AdminToken | Self::ClusterPeer => None,
         }
     }
 
@@ -244,7 +244,7 @@ impl RequestAuthorization {
         match self {
             Self::Session(auth) => auth.user_id(),
             Self::UserToken { user_id, .. } => *user_id,
-            Self::AdminToken | Self::ClusterToken => Uuid::nil(),
+            Self::AdminToken | Self::ClusterPeer => Uuid::nil(),
         }
     }
 
@@ -261,7 +261,7 @@ impl RequestAuthorization {
             }
             Self::Session(SessionAuthorization::Ticket { .. })
             | Self::AdminToken
-            | Self::ClusterToken => None,
+            | Self::ClusterPeer => None,
         }
     }
 }
@@ -305,6 +305,6 @@ mod tests {
 
         // Machine tokens carry no user identity.
         assert!(RequestAuthorization::AdminToken.as_full_user().is_none());
-        assert!(RequestAuthorization::ClusterToken.as_full_user().is_none());
+        assert!(RequestAuthorization::ClusterPeer.as_full_user().is_none());
     }
 }

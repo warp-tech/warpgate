@@ -3,6 +3,7 @@ use std::fmt::{Display, Formatter};
 use bytes::Bytes;
 use russh::{ChannelId, Pty, Sig};
 use serde::{Deserialize, Serialize};
+use warpgate_core::sane_terminal_size;
 
 #[derive(Clone, Debug)]
 pub struct PtyRequest {
@@ -15,12 +16,12 @@ pub struct PtyRequest {
 }
 
 impl PtyRequest {
-    /// Terminal dimensions as `(cols, rows)`, clamped to `u16` with a
-    /// conventional 80x24 fallback for out-of-range values.
+    /// Terminal dimensions as `(cols, rows)`, bounded by
+    /// [`sane_terminal_size`] so a client cannot pick an allocation size.
     pub fn screen_size(&self) -> (u16, u16) {
-        (
-            u16::try_from(self.col_width).unwrap_or(80),
-            u16::try_from(self.row_height).unwrap_or(24),
+        sane_terminal_size(
+            u16::try_from(self.col_width).unwrap_or(u16::MAX),
+            u16::try_from(self.row_height).unwrap_or(u16::MAX),
         )
     }
 }

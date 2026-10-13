@@ -9,19 +9,20 @@ use openidconnect::core::{
 };
 use openidconnect::url::Url;
 use openidconnect::{
-    AccessTokenHash, AdditionalClaims, Audience, AuthType, AuthorizationCode, Client, ClientSecret,
-    CsrfToken, EmptyExtraTokenFields, EndpointMaybeSet, EndpointNotSet, EndpointSet,
-    HttpClientError, IdToken, IdTokenClaims, IdTokenFields, LogoutRequest, Nonce,
-    OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, PostLogoutRedirectUrl,
-    ProviderMetadataWithLogout, RedirectUrl, RequestTokenError, Scope, StandardErrorResponse,
-    StandardTokenResponse, TokenResponse, UserInfoClaims, UserInfoError, reqwest,
+    AccessTokenHash, AdditionalClaims, Audience, AuthType, AuthorizationCode,
+    ClaimsVerificationError, Client, ClientSecret, CsrfToken, EmptyExtraTokenFields,
+    EndpointMaybeSet, EndpointNotSet, EndpointSet, HttpClientError, IdToken, IdTokenClaims,
+    IdTokenFields, LogoutRequest, Nonce, OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier,
+    PostLogoutRedirectUrl, ProviderMetadataWithLogout, RedirectUrl, RequestTokenError, Scope,
+    SignatureVerificationError, StandardErrorResponse, StandardTokenResponse, TokenResponse,
+    UserInfoClaims, UserInfoError, reqwest,
 };
 use serde::{Deserialize, Serialize};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::config::SsoInternalProviderConfig;
 use crate::request::SsoLoginRequest;
-use crate::{SsoError, discover_metadata};
+use crate::{SsoError, discover_metadata, refresh_metadata};
 
 /// A single entry in a group-style claim: either a bare string, or a
 /// SCIM-style object (RFC 7643) from which we take `value` (stable group ID)
@@ -205,11 +206,10 @@ fn resolve_auth_type(
     configured
 }
 
-async fn make_client(
+fn client_from_metadata(
     config: &SsoInternalProviderConfig,
-    http_client: &reqwest::Client,
+    metadata: ProviderMetadataWithLogout,
 ) -> Result<WarpgateClient, SsoError> {
-    let metadata = discover_metadata(config, http_client).await?;
     let secret = config.client_secret()?;
     let auth_type = resolve_auth_type(config.auth_type(), &secret, &metadata);
 
@@ -220,12 +220,37 @@ async fn make_client(
     Ok(client)
 }
 
+async fn make_client(
+    config: &SsoInternalProviderConfig,
+    http_client: &reqwest::Client,
+) -> Result<WarpgateClient, SsoError> {
+    client_from_metadata(config, discover_metadata(config, http_client).await?)
+}
+
 impl SsoClient {
     pub fn new(config: SsoInternalProviderConfig) -> Result<Self, SsoError> {
         Ok(Self {
             config,
             http_client: reqwest::ClientBuilder::new().build()?,
         })
+    }
+
+    /// Run `verify` against `client` and retry once with refreshed metadata if the token is signed with unknown (rotated) key
+    async fn retry_on_unknown_key<T>(
+        &self,
+        client: &WarpgateClient,
+        verify: impl Fn(&WarpgateClient) -> Result<T, SsoError>,
+    ) -> Result<T, SsoError> {
+        match verify(client) {
+            Err(SsoError::ClaimsVerification(ClaimsVerificationError::SignatureVerification(
+                SignatureVerificationError::NoMatchingKey,
+            ))) => {
+                info!("ID token signed with a key missing from the cached JWKS, re-fetching it");
+                let metadata = refresh_metadata(&self.config, &self.http_client).await?;
+                verify(&client_from_metadata(&self.config, metadata)?)
+            }
+            result => result,
+        }
     }
 
     pub async fn supports_single_logout(&self) -> Result<bool, SsoError> {
@@ -310,20 +335,38 @@ impl SsoClient {
             },
         )?;
 
-        let mut token_verifier = client.id_token_verifier();
-
-        if let Some(trusted_audiences) = self.config.additional_trusted_audiences() {
-            token_verifier = token_verifier.set_other_audience_verifier_fn(|aud: &Audience| {
-                trusted_audiences.contains(&**aud)
-            });
-        }
-
-        if self.config.trust_unknown_audiences() {
-            token_verifier = token_verifier.set_other_audience_verifier_fn(|_aud| true);
-        }
-
         let id_token: &WarpgateIdToken = token_response.id_token().ok_or(SsoError::NotOidc)?;
-        let claims = id_token.claims(&token_verifier, nonce)?;
+        let claims = self
+            .retry_on_unknown_key(&client, |client| {
+                let mut token_verifier = client.id_token_verifier();
+
+                if let Some(trusted_audiences) = self.config.additional_trusted_audiences() {
+                    token_verifier =
+                        token_verifier.set_other_audience_verifier_fn(|aud: &Audience| {
+                            trusted_audiences.contains(&**aud)
+                        });
+                }
+
+                if self.config.trust_unknown_audiences() {
+                    token_verifier = token_verifier.set_other_audience_verifier_fn(|_aud| true);
+                }
+
+                let claims = id_token.claims(&token_verifier, nonce)?;
+
+                if let Some(expected_access_token_hash) = claims.access_token_hash() {
+                    let actual_access_token_hash = AccessTokenHash::from_token(
+                        token_response.access_token(),
+                        id_token.signing_alg()?,
+                        id_token.signing_key(&token_verifier)?,
+                    )?;
+                    if actual_access_token_hash != *expected_access_token_hash {
+                        return Err(SsoError::Mitm);
+                    }
+                }
+
+                Ok(claims.clone())
+            })
+            .await?;
 
         let user_info_req = client
             .user_info(token_response.access_token().to_owned(), None)
@@ -349,21 +392,10 @@ impl SsoClient {
                 None
             };
 
-        if let Some(expected_access_token_hash) = claims.access_token_hash() {
-            let actual_access_token_hash = AccessTokenHash::from_token(
-                token_response.access_token(),
-                id_token.signing_alg()?,
-                id_token.signing_key(&token_verifier)?,
-            )?;
-            if actual_access_token_hash != *expected_access_token_hash {
-                return Err(SsoError::Mitm);
-            }
-        }
-
         Ok(SsoResult {
             token: id_token.clone(),
             userinfo_claims,
-            claims: claims.clone(),
+            claims,
         })
     }
 
@@ -389,14 +421,18 @@ impl SsoClient {
 
         let client: WarpgateClient = make_client(&self.config, &self.http_client).await?;
 
-        // Disable the built-in audience check so we can enforce it ourselves
-        // below.  Signature / iss / exp are still fully enforced.
-        let token_verifier = client.id_token_verifier().require_audience_match(false);
+        let claims = self
+            .retry_on_unknown_key(&client, |client| {
+                // Disable the built-in audience check so we can enforce it ourselves
+                // below.  Signature / iss / exp are still fully enforced.
+                let token_verifier = client.id_token_verifier().require_audience_match(false);
 
-        // No nonce in a non-interactive flow: accept any (absent) nonce.
-        let claims = id_token
-            .claims(&token_verifier, |_: Option<&Nonce>| Ok::<(), String>(()))?
-            .clone();
+                // No nonce in a non-interactive flow: accept any (absent) nonce.
+                Ok(id_token
+                    .claims(&token_verifier, |_: Option<&Nonce>| Ok::<(), String>(()))?
+                    .clone())
+            })
+            .await?;
 
         // Manual audience enforcement: a token is accepted iff its audience
         // contains Warpgate's own client_id OR any configured trusted audience.

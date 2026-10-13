@@ -29,13 +29,13 @@ use tracing::*;
 use uuid::Uuid;
 use warpgate_aws::AwsError;
 use warpgate_common::{
-    SSHTargetAuth, TargetOptionsVariant, TargetSSHOptions, UserSessionId, WarpgateError,
+    SSHTargetAuth, TargetOptionsVariant, TargetSSHOptions, UserFacingReason, UserSessionId,
+    WarpgateError, io_connect_reason,
 };
 use warpgate_core::{AdmittedTarget, ConfigProvider, Services};
 
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
-use crate::client::handler::ClientHandlerError;
 use crate::{ForwardedStreamlocalParams, ForwardedTcpIpParams, load_client_keys};
 
 #[derive(Debug, thiserror::Error)]
@@ -75,8 +75,29 @@ pub enum ConnectionError {
     #[error("Jump host target not found")]
     JumpHostTargetNotFound,
 
+    #[error("SSH handshake timed out after {timeout:?}")]
+    HandshakeTimeout { timeout: Duration },
+
     #[error(transparent)]
     Warpgate(#[from] WarpgateError),
+}
+
+impl UserFacingReason for ConnectionError {
+    fn user_facing_reason(&self) -> String {
+        match self {
+            Self::HostKeyMismatch { .. }
+            | Self::Resolve
+            | Self::Internal
+            | Self::Aborted
+            | Self::Authentication
+            | Self::HandshakeTimeout { .. }
+            | Self::JumpHostTargetNotFound => self.to_string(),
+            Self::Io(e) | Self::Ssh(russh::Error::IO(e)) => io_connect_reason(e).into(),
+            Self::Key(_) | Self::Ssh(_) => "SSH protocol error".into(),
+            Self::Aws(_) => "AWS authentication for the SSH target failed".into(),
+            Self::Warpgate(e) => e.user_facing_reason(),
+        }
+    }
 }
 
 pub struct ResolvedSshChainHost {
@@ -197,7 +218,7 @@ pub enum RCEvent {
     ChannelFailure(Uuid),
     Eof(Uuid),
     Close(Uuid),
-    Error(anyhow::Error),
+    Error(SshClientError),
     ExitStatus(Uuid, u32),
     ExitSignal {
         channel: Uuid,
@@ -473,7 +494,7 @@ impl RemoteClient {
                             }
                         };
                     }
-                    Ok::<(), anyhow::Error>(())
+                    Ok::<(), SshClientError>(())
                 }
                 .await
                 .map_err(|error| {
@@ -489,7 +510,7 @@ impl RemoteClient {
         )
     }
 
-    async fn handle_event(&mut self, event: InnerEvent) -> Result<bool> {
+    async fn handle_event(&mut self, event: InnerEvent) -> Result<bool, SshClientError> {
         match event {
             InnerEvent::RCCommand(cmd, mut reply) => {
                 let result = self.handle_command(cmd, &mut reply).await;
@@ -555,7 +576,7 @@ impl RemoteClient {
     async fn setup_server_initiated_channel(
         &mut self,
         channel: russh::Channel<russh::client::Msg>,
-    ) -> Result<Uuid> {
+    ) -> Result<Uuid, SshClientError> {
         let id = Uuid::new_v4();
 
         let (tx, rx) = unbounded_channel();
@@ -566,7 +587,8 @@ impl RemoteClient {
         self.child_tasks.push(
             tokio::task::Builder::new()
                 .name(&format!("SSH {} {:?} ops", self.id, id))
-                .spawn(session_channel.run())?,
+                .spawn(session_channel.run())
+                .map_err(WarpgateError::from)?,
         );
 
         Ok(id)
@@ -757,6 +779,14 @@ impl Connector {
     ) -> Result<Connection, ConnectionError> {
         let mut iter = chain.into_iter();
         let first = iter.next().ok_or(ConnectionError::Resolve)?;
+        let handshake_timeout = self
+            .services
+            .config
+            .lock()
+            .await
+            .store
+            .ssh
+            .target_handshake_timeout;
 
         let config = self.build_ssh_config(&first).await;
         let address_str = format!("{}:{}", first.host, first.port);
@@ -775,7 +805,7 @@ impl Connector {
         };
         let fut = russh::client::connect(config, address, handler);
         let (mut session, mut active_rx) = self
-            .wait_for_connection(&first, fut, event_rx, false)
+            .wait_for_connection(&first, fut, event_rx, handshake_timeout)
             .boxed()
             .await?;
 
@@ -786,16 +816,6 @@ impl Connector {
                 port = ssh_options.port,
                 "Opening direct-tcpip channel through jump host"
             );
-            let channel = session
-                .channel_open_direct_tcpip(
-                    ssh_options.host.clone(),
-                    u32::from(ssh_options.port),
-                    "localhost".to_string(),
-                    0,
-                )
-                .await
-                .map_err(ConnectionError::Ssh)?;
-            let stream = channel.into_stream();
             let config = self.build_ssh_config(&ssh_options).await;
             let (event_tx, event_rx) = unbounded_channel();
             let handler = ClientHandler {
@@ -804,9 +824,21 @@ impl Connector {
                 services: self.services.clone(),
                 session_id: self.id,
             };
-            let fut = russh::client::connect_stream(config, stream, handler);
+            // The jump host confirms the channel only once its own TCP connect to the
+            // next hop succeeds, so the open belongs under the same handshake deadline.
+            let fut = async {
+                let channel = session
+                    .channel_open_direct_tcpip(
+                        ssh_options.host.clone(),
+                        u32::from(ssh_options.port),
+                        "localhost".to_string(),
+                        0,
+                    )
+                    .await?;
+                russh::client::connect_stream(config, channel.into_stream(), handler).await
+            };
             let (new_session, new_rx) = self
-                .wait_for_connection(&ssh_options, fut, event_rx, false)
+                .wait_for_connection(&ssh_options, fut, event_rx, handshake_timeout)
                 .boxed()
                 .await?;
             session = new_session;
@@ -821,21 +853,34 @@ impl Connector {
         ssh_options: &TargetSSHOptions,
         fut_connect: Fut,
         mut event_rx: UnboundedReceiver<ClientHandlerEvent>,
-        _is_jump_host: bool,
+        handshake_timeout: Duration,
     ) -> Result<(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>), ConnectionError>
     where
-        Fut: Future<Output = Result<Handle<ClientHandler>, ClientHandlerError>>,
+        Fut: Future<Output = Result<Handle<ClientHandler>, ConnectionError>>,
     {
         pin_mut!(fut_connect);
 
+        let deadline = tokio::time::sleep(handshake_timeout);
+        pin_mut!(deadline);
+
+        // A host key prompt means the target has answered and shown its key, so
+        // the deadline has done its job. The rest of the wait is the user's.
+        let mut host_key_prompted = false;
+
         loop {
             tokio::select! {
+                () = &mut deadline, if !handshake_timeout.is_zero() && !host_key_prompted => {
+                    let error = ConnectionError::HandshakeTimeout { timeout: handshake_timeout };
+                    error!(?error, host=%ssh_options.host, port=ssh_options.port, "Connection error");
+                    return Err(error);
+                }
                 Some(event) = event_rx.recv() => {
                     match event {
                         ClientHandlerEvent::HostKeyReceived(key) => {
                             self.tx.send(RCEvent::HostKeyReceived(key, ssh_options.host.clone(), ssh_options.port)).await.map_err(|_| ConnectionError::Internal)?;
                         }
                         ClientHandlerEvent::HostKeyUnknown(key, reply) => {
+                            host_key_prompted = true;
                             self.tx.send(RCEvent::HostKeyUnknown(key, ssh_options.host.clone(), ssh_options.port, reply)).await.map_err(|_| ConnectionError::Internal)?;
                         }
                         _ => {}
@@ -845,13 +890,8 @@ impl Connector {
                     let mut session = match session {
                         Ok(session) => session,
                         Err(error) => {
-                            let connection_error = match error {
-                                ClientHandlerError::ConnectionError(e) => e,
-                                ClientHandlerError::Ssh(e) => ConnectionError::Ssh(e),
-                                ClientHandlerError::Internal => ConnectionError::Internal,
-                            };
-                            error!(error=?connection_error, "Connection error");
-                            return Err(connection_error);
+                            error!(?error, "Connection error");
+                            return Err(error);
                         }
                     };
 
@@ -1179,7 +1219,7 @@ impl RemoteClient {
             tokio::task::Builder::new()
                 .name(&format!("SSH {} {:?} ops", self.id, channel_id))
                 .spawn(task)
-                .map_err(|e| SshClientError::Other(Box::new(e)))?,
+                .map_err(WarpgateError::from)?,
         );
 
         Ok(())

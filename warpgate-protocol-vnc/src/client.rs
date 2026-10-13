@@ -1,15 +1,14 @@
 use std::sync::Arc;
 
-use anyhow::Context;
 use bytes::Bytes;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{Receiver, UnboundedReceiver, channel, unbounded_channel};
 use tracing::{Instrument, debug, error, info_span, warn};
-use vnc::{ClientKeyEvent, PixelFormat, VncConnector, VncEncoding, VncEvent, X11Event};
+use vnc::{ClientKeyEvent, PixelFormat, VncConnector, VncEncoding, VncError, VncEvent, X11Event};
 use warpgate_common::{SecretResolver, TargetVncOptions, VncTargetAuth, WarpgateError};
 use warpgate_core::{
-    AdmittedTarget, DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopClientHandles, DesktopEvent,
-    DesktopInput, DesktopRect, DesktopState, LogonState,
+    AdmittedTarget, DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopClientHandles, DesktopConnectionError,
+    DesktopEvent, DesktopInput, DesktopRect, DesktopState, LogonState,
 };
 
 const fn rect_from(r: vnc::Rect) -> DesktopRect {
@@ -139,8 +138,11 @@ fn spawn_client(
             )
             .await
             {
-                error!(%error, "VNC backend client failed");
-                let _ = event_tx.send(DesktopEvent::Error(error.to_string())).await;
+                let _ = event_tx.send(DesktopEvent::backend_error(&error)).await;
+                error!(
+                    "VNC backend client failed: {:#}",
+                    anyhow::Error::from(error)
+                );
             }
             let _ = event_tx
                 .send(DesktopEvent::State(DesktopState::Disconnected))
@@ -165,7 +167,7 @@ async fn run(
     mut input_rx: Receiver<DesktopInput>,
     mut abort_rx: UnboundedReceiver<()>,
     secrets: Arc<dyn SecretResolver>,
-) -> anyhow::Result<()> {
+) -> Result<(), DesktopConnectionError> {
     event_tx
         .send(DesktopEvent::State(DesktopState::Connecting))
         .await
@@ -173,7 +175,7 @@ async fn run(
 
     let stream = TcpStream::connect((options.host.clone(), options.port))
         .await
-        .context("connecting to VNC target")?;
+        .map_err(DesktopConnectionError::Io)?;
 
     let password = match &options.auth {
         VncTargetAuth::Password(auth) => auth
@@ -194,12 +196,12 @@ async fn run(
         .allow_shared(true)
         .set_pixel_format(PixelFormat::bgra())
         .build()
-        .context("building VNC connector")?
+        .map_err(vnc_error)?
         .try_start()
         .await
-        .context("starting VNC session")?
+        .map_err(vnc_error)?
         .finish()
-        .context("finishing VNC handshake")?;
+        .map_err(vnc_error)?;
 
     event_tx
         .send(DesktopEvent::State(DesktopState::Connected))
@@ -253,6 +255,16 @@ async fn run(
     Ok(())
 }
 
+fn vnc_error(error: VncError) -> DesktopConnectionError {
+    match error {
+        VncError::WrongPassword | VncError::NoPassword => {
+            DesktopConnectionError::TargetRejectedCredentials(error.into())
+        }
+        VncError::IoError(error) => DesktopConnectionError::Io(error),
+        error => DesktopConnectionError::Handshake(error.into()),
+    }
+}
+
 fn map_event(event: VncEvent) -> Option<DesktopEvent> {
     Some(match event {
         VncEvent::SetResolution(screen) => DesktopEvent::Resize {
@@ -278,9 +290,31 @@ fn map_event(event: VncEvent) -> Option<DesktopEvent> {
         },
         VncEvent::Text(text) => DesktopEvent::Clipboard(text),
         VncEvent::Bell => DesktopEvent::Bell,
-        VncEvent::Error(message) => DesktopEvent::Error(message),
+        VncEvent::Error(message) => {
+            error!(%message, "VNC backend reported an error");
+            DesktopEvent::backend_error(&DesktopConnectionError::Session(anyhow::anyhow!(message)))
+        }
         // Everything else (including the server's pixel-format echo — we fix our own)
         // is not surfaced.
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use vnc::VncEvent;
+    use warpgate_core::DesktopEvent;
+
+    use super::map_event;
+
+    #[test]
+    fn a_decoder_error_is_not_shown_verbatim() {
+        let shown = match map_event(VncEvent::Error(
+            "Connection reset by peer (os error 54)".into(),
+        )) {
+            Some(DesktopEvent::Error(message)) => message,
+            other => format!("{other:?}"),
+        };
+        assert_eq!(shown, "Target connection failed: The target session failed");
+    }
 }

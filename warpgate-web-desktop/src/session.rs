@@ -1,8 +1,9 @@
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use bytes::Bytes;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
+use tokio_util::sync::CancellationToken;
 use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::UserSessionId;
@@ -28,11 +29,14 @@ impl Sheddable for ServerMessage {
     }
 }
 
+pub struct DesktopBackend {
+    pub input_tx: Sender<DesktopInput>,
+    pub recorder: Option<Arc<DesktopRecorder>>,
+}
+
 pub struct WebDesktopSession {
     core: WebSession<ServerMessage>,
-    input_tx: Sender<DesktopInput>,
-    // shared with the manager's event loop; records viewer input for audit
-    recorder: Option<Arc<DesktopRecorder>>,
+    backend: OnceLock<DesktopBackend>,
     /// Composited surface, kept so a viewer attaching mid-session gets a base image.
     /// Separate from the recorder's: that one must only see events it actually wrote.
     /// Holds the refinement scratch too, so encoding one region needs a single lock.
@@ -55,9 +59,7 @@ impl WebDesktopSession {
         target_name: String,
         target_kind: warpgate_db_entities::Target::TargetKind,
         server_handle: Arc<tokio::sync::Mutex<warpgate_core::WarpgateServerHandle>>,
-        input_tx: Sender<DesktopInput>,
-        abort_tx: tokio::sync::mpsc::UnboundedSender<()>,
-        recorder: Option<Arc<DesktopRecorder>>,
+        cancel: CancellationToken,
     ) -> Self {
         Self {
             core: WebSession::new(
@@ -66,14 +68,17 @@ impl WebDesktopSession {
                 target_name,
                 target_kind,
                 server_handle,
-                abort_tx,
+                cancel,
                 OUTPUT_BUFFER_CAPACITY,
                 MAX_BUFFERED_INCREMENTAL,
             ),
-            input_tx,
-            recorder,
+            backend: OnceLock::new(),
             framebuffer: Mutex::new((Framebuffer::default(), RefineScratch::default())),
         }
+    }
+
+    pub fn bind_backend(&self, backend: DesktopBackend) {
+        let _ = self.backend.set(backend);
     }
 
     /// Composite an event into the session's surface. Driven from the manager's event loop
@@ -82,8 +87,8 @@ impl WebDesktopSession {
         self.framebuffer.lock().await.0.apply(event);
     }
 
-    /// A full-canvas snapshot for a viewer that just attached. `None` before the first
-    /// resize, when the backend hasn't reported a size yet.
+    /// A full-canvas snapshot for a viewer that just attached. `None` until the backend has
+    /// painted something, so a viewer is never handed a black surface to reveal.
     ///
     /// Encodes under the lock: it runs once per attach, and copying the surface out to
     /// offload it would cost more than the encode saves.
@@ -129,14 +134,17 @@ impl WebDesktopSession {
     }
 
     pub async fn send_input(&self, input: DesktopInput) {
+        let Some(backend) = self.backend.get() else {
+            return;
+        };
         // Record the viewer's input for audit before forwarding (like native RDP/VNC).
-        if let Some(recorder) = &self.recorder
+        if let Some(recorder) = &backend.recorder
             && let Err(error) = recorder.write_input(&input).await
         {
             warn!(%error, "Failed to record web-desktop viewer input");
         }
         // let inputs drop under backpressure
-        let _ = self.input_tx.try_send(input);
+        let _ = backend.input_tx.try_send(input);
     }
 }
 
@@ -158,6 +166,5 @@ impl ManagedSession for WebDesktopSession {
 
     fn on_removed(&self) {
         self.core.abort();
-        self.core.close();
     }
 }

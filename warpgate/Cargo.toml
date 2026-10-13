@@ -1,6 +1,6 @@
 [package]
 name = "warpgate"
-version = "0.29.1"
+version = "0.30.0-beta.1"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -37,7 +37,6 @@ sea-orm.workspace = true
 serde.workspace = true
 serde_ignored = "0.1"
 serde_json.workspace = true
-serde_yaml = { version = "0.9", default-features = false }
 time = { version = "0.3", default-features = false }
 tokio.workspace = true
 tokio-stream = { workspace = true, features = ["sync"] }
@@ -65,6 +64,7 @@ warpgate-protocol-rdp = { path = "../warpgate-protocol-rdp" }
 warpgate-protocol-ssh = { path = "../warpgate-protocol-ssh" }
 warpgate-protocol-vnc = { path = "../warpgate-protocol-vnc" }
 warpgate-tls = { path = "../warpgate-tls" }
+yaml_serde = { version = "0.10", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"

@@ -85,3 +85,16 @@ export function uuid(): string {
         return v.toString(16)
     })
 }
+
+export function logoUrl(etag: string): string {
+    return `/@warpgate/api/logo?v=${encodeURIComponent(etag)}`
+}
+
+export async function preloadImage(url: string): Promise<void> {
+    const image = new Image()
+    image.src = url
+    await Promise.race([
+        image.decode().catch(() => undefined),
+        new Promise(resolve => setTimeout(resolve, 1000)),
+    ])
+}

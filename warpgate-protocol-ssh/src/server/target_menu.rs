@@ -14,6 +14,7 @@ use ratatui::{Terminal, TerminalOptions, Viewport};
 use termwiz::input::{InputEvent, InputParser, KeyCode, Modifiers};
 use tui_input::{Input, InputRequest};
 use warpgate_common::eventhub::{EventSender, EventSubscription};
+use warpgate_common::fuzzy::fuzzy_rank;
 use warpgate_common::{Target, TargetSSHOptions, UserSessionId, WarpgateError};
 
 use crate::server::session::Event;
@@ -145,6 +146,7 @@ pub struct TargetMenu<T: Clone> {
 
 pub struct MenuEntry<T: Clone> {
     pub label: String,
+    pub description: String,
     pub value: T,
 }
 
@@ -390,7 +392,7 @@ impl<T: Clone> TargetMenu<T> {
         self.list_state = draw_state.list_state;
 
         let bytes = self.terminal.backend_mut().take_output();
-        String::from_utf8(bytes).map_err(WarpgateError::other)
+        Ok(String::from_utf8(bytes)?)
     }
 
     fn page_size(&self) -> usize {
@@ -444,18 +446,13 @@ impl<T: Clone> TargetMenu<T> {
             return (0..self.entries.len()).collect();
         }
 
-        let needle = self.filter_input.value().to_ascii_lowercase();
-        self.entries
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, entry)| {
-                if entry.label.to_ascii_lowercase().contains(&needle) {
-                    Some(idx)
-                } else {
-                    None
-                }
-            })
-            .collect()
+        let indexed: Vec<_> = self.entries.iter().enumerate().collect();
+        fuzzy_rank(&indexed, self.filter_input.value(), |(_, e)| {
+            vec![e.label.as_str(), e.description.as_str()]
+        })
+        .into_iter()
+        .map(|(idx, _)| *idx)
+        .collect()
     }
 
     /// restore terminal state
@@ -463,7 +460,7 @@ impl<T: Clone> TargetMenu<T> {
         let _ = self.terminal.backend_mut().take_output();
         self.terminal.show_cursor()?;
         let bytes = self.terminal.backend_mut().take_output();
-        String::from_utf8(bytes).map_err(WarpgateError::other)
+        Ok(String::from_utf8(bytes)?)
     }
 }
 
@@ -509,6 +506,7 @@ async fn run_target_menu_loop(
             .into_iter()
             .map(|(target, options)| MenuEntry {
                 label: target.name.clone(),
+                description: target.description.clone(),
                 value: (target, options),
             })
             .collect(),
@@ -597,10 +595,12 @@ mod tests {
         TargetMenu::new(
             vec![
                 MenuEntry {
+                    description: String::new(),
                     label: "alpha".into(),
                     value: 1,
                 },
                 MenuEntry {
+                    description: String::new(),
                     label: "bravo".into(),
                     value: 2,
                 },
@@ -656,14 +656,17 @@ mod tests {
         let mut menu = TargetMenu::new(
             vec![
                 MenuEntry {
+                    description: String::new(),
                     label: "210-db".into(),
                     value: 210,
                 },
                 MenuEntry {
+                    description: String::new(),
                     label: "20-web".into(),
                     value: 20,
                 },
                 MenuEntry {
+                    description: String::new(),
                     label: "22-app".into(),
                     value: 22,
                 },
@@ -687,5 +690,31 @@ mod tests {
             matches!(result, Some(MenuInputResult::Selected(22))),
             "expected 22-app as second item in natural order"
         );
+    }
+
+    #[test]
+    fn filter_matches_description() {
+        let mut menu = TargetMenu::new(
+            vec![
+                MenuEntry {
+                    label: "alpha".into(),
+                    description: String::new(),
+                    value: 1,
+                },
+                MenuEntry {
+                    label: "srv-01".into(),
+                    description: "Production server - prod-lyon site".into(),
+                    value: 2,
+                },
+            ],
+            "user".into(),
+            120,
+            40,
+        )
+        .expect("menu creation should succeed");
+
+        menu.handle_input(b"lyon prod");
+        let result = menu.handle_input(b"\r");
+        assert!(matches!(result, Some(MenuInputResult::Selected(2))));
     }
 }

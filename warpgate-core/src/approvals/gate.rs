@@ -71,6 +71,22 @@ impl GatedConnection {
     }
 }
 
+#[must_use]
+pub enum Admission<O = warpgate_common::TargetOptions> {
+    Admitted(AdmittedTarget<O>),
+    Refused,
+    Expired,
+}
+
+impl<O> Admission<O> {
+    pub fn admitted(self) -> Result<AdmittedTarget<O>, WarpgateError> {
+        match self {
+            Self::Admitted(admitted) => Ok(admitted),
+            Self::Refused | Self::Expired => Err(WarpgateError::SessionNotApproved),
+        }
+    }
+}
+
 /// Start a target session, waiting for approval if needed
 /// and handle approval result. This is the only transition path from "authorized" to "admitted" for protocols that can wait for approval.
 ///
@@ -78,16 +94,17 @@ impl GatedConnection {
 ///
 /// `notify_waiting` is called if waiting for an administrator (TODO use a more explicit event sender)
 ///
-/// Refusal return WarpgateError::SessionNotApproved
-///
 /// This wraps require_admin_approval()
+///
+/// Protocols that can communicate with the user during the wait must drive
+/// `require_admin_approval()` + `poll_admin_approval()` themselves.
 pub async fn admit_target_session<O, F, Fut>(
     services: &Services,
     handle: &Arc<Mutex<WarpgateServerHandle>>,
     authorization: TargetAuthorization<O>,
     connection: GatedConnection,
     notify_waiting: F,
-) -> Result<AdmittedTarget<O>, WarpgateError>
+) -> Result<Admission<O>, WarpgateError>
 where
     O: Send + Sync,
     F: FnOnce() -> Fut,
@@ -99,7 +116,10 @@ where
         .start_target_session(authorization)
         .await?;
     let authorization = match started {
-        TargetSessionStart::Started(started) => return Ok(started),
+        TargetSessionStart::Started(admitted) => {
+            handle.lock().await.confirm();
+            return Ok(Admission::Admitted(admitted));
+        }
         TargetSessionStart::NeedsApproval(authorization) => authorization,
     };
 
@@ -109,16 +129,22 @@ where
         .require_admin_approval(authorization, session_id, connection, notify_waiting)
         .await?;
 
-    let Some(approved) = outcome.approved() else {
-        warn!(%session_id, "Session was not approved by an administrator");
-        return Err(WarpgateError::SessionNotApproved);
+    let approved = match outcome {
+        GateOutcome::Approved(approved) => approved,
+        GateOutcome::Refused => {
+            warn!(%session_id, "Session was refused by an administrator");
+            return Ok(Admission::Refused);
+        }
+        GateOutcome::Expired => {
+            warn!(%session_id, "Session approval expired without a decision");
+            return Ok(Admission::Expired);
+        }
     };
 
-    handle
-        .lock()
-        .await
-        .register_approved_target_session(approved)
-        .await
+    let mut handle = handle.lock().await;
+    let admitted = handle.register_approved_target_session(approved).await?;
+    handle.confirm();
+    Ok(Admission::Admitted(admitted))
 }
 
 impl Services {

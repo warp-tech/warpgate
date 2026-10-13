@@ -7,7 +7,11 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
+futures.workspace = true
+poem.workspace = true
+serde.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 warpgate-common = { path = "../warpgate-common" }

@@ -11,15 +11,13 @@ use crate::request::trusted_client_ip;
 /// The peer IP of the connection itself, ignoring any forwarding headers.
 pub fn raw_remote_ip(req: &Request) -> Option<String> {
     let socket_addr = match req.remote_addr() {
-        // See [CertificateExtractorEndpoint]
-        RemoteAddr(Addr::Custom("captured-cert", value)) => {
-            #[allow(clippy::unwrap_used)]
-            let original_remote_addr = value.split('|').next().unwrap();
-            original_remote_addr
-                .to_socket_addrs()
-                .ok()
-                .and_then(|i| i.into_iter().next())
-        }
+        // An acceptor that learned something during the TLS handshake carries
+        // it after the socket address (see `tls_acceptor::annotate_remote_addr`)
+        RemoteAddr(Addr::Custom(_, value)) => value
+            .split('|')
+            .next()
+            .and_then(|addr| addr.to_socket_addrs().ok())
+            .and_then(|mut addrs| addrs.next()),
         other => other.as_socket_addr().copied(),
     };
 
@@ -32,12 +30,7 @@ pub async fn get_client_ip(req: &Request, services: &Services) -> Option<String>
         config.store.http.trust_x_forwarded_headers
     };
 
-    trusted_client_ip(
-        req,
-        &services.cluster.cluster_token,
-        raw_remote_ip(req),
-        trust_x_forwarded_headers,
-    )
+    trusted_client_ip(req, raw_remote_ip(req), trust_x_forwarded_headers)
 }
 
 pub async fn get_client_ip_addr(req: &Request, services: &Services) -> Option<IpAddr> {

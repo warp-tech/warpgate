@@ -1,4 +1,4 @@
-export enum ConnectionState {
+export enum SocketState {
     Connecting = 'Connecting',
     Connected = 'Connected',
     Disconnected = 'Disconnected',
@@ -12,7 +12,7 @@ export interface ReconnectingWebSocketOptions {
 }
 
 export class ReconnectingWebSocket {
-    state = $state(ConnectionState.Connecting)
+    state = $state(SocketState.Connecting)
     attempt = $state(0)
 
     private socket: WebSocket | null = null
@@ -39,7 +39,7 @@ export class ReconnectingWebSocket {
 
         this.socket.addEventListener('open', () => {
             this.attempt = 0
-            this.state = ConnectionState.Connected
+            this.state = SocketState.Connected
             this.onOpen()
         })
 
@@ -48,12 +48,12 @@ export class ReconnectingWebSocket {
         })
 
         this.socket.addEventListener('error', () => {
-            this.state = ConnectionState.Error
+            this.state = SocketState.Error
         })
 
         this.socket.addEventListener('close', () => {
             if (this.closed) {
-                this.state = ConnectionState.Disconnected
+                this.state = SocketState.Disconnected
                 return
             }
             this.scheduleReconnect()
@@ -74,12 +74,12 @@ export class ReconnectingWebSocket {
 
     private scheduleReconnect() {
         if (this.attempt >= this.maxAttempts) {
-            this.state = ConnectionState.Disconnected
+            this.state = SocketState.Disconnected
             return
         }
         const delay = Math.min(1000 * 2 ** this.attempt, 30_000)
         this.attempt++
-        this.state = ConnectionState.Connecting
+        this.state = SocketState.Connecting
         this.timer = setTimeout(() => {
             this.timer = null
             this.connect()

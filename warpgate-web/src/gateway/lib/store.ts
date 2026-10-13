@@ -1,4 +1,5 @@
 import { autosave } from 'common/autosave'
+import { logoUrl, preloadImage } from 'common/helpers'
 import { derived, writable } from 'svelte/store'
 import { api, type Info } from './api'
 
@@ -42,5 +43,9 @@ export function setOpenTargetsInNewTab(value: boolean): void {
 }
 
 export async function reloadServerInfo(): Promise<void> {
-    serverInfo.set(await api.getInfo())
+    const info = await api.getInfo()
+    if (info.logoEtag) {
+        await preloadImage(logoUrl(info.logoEtag))
+    }
+    serverInfo.set(info)
 }
