@@ -91,6 +91,7 @@ impl UserFacingReason for ConnectionError {
             | Self::Internal
             | Self::Aborted
             | Self::Authentication
+            | Self::HandshakeTimeout { .. }
             | Self::JumpHostTargetNotFound => self.to_string(),
             Self::Io(e) | Self::Ssh(russh::Error::IO(e)) => io_connect_reason(e).into(),
             Self::Key(_) | Self::Ssh(_) => "SSH protocol error".into(),
