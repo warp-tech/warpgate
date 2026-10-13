@@ -46,6 +46,7 @@ use warpgate_core::{
 
 pub(crate) use self::logon::LogonWatcher;
 use crate::clipboard::{Clipboard, ClipboardSink, TextClipboard};
+use crate::desktop_size::bound_desktop_size;
 
 /// Deadline for the TCP connect to the target.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -95,8 +96,9 @@ pub async fn run(
         .ok();
 
     let RdpTargetAuth::Password(auth) = &options.auth;
-    // The viewer-supplied size may be odd or out of range; keep the initial desktop within
-    // the same bounds the Display Control resize path enforces.
+    // The viewer-supplied size is untrusted; bound it the same way the native viewer's is,
+    // then make it a size the layout PDU accepts (even width), as the resize path does.
+    let (width, height) = bound_desktop_size(width, height);
     let (width, height) =
         MonitorLayoutEntry::adjust_display_size(u32::from(width), u32::from(height));
     let password = auth.password.resolve(&*secrets).await?;
@@ -242,6 +244,7 @@ async fn active_loop(
                 }
                 if let Some((width, height)) = resize {
                     // The layout PDU rejects odd widths and sizes outside 200..=8192.
+                    let (width, height) = bound_desktop_size(width, height);
                     let size = MonitorLayoutEntry::adjust_display_size(
                         u32::from(width),
                         u32::from(height),
