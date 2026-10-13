@@ -7,8 +7,9 @@ use tracing::{Instrument, debug, error, info_span, warn};
 use vnc::{ClientKeyEvent, PixelFormat, VncConnector, VncEncoding, VncError, VncEvent, X11Event};
 use warpgate_common::{SecretResolver, TargetVncOptions, VncTargetAuth, WarpgateError};
 use warpgate_core::{
-    AdmittedTarget, DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopClientHandles, DesktopConnectionError,
-    DesktopEvent, DesktopInput, DesktopRect, DesktopState, LogonState,
+    AdmittedTarget, DESKTOP_CONNECT_TIMEOUT, DESKTOP_HANDSHAKE_TIMEOUT,
+    DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopClientHandles, DesktopConnectionError, DesktopEvent,
+    DesktopInput, DesktopRect, DesktopState, LogonState, within_deadline,
 };
 
 const fn rect_from(r: vnc::Rect) -> DesktopRect {
@@ -173,9 +174,12 @@ async fn run(
         .await
         .ok();
 
-    let stream = TcpStream::connect((options.host.clone(), options.port))
-        .await
-        .map_err(DesktopConnectionError::Io)?;
+    let stream = within_deadline(DESKTOP_CONNECT_TIMEOUT, async {
+        TcpStream::connect((options.host.clone(), options.port))
+            .await
+            .map_err(DesktopConnectionError::Io)
+    })
+    .await?;
 
     let password = match &options.auth {
         VncTargetAuth::Password(auth) => auth
@@ -192,16 +196,19 @@ async fn run(
     for encoding in encodings {
         connector = connector.add_encoding(*encoding);
     }
-    let client = connector
-        .allow_shared(true)
-        .set_pixel_format(PixelFormat::bgra())
-        .build()
-        .map_err(vnc_error)?
-        .try_start()
-        .await
-        .map_err(vnc_error)?
-        .finish()
-        .map_err(vnc_error)?;
+    let client = within_deadline(DESKTOP_HANDSHAKE_TIMEOUT, async {
+        connector
+            .allow_shared(true)
+            .set_pixel_format(PixelFormat::bgra())
+            .build()
+            .map_err(vnc_error)?
+            .try_start()
+            .await
+            .map_err(vnc_error)?
+            .finish()
+            .map_err(vnc_error)
+    })
+    .await?;
 
     event_tx
         .send(DesktopEvent::State(DesktopState::Connected))
@@ -211,7 +218,7 @@ async fn run(
     // Ask for an initial full frame.
     client.input(X11Event::FullRefresh).await.ok();
 
-    loop {
+    'session: loop {
         tokio::select! {
             event = client.poll_event() => {
                 match event {
@@ -237,7 +244,7 @@ async fn run(
                         for event in map_input(input) {
                             if let Err(error) = client.input(event).await {
                                 warn!(%error, "VNC input error");
-                                break;
+                                break 'session;
                             }
                         }
                     }
