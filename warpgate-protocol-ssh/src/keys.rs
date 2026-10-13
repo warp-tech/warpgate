@@ -1,8 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use russh::keys::{
-    Algorithm, HashAlg, PrivateKey, decode_secret_key, encode_pkcs8_pem, load_secret_key,
-};
+use russh::keys::{Algorithm, HashAlg, PrivateKey, decode_secret_key, load_secret_key};
 use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use tracing::*;
@@ -10,6 +8,7 @@ use uuid::Uuid;
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{
     MaybeSecretRef, SecretRef, SecretResolver, SshHostKeyKind, StoredSecret, WarpgateError,
+    pkcs8_pem_string,
 };
 use warpgate_db_entities::{Parameters, SshClientKey};
 
@@ -80,12 +79,6 @@ pub async fn load_host_keys(db: &DatabaseConnection) -> Result<Vec<PrivateKey>, 
         .collect()
 }
 
-fn encode_pkcs8_pem_string(key: &PrivateKey) -> Result<String, WarpgateError> {
-    let mut buf = Vec::new();
-    encode_pkcs8_pem(key, &mut buf)?;
-    String::from_utf8(buf).map_err(WarpgateError::other)
-}
-
 /// `<algo> <base64>` only — the OpenSSH comment is dropped so that the same
 /// key always serializes identically for de-duplication.
 fn public_key_line(key: &PrivateKey) -> Result<String, WarpgateError> {
@@ -142,7 +135,7 @@ pub async fn import_client_key(
     is_default: bool,
 ) -> Result<Option<SshClientKey::Model>, WarpgateError> {
     let public_key = public_key_line(key)?;
-    let secret_key = encode_pkcs8_pem_string(key)?;
+    let secret_key = pkcs8_pem_string(key)?;
     insert_client_key(
         db,
         label,

@@ -13,7 +13,6 @@ use tracing::{info, warn};
 use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_directory;
 use warpgate_common::{GlobalParams, TargetSessionId};
-use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Recording::{self, RecordingKind};
 mod desktop;
 mod storage;
@@ -89,9 +88,6 @@ pub enum Error {
 
     #[error("Writer is closed")]
     Closed,
-
-    #[error("Disabled")]
-    Disabled,
 
     #[error("Invalid recording path")]
     InvalidPath,
@@ -204,24 +200,21 @@ impl SessionRecordings {
         Storage::load(&self.db, &self.params).await
     }
 
-    pub async fn is_enabled(&self) -> Result<bool> {
-        Ok(Parameters::Entity::get(&self.db).await?.recordings_enable)
-    }
-
-    /// Starting a recording with the same name again will append to it
+    /// Starting a recording with the same name again will append to it.
+    /// `None` when recording is disabled.
     pub async fn start<T, M>(
         &self,
         id: &TargetSessionId,
         name: Option<String>,
         metadata: M,
-    ) -> Result<T>
+    ) -> Result<Option<T>>
     where
         T: Recorder,
         M: Serialize + Debug,
     {
         let storage = self.storage().await?;
         if !storage.enabled() {
-            return Err(Error::Disabled);
+            return Ok(None);
         }
 
         let name = name.unwrap_or_else(|| Uuid::new_v4().to_string());
@@ -281,7 +274,7 @@ impl SessionRecordings {
             shutdown_tracker: self.shutdown_tracker.clone(),
         };
 
-        T::new(&opener).await
+        T::new(&opener).await.map(Some)
     }
 
     pub async fn subscribe_live(&self, id: &Uuid) -> Option<broadcast::Receiver<LiveChunk>> {

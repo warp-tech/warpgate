@@ -1,4 +1,3 @@
-use std::fmt::Debug;
 use std::future::Future;
 
 use anyhow::Result;
@@ -21,22 +20,6 @@ pub use handle::{AdmittedTarget, SessionHandle, TargetSessionStart, WarpgateServ
 pub use terminal_screen::{
     MAX_TERMINAL_COLS, MAX_TERMINAL_ROWS, TerminalScreen, sane_terminal_size,
 };
-
-#[derive(Debug, thiserror::Error)]
-pub enum TargetTestError {
-    #[error("unreachable")]
-    Unreachable,
-    #[error("authentication failed")]
-    AuthenticationError,
-    #[error("connection error: {0}")]
-    ConnectionError(String),
-    #[error("misconfigured: {0}")]
-    Misconfigured(String),
-    #[error("I/O: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("dialoguer: {0}")]
-    Dialoguer(#[from] dialoguer::Error),
-}
 
 pub trait ProtocolServer {
     fn name(&self) -> &'static str;

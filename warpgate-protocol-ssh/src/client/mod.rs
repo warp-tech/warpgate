@@ -36,7 +36,6 @@ use warpgate_core::{AdmittedTarget, ConfigProvider, Services};
 
 use self::handler::ClientHandlerEvent;
 use super::{ChannelOperation, DirectTCPIPParams};
-use crate::client::handler::ClientHandlerError;
 use crate::{ForwardedStreamlocalParams, ForwardedTcpIpParams, load_client_keys};
 
 #[derive(Debug, thiserror::Error)]
@@ -589,7 +588,7 @@ impl RemoteClient {
             tokio::task::Builder::new()
                 .name(&format!("SSH {} {:?} ops", self.id, id))
                 .spawn(session_channel.run())
-                .map_err(SshClientError::other)?,
+                .map_err(WarpgateError::from)?,
         );
 
         Ok(id)
@@ -857,7 +856,7 @@ impl Connector {
         handshake_timeout: Duration,
     ) -> Result<(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>), ConnectionError>
     where
-        Fut: Future<Output = Result<Handle<ClientHandler>, ClientHandlerError>>,
+        Fut: Future<Output = Result<Handle<ClientHandler>, ConnectionError>>,
     {
         pin_mut!(fut_connect);
 
@@ -891,13 +890,8 @@ impl Connector {
                     let mut session = match session {
                         Ok(session) => session,
                         Err(error) => {
-                            let connection_error = match error {
-                                ClientHandlerError::ConnectionError(e) => e,
-                                ClientHandlerError::Ssh(e) => ConnectionError::Ssh(e),
-                                ClientHandlerError::Internal => ConnectionError::Internal,
-                            };
-                            error!(error=?connection_error, "Connection error");
-                            return Err(connection_error);
+                            error!(?error, "Connection error");
+                            return Err(error);
                         }
                     };
 
@@ -1225,7 +1219,7 @@ impl RemoteClient {
             tokio::task::Builder::new()
                 .name(&format!("SSH {} {:?} ops", self.id, channel_id))
                 .spawn(task)
-                .map_err(|e| SshClientError::Other(Box::new(e)))?,
+                .map_err(WarpgateError::from)?,
         );
 
         Ok(())
