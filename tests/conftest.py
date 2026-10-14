@@ -26,7 +26,7 @@ from typing import List, Optional
 
 from deepmerge import always_merger
 
-from .util import _wait_timeout, alloc_port, wait_port
+from .util import _wait_timeout, alloc_port, port_owners, wait_port
 from .test_http_common import echo_server_port  # noqa
 
 
@@ -242,69 +242,64 @@ class ProcessManager:
         self.children = []
         self.ctx = ctx
         self.timeout = timeout
-        self._k3s_containers: List[str] = []
+        self._k3s: Optional[K3sInstance] = None
+        self._k3s_container: Optional[str] = None
         # sshd container name by published port, for reading the target's log
         self.ssh_containers: dict[int, str] = {}
         # OIDC mock container name by published port, for reading its signing key
         self.oidc_containers: dict[int, str] = {}
 
-    def _remove_k3s_containers(self):
-        """Force-remove every k3s container we've started so far. Idempotent —
-        `docker rm -f` on an already-gone container is a harmless no-op."""
-        for name in self._k3s_containers:
+    def stop_k3s(self):
+        """Force-removes the shared k3s container, if any."""
+        if self._k3s_container:
             subprocess.run(
-                ["docker", "rm", "-f", name],
+                ["docker", "rm", "-f", self._k3s_container],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-        self._k3s_containers.clear()
+        self._k3s = None
+        self._k3s_container = None
 
     def stop(self):
-        self._remove_k3s_containers()
-        for child in self.children:
-            self._stop_child(child)
+        self.stop_k3s()
+        self.stop_since(0)
 
     def mark(self):
-        """Record the current child and container counts for `stop_since`."""
-        return len(self.children), len(self._k3s_containers)
+        """Record the current child count for `stop_since`."""
+        return len(self.children)
 
     def stop_since(self, mark):
-        """Stop and remove children and containers started after `mark`."""
-        children, k3s = mark
-        for name in self._k3s_containers[k3s:]:
-            subprocess.run(
-                ["docker", "rm", "-f", name],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        del self._k3s_containers[k3s:]
-        for child in reversed(self.children[children:]):
-            self._stop_child(child)
-        del self.children[children:]
-
-    def _stop_child(self, child):
-        try:
-            p = psutil.Process(child.process.pid)
-        except psutil.NoSuchProcess:
-            return
-
-        p.send_signal(child.stop_signal)
-
-        for sp in p.children(recursive=True):
+        """Stops the children started after `mark`. All are signalled before
+        any is waited on, so their shutdowns overlap."""
+        children = self.children[mark:]
+        del self.children[mark:]
+        signalled = []
+        for child in children:
             try:
-                sp.terminate()
+                p = psutil.Process(child.process.pid)
+                descendants = p.children(recursive=True)
+                p.send_signal(child.stop_signal)
             except psutil.NoSuchProcess:
-                pass
-
-        try:
-            p.wait(timeout=child.stop_timeout)
-        except psutil.TimeoutExpired:
-            for sp in p.children(recursive=True):
+                continue
+            for sp in descendants:
                 try:
-                    sp.kill()
+                    sp.terminate()
                 except psutil.NoSuchProcess:
                     pass
-            p.kill()
+            signalled.append((child, p, descendants))
+
+        for child, p, descendants in signalled:
+            try:
+                p.wait(timeout=child.stop_timeout)
+            except psutil.TimeoutExpired:
+                for sp in descendants:
+                    try:
+                        sp.kill()
+                    except psutil.NoSuchProcess:
+                        pass
+                p.kill()
+            except psutil.NoSuchProcess:
+                pass
 
     def start_ssh_server(
         self, trusted_keys=[], extra_config="", root_password=None, trusted_ca=[]
@@ -507,27 +502,23 @@ class ProcessManager:
         logging.debug(f"Postgres {container_name} is up")
         return port
 
-    def start_k3s(self) -> K3sInstance:
+    def shared_k3s(self) -> K3sInstance:
         """
-        Runs a privileged k3s container, waits for the API to be ready,
-        creates a ServiceAccount and clusterrolebinding, then uses
-        `kubectl create token` to fetch the bearer token. Assumes a modern
-        k8s version (no fallback logic needed).
+        A privileged k3s container shared by every caller until `stop_k3s`,
+        with a cluster-admin ServiceAccount token and an mTLS client
+        certificate. Booting one takes 10-15s, so tests share it and keep
+        apart by unique object names.
 
-        The ProcessManager is session-scoped, so a k3s container would
-        otherwise stay up until the whole run ends. Left running, several of
-        these heavyweight privileged containers pile up across the k8s tests
-        and starve each other; an OOM-killed one is then removed by `--rm` and
-        later `docker exec`s fail with "No such container". Only one is ever
-        needed at a time, so tear down any earlier k3s before starting a fresh
-        one.
+        It is not a child: the per-test cleanup must not stop it, and
+        `docker rm -f` in `stop_k3s` is what removes it.
         """
-        self._remove_k3s_containers()
+        if self._k3s:
+            return self._k3s
         port = alloc_port()
         container_name = f"warpgate-e2e-k3s-{uuid.uuid4()}"
         image = os.getenv("K3S_IMAGE", "rancher/k3s:v1.35.2-k3s1")
 
-        self.start(
+        subprocess.Popen(
             [
                 "docker",
                 "run",
@@ -544,7 +535,7 @@ class ProcessManager:
                 "--disable-cloud-controller",
             ]
         )
-        self._k3s_containers.append(container_name)
+        self._k3s_container = container_name
 
         def wait_k3s():
             # Wait until kube-apiserver is responding
@@ -751,13 +742,14 @@ class ProcessManager:
         )
 
         logging.debug(f"k3s {container_name} is up on port {port}")
-        return K3sInstance(
+        self._k3s = K3sInstance(
             port=port,
             token=token,
             container_name=container_name,
             client_cert=client_cert,
             client_key=client_key,
         )
+        return self._k3s
 
     def start_oidc_server(
         self,
@@ -1142,6 +1134,16 @@ class ProcessManager:
         )
         if log_path:
             _tee_to_log(p.stdout, log_path)
+        for port in (
+            ssh_port,
+            http_port,
+            mysql_port,
+            postgres_port,
+            kubernetes_port,
+            vnc_port,
+            rdp_port,
+        ):
+            port_owners[port] = p
         return WarpgateProcess(
             process=p,
             config_path=config_path,
@@ -1216,7 +1218,7 @@ def ctx():
 
 
 @pytest.fixture(scope="session")
-def processes(ctx, timeout, report_generation):
+def processes(ctx, timeout):
     mgr = ProcessManager(ctx, timeout)
     try:
         yield mgr
@@ -1226,33 +1228,10 @@ def processes(ctx, timeout, report_generation):
 
 @pytest.fixture(autouse=True)
 def _stop_test_processes(processes):
-    """Stop each test's children; session fixtures are created before the mark."""
+    """Stop each test's children; wider-scoped fixtures are created before the mark."""
     mark = processes.mark()
     yield
     processes.stop_since(mark)
-
-
-@pytest.fixture(scope="session", autouse=True)
-def report_generation():
-    if not enable_coverage:
-        yield None
-        return
-    # subprocess.call(['cargo', 'llvm-cov', 'clean', '--workspace'])
-    subprocess.check_call(
-        [
-            "cargo",
-            "llvm-cov",
-            "run",
-            "--no-cfg-coverage-nightly",
-            "--all-features",
-            "--no-report",
-            "--",
-            "version",
-        ],
-        cwd=cargo_root,
-    )
-    yield
-    # subprocess.check_call(['cargo', 'llvm-cov', '--no-run', '--hide-instantiations', '--html'], cwd=cargo_root)
 
 
 @pytest.fixture(scope="session")

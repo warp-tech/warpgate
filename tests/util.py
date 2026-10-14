@@ -11,7 +11,16 @@ import time
 import yaml
 
 
-last_port = 1234
+# Each xdist worker (gw0, gw1, ...) hands out ports from its own range, so
+# workers never race each other for the same port. A serial run is worker 0.
+# ponytail: 3000 ports per worker keeps 20 workers under 61234; widen the
+# stride if a worker ever runs out.
+_worker = int(os.getenv("PYTEST_XDIST_WORKER", "gw0").removeprefix("gw"))
+last_port = 1234 + _worker * 3000
+
+# Process listening on each allocated port, so that wait_port fails as soon as
+# that process exits instead of waiting out its timeout.
+port_owners: dict = {}
 
 mysql_client_ssl_opt = "--ssl"
 mysql_client_opts = []
@@ -31,9 +40,25 @@ def read_until(stream, needle: bytes, deadline: float) -> bytes:
     return buf
 
 
+def _port_is_free(port):
+    # Warpgate listens on [::] and Docker publishes on 0.0.0.0, so the port
+    # must be bindable on both families.
+    for family, host in ((socket.AF_INET, "0.0.0.0"), (socket.AF_INET6, "::")):
+        with socket.socket(family, socket.SOCK_STREAM) as s:
+            try:
+                s.bind((host, port))
+            except OSError:
+                return False
+    return True
+
+
 def alloc_port():
+    # ponytail: free now is not free at bind time; the monotonic counter
+    # keeps this process from racing itself, nothing guards other processes.
     global last_port
     last_port += 1
+    while not _port_is_free(last_port):
+        last_port += 1
     return last_port
 
 
@@ -60,6 +85,7 @@ def _wait_timeout(fn, msg, timeout=60):
 
 def wait_port(port, recv=True, timeout=60, for_process: subprocess.Popen = None, connect_timeout=5, read_timeout=5):
     logging.debug(f"Waiting for port {port}")
+    for_process = for_process or port_owners.get(port)
     # What the last attempt saw, so that a timeout names a symptom.
     last_seen = ["no attempt completed"]
 
