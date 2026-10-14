@@ -75,39 +75,55 @@ async fn deduplicate_names(manager: &SchemaManager<'_>, table: &str) -> Result<(
     Ok(())
 }
 
+/// Renames colliding names and then makes `name` unique
+pub async fn add_unique_name_index(
+    manager: &SchemaManager<'_>,
+    table: &str,
+    index: &str,
+) -> Result<(), DbErr> {
+    deduplicate_names(manager, table).await?;
+
+    // CREATE UNIQUE INDEX rather than ALTER COLUMN so that this works on SQLite,
+    // which does not support altering column constraints.
+    manager
+        .create_index(
+            Index::create()
+                .name(index)
+                .table(Alias::new(table))
+                .col(Alias::new("name"))
+                .unique()
+                .to_owned(),
+        )
+        .await
+}
+
+pub async fn drop_unique_name_index(
+    manager: &SchemaManager<'_>,
+    table: &str,
+    index: &str,
+) -> Result<(), DbErr> {
+    manager
+        .drop_index(
+            Index::drop()
+                .name(index)
+                .table(Alias::new(table))
+                .to_owned(),
+        )
+        .await
+}
+
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         for (table, index) in TABLES {
-            deduplicate_names(manager, table).await?;
-
-            // CREATE UNIQUE INDEX rather than ALTER COLUMN so that this works on SQLite,
-            // which does not support altering column constraints.
-            manager
-                .create_index(
-                    Index::create()
-                        .name(*index)
-                        .table(Alias::new(*table))
-                        .col(Alias::new("name"))
-                        .unique()
-                        .to_owned(),
-                )
-                .await?;
+            add_unique_name_index(manager, table, index).await?;
         }
-
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         for (table, index) in TABLES {
-            manager
-                .drop_index(
-                    Index::drop()
-                        .name(*index)
-                        .table(Alias::new(*table))
-                        .to_owned(),
-                )
-                .await?;
+            drop_unique_name_index(manager, table, index).await?;
         }
         Ok(())
     }

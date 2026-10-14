@@ -27,6 +27,7 @@ use crate::helpers::i64_seconds_to_duration;
 use crate::login_protection::LoginProtectionService;
 use crate::rate_limiting::RateLimiterRegistry;
 use crate::recordings::SessionRecordings;
+use crate::resources::AdmittedSessions;
 use crate::{
     AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, ListenerStatusRegistry,
     SecretBackendRegistry, SessionsFilter, State,
@@ -67,6 +68,17 @@ impl Services {
         Ok(())
     }
 
+    pub async fn close_admitted_sessions(
+        &self,
+        sessions: AdmittedSessions,
+    ) -> Result<(), WarpgateError> {
+        if sessions.0.is_empty() {
+            return Ok(());
+        }
+        self.close_sessions(SessionsFilter::Sessions { ids: sessions.0 })
+            .await
+    }
+
     pub async fn delete_ticket_closing_sessions(
         &self,
         ticket_id: Uuid,
@@ -85,11 +97,8 @@ impl Services {
         Ticket::Entity::delete_by_id(ticket_id).exec(&txn).await?;
         txn.commit().await?;
 
-        if !admitted.is_empty() {
-            self.close_sessions(SessionsFilter::Sessions { ids: admitted })
-                .await?;
-        }
-        Ok(())
+        self.close_admitted_sessions(AdmittedSessions(admitted))
+            .await
     }
 
     pub async fn close_sessions_of_expired_tickets(&self) -> Result<(), WarpgateError> {
@@ -98,10 +107,7 @@ impl Services {
             Ticket::Column::Expiry.lt(OffsetDateTime::now_utc()),
         )
         .await?;
-        if ids.is_empty() {
-            return Ok(());
-        }
-        self.close_sessions(SessionsFilter::Sessions { ids }).await
+        self.close_admitted_sessions(AdmittedSessions(ids)).await
     }
 
     pub async fn new(
