@@ -723,7 +723,7 @@
           "description": "Default credential policy for auto-created users.\nKeys: \"http\", \"ssh\", \"mysql\", \"postgres\"\nValues: list of credential kinds e.g. [\"sso\"], [\"web\"], []"
         },
         "disable_local_logout": {
-          "description": "When the provider supports single logout, users who logged in through\nit can only log out via the provider, not out of Warpgate alone.",
+          "description": "Disables \"log out from Warpgate\" functionality when the provider supports single logout",
           "type": "boolean",
           "default": false
         },
