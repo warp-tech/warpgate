@@ -706,10 +706,9 @@ where
 
         if !authed_before_hop && session.get_auth().is_some() {
             // the forwarded request just got us logged in
-            // now we must rotate the cookie _here_ since cookies set by a forwarded request are not passed back to the client
-            storage
-                .rotate_session_id(crate::common::storage_session_id(jar), session)
-                .await?;
+            if let Some(rotation) = crate::common::SessionRotation::for_request(req).await? {
+                rotation.apply(session).await?;
+            }
         }
     }
 

@@ -54,6 +54,38 @@ pub fn storage_session_id(jar: &CookieJar) -> Option<String> {
     session_cookie_config().get_cookie_value(jar)
 }
 
+/// Deferred rekey after authorization
+pub struct SessionRotation {
+    storage: SharedSessionStorage,
+    stored_id: Option<String>,
+}
+
+impl SessionRotation {
+    /// None if rotation not needed
+    pub async fn for_request(req: &Request) -> Result<Option<Self>, WarpgateError> {
+        // don't try to rotate forwarded reqs
+        if is_cluster_peer_request(req) {
+            return Ok(None);
+        }
+        let jar = <&CookieJar>::from_request_without_body(req)
+            .await
+            .context("CookieJar not in request")?;
+        let storage = Data::<&SharedSessionStorage>::from_request_without_body(req)
+            .await
+            .context("SharedSessionStorage not in request")?;
+        Ok(Some(Self {
+            storage: (*storage).clone(),
+            stored_id: storage_session_id(jar),
+        }))
+    }
+
+    pub async fn apply(self, session: &Session) -> Result<(), WarpgateError> {
+        self.storage
+            .rotate_session_id(self.stored_id, session)
+            .await
+    }
+}
+
 /// Check if a host is localhost or 127.x.x.x (for development/testing scenarios)
 pub fn is_localhost_host(host: &str) -> bool {
     host == "localhost" || host == "127.0.0.1" || host.starts_with("127.")
@@ -339,19 +371,8 @@ pub async fn authorize_session(
         Err(error) => return Err(error),
     }
 
-    // when auth is completed, we must rotate the cookie *on the first hop*
-    // since cookies set by a forwarded request are not passed back to the client
-    if !is_cluster_peer_request(req) {
-        // we are the first hop
-
-        let jar = <&CookieJar>::from_request_without_body(req)
-            .await
-            .context("CookieJar not in request")?;
-        Data::<&SharedSessionStorage>::from_request_without_body(req)
-            .await
-            .context("SharedSessionStorage not in request")?
-            .rotate_session_id(storage_session_id(jar), session)
-            .await?;
+    if let Some(rotation) = SessionRotation::for_request(req).await? {
+        rotation.apply(session).await?;
     }
 
     session.set_auth(SessionAuthorization::User {
