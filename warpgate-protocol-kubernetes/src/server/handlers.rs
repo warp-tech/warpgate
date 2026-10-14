@@ -10,6 +10,7 @@ use reqwest_websocket::Upgrade;
 use serde::Deserialize;
 use tokio::sync::{Mutex, mpsc};
 use tokio_tungstenite::tungstenite;
+use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, error, warn};
 use url::Url;
 use warpgate_common::helpers::websocket::pump_websocket;
@@ -19,16 +20,16 @@ use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
-use warpgate_core::Services;
 use warpgate_core::logging::KubernetesAuditSubject;
 use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
+use warpgate_core::{Services, WarpgateServerHandle};
 
 use crate::audit::{StreamOperation, classify_mutating, classify_stream};
 use crate::correlator::{AdmittedSession, RequestCorrelator, correlated_authorization};
 use crate::recording::{start_recording_api, start_recording_exec};
 use crate::server::UpstreamClientCache;
 use crate::server::auth::{
-    KubernetesIdentity, authenticate_kubernetes_user, create_authenticated_client,
+    KubernetesIdentity, authenticate_kubernetes_user, create_authenticated_client, unauthorized,
 };
 
 /// A client-supplied impersonation header (`Impersonate-User`,
@@ -137,8 +138,12 @@ pub async fn handle_api_request(
         .path()
         .to_owned();
 
-    let (handle, admitted) =
+    let (handle, admitted, closed) =
         correlated_authorization(correlator.0, req, identity, &target_name, ctx.services()).await?;
+    // Close may have arrived after the correlator lookup.
+    if closed.is_cancelled() {
+        return Err(unauthorized());
+    }
 
     let (user_session_id, log_span) = {
         // The user info is already on the session: it is set when the session is
@@ -174,6 +179,8 @@ pub async fn handle_api_request(
                 &api_path,
                 &audit_subject,
                 ctx.services(),
+                closed.clone(),
+                handle.clone(),
             )
             .await
             .map(IntoResponse::into_response)
@@ -190,10 +197,16 @@ pub async fn handle_api_request(
                 &api_path,
                 &audit_subject,
                 ctx.services(),
+                closed,
+                handle.clone(),
             )
             .await
             .map(IntoResponse::into_response)
-            .map_err(poem::Error::from)
+            .map_err(|error| match error {
+                // Closed mid-request: the caller is no longer authorized.
+                WarpgateError::UserSessionEnded => unauthorized(),
+                error => poem::Error::from(error),
+            })
         };
 
         let client_ip = get_client_ip(req, ctx.services()).await;
@@ -228,6 +241,37 @@ fn named_target_path(path: &str) -> poem::Result<(String, String)> {
     Ok((target.into_owned(), path.to_owned()))
 }
 
+/// Ends `upstream` with an error once the session closes, so the client sees a
+/// truncated body rather than a clean end. Holds the session handle so the
+/// session stays open for as long as the stream does, even past its correlator
+/// entry.
+fn end_on_close<S>(
+    upstream: S,
+    closed: CancellationToken,
+    handle: Arc<Mutex<WarpgateServerHandle>>,
+) -> impl futures::Stream<Item = std::io::Result<bytes::Bytes>> + Send + 'static
+where
+    S: futures::Stream<Item = std::io::Result<bytes::Bytes>> + Unpin + Send + 'static,
+{
+    futures::stream::unfold(Some((upstream, closed, handle)), |state| async move {
+        let (mut upstream, closed, handle) = state?;
+        // Close first: a stream that is always ready must not starve it.
+        tokio::select! {
+            biased;
+            () = closed.cancelled() => Some((
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionAborted,
+                    "session closed",
+                )),
+                None,
+            )),
+            item = upstream.next() => {
+                item.map(|item| (item, Some((upstream, closed, handle))))
+            }
+        }
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn _handle_normal_request_inner(
     req: &Request,
@@ -237,6 +281,8 @@ async fn _handle_normal_request_inner(
     api_path: &str,
     audit_subject: &KubernetesAuditSubject,
     services: &Services,
+    closed: CancellationToken,
+    handle: Arc<Mutex<WarpgateServerHandle>>,
 ) -> Result<Response, WarpgateError> {
     let k8s_options = admitted.options();
     let target_id = admitted.target().id;
@@ -295,21 +341,17 @@ async fn _handle_normal_request_inner(
     // to a log line; this redacted view is used for both.
     let redacted_headers = redact_headers(&headers);
 
-    // Get request body
-    let body_bytes = body.into_bytes().await.context("reading request body")?;
+    // Cancel slow uploads when the session closes.
+    let body_bytes = closed
+        .run_until_cancelled(body.into_bytes())
+        .await
+        .ok_or(WarpgateError::UserSessionEnded)?
+        .context("reading request body")?;
 
-    // Record the request if recording is enabled
-    let mut recorder_opt = {
-        let enabled = services.recordings.is_enabled().await.unwrap_or(false);
-        if enabled {
-            match start_recording_api(&admitted.id(), &services.recordings).await {
-                Ok(recorder) => Some(recorder),
-                Err(e) => {
-                    warn!("Failed to start recording: {}", e);
-                    None
-                }
-            }
-        } else {
+    let mut recorder_opt = match start_recording_api(&admitted.id(), &services.recordings).await {
+        Ok(recorder) => recorder,
+        Err(e) => {
+            warn!("Failed to start recording: {}", e);
             None
         }
     };
@@ -361,7 +403,21 @@ async fn _handle_normal_request_inner(
         "Sending request to upstream Kubernetes API"
     );
 
-    let response = request_builder.send().await?;
+    // A write that reached the cluster runs to completion across a close, so
+    // the client learns whether it was applied and an audited one keeps its
+    // event. A close before dispatch still refuses it.
+    let is_write = !req.method().is_safe();
+    let response = if is_write {
+        if closed.is_cancelled() {
+            return Err(WarpgateError::UserSessionEnded);
+        }
+        request_builder.send().await?
+    } else {
+        closed
+            .run_until_cancelled(request_builder.send())
+            .await
+            .ok_or(WarpgateError::UserSessionEnded)??
+    };
 
     let status = response.status();
     let response_headers = response.headers().clone();
@@ -409,16 +465,24 @@ async fn _handle_normal_request_inner(
             .iter()
             .any(|(k, v)| (k == "watch" || k == "follow") && v == "true");
 
-        if transfer_encoding == "chunked" || is_streaming_response {
+        // A write's response is always read in full, even if it is framed as
+        // chunked, so a close can't cut off its answer.
+        if !is_write && (transfer_encoding == "chunked" || is_streaming_response) {
+            let upstream = response.bytes_stream().map_err(std::io::Error::other);
             (
-                Body::from_bytes_stream(response.bytes_stream().map_err(std::io::Error::other)),
+                Body::from_bytes_stream(end_on_close(upstream, closed, handle)),
                 None,
             )
         } else {
-            let bytes = response
-                .bytes()
-                .await
-                .context("reading kubernetes response")?;
+            let bytes = if is_write {
+                response.bytes().await
+            } else {
+                closed
+                    .run_until_cancelled(response.bytes())
+                    .await
+                    .ok_or(WarpgateError::UserSessionEnded)?
+            }
+            .context("reading kubernetes response")?;
 
             (Body::from_bytes(bytes.clone()), Some(bytes.to_vec()))
         }
@@ -465,7 +529,8 @@ async fn run_websocket_recording(recorder: TerminalRecorder, mut rx: mpsc::Recei
         let data = data[1..].to_vec();
 
         let result = match msg_type {
-            0..2 => {
+            // stdin, stdout, stderr
+            0..=2 => {
                 recorder
                     .write(
                         TerminalRecordingStreamId::from_usual_fd_number(msg_type)
@@ -506,6 +571,8 @@ async fn _handle_websocket_request_inner(
     api_path: &str,
     audit_subject: &KubernetesAuditSubject,
     services: &Services,
+    closed: CancellationToken,
+    handle: Arc<Mutex<WarpgateServerHandle>>,
 ) -> anyhow::Result<impl IntoResponse> {
     let k8s_options = admitted.options();
     let mut full_url = construct_target_url(req, api_path, k8s_options)?;
@@ -525,23 +592,20 @@ async fn _handle_websocket_request_inner(
     let operation = classify_stream(api_path, req.uri().query());
 
     let (recorder_tx, recorder_rx) = mpsc::channel::<Vec<u8>>(1000);
+    if let Some(metadata) = operation
+        .as_ref()
+        .and_then(StreamOperation::recording_metadata)
     {
-        let enabled = services.recordings.is_enabled().await.unwrap_or(false);
-        if enabled
-            && let Some(metadata) = operation
-                .as_ref()
-                .and_then(StreamOperation::recording_metadata)
-        {
-            match start_recording_exec(&admitted.id(), &services.recordings, metadata).await {
-                Err(e) => {
-                    error!("Failed to start recording: {}", e);
-                }
-                Ok(recorder) => {
-                    tokio::spawn(run_websocket_recording(recorder, recorder_rx));
-                }
+        match start_recording_exec(&admitted.id(), &services.recordings, metadata).await {
+            Err(e) => {
+                error!("Failed to start recording: {}", e);
             }
+            Ok(Some(recorder)) => {
+                tokio::spawn(run_websocket_recording(recorder, recorder_rx));
+            }
+            Ok(None) => {}
         }
-    };
+    }
 
     let ws_protocol = req
         .headers()
@@ -553,12 +617,18 @@ async fn _handle_websocket_request_inner(
     let audit_subject = audit_subject.clone();
 
     let ws_handler_inner = async move |socket: WebSocketStream| {
-        let client_response = client
-            .get(full_url.clone())
-            .upgrade()
-            .protocols(vec![ws_protocol])
-            .send()
+        // Keep the session handle alive if the websocket outlives its cache entry.
+        let _session_handle = handle;
+        let client_response = closed
+            .run_until_cancelled(
+                client
+                    .get(full_url.clone())
+                    .upgrade()
+                    .protocols(vec![ws_protocol])
+                    .send(),
+            )
             .await
+            .context("Session closed while upgrading the Kubernetes websocket")?
             .context("sending websocket request to Kubernetes API")?;
 
         let status = client_response.status();
@@ -577,13 +647,17 @@ async fn _handle_websocket_request_inner(
         }
         if !established {
             let client_response = client_response.into_inner();
-            let body = client_response.text().await?;
+            let body = closed
+                .run_until_cancelled(client_response.text())
+                .await
+                .context("Session closed while reading Kubernetes API rejection response")??;
             bail!("Unexpected websocket response status from Kubernetes API: {status}: {body}");
         }
 
-        let client_socket = client_response
-            .into_websocket()
+        let client_socket = closed
+            .run_until_cancelled(client_response.into_websocket())
             .await
+            .context("Session closed while negotiating the Kubernetes websocket")?
             .context("negotiating websocket connection with Kubernetes")?;
 
         let (client_sink, client_source) = client_socket.split();
@@ -615,8 +689,13 @@ async fn _handle_websocket_request_inner(
         });
 
         // Whichever direction ends first takes the stream down; the other is
-        // dropped rather than left to fail writing into the closed socket.
+        // dropped rather than left to fail writing into the closed socket. A
+        // session close (admin close, or a user's deletion) takes the stream
+        // down the same way, so a long-lived `exec`/`attach`/`port-forward`
+        // cannot outlive the access that opened it.
         let result = tokio::select! {
+            biased;
+            () = closed.cancelled() => Ok(()),
             result = server_to_client => result,
             result = client_to_server => result,
         };

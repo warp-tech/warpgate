@@ -8,11 +8,10 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi, Union};
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryOrder, Set};
 use uuid::Uuid;
-use warpgate_common::encryption::idempotent_maybe_encrypt_secret;
 use warpgate_common::secrets::validate_backend_name;
 use warpgate_common::{
     AdminPermission, BackendType, SecretError, SecretRef, SecretResolver as _, StoredSecret,
-    TargetSecrets, VaultAuthConfig, WarpgateError,
+    StoredSecrets, VaultAuthConfig, WarpgateError,
 };
 use warpgate_db_entities::{SecretBackend, SshClientKey, Target};
 
@@ -76,7 +75,9 @@ pub struct SecretBackendRequest {
     pub auth: VaultAuthConfig,
     #[oai(default)]
     pub tls_skip_verify: bool,
-    /// KV path prefixes (`mount/path`), matched on whole segments
+    /// Path prefixes the backend may be used for, matched on whole segments:
+    /// `mount/path` for KV secrets, `mount/sign/role` for SSH certificate
+    /// signing. Empty allows any.
     #[oai(default, validator(max_items = 256, max_length = 1024))]
     pub allowed_paths: Vec<String>,
 }
@@ -205,14 +206,14 @@ impl From<SecretError> for TestResolveApiResponse {
     fn from(error: SecretError) -> Self {
         let message = Json(error.to_string());
         match error {
-            SecretError::InvalidRef(_) | SecretError::InvalidBackendName(_) => {
-                Self::BadRequest(message)
-            }
+            SecretError::InvalidRef(_)
+            | SecretError::InvalidBackendName(_)
+            | SecretError::InvalidSshSigningRequest(_) => Self::BadRequest(message),
             SecretError::PathNotAllowed { .. } => Self::Forbidden(message),
             SecretError::BackendNotConfigured { .. } | SecretError::NotFound { .. } => {
                 Self::NotFound(message)
             }
-            SecretError::Backend(_) => Self::BadGateway(message),
+            SecretError::Backend(_) | SecretError::SshSigning { .. } => Self::BadGateway(message),
         }
     }
 }
@@ -251,7 +252,7 @@ fn update_active_model(
                 )
             })?
         } else {
-            StoredSecret::from(idempotent_maybe_encrypt_secret(provided_value)?)
+            StoredSecret::encrypted(provided_value.to_owned())?
         };
     }
 
@@ -273,19 +274,17 @@ async fn existing_references_to_backend(
 
     for target in Target::Entity::find().all(db).await? {
         if let Ok(target) = warpgate_common::Target::try_from(target) {
-            for secret in target
-                .options
-                .secrets()
-                .into_iter()
-                .filter_map(|s| s.as_reference())
-            {
+            for secret in target.options.secret_references() {
                 if secret.backend == backend_name {
-                    found.entry(secret.clone()).or_default().push(
-                        SecretReferenceUsageInstance::Target(SecretReferenceUsageTarget {
-                            id: target.id,
-                            name: target.name.clone(),
-                        }),
-                    );
+                    found
+                        .entry(secret)
+                        .or_default()
+                        .push(SecretReferenceUsageInstance::Target(
+                            SecretReferenceUsageTarget {
+                                id: target.id,
+                                name: target.name.clone(),
+                            },
+                        ));
                 }
             }
         }

@@ -328,8 +328,9 @@ impl<C: Send + 'static> ListenerSupervisor<C> {
 /// Abort the accept-loop task and wait for it to actually stop before returning,
 /// so its listen socket is closed before we rebind the same port — otherwise the
 /// new bind races the old socket's close and can hit `EADDRINUSE`, pausing the
-/// listener until the next change. Closing a listening socket frees the port
-/// immediately (no `TIME_WAIT`), so `SO_REUSEADDR` isn't needed here.
+/// listener until the next change. The listening socket itself leaves no
+/// `TIME_WAIT`, but connections it accepted do once closed server-side;
+/// `ListenEndpoint` binds with `SO_REUSEADDR` so those don't block the rebind.
 ///
 /// This only stops *accepting*: in-flight sessions/connections are spawned as
 /// independent tasks (SSH/MySQL/Postgres session tasks; poem detaches each

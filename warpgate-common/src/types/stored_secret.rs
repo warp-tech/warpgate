@@ -7,7 +7,9 @@ use poem_openapi::types::{ParseFromJSON, ToJSON};
 use serde::{Deserialize, Serialize};
 
 use crate::Secret;
-use crate::encryption::{EncryptionError, idempotent_maybe_decrypt};
+use crate::encryption::{
+    EncryptionError, idempotent_maybe_decrypt, idempotent_maybe_encrypt_secret, maybe_reencrypt_str,
+};
 
 /// A wrapper for a (maybe) encrypted credential
 #[derive(PartialEq, Eq, Clone, Serialize, Deserialize)]
@@ -29,6 +31,27 @@ impl StoredSecret {
     /// Decrypted credential value
     pub fn reveal(&self) -> Result<Secret<String>, EncryptionError> {
         idempotent_maybe_decrypt(self.0.expose_secret()).map(Secret::new)
+    }
+
+    /// Idempotent encryption
+    pub fn encrypt(&mut self) -> Result<(), EncryptionError> {
+        self.0 = Secret::new(idempotent_maybe_encrypt_secret(self.stored_value())?);
+        Ok(())
+    }
+
+    pub fn encrypted(plain: String) -> Result<Self, EncryptionError> {
+        let mut secret = Self::from(plain);
+        secret.encrypt()?;
+        Ok(secret)
+    }
+
+    pub fn maybe_reencrypt(&mut self) -> Result<bool, EncryptionError> {
+        let updated = maybe_reencrypt_str(self.stored_value())?;
+        let changed = updated != self.stored_value();
+        if changed {
+            self.0 = Secret::new(updated);
+        }
+        Ok(changed)
     }
 }
 

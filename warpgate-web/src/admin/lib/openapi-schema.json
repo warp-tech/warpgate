@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.29.1-47-gcd2038cd-modified"
+    "version": "v0.30.0-beta.3-1-g9a45f727-modified"
   },
   "servers": [
     {
@@ -101,9 +101,6 @@
           },
           {
             "CookieSecurityScheme": []
-          },
-          {
-            "ClusterPeerSecurityScheme": []
           }
         ],
         "operationId": "close_all_sessions"
@@ -220,9 +217,6 @@
           },
           {
             "CookieSecurityScheme": []
-          },
-          {
-            "ClusterPeerSecurityScheme": []
           }
         ],
         "operationId": "close_session"
@@ -2311,9 +2305,6 @@
           },
           {
             "CookieSecurityScheme": []
-          },
-          {
-            "ClusterPeerSecurityScheme": []
           }
         ],
         "operationId": "delete_user"
@@ -4993,7 +4984,9 @@
           },
           "port": {
             "type": "integer",
-            "format": "int32"
+            "format": "int32",
+            "maximum": 65535.0,
+            "minimum": 1.0
           },
           "key_type": {
             "type": "string"
@@ -7172,6 +7165,9 @@
             "$ref": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth"
           },
           {
+            "$ref": "#/components/schemas/SSHTargetAuth_SshTargetCertificateAuth"
+          },
+          {
             "$ref": "#/components/schemas/SSHTargetAuth_SshTargetIamRoleAuth"
           }
         ],
@@ -7180,9 +7176,32 @@
           "mapping": {
             "Password": "#/components/schemas/SSHTargetAuth_SshTargetPasswordAuth",
             "PublicKey": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth",
+            "Certificate": "#/components/schemas/SSHTargetAuth_SshTargetCertificateAuth",
             "IamRole": "#/components/schemas/SSHTargetAuth_SshTargetIamRoleAuth"
           }
         }
+      },
+      "SSHTargetAuth_SshTargetCertificateAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Certificate"
+                ],
+                "example": "Certificate"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/SshTargetCertificateAuth"
+          }
+        ]
       },
       "SSHTargetAuth_SshTargetIamRoleAuth": {
         "allOf": [
@@ -7419,7 +7438,7 @@
           },
           "allowed_paths": {
             "type": "array",
-            "description": "KV path prefixes (`mount/path`), matched on whole segments",
+            "description": "Path prefixes the backend may be used for, matched on whole segments:\n`mount/path` for KV secrets, `mount/sign/role` for SSH certificate\nsigning. Empty allows any.",
             "default": [],
             "items": {
               "type": "string",
@@ -7674,6 +7693,37 @@
           "Ignore"
         ]
       },
+      "SshTargetCertificateAuth": {
+        "type": "object",
+        "title": "SshTargetCertificateAuth",
+        "required": [
+          "backend",
+          "role"
+        ],
+        "properties": {
+          "backend": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._-]+$"
+          },
+          "mount": {
+            "type": "string",
+            "description": "Mount of the SSH secrets engine",
+            "default": "ssh",
+            "maxLength": 255,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "role": {
+            "type": "string",
+            "description": "Signing role",
+            "maxLength": 255,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        }
+      },
       "SshTargetIamRoleAuth": {
         "type": "object",
         "title": "SshTargetIamRoleAuth"
@@ -7814,7 +7864,8 @@
           },
           "ticket_max_duration_seconds": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "minimum": 1.0
           },
           "ticket_requests_disabled": {
             "type": "boolean",
@@ -7828,7 +7879,8 @@
           },
           "ticket_max_uses": {
             "type": "integer",
-            "format": "int16"
+            "format": "int16",
+            "minimum": 1.0
           }
         }
       },
@@ -7936,7 +7988,8 @@
           },
           "port": {
             "type": "integer",
-            "format": "uint16"
+            "format": "uint16",
+            "minimum": 1.0
           },
           "username": {
             "type": "string"
@@ -8161,7 +8214,8 @@
           },
           "port": {
             "type": "integer",
-            "format": "uint16"
+            "format": "uint16",
+            "minimum": 1.0
           },
           "username": {
             "type": "string"
@@ -8202,7 +8256,8 @@
           },
           "port": {
             "type": "integer",
-            "format": "uint16"
+            "format": "uint16",
+            "minimum": 1.0
           },
           "username": {
             "type": "string"
@@ -8245,7 +8300,8 @@
           },
           "port": {
             "type": "integer",
-            "format": "uint16"
+            "format": "uint16",
+            "minimum": 1.0
           },
           "username": {
             "type": "string"
@@ -8327,7 +8383,8 @@
           },
           "port": {
             "type": "integer",
-            "format": "uint16"
+            "format": "uint16",
+            "minimum": 1.0
           },
           "auth": {
             "$ref": "#/components/schemas/VncTargetAuth"

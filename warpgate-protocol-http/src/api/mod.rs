@@ -7,6 +7,7 @@ pub(crate) mod common;
 mod credentials;
 pub mod info;
 pub mod logo;
+pub mod sso_backchannel_logout;
 pub mod sso_provider_detail;
 pub mod sso_provider_list;
 pub mod targets_list;
@@ -23,6 +24,7 @@ pub fn get() -> impl OpenApi {
         targets_list::Api,
         sso_provider_list::Api,
         sso_provider_detail::Api,
+        sso_backchannel_logout::Api,
         credentials::Api,
         api_tokens::Api,
         ticket_requests::Api,

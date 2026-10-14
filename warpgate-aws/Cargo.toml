@@ -14,24 +14,24 @@ aws-config = { version = "1", default-features = false, features = [
 aws-credential-types = { version = "1", default-features = false }
 aws-sdk-ec2 = { version = "1", default-features = false, features = [
     "behavior-version-latest",
-    "rustls",
+    "default-https-client",
 ] }
 aws-sdk-ec2instanceconnect = { version = "1", default-features = false, features = [
     "behavior-version-latest",
-    "rustls",
+    "default-https-client",
 ] }
 aws-sdk-eks = { version = "1", default-features = false, features = [
     "behavior-version-latest",
-    "rustls",
+    "default-https-client",
 ] }
-aws-sdk-rds = { version = "1.130.0", default-features = false }
+aws-sdk-rds = { version = "1", default-features = false }
 aws-sdk-s3 = { version = "1", default-features = false, features = [
     "behavior-version-latest",
-    "rustls",
+    "default-https-client",
 ] }
 aws-sdk-sts = { version = "1", default-features = false, features = [
     "behavior-version-latest",
-    "rustls",
+    "default-https-client",
 ] }
 aws-sigv4 = { version = "1", default-features = false }
 aws-smithy-runtime-api = { version = "1", default-features = false }

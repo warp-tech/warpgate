@@ -1,4 +1,3 @@
-use poem::http::StatusCode;
 use poem::session::Session;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
@@ -6,12 +5,11 @@ use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, UserSessionId, WarpgateError};
-use warpgate_core::UserSessionSnapshot;
+use warpgate_core::{SessionsFilter, UserSessionSnapshot};
 use warpgate_db_entities::{HttpSession, Recording, TargetSession, UserSession};
 
+use super::AdminContext;
 use super::sessions_list::user_session_snapshots;
-use super::{AdminContext, ClusterOrAdminContext};
-use crate::api::cluster_proxy::fan_out_to_peers_expecting;
 
 pub struct Api;
 
@@ -102,9 +100,8 @@ impl Api {
     )]
     async fn api_close_session(
         &self,
-        admin: ClusterOrAdminContext,
+        admin: AdminContext,
         id: Path<UserSessionId>,
-        req: &poem::Request,
         browser_session: &Session,
     ) -> poem::Result<CloseSessionResponse> {
         admin.require(AdminPermission::SessionsTerminate)?;
@@ -113,39 +110,18 @@ impl Api {
             .one(&admin.services().db)
             .await
             .map_err(WarpgateError::from)?;
-        let Some(session) = session else {
-            return Ok(CloseSessionResponse::NotFound);
-        };
-        let intra_cluster = admin.is_intra_cluster_request();
-        if session.ended.is_some() && !intra_cluster {
+        if session.is_none_or(|session| session.ended.is_some()) {
             return Ok(CloseSessionResponse::NotFound);
         }
 
-        // kill the DB session entry before killing session handles
-        // to avoid an adopt race
-        if !intra_cluster {
-            UserSession::revoke(&admin.services().db, id.0)
-                .await
-                .map_err(poem::error::InternalServerError)?;
-        }
-
-        let user_state = {
-            let state = admin.services().state.lock().await;
-            state.user_sessions.get(&id.0).cloned()
-        };
-        if let Some(user_state) = user_state {
-            user_state.lock().await.handle.close();
-        }
+        admin
+            .services()
+            .close_sessions(SessionsFilter::Sessions { ids: vec![id.0] })
+            .await
+            .map_err(poem::error::InternalServerError)?;
 
         if browser_session.get::<UserSessionId>(HttpSession::SESSION_ID_DATA_KEY) == Some(id.0) {
             browser_session.purge();
-        }
-
-        if !intra_cluster {
-            for (node, status) in fan_out_to_peers_expecting(&admin, req, StatusCode::CREATED).await
-            {
-                tracing::warn!(%node, %status, "Failed to close a user session on a cluster node");
-            }
         }
 
         Ok(CloseSessionResponse::Ok)

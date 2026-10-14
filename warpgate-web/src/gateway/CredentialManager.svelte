@@ -175,7 +175,7 @@
             </div>
         </div>
 
-        {#if creds.publicKeys.length === 0 && policyRequires(CredentialKind.Password)}
+        {#if creds.password === PasswordState.Unset && policyRequires(CredentialKind.Password)}
             <Alert color="warning">
                 Your credential policy requires using a password for
                 authentication. Without one, you won't be able to log in.

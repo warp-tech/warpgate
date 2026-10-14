@@ -8,7 +8,7 @@
 //! so those live in each crate; everything here is generic over the message type `M`.
 
 use std::collections::{HashMap, VecDeque};
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use std::future::Future;
 use std::net::SocketAddr;
 use std::ops::Deref;
@@ -310,8 +310,8 @@ pub async fn run_web_client_lifecycle<S, M, O, E, Fut>(
     S: ManagedSession + Deref<Target = WebSession<M>>,
     M: Sheddable + From<SessionPhase>,
     O: Send + Sync,
+    E: Display + UserFacingReason,
     Fut: Future<Output = Result<(), E>>,
-    WarpgateError: From<E>,
 {
     let _cancel_on_exit = session.cancellation().clone().drop_guard();
     let cancel = session.cancellation();
@@ -320,10 +320,12 @@ pub async fn run_web_client_lifecycle<S, M, O, E, Fut>(
         () = cancel.cancelled() => None,
         admission = admit(session, services, authorization, remote_address) => Some(admission),
     };
-    let (reason, error): (CloseReason, Option<WarpgateError>) = match admission {
+    let (reason, message) = match admission {
         Some(Ok(Admission::Admitted(admitted))) if !cancel.is_cancelled() => {
             match connect(admitted).await {
-                Err(error) if !cancel.is_cancelled() => (CloseReason::Error, Some(error.into())),
+                Err(error) if !cancel.is_cancelled() => {
+                    (CloseReason::Error, Some(error.user_facing_reason()))
+                }
                 // The backend ended because we told it to.
                 _ => (CloseReason::Disconnected, None),
             }
@@ -333,12 +335,10 @@ pub async fn run_web_client_lifecycle<S, M, O, E, Fut>(
         Some(Ok(Admission::Expired)) => (CloseReason::ApprovalTimedOut, None),
         Some(Err(error)) => {
             warn!(session=%session.id(), %error, "Failed to admit the web client session");
-            (CloseReason::Error, Some(error.into()))
+            (CloseReason::Error, Some(error.user_facing_reason()))
         }
     };
-    session
-        .end(reason, error.map(|e| e.user_facing_reason()))
-        .await;
+    session.end(reason, message).await;
     registry.remove_session(session.id()).await;
 }
 

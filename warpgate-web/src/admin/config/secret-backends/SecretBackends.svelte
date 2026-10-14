@@ -127,7 +127,7 @@
                     {/if}
                     {#if $adminPermissions.configEdit}
                         <Button
-                            class="ms-3"
+                            class="ms-auto"
                             color="link px-0"
                             onclick={e => {
                             e.preventDefault()

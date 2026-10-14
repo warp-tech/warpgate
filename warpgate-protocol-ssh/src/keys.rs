@@ -1,16 +1,14 @@
 use std::path::{Path, PathBuf};
 
-use russh::keys::{
-    Algorithm, HashAlg, PrivateKey, decode_secret_key, encode_pkcs8_pem, load_secret_key,
-};
+use russh::keys::{Algorithm, HashAlg, PrivateKey, decode_secret_key, load_secret_key};
 use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::encryption::{idempotent_maybe_decrypt, idempotent_maybe_encrypt_secret};
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{
     MaybeSecretRef, SecretRef, SecretResolver, SshHostKeyKind, StoredSecret, WarpgateError,
+    pkcs8_pem_string,
 };
 use warpgate_db_entities::{Parameters, SshClientKey};
 
@@ -45,12 +43,18 @@ pub async fn ensure_host_keys(
         let file = host_key_file(keys_path, kind);
         let pem = if file.exists() {
             let pem = std::fs::read_to_string(&file)?;
-            if idempotent_maybe_decrypt(stored).is_ok_and(|stored| stored == pem) {
+            if stored
+                .reveal()
+                .is_ok_and(|stored| stored.expose_secret() == &pem)
+            {
                 continue;
             }
             info!("Importing SSH host key from {file:?} into the database");
             pem
-        } else if idempotent_maybe_decrypt(stored).is_ok_and(|stored| stored.is_empty()) {
+        } else if stored
+            .reveal()
+            .is_ok_and(|stored| stored.expose_secret().is_empty())
+        {
             info!("Generating SSH host key ({kind:?})");
             kind.generate_pem()?
         } else {
@@ -58,8 +62,8 @@ pub async fn ensure_host_keys(
         };
         // CAS write to prevent race between nodes at cluster boot
         Parameters::Entity::update_many()
-            .col_expr(column, Expr::value(idempotent_maybe_encrypt_secret(&pem)?))
-            .filter(column.eq(stored.as_str()))
+            .col_expr(column, Expr::value(StoredSecret::encrypted(pem)?))
+            .filter(column.eq(stored.clone()))
             .exec(db)
             .await?;
     }
@@ -71,19 +75,8 @@ pub async fn load_host_keys(db: &DatabaseConnection) -> Result<Vec<PrivateKey>, 
     let row = Parameters::Entity::get(db).await?;
     [row.ssh_host_key_ed25519, row.ssh_host_key_rsa]
         .into_iter()
-        .map(|stored| {
-            Ok(decode_secret_key(
-                &idempotent_maybe_decrypt(&stored)?,
-                None,
-            )?)
-        })
+        .map(|stored| Ok(decode_secret_key(stored.reveal()?.expose_secret(), None)?))
         .collect()
-}
-
-fn encode_pkcs8_pem_string(key: &PrivateKey) -> Result<String, WarpgateError> {
-    let mut buf = Vec::new();
-    encode_pkcs8_pem(key, &mut buf)?;
-    String::from_utf8(buf).map_err(WarpgateError::other)
 }
 
 /// `<algo> <base64>` only — the OpenSSH comment is dropped so that the same
@@ -142,14 +135,12 @@ pub async fn import_client_key(
     is_default: bool,
 ) -> Result<Option<SshClientKey::Model>, WarpgateError> {
     let public_key = public_key_line(key)?;
-    let secret_key = encode_pkcs8_pem_string(key)?;
+    let secret_key = pkcs8_pem_string(key)?;
     insert_client_key(
         db,
         label,
         public_key,
-        MaybeSecretRef::Inline(StoredSecret::from(idempotent_maybe_encrypt_secret(
-            &secret_key,
-        )?)),
+        MaybeSecretRef::Inline(StoredSecret::encrypted(secret_key)?),
         is_default,
     )
     .await

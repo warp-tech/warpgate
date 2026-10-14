@@ -1,8 +1,9 @@
 use core::str;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::Context;
-use http::{HeaderName, StatusCode};
+use http::StatusCode;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use poem::error::InternalServerError;
 use poem::session::{CookieConfig, Session};
@@ -22,7 +23,7 @@ use warpgate_common_http::ext::{construct_external_url, is_navigation_request};
 use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
-    X_WARPGATE_CLUSTER_IDENTITY, is_cluster_peer_request,
+    X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_TOKEN, is_cluster_peer_request,
 };
 use warpgate_core::{ConfigProvider, vet_credential_bearer};
 use warpgate_db_entities::User;
@@ -37,7 +38,6 @@ static TARGET_SESSION_KEY: &str = "target_name";
 static AUTH_SESSION_KEY: &str = "auth";
 static AUTH_SSO_LOGIN_STATE: &str = "auth_sso_login_state";
 pub static SESSION_COOKIE_NAME: &str = "warpgate-http-session";
-pub static X_WARPGATE_TOKEN: HeaderName = HeaderName::from_static("x-warpgate-token");
 
 /// The session cookie's shape — name and (absence of) signing — defined once:
 /// the `ServerSession` middleware writes the cookie through this config, and
@@ -53,6 +53,38 @@ pub fn session_cookie_config() -> CookieConfig {
 /// only there, never inside the session entries.
 pub fn storage_session_id(jar: &CookieJar) -> Option<String> {
     session_cookie_config().get_cookie_value(jar)
+}
+
+/// Deferred rekey after authorization
+pub struct SessionRotation {
+    storage: SharedSessionStorage,
+    stored_id: Option<String>,
+}
+
+impl SessionRotation {
+    /// None if rotation not needed
+    pub async fn for_request(req: &Request) -> Result<Option<Self>, WarpgateError> {
+        // don't try to rotate forwarded reqs
+        if is_cluster_peer_request(req) {
+            return Ok(None);
+        }
+        let jar = <&CookieJar>::from_request_without_body(req)
+            .await
+            .context("CookieJar not in request")?;
+        let storage = Data::<&SharedSessionStorage>::from_request_without_body(req)
+            .await
+            .context("SharedSessionStorage not in request")?;
+        Ok(Some(Self {
+            storage: (*storage).clone(),
+            stored_id: storage_session_id(jar),
+        }))
+    }
+
+    pub async fn apply(self, session: &Session) -> Result<(), WarpgateError> {
+        self.storage
+            .rotate_session_id(self.stored_id, session)
+            .await
+    }
 }
 
 /// Check if a host is localhost or 127.x.x.x (for development/testing scenarios)
@@ -82,6 +114,21 @@ pub struct SsoLoginState {
     pub token: WarpgateIdToken,
     pub provider: String,
     pub supports_single_logout: bool,
+    #[serde(default)]
+    pub subject: Option<String>,
+    #[serde(default)]
+    pub sid: Option<String>,
+}
+
+impl SsoLoginState {
+    fn parse(json: &str) -> Option<Self> {
+        serde_json::from_str(json).ok()
+    }
+
+    // HACK: for getting the session state out of an already serialized session
+    pub fn from_session_entries(entries: &BTreeMap<String, serde_json::Value>) -> Option<Self> {
+        Self::parse(entries.get(AUTH_SSO_LOGIN_STATE)?.as_str()?)
+    }
 }
 
 pub trait SessionExt {
@@ -120,8 +167,7 @@ impl SessionExt for Session {
     }
 
     fn get_sso_login_state(&self) -> Option<SsoLoginState> {
-        self.get::<String>(AUTH_SSO_LOGIN_STATE)
-            .and_then(|x| serde_json::from_str(&x).ok())
+        SsoLoginState::parse(&self.get::<String>(AUTH_SSO_LOGIN_STATE)?)
     }
 
     fn set_sso_login_state(&self, state: SsoLoginState) {
@@ -340,19 +386,8 @@ pub async fn authorize_session(
         Err(error) => return Err(error),
     }
 
-    // when auth is completed, we must rotate the cookie *on the first hop*
-    // since cookies set by a forwarded request are not passed back to the client
-    if !is_cluster_peer_request(req) {
-        // we are the first hop
-
-        let jar = <&CookieJar>::from_request_without_body(req)
-            .await
-            .context("CookieJar not in request")?;
-        Data::<&SharedSessionStorage>::from_request_without_body(req)
-            .await
-            .context("SharedSessionStorage not in request")?
-            .rotate_session_id(storage_session_id(jar), session)
-            .await?;
+    if let Some(rotation) = SessionRotation::for_request(req).await? {
+        rotation.apply(session).await?;
     }
 
     session.set_auth(SessionAuthorization::User {

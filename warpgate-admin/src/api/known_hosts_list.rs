@@ -28,6 +28,7 @@ enum AddSshKnownHostResponse {
 #[derive(Object)]
 struct AddSshKnownHostRequest {
     host: String,
+    #[oai(validator(minimum(value = "1"), maximum(value = "65535")))]
     port: i32,
     key_type: String,
     key_base64: String,

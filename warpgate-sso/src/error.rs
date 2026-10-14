@@ -1,5 +1,3 @@
-use std::error::Error;
-
 use openidconnect::{
     ClaimsVerificationError, ConfigurationError, SignatureVerificationError, SigningError, reqwest,
 };
@@ -40,6 +38,18 @@ pub enum SsoError {
         "the OIDC provider advertised a {endpoint} of `{url}`: only http and https endpoints are accepted"
     )]
     UnsupportedEndpointScheme { endpoint: String, url: String },
-    #[error(transparent)]
-    Other(Box<dyn Error + Send + Sync>),
+}
+
+impl SsoError {
+    /// The token names a signing key missing from the provider's JWKS, which a
+    /// key rotation since the JWKS was cached explains.
+    pub(crate) const fn is_unknown_signing_key(&self) -> bool {
+        matches!(
+            self,
+            Self::SignatureVerification(SignatureVerificationError::NoMatchingKey)
+                | Self::ClaimsVerification(ClaimsVerificationError::SignatureVerification(
+                    SignatureVerificationError::NoMatchingKey,
+                ))
+        )
+    }
 }

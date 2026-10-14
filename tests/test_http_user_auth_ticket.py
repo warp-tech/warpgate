@@ -145,3 +145,53 @@ class TestHTTPUserAuthTicket:
                 t.uses_left for t in api.get_tickets() if t.id == ticket.ticket.id
             )
             assert uses_left == 1
+
+    def test_ticket_link_rotates_a_planted_session_cookie(
+        self, echo_server_port, shared_wg: WarpgateProcess
+    ):
+        url = f"https://localhost:{shared_wg.http_port}"
+        with admin_client(url) as api:
+            user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
+            target = api.create_target(sdk.TargetDataRequest(
+                name=f"echo-{uuid4()}",
+                require_approval=False,
+                ticket_requests_disabled=False,
+                ticket_require_approval=False,
+                options=sdk.TargetOptions(sdk.TargetOptionsTargetHTTPOptions(
+                    kind="Http",
+                    headers={},
+                    url=f"http://localhost:{echo_server_port}",
+                    tls=sdk.Tls(mode=sdk.TlsMode.DISABLED, verify=False),
+                )),
+            ))
+            secret = api.create_ticket(sdk.CreateTicketRequest(
+                target_name=target.name, username=user.username, number_of_uses=1,
+            )).secret
+
+        # An unauthenticated session id, planted in the victim's browser
+        attacker = requests.Session()
+        attacker.verify = False
+        attacker.post(
+            f"{url}/@warpgate/api/auth/login",
+            json={"username": f"nobody-{uuid4()}", "password": "x"},
+        )
+        planted = attacker.cookies.get("warpgate-http-session")
+        assert planted
+
+        victim = requests.Session()
+        victim.verify = False
+        victim.cookies.set("warpgate-http-session", planted, domain="localhost.local")
+        response = victim.get(
+            f"{url}/some/path?warpgate-ticket={secret}", allow_redirects=False
+        )
+        assert response.status_code // 100 == 2
+        assert response.cookies.get("warpgate-http-session") not in (None, planted)
+
+        response = attacker.get(
+            f"{url}/some/path?warpgate-target={target.name}", allow_redirects=False
+        )
+        assert response.status_code // 100 != 2
+
+        # The single-use ticket's grant survives the rotation
+        response = victim.get(f"{url}/some/path", allow_redirects=False)
+        assert response.status_code // 100 == 2

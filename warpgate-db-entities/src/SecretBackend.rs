@@ -18,7 +18,8 @@ pub struct Model {
     #[sea_orm(column_type = "Json")]
     pub auth: VaultAuthConfig,
     pub tls_skip_verify: bool,
-    /// One `mount/path` prefix per line; empty allows every path.
+    /// One path prefix per line (`mount/path`, or `mount/sign/role` for SSH
+    /// signing); empty allows every path.
     #[sea_orm(column_type = "Text")]
     pub allowed_paths: String,
 }

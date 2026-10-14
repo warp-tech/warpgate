@@ -303,8 +303,6 @@ def _held_ssh_target(processes, wg_c_ed25519_pubkey, shared_wg, require_approval
     with admin_client(url) as api:
         role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
         user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
-        # Public key rather than password: sshpass retries on its own, which
-        # shows up as spurious failed-login attempts under a loaded suite.
         api.create_public_key_credential(
             user.id,
             sdk.NewPublicKeyCredential(

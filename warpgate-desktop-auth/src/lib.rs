@@ -314,8 +314,7 @@ pub async fn start_recording(
         .start::<DesktopRecorder, _>(target_session_id, None, DesktopRecordingMetadata::Desktop)
         .await
     {
-        Ok(recorder) => Some(recorder),
-        Err(warpgate_core::recordings::Error::Disabled) => None,
+        Ok(recorder) => recorder,
         Err(error) => {
             warn!(%error, protocol = protocol_label, "Failed to start desktop session recording");
             None
