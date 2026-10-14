@@ -443,7 +443,7 @@ impl ListApi {
                     )))
                 }
                 Err(e) => {
-                    tracing::warn!(host = ?body.host, port = body.port, error = ?format!("{e:#}"), "LDAP connection test failed");
+                    tracing::warn!(host = ?body.host, port = body.port, "LDAP connection test failed");
                     Ok(TestLdapServerConnectionResponse::Ok(Json(
                         TestLdapServerResponse {
                             success: false,
