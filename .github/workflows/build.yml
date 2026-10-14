@@ -180,3 +180,8 @@ jobs:
           mkdir warpgate-web/dist
           just config-schema
           git diff --exit-code config-schema.json
+
+      - name: Ensure there are no changes in GitOps resource schema
+        run: |
+          just gitops-schema
+          git diff --exit-code gitops-schema.json

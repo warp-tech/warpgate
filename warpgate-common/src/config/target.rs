@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use poem_openapi::{Enum, Object, Union};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warpgate_tls::TlsMode;
@@ -13,8 +14,9 @@ use super::defaults::{
 use crate::secrets::{MaybeSecretRef, SecretRef, StoredSecrets};
 use crate::{Protocol, Secret, StoredSecret};
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
 pub struct KubernetesTargetCertificateAuth {
+    #[schemars(with = "String")]
     pub certificate: Secret<String>,
     pub private_key: MaybeSecretRef,
 }
@@ -28,7 +30,7 @@ impl Default for KubernetesTargetCertificateAuth {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
 pub struct TargetSSHOptions {
     pub host: String,
     #[serde(default = "_default_ssh_port")]
@@ -41,10 +43,11 @@ pub struct TargetSSHOptions {
     #[serde(default)]
     pub auth: SSHTargetAuth,
     #[serde(default)]
+    #[schemars(with = "Option<String>")]
     pub jump_host: Option<Uuid>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union, JsonSchema)]
 #[serde(tag = "kind")]
 #[oai(discriminator_name = "kind", one_of)]
 pub enum SSHTargetAuth {
@@ -58,20 +61,21 @@ pub enum SSHTargetAuth {
     IamRole(SshTargetIamRoleAuth),
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
 pub struct SshTargetPasswordAuth {
     pub password: MaybeSecretRef,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default, JsonSchema)]
 pub struct SshTargetPublicKeyAuth {
     /// Specific stored client key to authenticate with; `None` uses the keys
     /// marked default.
     #[serde(default)]
+    #[schemars(with = "Option<String>")]
     pub key_id: Option<Uuid>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
 pub struct SshTargetCertificateAuth {
     #[oai(validator(min_length = 1, max_length = 64, pattern = r"^[A-Za-z0-9._-]+$"))]
     pub backend: String,
@@ -99,7 +103,7 @@ impl Default for SshTargetCertificateAuth {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default, JsonSchema)]
 pub struct SshTargetIamRoleAuth {}
 
 impl Default for SSHTargetAuth {
@@ -108,7 +112,7 @@ impl Default for SSHTargetAuth {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
 pub struct TargetHTTPOptions {
     #[serde(default = "_default_empty_string")]
     pub url: String,
@@ -128,7 +132,7 @@ pub struct TargetHTTPOptions {
 // key inside a present one. Spelling the two separately is how `verify` came to
 // mean `false` for an omitted block and `true` for an empty one. Kept as a plain
 // comment: a doc comment here would surface in the OpenAPI schema.
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
 #[serde(default)]
 pub struct Tls {
     pub mode: TlsMode,
@@ -146,7 +150,7 @@ impl Default for Tls {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union, JsonSchema)]
 #[serde(tag = "kind")]
 #[oai(discriminator_name = "kind", one_of)]
 pub enum DatabaseTargetAuth {
@@ -156,13 +160,13 @@ pub enum DatabaseTargetAuth {
     IamRole(DatabaseTargetIamRoleAuth),
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default, JsonSchema)]
 pub struct DatabaseTargetPasswordAuth {
     #[serde(default)]
     pub password: MaybeSecretRef,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default, JsonSchema)]
 pub struct DatabaseTargetIamRoleAuth {}
 
 impl Default for DatabaseTargetAuth {
@@ -171,7 +175,7 @@ impl Default for DatabaseTargetAuth {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
 pub struct TargetMySqlOptions {
     #[serde(default = "_default_empty_string")]
     pub host: String,
@@ -193,7 +197,7 @@ pub struct TargetMySqlOptions {
     pub default_database_name: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default, Enum)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default, Enum, JsonSchema)]
 pub enum PostgresProtocolVersion {
     #[serde(rename = "3.0")]
     #[oai(rename = "3.0")]
@@ -204,7 +208,7 @@ pub enum PostgresProtocolVersion {
     V3_2,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
 pub struct TargetPostgresOptions {
     #[serde(default = "_default_empty_string")]
     pub host: String,
@@ -232,7 +236,7 @@ pub struct TargetPostgresOptions {
     pub protocol_version: PostgresProtocolVersion,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
 pub struct TargetVncOptions {
     #[serde(default = "_default_empty_string")]
     pub host: String,
@@ -245,7 +249,7 @@ pub struct TargetVncOptions {
     pub auth: VncTargetAuth,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union, JsonSchema)]
 #[serde(tag = "kind")]
 #[oai(discriminator_name = "kind", one_of)]
 pub enum VncTargetAuth {
@@ -255,10 +259,10 @@ pub enum VncTargetAuth {
     Password(VncTargetPasswordAuth),
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default, JsonSchema)]
 pub struct VncTargetNoneAuth {}
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
 pub struct VncTargetPasswordAuth {
     pub password: MaybeSecretRef,
 }
@@ -269,7 +273,7 @@ impl Default for VncTargetAuth {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Enum, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Enum, Default, JsonSchema)]
 pub enum RdpTargetCompression {
     #[default]
     #[serde(rename = "remotefx")]
@@ -284,7 +288,7 @@ pub enum RdpTargetCompression {
     GraphicsPipeline,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
 pub struct TargetRdpOptions {
     #[serde(default = "_default_empty_string")]
     pub host: String,
@@ -330,7 +334,7 @@ pub struct TargetRdpOptions {
     pub tls_security: RdpTlsSecurity,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default, Enum)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default, Enum, JsonSchema)]
 pub enum RdpTlsSecurity {
     /// ~ Windows 2016/10
     #[serde(rename = "tls_1_2")]
@@ -344,7 +348,7 @@ pub enum RdpTlsSecurity {
     Tls10Unsafe,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union, JsonSchema)]
 #[serde(tag = "kind")]
 #[oai(discriminator_name = "kind", one_of)]
 pub enum RdpTargetAuth {
@@ -352,7 +356,7 @@ pub enum RdpTargetAuth {
     Password(RdpTargetPasswordAuth),
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
 pub struct RdpTargetPasswordAuth {
     pub password: MaybeSecretRef,
 }
@@ -365,7 +369,7 @@ impl Default for RdpTargetAuth {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
 pub struct TargetKubernetesOptions {
     #[serde(default = "_default_empty_string")]
     pub cluster_url: String,
@@ -377,7 +381,7 @@ pub struct TargetKubernetesOptions {
     pub auth: KubernetesTargetAuth,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union, JsonSchema)]
 #[serde(tag = "kind")]
 #[oai(discriminator_name = "kind", one_of)]
 pub enum KubernetesTargetAuth {
@@ -389,12 +393,12 @@ pub enum KubernetesTargetAuth {
     IamRole(KubernetesTargetIamRoleAuth),
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
 pub struct KubernetesTargetTokenAuth {
     pub token: MaybeSecretRef,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default, JsonSchema)]
 pub struct KubernetesTargetIamRoleAuth {}
 
 impl Default for KubernetesTargetAuth {
@@ -422,7 +426,7 @@ pub struct Target {
     pub ticket_max_uses: Option<i16>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union, JsonSchema)]
 #[oai(discriminator_name = "kind", one_of)]
 pub enum TargetOptions {
     #[serde(rename = "ssh")]

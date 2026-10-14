@@ -1,9 +1,12 @@
 use poem_openapi::{Enum, Object};
 use sea_orm::entity::prelude::*;
-use serde::Serialize;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, PartialEq, Eq, Serialize, Clone, Enum, EnumIter, DeriveActiveEnum)]
+#[derive(
+    Debug, PartialEq, Eq, Serialize, Deserialize, Clone, Enum, EnumIter, DeriveActiveEnum, JsonSchema,
+)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
 pub enum BootstrapThemeColor {
     #[sea_orm(string_value = "primary")]

@@ -1,0 +1,21 @@
+[package]
+name = "warpgate-gitops"
+version = "0.30.0-beta.2"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[[bin]]
+name = "gitops-schema"
+path = "src/gitops_schema.rs"
+
+[dependencies]
+saphyr = { version = "0.2", default-features = false }
+saphyr-parser = { version = "0.2", default-features = false }
+schemars.workspace = true
+serde.workspace = true
+serde_json = { workspace = true, features = ["std"] }
+serde_path_to_error = "0.1"
+strum = { version = "0.28", features = ["derive"] }
+warpgate-common = { path = "../warpgate-common" }
+warpgate-db-entities = { path = "../warpgate-db-entities" }

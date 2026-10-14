@@ -382,6 +382,19 @@ impl Serialize for MaybeSecretRef {
     }
 }
 
+impl schemars::JsonSchema for MaybeSecretRef {
+    fn schema_name() -> Cow<'static, str> {
+        "MaybeSecretRef".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "description": "A literal value, or a reference to one: secret://backend/mount/path#field",
+        })
+    }
+}
+
 /// Stores a type in a text column, converting with `$to` on the way in and
 /// `$from` on the way out.
 macro_rules! text_column {

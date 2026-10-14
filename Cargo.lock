@@ -3021,6 +3021,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "hashlink"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a596f1b20ed2cc5ecac41a164aaebc7258057060f06c0cf7a2ba3991ee7990fb"
+dependencies = [
+ "hashbrown 0.17.1",
+]
+
+[[package]]
 name = "hdrhistogram"
 version = "7.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4822,6 +4831,15 @@ name = "ordered-float"
 version = "4.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7bb71e1b3fa6ca1c61f383464aaf2bb0e2f8e772a1f01d486832464de363b951"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "ordered-float"
+version = "5.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c7c9e0d9b23589f26070720bac724174bfec1083e82f7854cdd0267518343c0"
 dependencies = [
  "num-traits",
 ]
@@ -6762,6 +6780,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "saphyr"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04ccdd2c7c9c47150213f912ca8d0c44e6ee16bf203487199f07e506b0aec0f6"
+dependencies = [
+ "hashlink 0.12.2",
+ "ordered-float 5.5.0",
+ "saphyr-parser",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "saphyr-parser"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b76a6d2c15f6fe77217c21796e39cd406ddc5f192d5c8a2a1ddecb672abedcd"
+dependencies = [
+ "arraydeque",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -9211,6 +9251,7 @@ dependencies = [
  "data-url",
  "ipnet",
  "poem-openapi",
+ "schemars 1.2.2",
  "sea-orm",
  "serde",
  "serde_json",
@@ -9268,6 +9309,21 @@ dependencies = [
  "minifb",
  "png",
  "warpgate-common",
+]
+
+[[package]]
+name = "warpgate-gitops"
+version = "0.30.0-beta.2"
+dependencies = [
+ "saphyr",
+ "saphyr-parser",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "strum 0.28.0",
+ "warpgate-common",
+ "warpgate-db-entities",
 ]
 
 [[package]]
@@ -9582,6 +9638,7 @@ dependencies = [
  "rustls",
  "rustls-native-certs",
  "rustls-pki-types",
+ "schemars 1.2.2",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
