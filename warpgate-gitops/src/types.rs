@@ -17,7 +17,7 @@ pub enum ApiVersion {
 /// One document of a Warpgate resource file
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, strum::EnumDiscriminants)]
 #[serde(tag = "kind")]
-#[strum_discriminants(name(Kind), derive(Deserialize))]
+#[strum_discriminants(name(Kind), derive(Deserialize, Hash))]
 #[allow(clippy::large_enum_variant)]
 pub enum Resource {
     Target(Manifest<TargetSpec>),
@@ -41,6 +41,14 @@ impl Resource {
             Kind::TargetGroup => Self::TargetGroup(serde_path_to_error::deserialize(value)?),
             Kind::Role => Self::Role(serde_path_to_error::deserialize(value)?),
         })
+    }
+
+    pub const fn metadata(&self) -> &Metadata {
+        match self {
+            Self::Target(m) => &m.metadata,
+            Self::TargetGroup(m) => &m.metadata,
+            Self::Role(m) => &m.metadata,
+        }
     }
 }
 

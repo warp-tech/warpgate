@@ -1,8 +1,102 @@
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::path::{Path as FilePath, PathBuf};
+
 use serde_json::Value;
 
-use crate::diagnostic::{Diagnostic, Path, Segment};
-use crate::parse::Document;
-use crate::types::Resource;
+use crate::diagnostic::{Diagnostic, Location, Path, Segment};
+use crate::parse::{Document, parse};
+use crate::types::{Kind, Resource};
+
+/// Checks every document of every file, then the names and references across all of them
+pub fn check_files(files: &[(PathBuf, String)]) -> Vec<(&FilePath, Diagnostic)> {
+    let mut diagnostics = Vec::new();
+    let mut documents = Vec::new();
+    for (file, source) in files {
+        match parse(source) {
+            Err(error) => diagnostics.push((file.as_path(), error)),
+            Ok(docs) => {
+                for doc in docs {
+                    let (resource, found) = check_document(&doc);
+                    diagnostics.extend(found.into_iter().map(|d| (file.as_path(), d)));
+                    if let Some(resource) = resource {
+                        documents.push((file.as_path(), doc, resource));
+                    }
+                }
+            }
+        }
+    }
+
+    // A set with a broken document is rejected as a whole, and checking
+    // references into it would only add knock-on errors
+    if diagnostics.is_empty() {
+        check_names_and_references(&documents, &mut diagnostics);
+    }
+
+    diagnostics.sort_by(|(a, x), (b, y)| a.cmp(b).then(x.location.cmp(&y.location)));
+    diagnostics
+}
+
+/// Names are compared ignoring case, like MySQL's unique index on them
+fn check_names_and_references<'a>(
+    documents: &[(&'a FilePath, Document, Resource)],
+    diagnostics: &mut Vec<(&'a FilePath, Diagnostic)>,
+) {
+    let name_path = Path::keys(&["metadata", "name"]);
+    let mut names: HashMap<(Kind, String), (&FilePath, Location)> = HashMap::new();
+    for (file, doc, resource) in documents {
+        let kind = Kind::from(resource);
+        let name = &resource.metadata().name;
+        let location = doc.value_location(&name_path);
+        match names.entry((kind, name.to_lowercase())) {
+            Entry::Vacant(entry) => {
+                entry.insert((file, location));
+            }
+            Entry::Occupied(entry) => {
+                let (first_file, first) = entry.get();
+                diagnostics.push((
+                    file,
+                    Diagnostic::new(
+                        location,
+                        name_path.clone(),
+                        format!(
+                            "duplicate {kind:?} name `{name}`, first defined at {}:{first}",
+                            first_file.display()
+                        ),
+                    ),
+                ));
+            }
+        }
+    }
+
+    for (file, doc, resource) in documents {
+        let Resource::Target(target) = resource else {
+            continue;
+        };
+        let group = target
+            .spec
+            .group
+            .iter()
+            .map(|name| (Path::keys(&["spec", "group"]), Kind::TargetGroup, name));
+        let roles = target.spec.roles.iter().enumerate().map(|(index, name)| {
+            let mut path = Path::keys(&["spec", "roles"]);
+            path.0.push(Segment::Index(index));
+            (path, Kind::Role, name)
+        });
+        for (path, kind, name) in group.chain(roles) {
+            if !names.contains_key(&(kind, name.to_lowercase())) {
+                diagnostics.push((
+                    file,
+                    Diagnostic::new(
+                        doc.value_location(&path),
+                        path,
+                        format!("unknown {kind:?} `{name}`"),
+                    ),
+                ));
+            }
+        }
+    }
+}
 
 pub fn check_document(doc: &Document) -> (Option<Resource>, Vec<Diagnostic>) {
     let mut diagnostics = doc.errors.clone();
@@ -259,6 +353,70 @@ mod tests {
                     "must be at least 1"
                 ),
             ]
+        );
+    }
+
+    fn check_all(files: &[(&str, &str)]) -> Vec<String> {
+        let files: Vec<_> = files
+            .iter()
+            .map(|(file, source)| (PathBuf::from(file), (*source).to_owned()))
+            .collect();
+        check_files(&files)
+            .into_iter()
+            .map(|(file, d)| {
+                format!(
+                    "{}:{} {}: {}",
+                    file.display(),
+                    d.location,
+                    d.path,
+                    d.message
+                )
+            })
+            .collect()
+    }
+
+    const ROLE_DBA: &str =
+        "apiVersion: warpgate/v1\nkind: Role\nmetadata:\n  name: dba\nspec: {}\n";
+
+    #[test]
+    fn names_and_references_across_files() {
+        let found = check_all(&[
+            (
+                "a.yaml",
+                &format!(
+                    "{ROLE_DBA}---\n\
+                     apiVersion: warpgate/v1\nkind: TargetGroup\nmetadata:\n  name: dba\nspec: {{}}\n"
+                ),
+            ),
+            (
+                "b.yaml",
+                "apiVersion: warpgate/v1\nkind: Role\nmetadata:\n  name: DBA\nspec: {}\n\
+                 ---\n\
+                 apiVersion: warpgate/v1\nkind: Target\nmetadata:\n  name: web\nspec:\n  \
+                   group: prod\n  \
+                   roles: [dba, ops]\n  \
+                   options:\n    ssh:\n      host: h\n",
+            ),
+        ]);
+        assert_eq!(
+            found,
+            vec![
+                "b.yaml:4:9 metadata.name: duplicate Role name `DBA`, first defined at a.yaml:4:9",
+                "b.yaml:12:10 spec.group: unknown TargetGroup `prod`",
+                "b.yaml:13:16 spec.roles[1]: unknown Role `ops`",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_broken_document_skips_the_cross_document_checks() {
+        let found = check_all(&[
+            ("a.yaml", &format!("{ROLE_DBA}---\n{ROLE_DBA}")),
+            ("b.yaml", "a: [\n"),
+        ]);
+        assert_eq!(
+            found,
+            vec!["b.yaml:2:1 : while parsing a node, did not find expected node content"]
         );
     }
 }
