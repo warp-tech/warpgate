@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.30.0-beta.2-3-g0b5119cf-modified"
+    "version": "v0.30.0-beta.3-modified"
   },
   "servers": [
     {
@@ -4984,7 +4984,9 @@
           },
           "port": {
             "type": "integer",
-            "format": "int32"
+            "format": "int32",
+            "maximum": 65535.0,
+            "minimum": 1.0
           },
           "key_type": {
             "type": "string"
@@ -7862,7 +7864,8 @@
           },
           "ticket_max_duration_seconds": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "minimum": 1.0
           },
           "ticket_requests_disabled": {
             "type": "boolean",
@@ -7876,7 +7879,8 @@
           },
           "ticket_max_uses": {
             "type": "integer",
-            "format": "int16"
+            "format": "int16",
+            "minimum": 1.0
           }
         }
       },
@@ -7984,7 +7988,8 @@
           },
           "port": {
             "type": "integer",
-            "format": "uint16"
+            "format": "uint16",
+            "minimum": 1.0
           },
           "username": {
             "type": "string"
@@ -8209,7 +8214,8 @@
           },
           "port": {
             "type": "integer",
-            "format": "uint16"
+            "format": "uint16",
+            "minimum": 1.0
           },
           "username": {
             "type": "string"
@@ -8250,7 +8256,8 @@
           },
           "port": {
             "type": "integer",
-            "format": "uint16"
+            "format": "uint16",
+            "minimum": 1.0
           },
           "username": {
             "type": "string"
@@ -8293,7 +8300,8 @@
           },
           "port": {
             "type": "integer",
-            "format": "uint16"
+            "format": "uint16",
+            "minimum": 1.0
           },
           "username": {
             "type": "string"
@@ -8375,7 +8383,8 @@
           },
           "port": {
             "type": "integer",
-            "format": "uint16"
+            "format": "uint16",
+            "minimum": 1.0
           },
           "auth": {
             "$ref": "#/components/schemas/VncTargetAuth"

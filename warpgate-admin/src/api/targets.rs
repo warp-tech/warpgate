@@ -45,12 +45,14 @@ struct TargetDataRequest {
     options: TargetOptions,
     rate_limit_bytes_per_second: Option<u32>,
     group_id: Option<Uuid>,
+    #[oai(validator(minimum(value = "1")))]
     ticket_max_duration_seconds: Option<i64>,
     /// Required on every write, so that saving a target without mentioning a
     /// gate is refused rather than quietly taking it off.
     ticket_requests_disabled: bool,
     ticket_require_approval: bool,
     require_approval: bool,
+    #[oai(validator(minimum(value = "1")))]
     ticket_max_uses: Option<i16>,
 }
 

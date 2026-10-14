@@ -32,6 +32,7 @@ impl Default for KubernetesTargetCertificateAuth {
 pub struct TargetSSHOptions {
     pub host: String,
     #[serde(default = "_default_ssh_port")]
+    #[oai(validator(minimum(value = "1")))]
     pub port: u16,
     #[serde(default = "_default_username")]
     pub username: String,
@@ -176,6 +177,7 @@ pub struct TargetMySqlOptions {
     pub host: String,
 
     #[serde(default = "_default_mysql_port")]
+    #[oai(validator(minimum(value = "1")))]
     pub port: u16,
 
     #[serde(default = "_default_username")]
@@ -208,6 +210,7 @@ pub struct TargetPostgresOptions {
     pub host: String,
 
     #[serde(default = "_default_postgres_port")]
+    #[oai(validator(minimum(value = "1")))]
     pub port: u16,
 
     #[serde(default = "_default_username")]
@@ -235,6 +238,7 @@ pub struct TargetVncOptions {
     pub host: String,
 
     #[serde(default = "_default_vnc_port")]
+    #[oai(validator(minimum(value = "1")))]
     pub port: u16,
 
     #[serde(default)]
@@ -286,6 +290,7 @@ pub struct TargetRdpOptions {
     pub host: String,
 
     #[serde(default = "_default_rdp_port")]
+    #[oai(validator(minimum(value = "1")))]
     pub port: u16,
 
     #[serde(default = "_default_username")]
