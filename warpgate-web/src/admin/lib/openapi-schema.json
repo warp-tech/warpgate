@@ -101,9 +101,6 @@
           },
           {
             "CookieSecurityScheme": []
-          },
-          {
-            "ClusterPeerSecurityScheme": []
           }
         ],
         "operationId": "close_all_sessions"
@@ -220,9 +217,6 @@
           },
           {
             "CookieSecurityScheme": []
-          },
-          {
-            "ClusterPeerSecurityScheme": []
           }
         ],
         "operationId": "close_session"
@@ -2311,9 +2305,6 @@
           },
           {
             "CookieSecurityScheme": []
-          },
-          {
-            "ClusterPeerSecurityScheme": []
           }
         ],
         "operationId": "delete_user"

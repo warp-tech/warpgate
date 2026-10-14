@@ -1,6 +1,6 @@
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::{Expr, IntoCondition};
-use sea_orm::{Condition, DatabaseTransaction, QuerySelect, TransactionTrait};
+use sea_orm::{DatabaseTransaction, QuerySelect, TransactionTrait};
 use time::OffsetDateTime;
 use tracing::error;
 use uuid::Uuid;
@@ -166,17 +166,6 @@ pub async fn revoke(db: &DatabaseConnection, id: UserSessionId) -> Result<(), Wa
     transaction.commit().await?;
     ended.settle(db).await;
     Ok(())
-}
-
-pub async fn revoke_all(db: &DatabaseConnection) -> Result<(), WarpgateError> {
-    revoke_open_matching(db, Condition::all()).await
-}
-
-pub async fn revoke_all_for_user(
-    db: &DatabaseConnection,
-    user_id: Uuid,
-) -> Result<(), WarpgateError> {
-    revoke_open_matching(db, Column::UserId.eq(user_id)).await
 }
 
 pub async fn revoke_open_matching(

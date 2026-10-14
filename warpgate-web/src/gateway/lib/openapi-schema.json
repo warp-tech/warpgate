@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.29.1-47-gcd2038cd-modified"
+    "version": "v0.30.0-beta.2-modified"
   },
   "servers": [
     {
@@ -76,6 +76,9 @@
         "responses": {
           "201": {
             "description": ""
+          },
+          "403": {
+            "description": "The session must be ended via SSO single logout."
           }
         },
         "operationId": "logout"
@@ -530,6 +533,35 @@
           }
         },
         "operationId": "start_sso"
+      }
+    },
+    "/sso/providers/{name}/backchannel-logout": {
+      "post": {
+        "summary": "OpenID Connect Back-Channel Logout endpoint, called by the identity\nprovider when a user's session there ends.",
+        "parameters": [
+          {
+            "name": "name",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "sso_backchannel_logout"
       }
     },
     "/profile/credentials": {
@@ -2112,6 +2144,7 @@
           "password_login_mode",
           "authorized_via_ticket",
           "authorized_via_sso_with_single_logout",
+          "local_logout_disabled",
           "own_credential_management_allowed",
           "ticket_self_service_enabled",
           "ticket_require_description",
@@ -2152,6 +2185,9 @@
             "type": "boolean"
           },
           "authorized_via_sso_with_single_logout": {
+            "type": "boolean"
+          },
+          "local_logout_disabled": {
             "type": "boolean"
           },
           "own_credential_management_allowed": {

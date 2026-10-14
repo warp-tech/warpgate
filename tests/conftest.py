@@ -245,6 +245,8 @@ class ProcessManager:
         self._k3s_containers: List[str] = []
         # sshd container name by published port, for reading the target's log
         self.ssh_containers: dict[int, str] = {}
+        # OIDC mock container name by published port, for reading its signing key
+        self.oidc_containers: dict[int, str] = {}
 
     def _remove_k3s_containers(self):
         """Force-remove every k3s container we've started so far. Idempotent —
@@ -879,7 +881,19 @@ class ProcessManager:
 
         _wait_timeout(wait_oidc, "OIDC mock is not ready", timeout=self.timeout * 3)
         logging.debug(f"OIDC mock {container_name} is up on port {port}")
+        self.oidc_containers[port] = container_name
         return port
+
+    def oidc_signing_key(self, port) -> dict:
+        """The OIDC mock's private signing key as a JWK (its developer
+        signing credential), for minting tokens the mock never issues."""
+        import json as _json
+
+        return _json.loads(
+            subprocess.check_output(
+                ["docker", "exec", self.oidc_containers[port], "cat", "/app/tempkey.jwk"]
+            )
+        )
 
     def start_vault(self, root_token=None, engine: str = "vault") -> VaultInstance:
         """Runs a dev-mode Vault or OpenBao server (KV v2 auto-mounted at `secret/`).

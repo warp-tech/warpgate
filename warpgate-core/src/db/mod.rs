@@ -301,12 +301,13 @@ mod tests {
             data: Set("{}".into()),
             updated: Set(OffsetDateTime::now_utc()),
             user_session_id: Set(Some(warpgate_common::UserSessionId(detached_http))),
+            ..Default::default()
         })
         .exec_without_returning(&db)
         .await
         .unwrap();
 
-        UserSession::revoke_all(&db).await.unwrap();
+        crate::SessionsFilter::All.revoke(&db).await.unwrap();
 
         for id in [direct, detached_http] {
             assert!(
