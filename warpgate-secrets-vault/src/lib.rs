@@ -488,6 +488,24 @@ mod tests {
         ));
     }
 
+    #[tokio::test]
+    async fn static_token_is_trimmed_and_must_fit_a_header() {
+        let mut builder = VaultClientSettingsBuilder::default();
+        builder.address("https://vault.invalid").token("");
+        let mut client = VaultClient::new(builder.build().unwrap()).unwrap();
+        let token = |value: &str| {
+            VaultAuthConfig::Token(VaultTokenAuth {
+                token: StoredSecret::new(Secret::new(value.into())),
+            })
+        };
+
+        let pasted = authenticate(&mut client, &token("hvs.abc\n")).await;
+        assert!(pasted.is_ok());
+        assert_eq!(client.settings.token, "hvs.abc");
+        let broken = authenticate(&mut client, &token("hvs.a\nbc")).await;
+        assert!(broken.is_err());
+    }
+
     #[test]
     fn mounts_and_roles_are_single_path_segments() {
         assert!(validate_path_segment("ssh-client_signer1").is_ok());
