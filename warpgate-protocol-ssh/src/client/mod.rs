@@ -97,8 +97,8 @@ impl UserFacingReason for ConnectionError {
             | Self::Aborted
             | Self::Authentication
             | Self::HandshakeTimeout { .. }
-            | Self::CertificateRefusedLocally(_)
             | Self::JumpHostTargetNotFound => self.to_string(),
+            Self::CertificateRefusedLocally(_) => "Certificate refused by Warpgate".into(),
             Self::Io(e) | Self::Ssh(russh::Error::IO(e)) => io_connect_reason(e).into(),
             Self::Key(_) | Self::Ssh(_) => "SSH protocol error".into(),
             Self::Aws(_) => "AWS authentication for the SSH target failed".into(),
@@ -1452,8 +1452,9 @@ mod tests {
     use std::collections::HashMap;
 
     use uuid::Uuid;
+    use warpgate_common::UserFacingReason;
 
-    use super::resolve_chain_ids;
+    use super::{ConnectionError, resolve_chain_ids};
 
     #[test]
     fn resolve_chain_ids_returns_ordered_chain() {
@@ -1477,5 +1478,13 @@ mod tests {
         // `a` jumps through `b`, but `b` resolves to no SSH target.
         let jumps: HashMap<Uuid, Option<Uuid>> = HashMap::from([(a, Some(b))]);
         assert!(resolve_chain_ids(a, |id| jumps.get(&id).copied()).is_err());
+    }
+
+    #[test]
+    fn locally_refused_certificate_keeps_the_reason_from_the_user() {
+        let error = ConnectionError::CertificateRefusedLocally(
+            "the certificate names [\"root\", \"admin\"]".into(),
+        );
+        assert!(!error.user_facing_reason().contains("admin"));
     }
 }
