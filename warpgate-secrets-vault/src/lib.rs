@@ -27,6 +27,8 @@ const KUBERNETES_JWT_PATH: &str = "/var/run/secrets/kubernetes.io/serviceaccount
 /// The target's sshd logs the certificate key ID verbatim; this keeps a long
 /// username from flooding that log.
 const MAX_SSH_KEY_ID: usize = 256;
+/// Without it, a role that sets no `ttl` signs for the mount's default, 768h.
+const CERTIFICATE_TTL: &str = "5m";
 
 pub struct VaultBackend {
     /// Readers share the client; only (re)authentication takes the write lock.
@@ -219,7 +221,8 @@ impl VaultBackend {
         let mut opts = SignSSHKeyRequest::builder();
         opts.cert_type("user")
             .valid_principals(principal)
-            .key_id(key_id);
+            .key_id(key_id)
+            .ttl(CERTIFICATE_TTL);
         let client = self.client.read().await;
         vaultrs::ssh::ca::sign(&*client, mount, role, public_key, Some(&mut opts)).await
     }

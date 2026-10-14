@@ -53,6 +53,9 @@ def ca_key(vault: VaultInstance) -> str:
         "forced",
         **{**BASE_ROLE, "default_critical_options": {"force-command": "/bin/echo forced"}},
     )
+    vault.write_ssh_role(
+        MOUNT, "no-ttl", **{k: v for k, v in BASE_ROLE.items() if k not in ("ttl", "max_ttl")}
+    )
     return key
 
 
@@ -154,6 +157,19 @@ class TestCertificateAuth:
         log = sshd_log(processes, ssh_port)
         assert f"ID warpgate:{user.username}:" in log
         assert "CA ED25519" in log
+
+    def test_role_without_a_ttl(
+        self, processes, shared_wg, wg_c_ed25519_pubkey, ssh_port, backend, timeout
+    ):
+        user, target = setup_user_and_target(
+            processes,
+            shared_wg,
+            wg_c_ed25519_pubkey,
+            ssh_port=ssh_port,
+            auth=cert_auth(backend, role="no-ttl"),
+        )
+        code, stdout = connect(processes, shared_wg, user, target, timeout)
+        assert code == 0, stdout
 
     def test_principal_outside_the_role_is_refused(
         self, processes, shared_wg, wg_c_ed25519_pubkey, ssh_port, backend, timeout
