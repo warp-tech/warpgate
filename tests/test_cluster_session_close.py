@@ -26,15 +26,9 @@ def _poll(fn, deadline_s=15):
 
 
 class Test:
-    def test_cross_node_session_close(
-        self,
-        processes: ProcessManager,
-        timeout,
-        wg_c_ed25519_pubkey,
-    ):
+    def _open_session_on_a_and_find_it_on_b(self, processes, timeout, pubkey):
         # Two nodes on one database. The live session handle exists only on the
-        # node that owns the connection (A); closing it from node B must proxy
-        # the request to A.
+        # node that owns the connection (A); closing it from node B must reach A.
         node_a = processes.start_wg()
         wait_port(node_a.http_port, recv=False)
         node_b = processes.start_wg(share_with=node_a)
@@ -42,7 +36,7 @@ class Test:
 
         url_b = f"https://localhost:{node_b.http_port}"
 
-        user, ssh_target = setup_user_and_target(processes, node_a, wg_c_ed25519_pubkey)
+        user, ssh_target = setup_user_and_target(processes, node_a, pubkey)
 
         # Session on node A that stays open far longer than the test, so only an
         # explicit close (not the command finishing) can end it in-window.
@@ -64,8 +58,19 @@ class Test:
         # Discover the live session via node B (shared DB projection).
         session_id = _poll(lambda: _live_ssh_session_id(url_b, user.username))
         assert session_id is not None, "live session not visible from node B"
+        return url_b, user, session_id, ssh_client
 
-        # Close it FROM NODE B — B holds no handle for it, so it must proxy to A.
+    def test_cross_node_session_close(
+        self,
+        processes: ProcessManager,
+        timeout,
+        wg_c_ed25519_pubkey,
+    ):
+        url_b, _, session_id, ssh_client = self._open_session_on_a_and_find_it_on_b(
+            processes, timeout, wg_c_ed25519_pubkey
+        )
+
+        # Close it FROM NODE B, which holds no handle for it.
         with admin_client(url_b) as api:
             api.close_session(session_id)
 
@@ -79,3 +84,18 @@ class Test:
                 return api.get_session(session_id).ended is not None
 
         assert _poll(ended), "session never marked ended after close"
+
+    def test_cross_node_user_deletion_closes_sessions(
+        self,
+        processes: ProcessManager,
+        timeout,
+        wg_c_ed25519_pubkey,
+    ):
+        url_b, user, _, ssh_client = self._open_session_on_a_and_find_it_on_b(
+            processes, timeout, wg_c_ed25519_pubkey
+        )
+
+        with admin_client(url_b) as api:
+            api.delete_user(user.id)
+
+        assert ssh_client.wait(timeout=30) is not None, "session was not closed"

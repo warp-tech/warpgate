@@ -1,4 +1,5 @@
 use core::str;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -81,6 +82,21 @@ pub struct SsoLoginState {
     pub token: WarpgateIdToken,
     pub provider: String,
     pub supports_single_logout: bool,
+    #[serde(default)]
+    pub subject: Option<String>,
+    #[serde(default)]
+    pub sid: Option<String>,
+}
+
+impl SsoLoginState {
+    fn parse(json: &str) -> Option<Self> {
+        serde_json::from_str(json).ok()
+    }
+
+    // HACK: for getting the session state out of an already serialized session
+    pub fn from_session_entries(entries: &BTreeMap<String, serde_json::Value>) -> Option<Self> {
+        Self::parse(entries.get(AUTH_SSO_LOGIN_STATE)?.as_str()?)
+    }
 }
 
 pub trait SessionExt {
@@ -119,8 +135,7 @@ impl SessionExt for Session {
     }
 
     fn get_sso_login_state(&self) -> Option<SsoLoginState> {
-        self.get::<String>(AUTH_SSO_LOGIN_STATE)
-            .and_then(|x| serde_json::from_str(&x).ok())
+        SsoLoginState::parse(&self.get::<String>(AUTH_SSO_LOGIN_STATE)?)
     }
 
     fn set_sso_login_state(&self, state: SsoLoginState) {

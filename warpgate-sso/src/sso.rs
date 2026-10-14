@@ -9,20 +9,19 @@ use openidconnect::core::{
 };
 use openidconnect::url::Url;
 use openidconnect::{
-    AccessTokenHash, AdditionalClaims, Audience, AuthType, AuthorizationCode,
-    ClaimsVerificationError, Client, ClientSecret, CsrfToken, EmptyExtraTokenFields,
-    EndpointMaybeSet, EndpointNotSet, EndpointSet, HttpClientError, IdToken, IdTokenClaims,
-    IdTokenFields, LogoutRequest, Nonce, OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier,
-    PostLogoutRedirectUrl, ProviderMetadataWithLogout, RedirectUrl, RequestTokenError, Scope,
-    SignatureVerificationError, StandardErrorResponse, StandardTokenResponse, TokenResponse,
-    UserInfoClaims, UserInfoError, reqwest,
+    AccessTokenHash, AdditionalClaims, Audience, AuthType, AuthorizationCode, Client, ClientSecret,
+    CsrfToken, EmptyExtraTokenFields, EndpointMaybeSet, EndpointNotSet, EndpointSet,
+    HttpClientError, IdToken, IdTokenClaims, IdTokenFields, LogoutRequest, Nonce,
+    OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, PostLogoutRedirectUrl,
+    ProviderMetadataWithLogout, RedirectUrl, RequestTokenError, Scope, StandardErrorResponse,
+    StandardTokenResponse, TokenResponse, UserInfoClaims, UserInfoError, reqwest,
 };
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
 use crate::config::SsoInternalProviderConfig;
 use crate::request::SsoLoginRequest;
-use crate::{SsoError, discover_metadata, refresh_metadata};
+use crate::{BackchannelLogout, SsoError, discover_metadata, refresh_metadata};
 
 /// A single entry in a group-style claim: either a bare string, or a
 /// SCIM-style object (RFC 7643) from which we take `value` (stable group ID)
@@ -235,19 +234,16 @@ impl SsoClient {
         })
     }
 
-    /// Run `verify` against `client` and retry once with refreshed metadata if the token is signed with unknown (rotated) key
+    /// Run `verify` against `metadata` and retry once with refreshed metadata if the token is signed with unknown (rotated) key
     async fn retry_on_unknown_key<T>(
         &self,
-        client: &WarpgateClient,
-        verify: impl Fn(&WarpgateClient) -> Result<T, SsoError>,
+        metadata: &ProviderMetadataWithLogout,
+        action: impl Fn(&ProviderMetadataWithLogout) -> Result<T, SsoError>,
     ) -> Result<T, SsoError> {
-        match verify(client) {
-            Err(SsoError::ClaimsVerification(ClaimsVerificationError::SignatureVerification(
-                SignatureVerificationError::NoMatchingKey,
-            ))) => {
-                info!("ID token signed with a key missing from the cached JWKS, re-fetching it");
-                let metadata = refresh_metadata(&self.config, &self.http_client).await?;
-                verify(&client_from_metadata(&self.config, metadata)?)
+        match action(metadata) {
+            Err(error) if error.is_unknown_signing_key() => {
+                info!("Token signed with a key missing from the cached JWKS, re-fetching it");
+                action(&refresh_metadata(&self.config, &self.http_client).await?)
             }
             result => result,
         }
@@ -307,9 +303,9 @@ impl SsoClient {
         nonce: &Nonce,
         code: String,
     ) -> Result<SsoResult, SsoError> {
-        let client: WarpgateClient = make_client(&self.config, &self.http_client)
-            .await?
-            .set_redirect_uri(redirect_url);
+        let metadata = discover_metadata(&self.config, &self.http_client).await?;
+        let client =
+            client_from_metadata(&self.config, metadata.clone())?.set_redirect_uri(redirect_url);
 
         let mut req = client.exchange_code(AuthorizationCode::new(code))?;
         if let Some(verifier) = pkce_verifier {
@@ -337,7 +333,8 @@ impl SsoClient {
 
         let id_token: &WarpgateIdToken = token_response.id_token().ok_or(SsoError::NotOidc)?;
         let claims = self
-            .retry_on_unknown_key(&client, |client| {
+            .retry_on_unknown_key(&metadata, |metadata| {
+                let client = client_from_metadata(&self.config, metadata.clone())?;
                 let mut token_verifier = client.id_token_verifier();
 
                 if let Some(trusted_audiences) = self.config.additional_trusted_audiences() {
@@ -419,10 +416,11 @@ impl SsoClient {
         let trust_unknown = self.config.trust_unknown_audiences();
         let client_id = self.config.client_id().as_str().to_owned();
 
-        let client: WarpgateClient = make_client(&self.config, &self.http_client).await?;
+        let metadata = discover_metadata(&self.config, &self.http_client).await?;
 
         let claims = self
-            .retry_on_unknown_key(&client, |client| {
+            .retry_on_unknown_key(&metadata, |metadata| {
+                let client = client_from_metadata(&self.config, metadata.clone())?;
                 // Disable the built-in audience check so we can enforce it ourselves
                 // below.  Signature / iss / exp are still fully enforced.
                 let token_verifier = client.id_token_verifier().require_audience_match(false);
@@ -481,6 +479,14 @@ impl SsoClient {
         req = req.set_client_id(self.config.client_id().clone());
         req = req.set_post_logout_redirect_uri(PostLogoutRedirectUrl::from_url(redirect_url));
         Ok(req.http_get_url())
+    }
+
+    pub async fn verify_logout_token(&self, token: &str) -> Result<BackchannelLogout, SsoError> {
+        let metadata = discover_metadata(&self.config, &self.http_client).await?;
+        self.retry_on_unknown_key(&metadata, |metadata| {
+            crate::logout_token::verify(&self.config, metadata, token)
+        })
+        .await
     }
 }
 

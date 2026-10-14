@@ -39,3 +39,17 @@ pub enum SsoError {
     )]
     UnsupportedEndpointScheme { endpoint: String, url: String },
 }
+
+impl SsoError {
+    /// The token names a signing key missing from the provider's JWKS, which a
+    /// key rotation since the JWKS was cached explains.
+    pub(crate) const fn is_unknown_signing_key(&self) -> bool {
+        matches!(
+            self,
+            Self::SignatureVerification(SignatureVerificationError::NoMatchingKey)
+                | Self::ClaimsVerification(ClaimsVerificationError::SignatureVerification(
+                    SignatureVerificationError::NoMatchingKey,
+                ))
+        )
+    }
+}

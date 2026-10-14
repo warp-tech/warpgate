@@ -22,12 +22,15 @@ use warpgate_common::{NodeId, Protocol, UserSessionId, WarpgateError};
 use warpgate_db_entities::{HttpSession, Node, Parameters, TargetSession, UserSession};
 use warpgate_tls::configure_cluster_tls_connector;
 
+use crate::SessionsFilter;
+
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 const REAP_INTERVAL: Duration = Duration::from_secs(15);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub const NOTIFICATION_TIMEOUT: Duration = Duration::from_secs(10);
 pub const NOTIFICATIONS_ROUTE: &str = "/cluster/notifications";
+pub const CLOSE_SESSIONS_ROUTE: &str = "/cluster/close-sessions";
 
 /// A refresh notification sent between nodes, used to feed UI update websockets
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,7 +108,7 @@ impl Cluster {
         self.deliver_local(msg.clone());
         let this = Arc::clone(self);
         tokio::spawn(async move {
-            this.for_each_peer(|peer| this.post_notification(peer.into(), &msg))
+            this.for_each_peer(|peer| this.post_to_peer(peer.into(), NOTIFICATIONS_ROUTE, &msg))
                 .await;
         });
     }
@@ -118,19 +121,25 @@ impl Cluster {
         self.notifications.subscribe()
     }
 
+    pub async fn close_sessions_on_peers(&self, scope: &SessionsFilter) {
+        self.for_each_peer(|peer| self.post_to_peer(peer.into(), CLOSE_SESSIONS_ROUTE, scope))
+            .await;
+    }
+
     // TODO: client pool
-    async fn post_notification(
+    async fn post_to_peer(
         &self,
         peer: RemoteNode,
-        msg: &ClusterNotification,
+        route: &str,
+        body: &impl Serialize,
     ) -> Result<(), WarpgateError> {
         self.peer_request(
             &peer,
             reqwest::Method::POST,
-            &format!("/@warpgate/admin/api{NOTIFICATIONS_ROUTE}"),
+            &format!("/@warpgate/admin/api{route}"),
         )
         .await?
-        .json(msg)
+        .json(body)
         .send()
         .await?
         .error_for_status()?;
@@ -592,6 +601,7 @@ mod tests {
             data: Set("{}".into()),
             updated: Set(OffsetDateTime::now_utc()),
             user_session_id: Set(Some(warpgate_common::UserSessionId(user_session_id))),
+            ..Default::default()
         })
         .exec_without_returning(db)
         .await

@@ -386,6 +386,8 @@ impl Api {
                 provider: context.provider,
                 token: response.id_token.clone(),
                 supports_single_logout: context.supports_single_logout,
+                subject: Some(response.subject.clone()),
+                sid: response.sid.clone(),
             });
         }
 

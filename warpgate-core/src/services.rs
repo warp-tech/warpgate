@@ -24,7 +24,7 @@ use crate::rate_limiting::RateLimiterRegistry;
 use crate::recordings::SessionRecordings;
 use crate::{
     AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, ListenerStatusRegistry,
-    SecretBackendRegistry, State,
+    SecretBackendRegistry, SessionsFilter, State,
 };
 
 #[derive(Clone)]
@@ -53,6 +53,13 @@ const APPROVAL_SWEEP_INTERVAL: Duration = Duration::from_secs(1);
 const SESSION_CHANGE_COALESCE_WINDOW: Duration = Duration::from_millis(100);
 
 impl Services {
+    pub async fn close_sessions(&self, scope: SessionsFilter) -> Result<(), WarpgateError> {
+        scope.revoke(&self.db).await?;
+        State::close_local_sessions(&self.state, &scope).await;
+        self.cluster.close_sessions_on_peers(&scope).await;
+        Ok(())
+    }
+
     pub async fn new(
         config: WarpgateConfig,
         admin_token: Option<String>,

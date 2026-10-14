@@ -34,7 +34,7 @@ use warpgate_core::cluster::{ClusterNotification, refresh_notification_stream};
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_db_entities::{Parameters, SessionApprovalRequest as SAR, UserSession};
 
-use super::common::{emit_unknown_authentication_failed_event, logout};
+use super::common::{emit_unknown_authentication_failed_event, local_logout_disabled, logout};
 use crate::api::auth_scheme::AuthedSession;
 use crate::common::{
     SessionExt, authorize_session, get_auth_state_for_request,
@@ -112,6 +112,9 @@ enum LoginResponse {
 enum LogoutResponse {
     #[oai(status = 201)]
     Success,
+
+    #[oai(status = 403)]
+    LocalLogoutDisabled,
 }
 
 #[derive(Object)]
@@ -226,8 +229,12 @@ impl Api {
     async fn api_auth_logout(
         &self,
         session: &Session,
+        ctx: Data<&UnauthenticatedRequestContext>,
         session_middleware: Data<&Arc<Mutex<SessionStore>>>,
     ) -> poem::Result<LogoutResponse> {
+        if local_logout_disabled(session, &*ctx.services().config.lock().await) {
+            return Ok(LogoutResponse::LocalLogoutDisabled);
+        }
         logout(session, &mut *session_middleware.lock().await);
         Ok(LogoutResponse::Success)
     }

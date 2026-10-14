@@ -161,39 +161,6 @@ where
     }
 }
 
-/// [fan_out_to_peers] but expect a specific HTTP response code
-/// and return a list of (hostname, code) of responses that did not match
-pub async fn fan_out_to_peers_expecting(
-    ctx: &AuthenticatedRequestContext,
-    req: &Request,
-    expected: StatusCode,
-) -> Vec<(String, StatusCode)> {
-    fan_out_to_peers(ctx, req, req.original_uri().path())
-        .await
-        .into_iter()
-        .map(|(hostname, response)| (hostname, response.status()))
-        .filter(|(_, status)| *status != expected)
-        .collect()
-}
-
-/// Forwards `req` as `path` to every other registered node and collects what
-/// they answer, paired with the node's hostname for logging.
-///
-/// Best effort: a node can be registered but already gone (a crashed node stays
-/// in the registry until the reaper drops it), so an unreachable peer is logged,
-/// not raised. Callers must not fan out a request that arrived from a peer -
-/// see [`reject_second_hop`].
-pub async fn fan_out_to_peers(
-    ctx: &AuthenticatedRequestContext,
-    req: &Request,
-    path: &str,
-) -> Vec<(String, Response)> {
-    ctx.services()
-        .cluster
-        .for_each_peer(|peer| forward_http_to(ctx, req, path, peer.into()))
-        .await
-}
-
 fn reject_second_hop(req: &Request) -> poem::Result<()> {
     if is_cluster_peer_request(req) {
         return Err(poem::Error::from_string(
@@ -216,25 +183,6 @@ async fn connect_any(
         }
     }
     Err(last_error)
-}
-
-/// Forwards `req` to `path` on the peer rather than the request's own path - for
-/// when the peer's copy of the request needs different parameters.
-pub(crate) async fn forward_http_to(
-    ctx: &AuthenticatedRequestContext,
-    req: &Request,
-    path: &str,
-    owner: RemoteNode,
-) -> poem::Result<Response> {
-    forward_http_inner(
-        ctx.services(),
-        req,
-        path,
-        owner,
-        ForwardIdentity::User(&ctx.auth),
-        None,
-    )
-    .await
 }
 
 /// Forwards `req` to `owner` as `identity`.

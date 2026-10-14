@@ -722,6 +722,11 @@
         "default_credential_policy": {
           "description": "Default credential policy for auto-created users.\nKeys: \"http\", \"ssh\", \"mysql\", \"postgres\"\nValues: list of credential kinds e.g. [\"sso\"], [\"web\"], []"
         },
+        "disable_local_logout": {
+          "description": "Disables \"log out from Warpgate\" functionality when the provider supports single logout",
+          "type": "boolean",
+          "default": false
+        },
         "kubernetes": {
           "description": "kubectl OIDC parameters for generating a kubelogin kubeconfig.",
           "anyOf": [
