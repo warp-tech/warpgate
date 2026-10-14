@@ -17,5 +17,6 @@ serde.workspace = true
 serde_json = { workspace = true, features = ["std"] }
 serde_path_to_error = "0.1"
 strum = { version = "0.28", features = ["derive"] }
+walkdir = "2.5"
 warpgate-common = { path = "../warpgate-common" }
 warpgate-db-entities = { path = "../warpgate-db-entities" }

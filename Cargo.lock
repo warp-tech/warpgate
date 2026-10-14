@@ -8984,6 +8984,7 @@ dependencies = [
  "warpgate-common",
  "warpgate-core",
  "warpgate-db-entities",
+ "warpgate-gitops",
  "warpgate-protocol-http",
  "warpgate-protocol-kubernetes",
  "warpgate-protocol-mysql",
@@ -9322,6 +9323,7 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "strum 0.28.0",
+ "walkdir",
  "warpgate-common",
  "warpgate-db-entities",
 ]
