@@ -1,0 +1,2 @@
+tests/fixtures/invalid/references.yaml:12:10 spec.group: unknown TargetGroup `prod`
+tests/fixtures/invalid/references.yaml:13:16 spec.roles[1]: unknown Role `ops`

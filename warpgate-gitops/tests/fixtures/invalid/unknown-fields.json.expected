@@ -1,0 +1,23 @@
+[
+  {
+    "column": 3,
+    "file": "tests/fixtures/invalid/unknown-fields.yaml",
+    "line": 5,
+    "message": "unknown field `label`, expected one of `labels`, `name`",
+    "path": "metadata.label"
+  },
+  {
+    "column": 7,
+    "file": "tests/fixtures/invalid/unknown-fields.yaml",
+    "line": 10,
+    "message": "unknown field `usrname`, expected one of `allow_insecure_algos`, `auth`, `host`, `jump_host`, `port`, `username`",
+    "path": "spec.options.ssh.usrname"
+  },
+  {
+    "column": 9,
+    "file": "tests/fixtures/invalid/unknown-fields.yaml",
+    "line": 14,
+    "message": "unknown field `passwrod`, expected one of `kind`, `password`",
+    "path": "spec.options.ssh.auth.passwrod"
+  }
+]

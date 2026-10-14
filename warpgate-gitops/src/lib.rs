@@ -1,7 +1,10 @@
 use std::ffi::OsStr;
-use std::path::PathBuf;
+use std::fmt::Write;
+use std::path::{Path, PathBuf};
 use std::{fs, io};
 
+use diagnostic::Diagnostic;
+use serde_json::{Value, json};
 use walkdir::WalkDir;
 
 pub mod diagnostic;
@@ -41,4 +44,41 @@ pub fn read_files(paths: &[PathBuf]) -> io::Result<Vec<(PathBuf, String)>> {
         }
     }
     Ok(files)
+}
+
+/// One `file:line:col path: message` line per diagnostic
+pub fn format_text(diagnostics: &[(&Path, Diagnostic)]) -> String {
+    diagnostics
+        .iter()
+        .fold(String::new(), |mut out, (file, d)| {
+            let path = if d.path.0.is_empty() {
+                String::new()
+            } else {
+                format!(" {}", d.path)
+            };
+            // writing to a String cannot fail
+            let _ = writeln!(
+                out,
+                "{}:{}{path}: {}",
+                file.display(),
+                d.location,
+                d.message
+            );
+            out
+        })
+}
+
+pub fn format_json(diagnostics: &[(&Path, Diagnostic)]) -> Value {
+    diagnostics
+        .iter()
+        .map(|(file, d)| {
+            json!({
+                "file": file.display().to_string(),
+                "line": d.location.line,
+                "column": d.location.column,
+                "path": d.path.to_string(),
+                "message": d.message,
+            })
+        })
+        .collect()
 }

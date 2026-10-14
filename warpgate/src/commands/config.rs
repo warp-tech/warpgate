@@ -2,9 +2,8 @@ use std::path::PathBuf;
 use std::process::exit;
 
 use anyhow::Result;
-use serde_json::json;
 use warpgate_gitops::validate::check_files;
-use warpgate_gitops::{json_schema, read_files};
+use warpgate_gitops::{format_json, format_text, json_schema, read_files};
 
 #[derive(clap::Subcommand)]
 pub enum ConfigCommand {
@@ -53,31 +52,11 @@ fn validate(paths: &[PathBuf], format: OutputFormat) -> Result<()> {
 
     let diagnostics = check_files(&files);
     match format {
-        OutputFormat::Text => {
-            for (file, d) in &diagnostics {
-                let path = if d.path.0.is_empty() {
-                    String::new()
-                } else {
-                    format!(" {}", d.path)
-                };
-                println!("{}:{}{path}: {}", file.display(), d.location, d.message);
-            }
-        }
-        OutputFormat::Json => {
-            let diagnostics: Vec<_> = diagnostics
-                .iter()
-                .map(|(file, d)| {
-                    json!({
-                        "file": file.display().to_string(),
-                        "line": d.location.line,
-                        "column": d.location.column,
-                        "path": d.path.to_string(),
-                        "message": d.message,
-                    })
-                })
-                .collect();
-            println!("{}", serde_json::to_string_pretty(&diagnostics)?);
-        }
+        OutputFormat::Text => print!("{}", format_text(&diagnostics)),
+        OutputFormat::Json => println!(
+            "{}",
+            serde_json::to_string_pretty(&format_json(&diagnostics))?
+        ),
     }
 
     if !diagnostics.is_empty() {

@@ -1,0 +1,3 @@
+tests/fixtures/invalid/unrepresentable.yaml:6:17 metadata.labels.team: YAML tags are not supported
+tests/fixtures/invalid/unrepresentable.yaml:8:16 spec.description: YAML aliases are not supported
+tests/fixtures/invalid/unrepresentable.yaml:9:3 spec: mapping keys must be strings

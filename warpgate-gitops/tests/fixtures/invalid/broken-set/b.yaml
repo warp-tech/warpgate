@@ -1,0 +1,10 @@
+# Not reported: references are only checked once every document is valid
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: web
+spec:
+  roles: [ops]
+  options:
+    ssh:
+      host: h

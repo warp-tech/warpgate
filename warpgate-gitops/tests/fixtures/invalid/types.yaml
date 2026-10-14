@@ -1,0 +1,56 @@
+# Only the first type error of a document is reported
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: quoted-port
+spec:
+  options:
+    ssh:
+      host: h
+      port: "22"
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: unknown-tls-mode
+spec:
+  options:
+    mysql:
+      host: h
+      tls:
+        mode: strict
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: unknown-auth-kind
+spec:
+  options:
+    ssh:
+      host: h
+      auth:
+        kind: pubkey
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: unknown-protocol
+spec:
+  options:
+    telnet:
+      host: h
+---
+apiVersion: warpgate/v1
+kind: Role
+metadata: {}
+spec: {}
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: roles-not-a-list
+spec:
+  roles: dba
+  options:
+    ssh:
+      host: h
