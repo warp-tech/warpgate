@@ -36,8 +36,9 @@ pub enum SecretError {
 impl UserFacingReason for SecretError {
     fn user_facing_reason(&self) -> String {
         match self {
-            Self::InvalidRef(_) | Self::NotFound { .. } | Self::PathNotAllowed { .. } => {
-                "Invalid secret reference".into()
+            Self::InvalidRef(_) | Self::NotFound { .. } => "Invalid secret reference".into(),
+            Self::PathNotAllowed { .. } => {
+                "The secret backend is not allowed to be used for this path".into()
             }
             Self::InvalidBackendName(_) => "Invalid secret backend name".into(),
             Self::BackendNotConfigured { .. } | Self::Backend(_) => "Secret backend error".into(),
@@ -142,7 +143,8 @@ pub struct SecretBackendConfig {
     pub namespace: Option<String>,
     pub auth: VaultAuthConfig,
     pub tls_skip_verify: bool,
-    /// Allowed KV path prefixes (`mount/path`), empty = any
+    /// Path prefixes the backend may be used for, empty = any: `mount/path`
+    /// for a KV read, `mount/sign/role` for SSH certificate signing
     pub allowed_paths: Vec<String>,
 }
 
