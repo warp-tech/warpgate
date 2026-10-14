@@ -6,6 +6,7 @@ pub mod consts;
 pub mod encryption;
 mod error;
 pub mod eventhub;
+pub mod fuzzy;
 pub mod helpers;
 pub mod http_headers;
 pub mod secrets;
@@ -15,11 +16,11 @@ mod types;
 pub mod version;
 
 pub use config::*;
-pub use error::{UserFacingReason, WarpgateError};
+pub use error::{UserFacingReason, WarpgateError, io_connect_reason};
 pub use helpers::password_policy::{PasswordPolicy, PasswordPolicyViolation, validate_password};
 pub use secrets::{
     BackendType, MaybeSecretRef, SecretBackendConfig, SecretError, SecretRef, SecretResolver,
-    VaultAppRoleAuth, VaultAuthConfig, VaultKubernetesAuth, VaultTokenAuth,
+    StoredSecrets, VaultAppRoleAuth, VaultAuthConfig, VaultKubernetesAuth, VaultTokenAuth,
 };
 pub use state::GlobalParams;
 pub use types::*;

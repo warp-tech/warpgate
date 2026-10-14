@@ -4,7 +4,6 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use poem::listener::Listener;
 use poem::{EndpointExt, Route, Server};
 use rustls::ServerConfig;
 use tracing::info;
@@ -12,17 +11,18 @@ use warpgate_common::helpers::proxy_protocol::MaybeProxyProtocolAcceptor;
 use warpgate_common::{ListenEndpoint, TargetKubernetesOptions};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_core::Services;
-use warpgate_tls::{SingleCertResolver, TlsCertificateAndPrivateKey};
+use warpgate_tls::{
+    PossessionOnlyClientCertVerifier, ResolveServerCert, TlsCertificateAndPrivateKey,
+};
 
 use crate::correlator::RequestCorrelator;
-use crate::server::client_certs::{AcceptAnyClientCert, certificate_capturing_acceptor};
+use crate::server::client_certs::{certificate_capturing_acceptor, client_certificate_extension};
 use crate::server::handlers::handle_api_request;
 
 pub mod auth;
 mod client_certs;
 mod handlers;
 
-use client_certs::CertificateExtractorMiddleware;
 use warpgate_common_http::errors::render_errors;
 
 /// Cached client reuse time limit, itself limited by the credential lifetime (e.g. EKS token)
@@ -45,7 +45,7 @@ pub async fn bind_server(
         .at("/", handle_api_request)
         .at("/*path", handle_api_request)
         .with(poem::middleware::Cors::new())
-        .with(CertificateExtractorMiddleware)
+        .with(client_certificate_extension())
         .data(UnauthenticatedRequestContext::new(services.clone()).await)
         .data(correlator)
         .data(upstream_clients)
@@ -65,12 +65,14 @@ pub async fn bind_server(
     let tls_config = ServerConfig::builder_with_provider(provider.clone())
         .with_safe_default_protocol_versions()
         .map_err(|e| anyhow::anyhow!("Failed to configure TLS protocol versions: {e}"))?
-        .with_client_cert_verifier(Arc::new(AcceptAnyClientCert::new(provider)))
-        .with_cert_resolver(Arc::new(SingleCertResolver::new(
-            certificate_and_key.clone(),
-        )));
+        .with_client_cert_verifier(Arc::new(PossessionOnlyClientCertVerifier::optional(
+            provider,
+        )))
+        .with_cert_resolver(Arc::new(ResolveServerCert(Arc::new(
+            certificate_and_key.clone().into(),
+        ))));
 
-    let tcp_acceptor = address.poem_listener()?.into_acceptor().await?;
+    let tcp_acceptor = address.poem_acceptor().await?;
     let tcp_acceptor = MaybeProxyProtocolAcceptor::new(tcp_acceptor, proxy_protocol);
     let cert_capturing_acceptor = certificate_capturing_acceptor(tcp_acceptor, tls_config);
 

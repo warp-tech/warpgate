@@ -51,8 +51,9 @@ async fn admin_access(req: &Request, _key: ApiKey) -> Option<AdminAccess> {
     }
 }
 
-/// Checker for [`ClusterOrAdminContext`]: as above, but a cluster peer is also accepted — the
-/// origin node has already authorized the admin before forwarding, so it gets every permission.
+/// Checker for [`ClusterOrAdminContext`]: as above, but a cluster peer (a node that proved its
+/// pinned TLS identity at the listener) is also accepted — the origin node has already
+/// authorized the admin before forwarding, so it gets every permission.
 async fn cluster_or_admin_access(req: &Request, _key: ApiKey) -> Option<AdminAccess> {
     let ctx = req.data::<AuthenticatedRequestContext>().cloned()?;
     if ctx.auth.is_cluster_peer() {
@@ -143,27 +144,28 @@ pub struct ClusterOrAdminTokenAuth(AdminAccess);
 )]
 pub struct ClusterOrAdminCookieAuth(AdminAccess);
 
-/// Peer-to-peer cluster token.
-// A forwarded request carries no admin token or cookie - the cluster token header is its only
-// credential, so it has to be a key this scheme accepts. The value here is not trusted:
-// `cluster_or_admin_access` goes by the authorization the middleware already validated.
+/// Peer-forwarded request.
+// A forwarded request carries no admin token or cookie - the sending node's id header is the
+// only key this scheme can latch onto. The value is not trusted: the peer was authenticated by
+// its TLS client certificate at the listener, and `cluster_or_admin_access` goes by the
+// authorization the middleware derived from that.
 #[derive(SecurityScheme)]
 #[oai(
-    rename = "ClusterTokenSecurityScheme",
+    rename = "ClusterPeerSecurityScheme",
     ty = "api_key",
-    key_name = "X-Warpgate-Cluster-Token",
+    key_name = "X-Warpgate-Cluster-Node",
     key_in = "header",
     checker = "cluster_or_admin_access"
 )]
-pub struct ClusterTokenAuth(AdminAccess);
+pub struct ClusterPeerAuth(AdminAccess);
 
-/// Like [`AdminContext`], but also accepts a cluster token (peer-forwarded admin requests).
+/// Like [`AdminContext`], but also accepts a cluster peer (peer-forwarded admin requests).
 /// Use only on endpoints that are legitimately cross-node forwardable.
 #[derive(SecurityScheme)]
 pub enum ClusterOrAdminContext {
     Token(ClusterOrAdminTokenAuth),
     Cookie(ClusterOrAdminCookieAuth),
-    ClusterToken(ClusterTokenAuth),
+    ClusterPeer(ClusterPeerAuth),
 }
 
 impl ClusterOrAdminContext {
@@ -171,13 +173,13 @@ impl ClusterOrAdminContext {
         match self {
             Self::Token(t) => &t.0,
             Self::Cookie(c) => &c.0,
-            Self::ClusterToken(t) => &t.0,
+            Self::ClusterPeer(t) => &t.0,
         }
     }
 
     /// true if the request came in via intra-cluster forwarding
     pub(crate) const fn is_intra_cluster_request(&self) -> bool {
-        matches!(self, Self::ClusterToken(_))
+        matches!(self, Self::ClusterPeer(_))
     }
 
     pub(crate) const fn require(&self, permission: AdminPermission) -> Result<(), WarpgateError> {

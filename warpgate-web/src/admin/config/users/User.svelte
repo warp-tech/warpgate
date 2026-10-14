@@ -32,6 +32,7 @@
     import { adminPermissions } from 'admin/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
+    import { toLocalISO } from 'common/helpers'
     import Loadable from 'common/Loadable.svelte'
     import PageSummaryBar from 'common/PageSummaryBar.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
@@ -188,14 +189,6 @@
         }
 
         userRoles = await api.getUserRoles(user)
-    }
-
-    function toLocalISO(date: Date): string {
-        const tzOffset = date.getTimezoneOffset() * 60000
-        const localISOTime = new Date(date.getTime() - tzOffset)
-            .toISOString()
-            .slice(0, -5)
-        return localISOTime
     }
 
     function nowLocalISO(): string {

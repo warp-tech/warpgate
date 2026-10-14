@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.29.1-26-gdf7b889a-modified"
+    "version": "v0.29.1-47-gcd2038cd-modified"
   },
   "servers": [
     {
@@ -2216,8 +2216,7 @@
             "type": "boolean"
           },
           "logo_etag": {
-            "type": "string",
-            "description": "Content hash of the custom logo, `None` when unset. Changes whenever the\nlogo does, so it keys the logo URL (`/api/logo?v=…`) for long-lived caching."
+            "type": "string"
           },
           "config_warnings": {
             "type": "array",
@@ -2902,8 +2901,8 @@
     "securitySchemes": {
       "ClusterSecurityScheme": {
         "type": "apiKey",
-        "description": "Requests forwarded by a cluster peer authenticate with the cluster token\n(plus the forwarded user identity resolved into the request authorization —\nsee `cluster_request_authorization`). The checker only reads the context\nthat `inject_request_authorization` attaches after verifying the token, so\na bogus header value alone never authenticates.",
-        "name": "x-warpgate-cluster-token",
+        "description": "Requests forwarded by a cluster peer are authenticated by the peer's TLS\nclient certificate at the listener (plus the forwarded user identity\nresolved into the request authorization — see\n`cluster_request_authorization`). The node id header only lets this scheme\nfire: the checker reads the context that `inject_request_authorization`\nattaches, so a header alone never authenticates.",
+        "name": "x-warpgate-cluster-node",
         "in": "header"
       },
       "CookieSecurityScheme": {

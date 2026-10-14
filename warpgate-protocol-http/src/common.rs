@@ -2,7 +2,7 @@ use core::str;
 use std::sync::Arc;
 
 use anyhow::Context;
-use http::{HeaderName, StatusCode};
+use http::StatusCode;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use poem::error::InternalServerError;
 use poem::session::{CookieConfig, Session};
@@ -22,7 +22,7 @@ use warpgate_common_http::ext::{construct_external_url, is_navigation_request};
 use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
-    X_WARPGATE_CLUSTER_IDENTITY, is_cluster_peer_request,
+    X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_TOKEN, is_cluster_peer_request,
 };
 use warpgate_core::{ConfigProvider, vet_credential_bearer};
 use warpgate_db_entities::User;
@@ -37,7 +37,6 @@ static TARGET_SESSION_KEY: &str = "target_name";
 static AUTH_SESSION_KEY: &str = "auth";
 static AUTH_SSO_LOGIN_STATE: &str = "auth_sso_login_state";
 pub static SESSION_COOKIE_NAME: &str = "warpgate-http-session";
-pub static X_WARPGATE_TOKEN: HeaderName = HeaderName::from_static("x-warpgate-token");
 
 /// The session cookie's shape — name and (absence of) signing — defined once:
 /// the `ServerSession` middleware writes the cookie through this config, and
@@ -342,7 +341,7 @@ pub async fn authorize_session(
 
     // when auth is completed, we must rotate the cookie *on the first hop*
     // since cookies set by a forwarded request are not passed back to the client
-    if !warpgate_common_http::is_cluster_peer_request(req, &ctx.services().cluster.cluster_token) {
+    if !is_cluster_peer_request(req) {
         // we are the first hop
 
         let jar = <&CookieJar>::from_request_without_body(req)
@@ -364,7 +363,7 @@ pub async fn authorize_session(
     Ok(())
 }
 
-/// Authorization for a request authenticated by the cluster token. The proxying
+/// Authorization for a request from an authenticated cluster peer. The proxying
 /// node forwards the acting user's id in `x-warpgate-cluster-identity` (see
 /// `cluster_proxy::proxy_or_serve`), so the request runs here as that user;
 /// without the header the peer acts as a bare cluster peer. An id that no
@@ -374,7 +373,7 @@ async fn cluster_request_authorization(
     req: &Request,
 ) -> poem::Result<Option<RequestAuthorization>> {
     let Some(header) = req.headers().get(&X_WARPGATE_CLUSTER_IDENTITY) else {
-        return Ok(Some(RequestAuthorization::ClusterToken));
+        return Ok(Some(RequestAuthorization::ClusterPeer));
     };
     let Some(user_id) = header.to_str().ok().and_then(|s| s.parse::<Uuid>().ok()) else {
         return Ok(None);
@@ -436,7 +435,7 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
         .await?
         .for_request();
     let session = <&Session>::from_request_without_body(&req).await?;
-    let is_cluster_peer = is_cluster_peer_request(&req, &ctx.services().cluster.cluster_token);
+    let is_cluster_peer = is_cluster_peer_request(&req);
 
     let mut session_auth = session.get_auth();
     // A forwarded request's Host is the cluster SNI name by construction, so the

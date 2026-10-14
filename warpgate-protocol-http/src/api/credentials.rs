@@ -397,13 +397,18 @@ impl Api {
             return Ok(CreatePublicKeyCredentialResponse::Unauthorized);
         };
 
+        let mut key = russh::keys::PublicKey::from_openssh(&body.openssh_public_key)
+            .map_err(russh::keys::Error::from)?;
+        key.set_comment("");
+        let openssh_public_key = key.to_openssh().map_err(russh::keys::Error::from)?;
+
         let object = PublicKeyCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(user.id),
             date_added: Set(Some(OffsetDateTime::now_utc())),
             last_used: Set(None),
             label: Set(body.label.clone()),
-            openssh_public_key: Set(body.openssh_public_key.clone()),
+            openssh_public_key: Set(openssh_public_key),
         }
         .insert(db)
         .await

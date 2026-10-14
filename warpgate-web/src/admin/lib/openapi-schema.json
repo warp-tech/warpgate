@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.29.1-26-gdf7b889a-modified"
+    "version": "v0.30.0-beta.1-33-gf5a7e368-modified"
   },
   "servers": [
     {
@@ -103,7 +103,7 @@
             "CookieSecurityScheme": []
           },
           {
-            "ClusterTokenSecurityScheme": []
+            "ClusterPeerSecurityScheme": []
           }
         ],
         "operationId": "close_all_sessions"
@@ -222,7 +222,7 @@
             "CookieSecurityScheme": []
           },
           {
-            "ClusterTokenSecurityScheme": []
+            "ClusterPeerSecurityScheme": []
           }
         ],
         "operationId": "close_session"
@@ -266,7 +266,7 @@
             "CookieSecurityScheme": []
           },
           {
-            "ClusterTokenSecurityScheme": []
+            "ClusterPeerSecurityScheme": []
           }
         ],
         "operationId": "get_recording"
@@ -2313,7 +2313,7 @@
             "CookieSecurityScheme": []
           },
           {
-            "ClusterTokenSecurityScheme": []
+            "ClusterPeerSecurityScheme": []
           }
         ],
         "operationId": "delete_user"
@@ -6652,8 +6652,7 @@
             "type": "boolean"
           },
           "logo_etag": {
-            "type": "string",
-            "description": "Content hash of the custom logo, `None` when unset; the image itself is\nserved by the gateway `/api/logo` endpoint."
+            "type": "string"
           },
           "web_auth_max_age_seconds": {
             "type": "integer",
@@ -6783,7 +6782,8 @@
         "type": "string",
         "enum": [
           "remotefx",
-          "lossless"
+          "lossless",
+          "graphics_pipeline"
         ]
       },
       "RdpTargetPasswordAuth": {
@@ -7172,6 +7172,9 @@
             "$ref": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth"
           },
           {
+            "$ref": "#/components/schemas/SSHTargetAuth_SshTargetCertificateAuth"
+          },
+          {
             "$ref": "#/components/schemas/SSHTargetAuth_SshTargetIamRoleAuth"
           }
         ],
@@ -7180,9 +7183,32 @@
           "mapping": {
             "Password": "#/components/schemas/SSHTargetAuth_SshTargetPasswordAuth",
             "PublicKey": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth",
+            "Certificate": "#/components/schemas/SSHTargetAuth_SshTargetCertificateAuth",
             "IamRole": "#/components/schemas/SSHTargetAuth_SshTargetIamRoleAuth"
           }
         }
+      },
+      "SSHTargetAuth_SshTargetCertificateAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Certificate"
+                ],
+                "example": "Certificate"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/SshTargetCertificateAuth"
+          }
+        ]
       },
       "SSHTargetAuth_SshTargetIamRoleAuth": {
         "allOf": [
@@ -7673,6 +7699,39 @@
           "AutoReject",
           "Ignore"
         ]
+      },
+      "SshTargetCertificateAuth": {
+        "type": "object",
+        "title": "SshTargetCertificateAuth",
+        "description": "Authenticates with a short-lived OpenSSH certificate signed per connection\nby the SSH secrets engine of a configured secret backend. The key pair is\ngenerated for the connection and never stored. The certificate's key ID is\n`warpgate:<username>:<session id>`, which the target's sshd logs verbatim.\nWhat else the certificate carries is the signing role's decision, except a\n`force-command`, which is refused.",
+        "required": [
+          "backend",
+          "role"
+        ],
+        "properties": {
+          "backend": {
+            "type": "string",
+            "description": "Name of the secret backend whose SSH secrets engine signs the key.",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._-]+$"
+          },
+          "mount": {
+            "type": "string",
+            "description": "Mount of the SSH secrets engine, in signed-certificates mode.",
+            "default": "ssh",
+            "maxLength": 255,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "role": {
+            "type": "string",
+            "description": "Signing role. It constrains the principals that may be requested, so\ntargets of differing privilege belong to differing roles.",
+            "maxLength": 255,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        }
       },
       "SshTargetIamRoleAuth": {
         "type": "object",
@@ -9079,10 +9138,10 @@
       }
     },
     "securitySchemes": {
-      "ClusterTokenSecurityScheme": {
+      "ClusterPeerSecurityScheme": {
         "type": "apiKey",
-        "description": "Peer-to-peer cluster token.",
-        "name": "X-Warpgate-Cluster-Token",
+        "description": "Peer-forwarded request.",
+        "name": "X-Warpgate-Cluster-Node",
         "in": "header"
       },
       "CookieSecurityScheme": {

@@ -8,6 +8,7 @@
 
 mod client;
 mod clipboard;
+mod desktop_size;
 mod server;
 mod session_handle;
 
@@ -118,9 +119,8 @@ pub fn connect(
             )
             .await
             {
-                let error_chain = format!("{error:#}");
-                error!(%error, %error_chain, "RDP client failed");
-                let _ = event_tx.send(DesktopEvent::Error(error_chain)).await;
+                let _ = event_tx.send(DesktopEvent::backend_error(&error)).await;
+                error!("RDP client failed: {:#}", anyhow::Error::from(error));
             }
             let _ = event_tx
                 .send(DesktopEvent::State(DesktopState::Disconnected))

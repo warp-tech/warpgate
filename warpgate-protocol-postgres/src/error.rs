@@ -1,4 +1,3 @@
-use std::error::Error;
 use std::string::FromUtf8Error;
 
 use pgwire::error::PgWireError;
@@ -42,14 +41,6 @@ pub enum PostgresError {
     SaslSession(#[from] SessionError),
     #[error(transparent)]
     Warpgate(#[from] WarpgateError),
-    #[error(transparent)]
-    Other(Box<dyn Error + Send + Sync>),
-}
-
-impl PostgresError {
-    pub fn other<E: Error + Send + Sync + 'static>(err: E) -> Self {
-        Self::Other(Box::new(err))
-    }
 }
 
 impl From<ErrorResponse> for PostgresError {

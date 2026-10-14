@@ -22,9 +22,11 @@
     const paramLabel = urlParams.get('label') ?? ''
     const paramExpiry = urlParams.get('expiry')
 
-    const initialExpiryMs = paramExpiry
+    const paramExpirySeconds = paramExpiry
         ? parseHumantimeDuration(paramExpiry)
         : undefined
+    const initialExpiryMs =
+        paramExpirySeconds !== undefined ? paramExpirySeconds * 1000 : undefined
 
     if (autoCreate) {
         creatingToken = true

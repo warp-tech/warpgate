@@ -28,16 +28,17 @@ pub struct TokenAuth(AuthenticatedRequestContext);
 )]
 pub struct CookieAuth(AuthenticatedRequestContext);
 
-/// Requests forwarded by a cluster peer authenticate with the cluster token
-/// (plus the forwarded user identity resolved into the request authorization —
-/// see `cluster_request_authorization`). The checker only reads the context
-/// that `inject_request_authorization` attaches after verifying the token, so
-/// a bogus header value alone never authenticates.
+/// Requests forwarded by a cluster peer are authenticated by the peer's TLS
+/// client certificate at the listener (plus the forwarded user identity
+/// resolved into the request authorization — see
+/// `cluster_request_authorization`). The node id header only lets this scheme
+/// fire: the checker reads the context that `inject_request_authorization`
+/// attaches, so a header alone never authenticates.
 #[derive(SecurityScheme)]
 #[oai(
     rename = "ClusterSecurityScheme",
     ty = "api_key",
-    key_name = "x-warpgate-cluster-token",
+    key_name = "x-warpgate-cluster-node",
     key_in = "header",
     checker = "authenticated_context"
 )]
@@ -112,10 +113,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_unverified_cluster_token_header() {
+    async fn rejects_cluster_node_header_without_a_verified_peer() {
         let resp = client()
             .get("/guarded")
-            .header("x-warpgate-cluster-token", "anything")
+            .header("x-warpgate-cluster-node", "anything")
             .send()
             .await;
         resp.assert_status(http::StatusCode::UNAUTHORIZED);

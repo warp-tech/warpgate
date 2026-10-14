@@ -78,6 +78,7 @@ ignore = [
     "RUSTSEC-2026-0194", # quick-xml quadratic time - see above
     "RUSTSEC-2021-0141", # dotenv is unmaintaned - only used for dev
     "RUSTSEC-2026-0258", # h2 empty data frame leak - only used by old hyper-rustls via aws sdk
+    "RUSTSEC-2024-0449", # unsafe-libyaml is unmaintained - serde_yaml (config) and poem still depend on it
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.

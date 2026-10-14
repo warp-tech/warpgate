@@ -1284,9 +1284,9 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "chacha20"
-version = "0.10.0"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f8d983286843e49675a4b7a2d174efe136dc93a18d69130dd18198a6c167601"
+checksum = "65c35e4b699c7e15ccbe7ee35c005e4fc0a278d22238a2857e6ce2dadeda1b06"
 dependencies = [
  "cfg-if",
  "cipher 0.5.2",
@@ -2042,9 +2042,9 @@ dependencies = [
 
 [[package]]
 name = "der"
-version = "0.8.0"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71fd89660b2dc699704064e59e9dba0147b903e85319429e131620d022be411b"
+checksum = "a878c850e9e421b20262e9b41f9c860e4785fa07541c266b62ff9d1ef998a80a"
 dependencies = [
  "const-oid 0.10.2",
  "pem-rfc7468 1.0.0",
@@ -2251,7 +2251,7 @@ dependencies = [
  "crypto-bigint 0.7.5",
  "crypto-common 0.2.2",
  "crypto-primes",
- "der 0.8.0",
+ "der 0.8.2",
  "digest 0.11.3",
  "rfc6979 0.6.0",
  "sha2 0.11.0",
@@ -2300,7 +2300,7 @@ version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0681a4fc24c767085329728d8dfba959af91228aa4610cca4f8ce317ba46ae0"
 dependencies = [
- "der 0.8.0",
+ "der 0.8.2",
  "digest 0.11.3",
  "elliptic-curve 0.14.1",
  "rfc6979 0.6.0",
@@ -2474,7 +2474,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3416,7 +3416,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -3786,8 +3786,6 @@ dependencies = [
 [[package]]
 name = "ironrdp-dvc"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a5de64988ddabf96928e2f042e1772a5f7201f0001ea99012129c73a105fc52"
 dependencies = [
  "ironrdp-core",
  "ironrdp-pdu",
@@ -3808,6 +3806,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ironrdp-egfx"
+version = "0.3.0"
+dependencies = [
+ "bit_field",
+ "bitflags 2.13.1",
+ "ironrdp-core",
+ "ironrdp-dvc",
+ "ironrdp-graphics",
+ "ironrdp-pdu",
+ "tracing",
+]
+
+[[package]]
 name = "ironrdp-error"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3816,8 +3827,6 @@ checksum = "cd344ce9518ab83f6f7568ca4f1bc6dc8c55bd2da04cb5ee7b3e8740d5041734"
 [[package]]
 name = "ironrdp-graphics"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7493e426b6a8104cd497e518ba7781a9c7fc9a5f58a9cc0c1111e6d66f63bcc"
 dependencies = [
  "bit_field",
  "bitflags 2.13.1",
@@ -3827,6 +3836,7 @@ dependencies = [
  "ironrdp-pdu",
  "num-derive",
  "num-traits",
+ "wide",
  "yuv",
 ]
 
@@ -3913,6 +3923,7 @@ dependencies = [
  "ironrdp-core",
  "ironrdp-displaycontrol",
  "ironrdp-dvc",
+ "ironrdp-egfx",
  "ironrdp-error",
  "ironrdp-graphics",
  "ironrdp-pdu",
@@ -4251,12 +4262,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "libyaml-rs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e126dda6f34391ab7b444f9922055facc83c07a910da3eb16f1e4d9c45dc777"
+
+[[package]]
 name = "libz-sys"
 version = "1.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85bc9657773828b90eeb625adff10eeac83cc21bbfd8e23a03eaa8a33c9e28d9"
 dependencies = [
  "cc",
+ "libc",
  "pkg-config",
  "vcpkg",
 ]
@@ -4670,7 +4688,17 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "nucleo-matcher"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf33f538733d1a5a3494b836ba913207f14d9d4a1d3cd67030c5061bdd2cac85"
+dependencies = [
+ "memchr",
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -5527,7 +5555,7 @@ version = "0.8.0-rc.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "986d2e952779af96ea048f160fd9194e1751b4faea78bcf3ceb456efe008088e"
 dependencies = [
- "der 0.8.0",
+ "der 0.8.2",
  "spki 0.8.0",
 ]
 
@@ -5539,7 +5567,7 @@ checksum = "279a91971a1d8eb1260a30938eae3be9cb67b472dffecb222fbbbe2fd2dc1453"
 dependencies = [
  "aes 0.9.2",
  "cbc",
- "der 0.8.0",
+ "der 0.8.2",
  "pbkdf2 0.13.0",
  "rand_core 0.10.1",
  "scrypt",
@@ -5563,7 +5591,7 @@ version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "451913da69c775a56034ea8d9003d27ee8948e12443eae7c038ba100a4f21cb7"
 dependencies = [
- "der 0.8.0",
+ "der 0.8.2",
  "pkcs5",
  "rand_core 0.10.1",
  "spki 0.8.0",
@@ -5999,7 +6027,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls 0.23.45",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
@@ -6037,9 +6065,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6628,7 +6656,7 @@ dependencies = [
  "curve25519-dalek 5.0.0",
  "data-encoding",
  "delegate",
- "der 0.8.0",
+ "der 0.8.2",
  "des",
  "digest 0.11.3",
  "ecdsa 0.17.0",
@@ -6819,7 +6847,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6899,7 +6927,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6941,6 +6969,15 @@ name = "ryu"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
+
+[[package]]
+name = "safe_arch"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96b02de82ddbe1b636e6170c21be622223aea188ef2e139be0a5b219ec215323"
+dependencies = [
+ "bytemuck",
+]
 
 [[package]]
 name = "salsa20"
@@ -7242,7 +7279,7 @@ checksum = "d56d437c2f19203ce5f7122e507831de96f3d2d4d3be5af44a0b0a09d8a80e4d"
 dependencies = [
  "base16ct 1.0.0",
  "ctutils",
- "der 0.8.0",
+ "der 0.8.2",
  "hybrid-array",
  "subtle",
  "zeroize",
@@ -7682,7 +7719,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7726,7 +7763,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d9efca8738c78ee9484207732f728b1ef517bbb1833d6fc0879ca898a522f6f"
 dependencies = [
  "base64ct",
- "der 0.8.0",
+ "der 0.8.2",
 ]
 
 [[package]]
@@ -8216,10 +8253,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8241,7 +8278,7 @@ dependencies = [
  "parking_lot",
  "rustix",
  "signal-hook",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9130,7 +9167,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate"
-version = "0.29.1"
+version = "0.30.0-beta.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9156,7 +9193,6 @@ dependencies = [
  "serde",
  "serde_ignored",
  "serde_json",
- "serde_yaml",
  "tempfile",
  "time",
  "tokio",
@@ -9178,11 +9214,12 @@ dependencies = [
  "warpgate-protocol-ssh",
  "warpgate-protocol-vnc",
  "warpgate-tls",
+ "yaml_serde",
 ]
 
 [[package]]
 name = "warpgate-admin"
-version = "0.29.1"
+version = "0.30.0-beta.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9251,7 +9288,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-ca"
-version = "0.29.1"
+version = "0.30.0-beta.2"
 dependencies = [
  "aws-lc-rs",
  "const-oid 0.9.6",
@@ -9270,7 +9307,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common"
-version = "0.29.1"
+version = "0.30.0-beta.2"
 dependencies = [
  "aes-gcm 0.11.0",
  "anyhow",
@@ -9285,6 +9322,8 @@ dependencies = [
  "governor",
  "humantime-serde",
  "ipnet",
+ "nix 0.31.3",
+ "nucleo-matcher",
  "password-hash 0.5.0",
  "poem",
  "poem-openapi",
@@ -9304,6 +9343,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "socket2 0.6.5",
  "strum 0.28.0",
  "thiserror 2.0.20",
  "time",
@@ -9335,34 +9375,37 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common-http"
-version = "0.29.1"
+version = "0.30.0-beta.2"
 dependencies = [
  "anyhow",
  "html-escape",
  "poem",
  "poem-openapi",
+ "rcgen",
+ "rustls 0.23.45",
  "serde",
- "subtle",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-rustls 0.26.4",
  "tracing",
  "url",
  "uuid",
+ "warpgate-ca",
  "warpgate-common",
  "warpgate-core",
  "warpgate-db-entities",
+ "warpgate-tls",
 ]
 
 [[package]]
 name = "warpgate-core"
-version = "0.29.1"
+version = "0.30.0-beta.2"
 dependencies = [
  "anyhow",
  "argon2 0.5.3",
  "async-trait",
  "bytes",
  "data-encoding",
- "dialoguer",
  "enum_dispatch",
  "futures",
  "governor",
@@ -9410,7 +9453,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-database-protocols"
-version = "0.29.1"
+version = "0.30.0-beta.2"
 dependencies = [
  "bitflags 2.13.1",
  "bytes",
@@ -9423,7 +9466,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-entities"
-version = "0.29.1"
+version = "0.30.0-beta.2"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -9446,7 +9489,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-migrations"
-version = "0.29.1"
+version = "0.30.0-beta.2"
 dependencies = [
  "data-encoding",
  "regex",
@@ -9491,7 +9534,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-ldap"
-version = "0.29.1"
+version = "0.30.0-beta.2"
 dependencies = [
  "anyhow",
  "ldap3",
@@ -9507,7 +9550,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-http"
-version = "0.29.1"
+version = "0.30.0-beta.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9522,6 +9565,7 @@ dependencies = [
  "poem-openapi",
  "regex",
  "reqwest 0.13.4",
+ "russh",
  "rustls 0.23.45",
  "sea-orm",
  "serde",
@@ -9553,7 +9597,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-kubernetes"
-version = "0.29.1"
+version = "0.30.0-beta.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9561,6 +9605,7 @@ dependencies = [
  "bytes",
  "dashmap",
  "futures",
+ "h2 0.4.16",
  "http 1.5.0",
  "md5",
  "percent-encoding",
@@ -9579,6 +9624,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.26.4",
  "tokio-tungstenite 0.30.0",
+ "tokio-util",
  "tracing",
  "url",
  "uuid",
@@ -9595,7 +9641,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-mysql"
-version = "0.29.1"
+version = "0.30.0-beta.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9625,7 +9671,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-postgres"
-version = "0.29.1"
+version = "0.30.0-beta.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9661,8 +9707,10 @@ dependencies = [
  "bytes",
  "futures",
  "ironrdp",
+ "ironrdp-egfx",
  "ironrdp-server",
  "ironrdp-tokio",
+ "libz-sys",
  "openssl",
  "rustls 0.23.45",
  "rustls-native-certs",
@@ -9683,7 +9731,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-ssh"
-version = "0.29.1"
+version = "0.30.0-beta.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9749,7 +9797,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-secrets-vault"
-version = "0.28.5"
+version = "0.30.0-beta.2"
 dependencies = [
  "async-trait",
  "serde",
@@ -9763,7 +9811,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-sso"
-version = "0.29.1"
+version = "0.30.0-beta.2"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -9784,7 +9832,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-tls"
-version = "0.29.1"
+version = "0.30.0-beta.2"
 dependencies = [
  "bytes",
  "poem",
@@ -9806,7 +9854,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-web"
-version = "0.29.1"
+version = "0.30.0-beta.2"
 dependencies = [
  "rust-embed",
  "serde",
@@ -10201,6 +10249,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "wide"
+version = "0.7.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ce5da8ecb62bcd8ec8b7ea19f69a51275e91299be594ea5cc6ef7819e16cd03"
+dependencies = [
+ "bytemuck",
+ "safe_arch",
+]
+
+[[package]]
 name = "widestring"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10234,7 +10292,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -10626,13 +10684,14 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "wnaf"
-version = "0.14.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab12e7090f27e2ffd9322651492942d50c2926094af30601e1964337db39daf1"
+checksum = "795ca18b3fdb5e62bf982199278341ddcf7ebf7d32e25e212ad05d496e95f6fa"
 dependencies = [
  "ff 0.14.0",
  "group 0.14.0",
  "hybrid-array",
+ "primefield",
 ]
 
 [[package]]
@@ -10750,6 +10809,19 @@ dependencies = [
  "arraydeque",
  "encoding_rs",
  "hashlink 0.11.1",
+]
+
+[[package]]
+name = "yaml_serde"
+version = "0.10.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33b729a08a9a6be689bbad3e2bf8015926db54b6622cc89c3a5f7dc174b9e918"
+dependencies = [
+ "indexmap 2.14.0",
+ "itoa",
+ "libyaml-rs",
+ "ryu",
+ "serde",
 ]
 
 [[package]]

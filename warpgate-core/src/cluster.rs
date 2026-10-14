@@ -9,7 +9,7 @@ use poem::IntoResponse;
 use poem::web::websocket::{Message, WebSocket};
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{Expr, IntoCondition, OnConflict};
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect};
+use sea_orm::{ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tokio::sync::broadcast;
@@ -17,8 +17,8 @@ use tokio::time::timeout;
 use tracing::{info, warn};
 use uuid::Uuid;
 use warpgate_ca::{CLUSTER_TLS_SNI_NAME, ClusterTlsIdentity};
-use warpgate_common::http_headers::X_WARPGATE_CLUSTER_TOKEN;
-use warpgate_common::{NodeId, Protocol, Secret, UserSessionId, WarpgateError};
+use warpgate_common::http_headers::X_WARPGATE_CLUSTER_NODE;
+use warpgate_common::{NodeId, Protocol, UserSessionId, WarpgateError};
 use warpgate_db_entities::{HttpSession, Node, Parameters, TargetSession, UserSession};
 use warpgate_tls::configure_cluster_tls_connector;
 
@@ -75,7 +75,6 @@ pub struct Cluster {
     pub node_id: NodeId,
     /// Peer auth certificate issued for this process
     pub tls_identity: ClusterTlsIdentity,
-    pub cluster_token: Arc<Secret<String>>,
     db: DatabaseConnection,
     /// Peer address (host:port)
     address: String,
@@ -94,7 +93,6 @@ impl Cluster {
                 &params.ca_certificate_pem,
                 &params.ca_private_key_pem,
             )?,
-            cluster_token: Arc::new(resolve_cluster_token(&db, &params).await?),
             address: advertised_peer_address(http_port)?,
             hostname: std::net::hostname()?.to_string_lossy().to_string(),
             ca_certificate_pem: params.ca_certificate_pem,
@@ -196,10 +194,20 @@ impl Cluster {
                 method,
                 format!("https://{CLUSTER_TLS_SNI_NAME}:{port}{path}"),
             )
-            .header(
-                X_WARPGATE_CLUSTER_TOKEN.clone(),
-                self.cluster_token.expose_secret(),
-            ))
+            .header(X_WARPGATE_CLUSTER_NODE.clone(), self.node_id.to_string()))
+    }
+
+    pub async fn lookup_by_mtls_fingerprint(
+        &self,
+        spki_sha256_hex: &str,
+    ) -> Result<Option<NodeId>, WarpgateError> {
+        Ok(alive_nodes(&self.db)
+            .await?
+            .into_iter()
+            .find(|node| {
+                node.id != self.node_id && node.tls_spki_sha256.as_deref() == Some(spki_sha256_hex)
+            })
+            .map(|node| node.id))
     }
 
     /// resolve a node UUID into an [Owner::Local]/[Owner::Remote],
@@ -228,7 +236,11 @@ impl Cluster {
                 peer.address
             )));
         };
-        let tls = configure_cluster_tls_connector(self.ca_certificate_pem.as_bytes(), pin)?;
+        let tls = configure_cluster_tls_connector(
+            self.ca_certificate_pem.as_bytes(),
+            pin,
+            &self.tls_identity,
+        )?;
         let addrs: Vec<SocketAddr> = tokio::net::lookup_host(&peer.address)
             .await
             .map_err(|error| {
@@ -327,32 +339,6 @@ impl Cluster {
     }
 }
 
-async fn resolve_cluster_token(
-    db: &DatabaseConnection,
-    params: &Parameters::Model,
-) -> Result<Secret<String>, WarpgateError> {
-    if let Some(token) = &params.cluster_token {
-        return Ok(Secret::new(token.clone()));
-    }
-
-    Parameters::Entity::update_many()
-        .col_expr(
-            Parameters::Column::ClusterToken,
-            Expr::value(Secret::<String>::random().expose_secret().clone()),
-        )
-        .filter(Parameters::Column::ClusterToken.is_null())
-        .exec(db)
-        .await?;
-
-    Parameters::Entity::get(db)
-        .await?
-        .cluster_token
-        .map(Secret::new)
-        .ok_or_else(|| {
-            WarpgateError::InconsistentState("cluster token missing after generation".into())
-        })
-}
-
 /// Websocket that serves refresh notifications for a page from a cluster notification stream
 pub fn refresh_notification_stream(
     ws: WebSocket,
@@ -393,49 +379,41 @@ pub fn refresh_notification_stream(
 /// ending a session mid-birth.
 const SHARED_SESSION_ORPHAN_GRACE: time::Duration = time::Duration::minutes(5);
 
-/// bound sessions reap 1/2: mark user sessions matching filter as ended
+/// bound sessions reap 1/2: end user sessions matching filter
 async fn end_connection_bound_sessions(
     db: &DatabaseConnection,
     node_filter: impl IntoCondition,
 ) -> Result<(), WarpgateError> {
-    UserSession::Entity::update_many()
-        .col_expr(
-            UserSession::Column::Ended,
-            Expr::value(OffsetDateTime::now_utc()),
-        )
-        .filter(node_filter)
-        .filter(UserSession::Column::NodeId.is_not_null())
-        .filter(UserSession::Column::Ended.is_null())
-        .exec(db)
-        .await?;
-    Ok(())
+    UserSession::revoke_open_matching(
+        db,
+        Condition::all()
+            .add(node_filter.into_condition())
+            .add(UserSession::Column::NodeId.is_not_null()),
+    )
+    .await
 }
 
 /// End unowned (HTTP browser) sessions whose backing is gone: they are kept
 /// alive by their stored cookie sessions, not by any node.
 async fn end_sessions_without_cookie(db: &DatabaseConnection) -> Result<(), WarpgateError> {
     let grace_cutoff = OffsetDateTime::now_utc() - SHARED_SESSION_ORPHAN_GRACE;
-    UserSession::Entity::update_many()
-        .col_expr(
-            UserSession::Column::Ended,
-            Expr::value(OffsetDateTime::now_utc()),
-        )
-        .filter(UserSession::Column::Protocol.eq(Protocol::Http.name()))
-        .filter(UserSession::Column::NodeId.is_null())
-        .filter(UserSession::Column::Ended.is_null())
-        .filter(UserSession::Column::Started.lt(grace_cutoff))
-        .filter(
-            UserSession::Column::Id.not_in_subquery(
-                sea_orm::sea_query::Query::select()
-                    .column(HttpSession::Column::UserSessionId)
-                    .from(HttpSession::Entity)
-                    .and_where(Expr::col(HttpSession::Column::UserSessionId).is_not_null())
-                    .to_owned(),
+    UserSession::revoke_open_matching(
+        db,
+        Condition::all()
+            .add(UserSession::Column::Protocol.eq(Protocol::Http.name()))
+            .add(UserSession::Column::NodeId.is_null())
+            .add(UserSession::Column::Started.lt(grace_cutoff))
+            .add(
+                UserSession::Column::Id.not_in_subquery(
+                    sea_orm::sea_query::Query::select()
+                        .column(HttpSession::Column::UserSessionId)
+                        .from(HttpSession::Entity)
+                        .and_where(Expr::col(HttpSession::Column::UserSessionId).is_not_null())
+                        .to_owned(),
+                ),
             ),
-        )
-        .exec(db)
-        .await?;
-    Ok(())
+    )
+    .await
 }
 
 /// Safety net: no target access may read as open past its parent. The normal
@@ -659,13 +637,46 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cluster_token_is_shared_across_nodes() {
+    async fn registered_peer_matches_live_pins_of_other_nodes_only() {
         let db = migrated_db().await;
-        let a = Cluster::new(db.clone(), 0).await.unwrap();
-        let b = Cluster::new(db, 0).await.unwrap();
+        let a = Arc::new(Cluster::new(db.clone(), 0).await.unwrap());
+        let b = Arc::new(Cluster::new(db.clone(), 0).await.unwrap());
+        a.start().await.unwrap();
+        b.start().await.unwrap();
+
         assert_eq!(
-            a.cluster_token.expose_secret(),
-            b.cluster_token.expose_secret()
+            a.lookup_by_mtls_fingerprint(&b.tls_identity.spki_sha256_hex)
+                .await
+                .unwrap(),
+            Some(b.node_id)
+        );
+        // A node never counts itself as a peer
+        assert_eq!(
+            a.lookup_by_mtls_fingerprint(&a.tls_identity.spki_sha256_hex)
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            a.lookup_by_mtls_fingerprint("not-a-pin").await.unwrap(),
+            None
+        );
+
+        // A stale heartbeat drops the node out of the peer set
+        Node::Entity::update_many()
+            .col_expr(
+                Node::Column::LastSeen,
+                Expr::value(OffsetDateTime::now_utc() - HEARTBEAT_TIMEOUT * 2),
+            )
+            .filter(Node::Column::Id.eq(b.node_id))
+            .exec(&db)
+            .await
+            .unwrap();
+        assert_eq!(
+            a.lookup_by_mtls_fingerprint(&b.tls_identity.spki_sha256_hex)
+                .await
+                .unwrap(),
+            None
         );
     }
 

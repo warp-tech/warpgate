@@ -80,7 +80,8 @@ impl ImportApi {
                         ldap_server_id: Set(Some(server.id)),
                         allowed_ip_ranges: Set(serde_json::Value::Null),
                     };
-                    values.insert(db).await?;
+                    let created = values.insert(db).await?;
+                    super::users::on_user_created(db, &created, admin.auth.user_id()).await?;
                     imported.push(user.username.clone());
                 }
             }
