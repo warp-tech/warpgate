@@ -745,14 +745,14 @@ ssh = ["bcrypt (>=3.1.5)"]
 
 [[package]]
 name = "deepmerge"
-version = "2.1.0"
+version = "3.0.1"
 description = "A toolset for deeply merging Python dictionaries."
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-    {file = "deepmerge-2.1.0-py3-none-any.whl", hash = "sha256:8f148339a91d680a75ecb74ade235d9e759a93df373a0b04e9d31c8666cfeb75"},
-    {file = "deepmerge-2.1.0.tar.gz", hash = "sha256:07ca7a7b8935df596c512fa8161877c0487ac61f691c07766e7d71d2b23bdd2f"},
+    {file = "deepmerge-3.0.1-py3-none-any.whl", hash = "sha256:35c96f6a68fcf90719a5b31d9f8042ecef6c00fb56836660d33455d0f5cfda65"},
+    {file = "deepmerge-3.0.1.tar.gz", hash = "sha256:35b39a4cb92cf328d6eca61cbbf65f68a37c2ceb3085f0f853cbb2e52a59fc23"},
 ]
 
 [package.extras]
@@ -2518,4 +2518,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10"
-content-hash = "c60a79bb5280133839a621513032a0df028fe1dd65963383dd28c17d98d200f4"
+content-hash = "b7ea732fd47057ab86b8eb19dc40acd718bdaead438192e915536a3c47885d66"
