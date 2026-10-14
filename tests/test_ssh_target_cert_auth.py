@@ -66,10 +66,9 @@ def ssh_port(processes: ProcessManager, ca_key: str) -> int:
     return port
 
 
-@pytest.fixture(scope="module")
-def backend(shared_wg: WarpgateProcess, vault: VaultInstance) -> str:
+def create_backend(wg: WarpgateProcess, vault: VaultInstance, allowed_paths=None) -> str:
     name = f"vault-{uuid4()}"
-    with admin_client(f"https://localhost:{shared_wg.http_port}") as api:
+    with admin_client(f"https://localhost:{wg.http_port}") as api:
         api.create_secret_backend(
             sdk.SecretBackendRequest(
                 name=name,
@@ -78,9 +77,15 @@ def backend(shared_wg: WarpgateProcess, vault: VaultInstance) -> str:
                 auth=sdk.SecretBackendAuth(
                     sdk.SecretBackendAuthVaultTokenAuth(method="Token", token=vault.root_token)
                 ),
+                allowed_paths=allowed_paths or [],
             )
         )
     return name
+
+
+@pytest.fixture(scope="module")
+def backend(shared_wg: WarpgateProcess, vault: VaultInstance) -> str:
+    return create_backend(shared_wg, vault)
 
 
 def cert_auth(backend: str, role: str = "warpgate", **fields) -> sdk.SSHTargetAuth:
@@ -197,6 +202,26 @@ class TestCertificateAuth:
         )
         logged = refusal(processes, shared_wg, user, target, timeout)
         assert "SshSigning" in logged and "nope" in logged
+
+    def test_signing_is_gated_by_the_backends_allowed_paths(
+        self, processes, shared_wg, vault, wg_c_ed25519_pubkey, ssh_port, timeout
+    ):
+        """A targets-only administrator can name any mount and role, so the
+        backend's path list has to cover `mount/sign/role` as it covers KV."""
+        kv_only = create_backend(shared_wg, vault, allowed_paths=["secret/app"])
+        user, target = setup_user_and_target(
+            processes, shared_wg, wg_c_ed25519_pubkey, ssh_port=ssh_port, auth=cert_auth(kv_only)
+        )
+        logged = refusal(processes, shared_wg, user, target, timeout)
+        assert "PathNotAllowed" in logged and f"{MOUNT}/sign/warpgate" in logged
+
+        this_role = create_backend(shared_wg, vault, allowed_paths=[f"{MOUNT}/sign/warpgate"])
+        user, target = setup_user_and_target(
+            processes, shared_wg, wg_c_ed25519_pubkey, ssh_port=ssh_port, auth=cert_auth(this_role)
+        )
+        code, stdout = connect(processes, shared_wg, user, target, timeout)
+        assert code == 0, stdout
+        assert stdout == b"/bin/sh\n"
 
     def test_unknown_backend_is_reported(
         self, processes, shared_wg, wg_c_ed25519_pubkey, ssh_port, backend, timeout

@@ -31,10 +31,12 @@ const MAX_SSH_KEY_ID: usize = 256;
 const CERTIFICATE_TTL: &str = "5m";
 
 pub struct VaultBackend {
+    name: String,
     /// Readers share the client; only (re)authentication takes the write lock.
     client: Arc<RwLock<VaultClient>>,
     auth_config: VaultAuthConfig,
-    /// KV path prefixes references may use, from the config, empty = any
+    /// Path prefixes this backend may be asked for, from the config, empty =
+    /// any: `mount/path` for a KV read, `mount/sign/role` for SSH signing.
     allowed_paths: Vec<String>,
     last_reauth: Mutex<Option<Instant>>,
 }
@@ -90,6 +92,7 @@ impl VaultBackend {
         };
 
         let backend = Self {
+            name: config.name.clone(),
             client: Arc::new(RwLock::new(client)),
             auth_config: config.auth.clone(),
             allowed_paths: config.allowed_paths.clone(),
@@ -132,13 +135,12 @@ impl VaultBackend {
         });
     }
 
-    fn assert_path_allowed(&self, reference: &SecretRef) -> Result<(), SecretError> {
-        let path = reference.kv_path();
+    fn assert_path_allowed(&self, path: String) -> Result<(), SecretError> {
         if path_allowed(&self.allowed_paths, &path) {
             Ok(())
         } else {
             Err(SecretError::PathNotAllowed {
-                backend: reference.backend.clone(),
+                backend: self.name.clone(),
                 path,
             })
         }
@@ -181,6 +183,7 @@ impl VaultBackend {
     ) -> Result<String, SecretError> {
         validate_path_segment(mount)?;
         validate_path_segment(role)?;
+        self.assert_path_allowed(format!("{mount}/sign/{role}"))?;
         // Vault reads `valid_principals` as a comma-separated list, so a comma
         // would widen the certificate to accounts nobody named.
         if principal.is_empty()
@@ -242,7 +245,7 @@ impl VaultBackend {
 #[async_trait]
 impl SecretResolver for VaultBackend {
     async fn resolve(&self, reference: &SecretRef) -> Result<Secret<String>, SecretError> {
-        self.assert_path_allowed(reference)?;
+        self.assert_path_allowed(reference.kv_path())?;
 
         let data = match self.read_kv(reference).await {
             Ok(data) => data,

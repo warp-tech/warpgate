@@ -14,6 +14,7 @@
         SecretBackendAuth,
         SecretBackendRequest,
     } from 'admin/lib/api'
+    import InfoBox from 'common/InfoBox.svelte'
 
     interface Props {
         isOpen: boolean
@@ -178,7 +179,7 @@
 
             <FormGroup
                 floating
-                label="Allowed KV path prefixes, one per line (empty: any)"
+                label="Allowed path prefixes, one per line (empty: any)"
                 class="mt-3"
             >
                 <Input
@@ -187,6 +188,12 @@
                     bind:value={allowedPaths}
                 />
             </FormGroup>
+            <InfoBox>
+                Use <code>[mount]/[path]</code>
+                for KV secrets,
+                <code>[mount]/sign/[role]</code>
+                for SSH certificate signing.
+            </InfoBox>
         </ModalBody>
 
         <ModalFooter>

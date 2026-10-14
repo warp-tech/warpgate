@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.30.0-beta.1-33-gf5a7e368-modified"
+    "version": "v0.30.0-beta.2-3-g0b5119cf-modified"
   },
   "servers": [
     {
@@ -7445,7 +7445,7 @@
           },
           "allowed_paths": {
             "type": "array",
-            "description": "KV path prefixes (`mount/path`), matched on whole segments",
+            "description": "Path prefixes the backend may be used for, matched on whole segments:\n`mount/path` for KV secrets, `mount/sign/role` for SSH certificate\nsigning. Empty allows any.",
             "default": [],
             "items": {
               "type": "string",
@@ -7703,7 +7703,6 @@
       "SshTargetCertificateAuth": {
         "type": "object",
         "title": "SshTargetCertificateAuth",
-        "description": "Authenticates with a short-lived OpenSSH certificate signed per connection\nby the SSH secrets engine of a configured secret backend. The key pair is\ngenerated for the connection and never stored. The certificate's key ID is\n`warpgate:<username>:<session id>`, which the target's sshd logs verbatim.\nWhat else the certificate carries is the signing role's decision, except a\n`force-command`, which is refused.",
         "required": [
           "backend",
           "role"
@@ -7711,14 +7710,13 @@
         "properties": {
           "backend": {
             "type": "string",
-            "description": "Name of the secret backend whose SSH secrets engine signs the key.",
             "maxLength": 64,
             "minLength": 1,
             "pattern": "^[A-Za-z0-9._-]+$"
           },
           "mount": {
             "type": "string",
-            "description": "Mount of the SSH secrets engine, in signed-certificates mode.",
+            "description": "Mount of the SSH secrets engine",
             "default": "ssh",
             "maxLength": 255,
             "minLength": 1,
@@ -7726,7 +7724,7 @@
           },
           "role": {
             "type": "string",
-            "description": "Signing role. It constrains the principals that may be requested, so\ntargets of differing privilege belong to differing roles.",
+            "description": "Signing role",
             "maxLength": 255,
             "minLength": 1,
             "pattern": "^[A-Za-z0-9_-]+$"

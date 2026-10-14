@@ -75,7 +75,9 @@ pub struct SecretBackendRequest {
     pub auth: VaultAuthConfig,
     #[oai(default)]
     pub tls_skip_verify: bool,
-    /// KV path prefixes (`mount/path`), matched on whole segments
+    /// Path prefixes the backend may be used for, matched on whole segments:
+    /// `mount/path` for KV secrets, `mount/sign/role` for SSH certificate
+    /// signing. Empty allows any.
     #[oai(default, validator(max_items = 256, max_length = 1024))]
     pub allowed_paths: Vec<String>,
 }
