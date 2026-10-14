@@ -29,9 +29,14 @@ black = "^26"
 pytest-asyncio = ">=0.26,<1.5"
 pytest-timeout = "^2.4.0"
 pyright = "^1.1.408"
+pytest-xdist = "^3.6"
 
 [tool.pytest.ini_options]
 minversion = "6.0"
+# The generated SDK ships its own stub tests. Under xdist (-n), each file
+# stays on one worker so module-scoped fixtures such as the shared k3s start
+# once.
+addopts = "--ignore=api_sdk --dist loadfile"
 filterwarnings = ["ignore::urllib3.exceptions.InsecureRequestWarning"]
 
 [build-system]

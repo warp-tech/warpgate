@@ -39,6 +39,16 @@ def _node_exists(config_path, node_id):
         )
 
 
+def _expire_heartbeat(config_path, node_id):
+    """Moves the node's last heartbeat back to the year 2000, past any
+    heartbeat timeout, keeping the stored timestamp format intact."""
+    with _db(config_path) as db:
+        db.execute(
+            "UPDATE nodes SET last_seen = '2000' || substr(last_seen, 5) WHERE id = ?",
+            (node_id,),
+        )
+
+
 def _session_ended(config_path, session_id):
     with _db(config_path) as db:
         row = db.execute(
@@ -113,9 +123,10 @@ class Test:
         assert _node_exists(node_b.config_path, node_a_id), "node A never registered"
 
         _hard_kill(node_a)
+        _expire_heartbeat(node_b.config_path, node_a_id)
 
-        # Reaper: heartbeat timeout (30s) + reap interval (15s), plus margin.
-        deadline = time.monotonic() + 70
+        # Reaper interval (15s), plus margin.
+        deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             if not _node_exists(node_b.config_path, node_a_id) and _session_ended(
                 node_b.config_path, session_id

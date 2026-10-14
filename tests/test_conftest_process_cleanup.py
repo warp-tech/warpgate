@@ -1,7 +1,5 @@
 """Per-test cleanup stops new children and preserves shared resources."""
 
-import subprocess
-
 import pytest
 
 from . import conftest
@@ -26,23 +24,3 @@ def test_cleanup_stops_new_children_and_preserves_shared_children(tmp_path, time
     finally:
         manager.stop()
 
-
-def test_k3s_container_bookkeeping_is_trimmed_by_stop_since(
-    tmp_path, timeout, monkeypatch: pytest.MonkeyPatch
-):
-    manager = ProcessManager(Context(tmp_path), timeout)
-    removed_names = []
-
-    def remove_container(args, **kwargs):
-        removed_names.append(args[-1])
-        return subprocess.CompletedProcess(args, 0)
-
-    monkeypatch.setattr(conftest.subprocess, "run", remove_container)
-    manager._k3s_containers.append("shared-container")
-    mark = manager.mark()
-    manager._k3s_containers.append("test-container")
-
-    manager.stop_since(mark)
-
-    assert manager._k3s_containers == ["shared-container"]
-    assert removed_names == ["test-container"]

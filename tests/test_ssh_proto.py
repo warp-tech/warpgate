@@ -278,8 +278,6 @@ class Test:
             password="123",
         )
         try:
-            time.sleep(10)
-
             wait_port(local_port, recv=False)
 
             s = requests.Session()
