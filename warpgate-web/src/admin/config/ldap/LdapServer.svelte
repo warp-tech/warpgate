@@ -44,11 +44,17 @@
     let testResult = $state<{ success: boolean; message: string } | null>(null)
     let isLoaded = $state(false)
 
-    // Auto-update port based on TLS mode (only after initial load)
+    // The port follows the TLS mode only when the mode is changed here. Loading the server
+    // must keep its stored port, which may well be custom (e.g. Global Catalog on 3268).
+    let portFollowsMode: TlsMode | undefined
     $effect(() => {
-        if (isLoaded) {
+        if (!isLoaded) {
+            return
+        }
+        if (portFollowsMode !== undefined && tls.mode !== portFollowsMode) {
             port = defaultLdapPortForTlsMode(tls.mode)
         }
+        portFollowsMode = tls.mode
     })
 
     async function load() {

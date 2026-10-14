@@ -45,6 +45,38 @@ impl SecretBackendRegistry {
     pub async fn health_of(&self, name: &str) -> Result<(), SecretError> {
         self.get(name).await?.health().await
     }
+
+    /// Signs an SSH public key with the SSH secrets engine of `backend`,
+    /// returning the certificate in OpenSSH wire format.
+    pub async fn sign_ssh_key(
+        &self,
+        backend: &str,
+        mount: &str,
+        role: &str,
+        public_key: &str,
+        principal: &str,
+        key_id: &str,
+    ) -> Result<String, SecretError> {
+        let result = match self.get(backend).await {
+            Ok(backend) => {
+                backend
+                    .sign_ssh_key(mount, role, public_key, principal, key_id)
+                    .await
+            }
+            Err(e) => Err(e),
+        };
+
+        AuditEvent::SshCertificateIssued {
+            backend: backend.to_owned(),
+            role: role.to_owned(),
+            principal: principal.to_owned(),
+            key_id: key_id.to_owned(),
+            success: result.is_ok(),
+        }
+        .emit();
+
+        result
+    }
 }
 
 #[async_trait]

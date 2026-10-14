@@ -27,7 +27,8 @@ use warpgate_common::auth::{
 use warpgate_common::eventhub::{EventHub, EventSender};
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{
-    Secret, TargetOptions, TargetSSHOptions, TargetSessionId, UserSessionId, WarpgateError,
+    Secret, TargetOptions, TargetSSHOptions, TargetSessionId, UserFacingReason, UserSessionId,
+    WarpgateError,
 };
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::approvals::{GateOutcome, GatedConnection};
@@ -60,9 +61,13 @@ use crate::{
 const EVENT_QUEUE_CAPACITY: usize = 128;
 
 /// How long a teardown waits for the channel writer's own queue to drain —
-/// i.e. for `Handle::close`/`Handle::disconnect` to have been *sent* — before
-/// giving up on them.
+/// i.e. for `Handle::close` to have been *sent* — before giving up on it, and
+/// how long a reading client then gets to receive what was sent.
 const DISCONNECT_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long the session's last message gets ahead of the connection-level
+/// disconnect. A client that reads both in one batch acts on the disconnect
+/// and exits without printing the message.
+const DISCONNECT_NOTICE_GAP: Duration = Duration::from_secs(1);
 
 #[allow(clippy::large_enum_variant)]
 enum TargetSelection {
@@ -1311,13 +1316,16 @@ impl ServerSession {
                         );
                     }
                     error => {
-                        let _ = self.emit_pty_error(&format!("Target connection failed: {error}"));
+                        let _ = self.emit_pty_error(&format!(
+                            "Target connection failed: {}",
+                            error.user_facing_reason()
+                        ));
                     }
                 }
             }
             RCEvent::Error(e) => {
                 self.service_output.stop_progress();
-                let _ = self.emit_pty_error(&format!("Error: {e}"));
+                let _ = self.emit_pty_error(&format!("Error: {}", e.user_facing_reason()));
                 self.disconnect_server().await;
             }
             RCEvent::Output(channel, data) => {
@@ -1777,11 +1785,14 @@ impl ServerSession {
             return;
         };
         let recorder = async {
-            let recorder = self
+            let Some(recorder) = self
                 .services
                 .recordings
                 .start::<TerminalRecorder, _>(&target_session_id, None, metadata)
-                .await?;
+                .await?
+            else {
+                return Ok(None);
+            };
             if let Some(request) = self
                 .channels
                 .get(&channel_id)
@@ -1791,11 +1802,11 @@ impl ServerSession {
                     .write_pty_resize(request.col_width, request.row_height)
                     .await?;
             }
-            Ok::<_, recordings::Error>(recorder)
+            Ok::<_, recordings::Error>(Some(recorder))
         }
         .await;
         match recorder {
-            Ok(recorder) => {
+            Ok(Some(recorder)) => {
                 // Starting the recording awaits, so the channel can be gone by
                 // now — e.g. target selection failed and tore the session down.
                 if let Some(channel_state) = self.channels.get_mut(&channel_id) {
@@ -1804,10 +1815,8 @@ impl ServerSession {
                     debug!(channel=%channel_id, "Recording started for a channel that is already gone");
                 }
             }
-            Err(error) => match error {
-                recordings::Error::Disabled => (),
-                error => error!(channel=%channel_id, ?error, "Failed to start recording"),
-            },
+            Ok(None) => (),
+            Err(error) => error!(channel=%channel_id, ?error, "Failed to start recording"),
         }
     }
 
@@ -1885,10 +1894,10 @@ impl ServerSession {
                 .start(&target_session_id, None, metadata)
                 .await
             {
-                Ok(recorder) => {
+                Ok(Some(recorder)) => {
                     e.insert(recorder);
                 }
-                Err(recordings::Error::Disabled) => (),
+                Ok(None) => (),
                 Err(error) => {
                     error!(?key, ?error, "Failed to start recording");
                 }
@@ -2676,15 +2685,6 @@ impl ServerSession {
             for ch in channels {
                 let _ = self.channel_writer.close(handle.clone(), ch.0);
             }
-            // A channel close says nothing about the connection, so a dead
-            // target never gives the client a reason to let go of the socket
-            // (#2520). Queued behind the closes so the ordering holds.
-            let _ = self.channel_writer.disconnect(
-                handle,
-                russh::Disconnect::ByApplication,
-                String::new(),
-                String::new(),
-            );
         }
 
         // Bounded: a client whose window is full never lets the queue
@@ -2705,8 +2705,25 @@ impl ServerSession {
                 warn!("Client is not reading; closing its connection");
                 Duration::ZERO
             };
+            // A channel close says nothing about the connection, so a dead
+            // target never gives the client a reason to let go of the socket
+            // (#2520). It goes only to a client that is still reading, and
+            // only after `DISCONNECT_NOTICE_GAP`.
+            let handle = flushed.then(|| self.session_handle.clone()).flatten();
             tokio::spawn(async move {
-                tokio::time::sleep(delay).await;
+                if let Some(handle) = handle {
+                    tokio::time::sleep(DISCONNECT_NOTICE_GAP).await;
+                    let _ = tokio::time::timeout(
+                        DISCONNECT_FLUSH_TIMEOUT,
+                        handle.disconnect(
+                            russh::Disconnect::ByApplication,
+                            String::new(),
+                            String::new(),
+                        ),
+                    )
+                    .await;
+                }
+                tokio::time::sleep(delay.saturating_sub(DISCONNECT_NOTICE_GAP)).await;
                 let _ = socket.shutdown(std::net::Shutdown::Both);
             });
         }

@@ -27,6 +27,10 @@ pub enum SecretError {
     PathNotAllowed { backend: String, path: String },
     #[error("secret backend error: {0}")]
     Backend(String),
+    #[error("invalid SSH certificate request: {0}")]
+    InvalidSshSigningRequest(String),
+    #[error("SSH certificate signing failed (HTTP {status}): {message}")]
+    SshSigning { status: u16, message: String },
 }
 
 impl UserFacingReason for SecretError {
@@ -37,7 +41,24 @@ impl UserFacingReason for SecretError {
             }
             Self::InvalidBackendName(_) => "Invalid secret backend name".into(),
             Self::BackendNotConfigured { .. } | Self::Backend(_) => "Secret backend error".into(),
+            Self::InvalidSshSigningRequest(_) => "Invalid SSH certificate request".into(),
+            Self::SshSigning { status, message } => ssh_signing_reason(*status, message).into(),
         }
+    }
+}
+
+fn ssh_signing_reason(status: u16, message: &str) -> &'static str {
+    match status {
+        400 if message.contains("key_id is not allowed") => {
+            "The signing role does not permit a key ID; set allow_user_key_ids=true on it"
+        }
+        404 => "The secret backend has no signing role or mount at that path",
+        400 if message.contains("Unknown role") => {
+            "The secret backend has no signing role or mount at that path"
+        }
+        400 => "The signing role refused the request",
+        401 | 403 => "The secret backend denied the signing request",
+        _ => "SSH certificate signing failed",
     }
 }
 

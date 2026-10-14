@@ -259,8 +259,6 @@ impl State {
             error!(%error, %id, "Could not end user session in the DB");
         }
 
-        self.abandon_session_approvals(id).await;
-
         let _ = self.change_sender.send(());
     }
 }

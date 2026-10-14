@@ -17,7 +17,7 @@ use tracing::{debug, error, info, info_span, warn};
 use url::Url;
 use warpgate_common::auth::AuthSelector;
 use warpgate_common::{
-    PostgresProtocolVersion, Protocol, Secret, TargetPostgresOptions, UserSessionId,
+    PostgresProtocolVersion, Protocol, Secret, TargetPostgresOptions, UserSessionId, WarpgateError,
 };
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::{
@@ -299,7 +299,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
     ) -> Result<(), PostgresError> {
         if let Some(banner) = warpgate_db_entities::Parameters::Entity::get(&self.services.db)
             .await
-            .map_err(PostgresError::other)?
+            .map_err(WarpgateError::from)?
             .banner_text()
         {
             self.stream

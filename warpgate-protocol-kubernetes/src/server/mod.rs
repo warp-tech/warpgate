@@ -4,7 +4,6 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use poem::listener::Listener;
 use poem::{EndpointExt, Route, Server};
 use rustls::ServerConfig;
 use tracing::info;
@@ -13,7 +12,7 @@ use warpgate_common::{ListenEndpoint, TargetKubernetesOptions};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_core::Services;
 use warpgate_tls::{
-    PossessionOnlyClientCertVerifier, SingleCertResolver, TlsCertificateAndPrivateKey,
+    PossessionOnlyClientCertVerifier, ResolveServerCert, TlsCertificateAndPrivateKey,
 };
 
 use crate::correlator::RequestCorrelator;
@@ -69,11 +68,11 @@ pub async fn bind_server(
         .with_client_cert_verifier(Arc::new(PossessionOnlyClientCertVerifier::optional(
             provider,
         )))
-        .with_cert_resolver(Arc::new(SingleCertResolver::new(
-            certificate_and_key.clone(),
-        )));
+        .with_cert_resolver(Arc::new(ResolveServerCert(Arc::new(
+            certificate_and_key.clone().into(),
+        ))));
 
-    let tcp_acceptor = address.poem_listener()?.into_acceptor().await?;
+    let tcp_acceptor = address.poem_acceptor().await?;
     let tcp_acceptor = MaybeProxyProtocolAcceptor::new(tcp_acceptor, proxy_protocol);
     let cert_capturing_acceptor = certificate_capturing_acceptor(tcp_acceptor, tls_config);
 

@@ -189,6 +189,26 @@ async fn find_request(
         .await?)
 }
 
+/// A revoked session (admin close, logout, cookie expiry) can no longer be admitted, so its
+/// pending questions must leave the inbox at once rather than wait for the reaper.
+#[tokio::test]
+async fn revoking_a_session_abandons_its_pending_requests() {
+    use SessionApprovalRequest::ApprovalRequestStatus as Status;
+
+    let db = migrated_db().await;
+    let revoked = UserSessionId(Uuid::new_v4());
+    let other = UserSessionId(Uuid::new_v4());
+    pending_row(&db, revoked, "a-target").await;
+    pending_row(&db, other, "a-target").await;
+
+    warpgate_db_entities::UserSession::revoke(&db, revoked)
+        .await
+        .unwrap();
+
+    assert_eq!(status_of(&db, revoked, "a-target").await, Status::Abandoned);
+    assert_eq!(status_of(&db, other, "a-target").await, Status::Pending);
+}
+
 /// Nothing else ends a request whose owning node died mid-hold: the guard's
 /// `Drop` never ran, and no waiter is left to time out. Without the reaper
 /// the row sits in the inbox forever, offering an administrator a session

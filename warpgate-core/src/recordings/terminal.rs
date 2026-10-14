@@ -8,7 +8,7 @@ use tracing::error;
 use warpgate_db_entities::Recording::RecordingKind;
 
 use super::{Recorder, Result};
-use crate::protocols::TerminalScreen;
+use crate::protocols::{TerminalScreen, sane_terminal_size};
 use crate::recordings::RecordingWriterOpener;
 use crate::recordings::writer::NDJsonRecordingWriter;
 
@@ -128,10 +128,12 @@ impl TerminalRecorder {
         let time = self.get_time();
         st.duration = st.duration.max(time);
         st.pty = true;
-        st.screen.resize(
+        let (cols, rows) = sane_terminal_size(
             u16::try_from(cols).unwrap_or(u16::MAX),
             u16::try_from(rows).unwrap_or(u16::MAX),
         );
+        st.screen.resize(cols, rows);
+        let (cols, rows) = (u32::from(cols), u32::from(rows));
 
         let item = TerminalRecordingItem::PtyResize { time, rows, cols };
         self.write_data_item(&mut st, &item).await?;

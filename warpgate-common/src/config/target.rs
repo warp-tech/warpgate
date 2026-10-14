@@ -8,7 +8,7 @@ use warpgate_tls::TlsMode;
 use super::defaults::{
     _default_empty_string, _default_empty_vec, _default_mysql_port,
     _default_postgres_idle_timeout_str, _default_postgres_port, _default_rdp_port,
-    _default_ssh_port, _default_username, _default_vnc_port,
+    _default_ssh_ca_mount, _default_ssh_port, _default_username, _default_vnc_port,
 };
 use crate::secrets::{MaybeSecretRef, SecretRef, StoredSecrets};
 use crate::{Protocol, Secret, StoredSecret};
@@ -51,6 +51,8 @@ pub enum SSHTargetAuth {
     Password(SshTargetPasswordAuth),
     #[serde(rename = "publickey")]
     PublicKey(SshTargetPublicKeyAuth),
+    #[serde(rename = "certificate")]
+    Certificate(SshTargetCertificateAuth),
     #[serde(rename = "iam_role")]
     IamRole(SshTargetIamRoleAuth),
 }
@@ -66,6 +68,34 @@ pub struct SshTargetPublicKeyAuth {
     /// marked default.
     #[serde(default)]
     pub key_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct SshTargetCertificateAuth {
+    #[oai(validator(min_length = 1, max_length = 64, pattern = r"^[A-Za-z0-9._-]+$"))]
+    pub backend: String,
+
+    /// Mount of the SSH secrets engine
+    #[serde(default = "_default_ssh_ca_mount")]
+    #[oai(
+        default = "_default_ssh_ca_mount",
+        validator(min_length = 1, max_length = 255, pattern = r"^[A-Za-z0-9_-]+$")
+    )]
+    pub mount: String,
+
+    /// Signing role
+    #[oai(validator(min_length = 1, max_length = 255, pattern = r"^[A-Za-z0-9_-]+$"))]
+    pub role: String,
+}
+
+impl Default for SshTargetCertificateAuth {
+    fn default() -> Self {
+        Self {
+            backend: String::new(),
+            mount: _default_ssh_ca_mount(),
+            role: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
@@ -447,7 +477,9 @@ impl TargetSecrets for TargetSSHOptions {
     fn secrets_mut(&mut self) -> Vec<&mut MaybeSecretRef> {
         match &mut self.auth {
             SSHTargetAuth::Password(auth) => vec![&mut auth.password],
-            SSHTargetAuth::PublicKey(_) | SSHTargetAuth::IamRole(_) => vec![],
+            SSHTargetAuth::PublicKey(_)
+            | SSHTargetAuth::Certificate(_)
+            | SSHTargetAuth::IamRole(_) => vec![],
         }
     }
 }
@@ -546,9 +578,9 @@ mod tests {
     use super::{
         DatabaseTargetAuth, DatabaseTargetIamRoleAuth, DatabaseTargetPasswordAuth, MaybeSecretRef,
         PostgresProtocolVersion, RdpTargetCompression, RdpTlsSecurity, SSHTargetAuth, SecretRef,
-        SshTargetIamRoleAuth, SshTargetPasswordAuth, SshTargetPublicKeyAuth, TargetHTTPOptions,
-        TargetKubernetesOptions, TargetMySqlOptions, TargetOptions, TargetPostgresOptions,
-        TargetRdpOptions, TargetSSHOptions, Tls,
+        SshTargetCertificateAuth, SshTargetIamRoleAuth, SshTargetPasswordAuth,
+        SshTargetPublicKeyAuth, TargetHTTPOptions, TargetKubernetesOptions, TargetMySqlOptions,
+        TargetOptions, TargetPostgresOptions, TargetRdpOptions, TargetSSHOptions, Tls,
     };
     use crate::{StoredSecrets, TargetSecrets};
 
@@ -606,6 +638,9 @@ mod tests {
                 password: MaybeSecretRef::default(),
             })),
             ssh_options(SSHTargetAuth::PublicKey(SshTargetPublicKeyAuth::default())),
+            ssh_options(SSHTargetAuth::Certificate(
+                SshTargetCertificateAuth::default(),
+            )),
             ssh_options(SSHTargetAuth::IamRole(SshTargetIamRoleAuth::default())),
             TargetOptions::MySql(mysql),
             TargetOptions::Postgres(postgres),

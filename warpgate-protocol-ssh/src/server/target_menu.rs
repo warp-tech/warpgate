@@ -392,7 +392,7 @@ impl<T: Clone> TargetMenu<T> {
         self.list_state = draw_state.list_state;
 
         let bytes = self.terminal.backend_mut().take_output();
-        String::from_utf8(bytes).map_err(WarpgateError::other)
+        Ok(String::from_utf8(bytes)?)
     }
 
     fn page_size(&self) -> usize {
@@ -460,7 +460,7 @@ impl<T: Clone> TargetMenu<T> {
         let _ = self.terminal.backend_mut().take_output();
         self.terminal.show_cursor()?;
         let bytes = self.terminal.backend_mut().take_output();
-        String::from_utf8(bytes).map_err(WarpgateError::other)
+        Ok(String::from_utf8(bytes)?)
     }
 }
 

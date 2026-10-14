@@ -16,7 +16,7 @@ mod types;
 pub mod version;
 
 pub use config::*;
-pub use error::{UserFacingReason, WarpgateError};
+pub use error::{UserFacingReason, WarpgateError, io_connect_reason};
 pub use helpers::password_policy::{PasswordPolicy, PasswordPolicyViolation, validate_password};
 pub use secrets::{
     BackendType, MaybeSecretRef, SecretBackendConfig, SecretError, SecretRef, SecretResolver,

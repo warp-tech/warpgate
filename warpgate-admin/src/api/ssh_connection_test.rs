@@ -60,9 +60,19 @@ impl Api {
 
         let mut handles =
             RemoteClient::create(UserSessionId(Uuid::new_v4()), admin.services().clone())?;
-        let _ = handles
-            .command_tx
-            .send((RCCommand::Connect(ssh_chain), None));
+        // Not `Connect`: that would go on to authenticate to the target once
+        // the key had been reported, opening a session nothing is attached to.
+        let _ = handles.command_tx.send((
+            RCCommand::CheckHostKey {
+                chain: ssh_chain,
+                requested_by: admin
+                    .auth
+                    .username()
+                    .cloned()
+                    .unwrap_or_else(|| "admin-token".to_owned()),
+            },
+            None,
+        ));
 
         let fut = async move {
             let key = loop {
@@ -78,7 +88,7 @@ impl Api {
                         anyhow::bail!("Jump host {host}:{port} has an untrusted host key");
                     }
                     Some(RCEvent::ConnectionError(err)) => return Err(anyhow::Error::from(err)),
-                    Some(RCEvent::Error(err)) => return Err(err),
+                    Some(RCEvent::Error(err)) => return Err(err.into()),
                     None => anyhow::bail!("Failed to connect to target"),
                     _ => (),
                 }

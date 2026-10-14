@@ -1,18 +1,17 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use anyhow::Context;
 use russh::keys::PublicKeyBase64;
 use tokio::sync::mpsc::Receiver;
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, error, info_span, warn};
-use warpgate_common::{TargetSSHOptions, UserSessionId, WarpgateError};
+use warpgate_common::{TargetSSHOptions, UserFacingReason, UserSessionId, WarpgateError};
 use warpgate_core::{Services, TargetAuthorization};
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_protocol_ssh::{
-    RCEvent, RCState, RemoteClient, RemoteClientHandles, resolve_approved_ssh_chain,
+    RCEvent, RCState, RemoteClient, RemoteClientHandles, SshClientError, resolve_approved_ssh_chain,
 };
 use warpgate_web_clients_common::{
     ClientManager, LiveSessionPhase, register_provisional_web_client_session,
@@ -65,8 +64,7 @@ impl WebSshClientManager {
             event_rx,
             command_tx,
             abort_tx,
-        } = RemoteClient::create(session_id, services.clone())
-            .context("creating SSH remote client")?;
+        } = RemoteClient::create(session_id, services.clone())?;
 
         let session = Arc::new(WebSshSession::new(
             session_id,
@@ -129,7 +127,7 @@ async fn run_session(
                     session.connect(chain.into_iter().map(|x| x.ssh_options).collect());
                     relay_events(&session, &mut event_rx, &services).await
                 }
-                Err(error) => Err(error),
+                Err(error) => Err(error.into()),
             };
             if let Some(pending) = session.take_pending_host_key().await {
                 let _ = pending.reply.send(false);
@@ -144,9 +142,9 @@ async fn relay_events(
     session: &WebSshSession,
     event_rx: &mut Receiver<RCEvent>,
     services: &Services,
-) -> Result<(), WarpgateError> {
+) -> Result<(), SshClientError> {
     let session_id = session.id();
-    let mut final_result: Result<(), WarpgateError> = Ok(());
+    let mut final_result = Ok(());
     while let Some(event) = event_rx.recv().await {
         match event {
             RCEvent::State(RCState::Connecting) => {
@@ -176,10 +174,20 @@ async fn relay_events(
                     .await;
             }
             RCEvent::Error(e) => {
-                final_result = Err(notice(session, e).await.into());
+                session
+                    .push(ServerMessage::Error {
+                        message: e.user_facing_reason(),
+                    })
+                    .await;
+                final_result = Err(e)
             }
             RCEvent::ConnectionError(e) => {
-                final_result = Err(notice(session, e.into()).await.into());
+                session
+                    .push(ServerMessage::Error {
+                        message: e.user_facing_reason(),
+                    })
+                    .await;
+                final_result = Err(e.into())
             }
             RCEvent::HostKeyReceived(key, host, port) => {
                 debug!(%session_id, "Host key received for {host}:{port}: {}", key.algorithm());
@@ -221,13 +229,4 @@ async fn relay_events(
         }
     }
     final_result
-}
-
-async fn notice(session: &WebSshSession, error: anyhow::Error) -> anyhow::Error {
-    session
-        .push(ServerMessage::Error {
-            message: error.to_string(),
-        })
-        .await;
-    error
 }

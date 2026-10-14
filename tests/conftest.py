@@ -8,6 +8,7 @@ import shutil
 import signal
 import subprocess
 import tempfile
+import threading
 import urllib3
 import uuid
 import base64
@@ -154,6 +155,32 @@ class VaultInstance:
 
         return role_id, secret_id
 
+    def enable_ssh_ca(self, mount: str = "ssh") -> str:
+        """Mounts an SSH secrets engine with a generated CA; returns the CA public key."""
+        r = requests.post(
+            f"{self.addr}/v1/sys/mounts/{mount}",
+            json={"type": "ssh"},
+            headers=self._headers(),
+        )
+        r.raise_for_status()
+        r = requests.post(
+            f"{self.addr}/v1/{mount}/config/ca",
+            json={"generate_signing_key": True, "key_type": "ed25519"},
+            headers=self._headers(),
+        )
+        r.raise_for_status()
+        r = requests.get(f"{self.addr}/v1/{mount}/public_key")
+        r.raise_for_status()
+        return r.text.strip()
+
+    def write_ssh_role(self, mount: str, name: str, **fields):
+        r = requests.post(
+            f"{self.addr}/v1/{mount}/roles/{name}",
+            json=fields,
+            headers=self._headers(),
+        )
+        r.raise_for_status()
+
 
 @dataclass
 class Child:
@@ -182,6 +209,30 @@ class WarpgateProcess:
     kubernetes_port: int
     vnc_port: int
     rdp_port: int
+    # Everything the gateway wrote, for asserting on its log; unset when the
+    # caller redirected its output elsewhere.
+    log_path: Optional[Path] = None
+
+
+def _tee_to_log(stream, log_path: Path) -> None:
+    """Copies a child's output into `log_path` and on to the stdout it would
+    have inherited, so pytest still captures it."""
+    out_fd = os.dup(1)
+
+    def pump():
+        with stream, open(log_path, "ab") as log:
+            for chunk in iter(lambda: stream.read1(65536), b""):
+                log.write(chunk)
+                log.flush()
+                view = memoryview(chunk)
+                while view:
+                    try:
+                        view = view[os.write(out_fd, view):]
+                    except OSError:
+                        break
+        os.close(out_fd)
+
+    threading.Thread(target=pump, daemon=True).start()
 
 
 class ProcessManager:
@@ -192,6 +243,8 @@ class ProcessManager:
         self.ctx = ctx
         self.timeout = timeout
         self._k3s_containers: List[str] = []
+        # sshd container name by published port, for reading the target's log
+        self.ssh_containers: dict[int, str] = {}
 
     def _remove_k3s_containers(self):
         """Force-remove every k3s container we've started so far. Idempotent —
@@ -230,12 +283,16 @@ class ProcessManager:
                         pass
                 p.kill()
 
-    def start_ssh_server(self, trusted_keys=[], extra_config="", root_password=None):
+    def start_ssh_server(
+        self, trusted_keys=[], extra_config="", root_password=None, trusted_ca=[]
+    ):
         port = alloc_port()
         data_dir = self.ctx.tmpdir / f"sshd-{uuid.uuid4()}"
         data_dir.mkdir(parents=True)
         authorized_keys_path = data_dir / "authorized_keys"
         authorized_keys_path.write_text("\n".join(trusted_keys))
+        trusted_ca_path = data_dir / "trusted_ca"
+        trusted_ca_path.write_text("\n".join(trusted_ca) + "\n")
         config_path = data_dir / "sshd_config"
         if root_password:
             # the base image only unlocks the root account (empty password); a real
@@ -246,6 +303,7 @@ class ProcessManager:
                 f"""\
                 Port 22
                 AuthorizedKeysFile {authorized_keys_path}
+                TrustedUserCAKeys {trusted_ca_path}
                 AllowAgentForwarding yes
                 AllowTcpForwarding yes
                 GatewayPorts yes
@@ -263,9 +321,11 @@ class ProcessManager:
         )
         data_dir.chmod(0o700)
         authorized_keys_path.chmod(0o600)
+        trusted_ca_path.chmod(0o600)
         config_path.chmod(0o600)
 
         container_name = f"warpgate-e2e-ssh-server-{uuid.uuid4()}"
+        self.ssh_containers[port] = container_name
         self.start(
             [
                 "docker",
@@ -941,7 +1001,7 @@ class ProcessManager:
 
             config_path = data_dir / "warpgate.yaml"
 
-        def run(args, env={}):
+        def run(args, env={}, stdout=stdout, stderr=stderr):
             return self.start(
                 [
                     os.path.join(cargo_root, binary_path),
@@ -1030,11 +1090,23 @@ class ProcessManager:
             with config_path.open("w") as f:
                 yaml.safe_dump(config, f)
 
+        log_path = None
+        if stdout is None and stderr is None:
+            log_path = self.ctx.tmpdir / f"wg-{uuid.uuid4()}.log"
+            log_path.touch()
+
         # A deterministic, reachable self-address so cross-node proxying can find us.
         p = run(
             args,
             env={"WARPGATE_PEER_ADDRESS": f"127.0.0.1:{http_port}", **(env or {})},
+            **(
+                {"stdout": subprocess.PIPE, "stderr": subprocess.STDOUT}
+                if log_path
+                else {}
+            ),
         )
+        if log_path:
+            _tee_to_log(p.stdout, log_path)
         return WarpgateProcess(
             process=p,
             config_path=config_path,
@@ -1045,15 +1117,31 @@ class ProcessManager:
             kubernetes_port=kubernetes_port,
             vnc_port=vnc_port,
             rdp_port=rdp_port,
+            log_path=log_path,
         )
 
+    def _askpass(self) -> Path:
+        path = self.ctx.tmpdir / "askpass.sh"
+        if not path.exists():
+            path.write_text('#!/bin/sh\nprintf "%s\\n" "$WARPGATE_TEST_SSH_PASSWORD"\n')
+            path.chmod(0o700)
+        return path
+
     def start_ssh_client(self, *args, password=None, **kwargs):
-        preargs = []
+        password_options = []
         if password:
-            preargs = ["sshpass", "-p", password]
+            # ssh asks this helper for the password, so it needs no terminal.
+            # One prompt per run keeps a wrong password to a single server-side
+            # attempt per client, which the login-protection tests count on.
+            password_options = ["-o", "NumberOfPasswordPrompts=1"]
+            kwargs["env"] = {
+                **(kwargs.get("env") or os.environ),
+                "SSH_ASKPASS": str(self._askpass()),
+                "SSH_ASKPASS_REQUIRE": "force",
+                "WARPGATE_TEST_SSH_PASSWORD": password,
+            }
         p = self.start(
             [
-                *preargs,
                 "ssh",
                 # '-v',
                 "-o",
@@ -1062,6 +1150,7 @@ class ProcessManager:
                 "StrictHostKeychecking=no",
                 "-o",
                 "UserKnownHostsFile=/dev/null",
+                *password_options,
                 *args,
             ],
             stdin=subprocess.PIPE,

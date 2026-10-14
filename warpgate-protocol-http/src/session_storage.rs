@@ -235,7 +235,7 @@ impl SharedSessionStorage {
 
         transaction.commit().await?;
         if let Some(ended) = ended {
-            ended.emit();
+            ended.settle(&self.db).await;
         }
         Ok(())
     }
