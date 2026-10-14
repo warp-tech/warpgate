@@ -11,7 +11,6 @@ use serde::Deserialize;
 
 use crate::SsoError;
 use crate::config::SsoInternalProviderConfig;
-use crate::sso::WarpgateIdToken;
 
 const BACKCHANNEL_LOGOUT_EVENT: &str = "http://schemas.openid.net/event/backchannel-logout";
 
@@ -139,21 +138,6 @@ fn now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-/// The `sub` and `sid` an ID token was issued with, read without verification:
-/// only for tokens that were verified when they were received.
-pub fn id_token_session_identity(token: &WarpgateIdToken) -> Option<(String, Option<String>)> {
-    #[derive(Deserialize)]
-    struct SessionClaims {
-        sub: String,
-        sid: Option<String>,
-    }
-
-    let claims = jsonwebtoken::dangerous::insecure_decode::<SessionClaims>(token.to_string())
-        .ok()?
-        .claims;
-    Some((claims.sub, claims.sid))
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -214,13 +198,13 @@ mod tests {
         assert!(claims(v).into_logout(NOW).is_err());
     }
 
-    const PRIVATE_KEY: &str = "-----BEGIN PRIVATE KEY-----
-MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgT62dkUT0LaXOr155
-KeOHdalTEZcw2ZzAriFf7gz+qTmhRANCAARDCnaxDxaqJ+YsseM9UL329uXUbwYZ
-Lez84/PAatgF6vGI5uFWHcsYcgmQ7Y4ZwMAdoAg8aoPB4KOde38iLu8s
------END PRIVATE KEY-----";
-
-    fn provider() -> (SsoInternalProviderConfig, ProviderMetadataWithLogout) {
+    /// A provider publishing a freshly generated P-256 key as `k1`, and the
+    /// key to sign its tokens with.
+    fn provider() -> (
+        SsoInternalProviderConfig,
+        ProviderMetadataWithLogout,
+        jsonwebtoken::EncodingKey,
+    ) {
         let config = serde_json::from_value(json!({
             "type": "custom",
             "client_id": "warpgate",
@@ -229,26 +213,32 @@ Lez84/PAatgF6vGI5uFWHcsYcgmQ7Y4ZwMAdoAg8aoPB4KOde38iLu8s
             "scopes": [],
         }))
         .unwrap();
+        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        // An uncompressed SEC1 point: 0x04, then x, then y.
+        let point = key_pair.public_key_raw();
+        let coordinate = |range| data_encoding::BASE64URL_NOPAD.encode(point.get(range).unwrap());
         let jwks = serde_json::from_value(json!({ "keys": [{
             "kty": "EC",
             "crv": "P-256",
             "kid": "k1",
             "use": "sig",
-            "x": "Qwp2sQ8WqifmLLHjPVC99vbl1G8GGS3s_OPzwGrYBeo",
-            "y": "8Yjm4VYdyxhyCZDtjhnAwB2gCDxqg8Hgo517fyIu7yw",
+            "x": coordinate(1..33),
+            "y": coordinate(33..65),
         }]}))
         .unwrap();
+        let key =
+            jsonwebtoken::EncodingKey::from_ec_pem(key_pair.serialize_pem().as_bytes()).unwrap();
         (
             config,
             crate::metadata::tests::metadata(&json!({})).set_jwks(jwks),
+            key,
         )
     }
 
-    fn sign(kid: &str, claims: &serde_json::Value) -> String {
+    fn sign(key: &jsonwebtoken::EncodingKey, kid: &str, claims: &serde_json::Value) -> String {
         let mut header = Header::new(jsonwebtoken::Algorithm::ES256);
         header.kid = Some(kid.into());
-        let key = jsonwebtoken::EncodingKey::from_ec_pem(PRIVATE_KEY.as_bytes()).unwrap();
-        jsonwebtoken::encode(&header, claims, &key).unwrap()
+        jsonwebtoken::encode(&header, claims, key).unwrap()
     }
 
     fn signed_claims(aud: &str) -> serde_json::Value {
@@ -261,14 +251,14 @@ Lez84/PAatgF6vGI5uFWHcsYcgmQ7Y4ZwMAdoAg8aoPB4KOde38iLu8s
 
     #[test]
     fn verifies_a_signed_token() {
-        let (config, metadata) = provider();
-        let token = sign("k1", &signed_claims("warpgate"));
+        let (config, metadata, key) = provider();
+        let token = sign(&key, "k1", &signed_claims("warpgate"));
         assert!(verify(&config, &metadata, &token).is_ok());
 
-        let foreign = sign("k1", &signed_claims("someone-else"));
+        let foreign = sign(&key, "k1", &signed_claims("someone-else"));
         assert!(verify(&config, &metadata, &foreign).is_err());
 
-        let unknown_key = sign("k2", &signed_claims("warpgate"));
+        let unknown_key = sign(&key, "k2", &signed_claims("warpgate"));
         assert!(
             verify(&config, &metadata, &unknown_key)
                 .unwrap_err()
@@ -278,7 +268,7 @@ Lez84/PAatgF6vGI5uFWHcsYcgmQ7Y4ZwMAdoAg8aoPB4KOde38iLu8s
         // Another subject's claims under this token's signature.
         let mut other = signed_claims("warpgate");
         other["sub"] = json!("mallory");
-        let other = sign("k1", &other);
+        let other = sign(&key, "k1", &other);
         let (other_head, _) = other.rsplit_once('.').unwrap();
         let (_, signature) = token.rsplit_once('.').unwrap();
         let tampered = format!("{other_head}.{signature}");

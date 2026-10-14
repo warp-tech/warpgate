@@ -9,7 +9,7 @@ mod sso;
 
 pub use config::*;
 pub use error::*;
-pub use logout_token::{BackchannelLogout, id_token_session_identity};
+pub use logout_token::BackchannelLogout;
 pub use metadata::*;
 pub use request::*;
 pub use response::*;

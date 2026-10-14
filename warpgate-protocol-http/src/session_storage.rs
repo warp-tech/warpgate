@@ -16,7 +16,6 @@ use time::OffsetDateTime;
 use tracing::error;
 use warpgate_common::{UserSessionId, WarpgateError};
 use warpgate_db_entities::{HttpSession, UserSession};
-use warpgate_sso::id_token_session_identity;
 
 use crate::SsoLoginState;
 use crate::common::SessionExt;
@@ -315,9 +314,8 @@ impl SessionStorage for SharedSessionStorage {
 
         let (sso_provider, sso_subject, sso_sid) = {
             // enforce column length for SSO state values
-            let sso = SsoLoginState::from_session_entries(entries).and_then(|state| {
-                id_token_session_identity(&state.token).map(|(sub, sid)| (state.provider, sub, sid))
-            });
+            let sso = SsoLoginState::from_session_entries(entries)
+                .and_then(|state| Some((state.provider, state.subject?, state.sid)));
             let fits = |value: &String| value.len() <= HttpSession::SSO_COLUMN_MAX_LENGTH;
             match sso {
                 Some((provider, sub, sid)) => (

@@ -31,3 +31,6 @@ yup-oauth2 = { version = "12", default-features = false, features = [
     "hyper-rustls",
     "ring",
 ] }
+
+[dev-dependencies]
+rcgen.workspace = true

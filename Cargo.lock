@@ -9818,6 +9818,7 @@ dependencies = [
  "form_urlencoded",
  "jsonwebtoken",
  "openidconnect",
+ "rcgen",
  "reqwest 0.12.28",
  "schemars 1.2.2",
  "serde",

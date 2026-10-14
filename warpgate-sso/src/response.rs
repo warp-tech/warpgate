@@ -8,5 +8,7 @@ pub struct SsoLoginResponse {
     pub access_roles: Option<Vec<String>>,
     pub admin_roles: Option<Vec<String>>,
     pub id_token: WarpgateIdToken,
+    pub subject: String,
+    pub sid: Option<String>,
     pub preferred_username: Option<String>,
 }
