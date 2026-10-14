@@ -1218,7 +1218,7 @@ def ctx():
 
 
 @pytest.fixture(scope="session")
-def processes(ctx, timeout, report_generation):
+def processes(ctx, timeout):
     mgr = ProcessManager(ctx, timeout)
     try:
         yield mgr
@@ -1232,29 +1232,6 @@ def _stop_test_processes(processes):
     mark = processes.mark()
     yield
     processes.stop_since(mark)
-
-
-@pytest.fixture(scope="session", autouse=True)
-def report_generation():
-    if not enable_coverage:
-        yield None
-        return
-    # subprocess.call(['cargo', 'llvm-cov', 'clean', '--workspace'])
-    subprocess.check_call(
-        [
-            "cargo",
-            "llvm-cov",
-            "run",
-            "--no-cfg-coverage-nightly",
-            "--all-features",
-            "--no-report",
-            "--",
-            "version",
-        ],
-        cwd=cargo_root,
-    )
-    yield
-    # subprocess.check_call(['cargo', 'llvm-cov', '--no-run', '--hide-instantiations', '--html'], cwd=cargo_root)
 
 
 @pytest.fixture(scope="session")
