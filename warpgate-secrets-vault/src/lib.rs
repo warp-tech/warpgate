@@ -367,13 +367,25 @@ fn reveal(stored: &StoredSecret) -> Result<Secret<String>, SecretError> {
         .map_err(|e| SecretError::Backend(format!("decrypt stored credential: {e}")))
 }
 
+// vaultrs panics on a token that is not a valid header value.
+fn use_token(client: &mut VaultClient, token: &str) -> Result<(), SecretError> {
+    let token = token.trim();
+    if !token.chars().all(|c| c.is_ascii_graphic()) {
+        return Err(SecretError::Backend(
+            "the Vault token contains characters a header can't carry".into(),
+        ));
+    }
+    client.set_token(token);
+    Ok(())
+}
+
 async fn authenticate(
     client: &mut VaultClient,
     auth: &VaultAuthConfig,
 ) -> Result<Option<Duration>, SecretError> {
     match auth {
         VaultAuthConfig::Token(VaultTokenAuth { token }) => {
-            client.set_token(reveal(token)?.expose_secret());
+            use_token(client, reveal(token)?.expose_secret())?;
             Ok(None)
         }
         VaultAuthConfig::AppRole(VaultAppRoleAuth {
@@ -390,7 +402,7 @@ async fn authenticate(
             .await
             .map_err(|e| SecretError::Backend(format!("AppRole login: {e}")))?;
 
-            client.set_token(&info.client_token);
+            use_token(client, &info.client_token)?;
             Ok(Some(Duration::from_secs(info.lease_duration)))
         }
         VaultAuthConfig::Kubernetes(VaultKubernetesAuth { role, mount }) => {
@@ -409,7 +421,7 @@ async fn authenticate(
             .await
             .map_err(|e| SecretError::Backend(format!("Kubernetes login: {e}")))?;
 
-            client.set_token(&info.client_token);
+            use_token(client, &info.client_token)?;
             Ok(Some(Duration::from_secs(info.lease_duration)))
         }
     }
@@ -486,6 +498,24 @@ mod tests {
             }),
             SecretError::SshSigning { status: 500, .. }
         ));
+    }
+
+    #[tokio::test]
+    async fn static_token_is_trimmed_and_must_fit_a_header() {
+        let mut builder = VaultClientSettingsBuilder::default();
+        builder.address("https://vault.invalid").token("");
+        let mut client = VaultClient::new(builder.build().unwrap()).unwrap();
+        let token = |value: &str| {
+            VaultAuthConfig::Token(VaultTokenAuth {
+                token: StoredSecret::new(Secret::new(value.into())),
+            })
+        };
+
+        let pasted = authenticate(&mut client, &token("hvs.abc\n")).await;
+        assert!(pasted.is_ok());
+        assert_eq!(client.settings.token, "hvs.abc");
+        let broken = authenticate(&mut client, &token("hvs.a\nbc")).await;
+        assert!(broken.is_err());
     }
 
     #[test]
