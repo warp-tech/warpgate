@@ -6,26 +6,20 @@
 //! [`Path`]. [`Document::value_location`] and [`Document::key_location`] map
 //! any such path back to a position in the file.
 
-use std::borrow::{Borrow, Cow};
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
-use std::fmt;
 
 use saphyr::{MarkedYaml, Scalar, YamlData, YamlLoader};
 use saphyr_parser::{Event, Marker, Parser, ScalarStyle, ScanError, Span, SpannedEventReceiver};
 use serde_json::{Map, Number, Value};
+
+use crate::diagnostic::{Diagnostic, Location, Path, Segment};
 
 /// Deeper input is rejected before it is loaded: converting a node tree and
 /// dropping it both recurse once per level.
 const MAX_DEPTH: usize = 64;
 
 const ALIAS_UNSUPPORTED: &str = "YAML aliases are not supported";
-
-/// A 1-based position in the source
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Location {
-    pub line: usize,
-    pub column: usize,
-}
 
 impl From<&Marker> for Location {
     fn from(marker: &Marker) -> Self {
@@ -37,50 +31,9 @@ impl From<&Marker> for Location {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Segment {
-    Key(String),
-    Index(usize),
-}
-
-/// The address of a node within its document. Mapping keys are kept whole, so
-/// a label key such as `example.com/team` stays a single segment.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Path(pub Vec<Segment>);
-
-impl Borrow<[Segment]> for Path {
-    fn borrow(&self) -> &[Segment] {
-        &self.0
-    }
-}
-
-impl fmt::Display for Path {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (i, segment) in self.0.iter().enumerate() {
-            match segment {
-                Segment::Key(key) if i == 0 => f.write_str(key)?,
-                Segment::Key(key) => write!(f, ".{key}")?,
-                Segment::Index(index) => write!(f, "[{index}]")?,
-            }
-        }
-        Ok(())
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct YamlError {
-    pub location: Location,
-    pub path: Path,
-    pub message: String,
-}
-
-impl From<&ScanError> for YamlError {
+impl From<&ScanError> for Diagnostic {
     fn from(error: &ScanError) -> Self {
-        Self {
-            location: error.marker().into(),
-            path: Path::default(),
-            message: error.info().to_owned(),
-        }
+        Self::new(error.marker().into(), Path::default(), error.info())
     }
 }
 
@@ -96,7 +49,7 @@ pub struct Document {
     pub value: Value,
     /// Nodes that have no JSON representation. Each reads as `null` in
     /// [`Self::value`], or is left out if it was a mapping key.
-    pub errors: Vec<YamlError>,
+    pub errors: Vec<Diagnostic>,
     locations: HashMap<Path, NodeLocation>,
 }
 
@@ -125,7 +78,7 @@ impl Document {
     }
 }
 
-pub fn parse(source: &str) -> Result<Vec<Document>, YamlError> {
+pub fn parse(source: &str) -> Result<Vec<Document>, Diagnostic> {
     let mut loader = GuardedLoader {
         loader: YamlLoader::default(),
         depth: 0,
@@ -134,7 +87,7 @@ pub fn parse(source: &str) -> Result<Vec<Document>, YamlError> {
 
     // `load` is recursive and can overflow on a bad doc
     for event in Parser::new_from_str(source) {
-        let (event, span) = event.map_err(|error| YamlError::from(&error))?;
+        let (event, span) = event.map_err(|error| Diagnostic::from(&error))?;
         loader.feed(event, span)?;
     }
     if let Some(error) = loader.loader.error() {
@@ -177,16 +130,16 @@ struct GuardedLoader<'input> {
 }
 
 impl<'input> GuardedLoader<'input> {
-    fn feed(&mut self, event: Event<'input>, span: Span) -> Result<(), YamlError> {
+    fn feed(&mut self, event: Event<'input>, span: Span) -> Result<(), Diagnostic> {
         let event = match event {
             Event::MappingStart(..) | Event::SequenceStart(..) => {
                 self.depth += 1;
                 if self.depth > MAX_DEPTH {
-                    return Err(YamlError {
-                        location: (&span.start).into(),
-                        path: Path::default(),
-                        message: format!("nesting is deeper than {MAX_DEPTH} levels"),
-                    });
+                    return Err(Diagnostic::new(
+                        (&span.start).into(),
+                        Path::default(),
+                        format!("nesting is deeper than {MAX_DEPTH} levels"),
+                    ));
                 }
                 event
             }
@@ -209,7 +162,7 @@ impl<'input> GuardedLoader<'input> {
 struct Converter<'a> {
     aliases: &'a HashSet<usize>,
     locations: HashMap<Path, NodeLocation>,
-    errors: Vec<YamlError>,
+    errors: Vec<Diagnostic>,
 }
 
 impl Converter<'_> {
@@ -281,11 +234,8 @@ impl Converter<'_> {
 
     /// a node without JSON representation
     fn error(&mut self, path: &[Segment], location: Location, message: &str) -> Value {
-        self.errors.push(YamlError {
-            location,
-            path: Path(path.to_vec()),
-            message: message.to_owned(),
-        });
+        self.errors
+            .push(Diagnostic::new(location, Path(path.to_vec()), message));
         Value::Null
     }
 }
@@ -295,22 +245,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-
-    fn path(segments: &[&str]) -> Path {
-        Path(
-            segments
-                .iter()
-                .map(|s| match s.parse() {
-                    Ok(index) => Segment::Index(index),
-                    Err(_) => Segment::Key((*s).to_owned()),
-                })
-                .collect(),
-        )
-    }
-
-    fn at(line: usize, column: usize) -> Location {
-        Location { line, column }
-    }
+    use crate::diagnostic::test::{at, path};
 
     fn single(source: &str) -> Document {
         let mut docs = parse(source).unwrap();
@@ -403,16 +338,8 @@ mod tests {
         assert_eq!(
             doc.errors,
             vec![
-                YamlError {
-                    location: at(2, 4),
-                    path: path(&["y"]),
-                    message: ALIAS_UNSUPPORTED.into(),
-                },
-                YamlError {
-                    location: at(3, 5),
-                    path: path(&["z", "0"]),
-                    message: ALIAS_UNSUPPORTED.into(),
-                },
+                Diagnostic::new(at(2, 4), path(&["y"]), ALIAS_UNSUPPORTED),
+                Diagnostic::new(at(3, 5), path(&["z", "0"]), ALIAS_UNSUPPORTED),
             ]
         );
 

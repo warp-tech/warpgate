@@ -192,7 +192,6 @@
           "default": {}
         },
         "name": {
-          "description": "Unique among resources of the same kind, ignoring case",
           "type": "string",
           "minLength": 1
         }
@@ -279,7 +278,7 @@
           "default": ""
         },
         "is_default": {
-          "description": "Granted to every new user",
+          "description": "Grant to every new user",
           "type": "boolean",
           "default": false
         }
@@ -781,7 +780,7 @@
           "default": ""
         },
         "group": {
-          "description": "Name of a TargetGroup",
+          "description": "TargetGroup name",
           "type": [
             "string",
             "null"
@@ -803,7 +802,7 @@
           "default": false
         },
         "roles": {
-          "description": "Names of the Roles that may access the target",
+          "description": "Role names that are allowed to access the target",
           "type": "array",
           "default": [],
           "items": {
