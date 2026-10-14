@@ -99,3 +99,40 @@ impl From<TargetSession::Model> for TargetSessionSnapshot {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use time::OffsetDateTime;
+    use uuid::Uuid;
+    use warpgate_common::{TargetSessionId, UserSessionId};
+    use warpgate_db_entities::TargetSession;
+
+    use super::TargetSessionSnapshot;
+
+    #[test]
+    fn snapshot_redacts_a_malformed_reference_on_read() {
+        let malformed = "secret://not a valid ref";
+        let target = serde_json::json!({
+            "name": "t",
+            "description": "",
+            "mysql": {"host": "db", "auth": {"kind": "password", "password": malformed}},
+            "ticket_requests_disabled": false,
+            "ticket_require_approval": false,
+            "require_approval": false,
+        });
+
+        let snapshot = TargetSessionSnapshot::from(TargetSession::Model {
+            id: TargetSessionId(Uuid::nil()),
+            user_session_id: UserSessionId(Uuid::nil()),
+            target_snapshot: target.to_string(),
+            target_id: Uuid::nil(),
+            started: OffsetDateTime::UNIX_EPOCH,
+            ended: None,
+            ticket_id: None,
+            node_id: None,
+        });
+
+        let rendered = serde_json::to_string(&snapshot.target.unwrap()).unwrap();
+        assert!(!rendered.contains(malformed), "{rendered}");
+    }
+}
