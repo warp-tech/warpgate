@@ -97,8 +97,8 @@ impl UserFacingReason for ConnectionError {
             | Self::Aborted
             | Self::Authentication
             | Self::HandshakeTimeout { .. }
-            | Self::CertificateRefusedLocally(_)
             | Self::JumpHostTargetNotFound => self.to_string(),
+            Self::CertificateRefusedLocally(_) => "Certificate refused by Warpgate".into(),
             Self::Io(e) | Self::Ssh(russh::Error::IO(e)) => io_connect_reason(e).into(),
             Self::Key(_) | Self::Ssh(_) => "SSH protocol error".into(),
             Self::Aws(_) => "AWS authentication for the SSH target failed".into(),
