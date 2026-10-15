@@ -31,5 +31,6 @@ warpgate-common = { path = "../warpgate-common", default-features = false }
 warpgate-common-http = { path = "../warpgate-common-http", default-features = false }
 warpgate-core = { path = "../warpgate-core", default-features = false }
 warpgate-database-protocols = { path = "../warpgate-database-protocols", default-features = false }
+warpgate-protocol-ssh = { path = "../warpgate-protocol-ssh" }
 warpgate-tls = { path = "../warpgate-tls", default-features = false }
 webpki = { version = "0.22", default-features = false }
