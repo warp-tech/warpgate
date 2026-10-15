@@ -15,7 +15,7 @@ use poem::Request;
 use poem::http::{HeaderMap, HeaderName, HeaderValue, header};
 pub use warpgate_common::http_headers::{
     X_WARPGATE_CLUSTER_CLIENT_IP, X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_NODE,
-    X_WARPGATE_TOKEN,
+    X_WARPGATE_TICKET, X_WARPGATE_TOKEN,
 };
 
 /// The credential from the first `Authorization` header using `scheme`

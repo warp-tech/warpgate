@@ -9,7 +9,7 @@ use uuid::Uuid;
 use warpgate_common::Secret;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::get_client_ip;
-use warpgate_common_http::{SessionAuthorization, authorization_token};
+use warpgate_common_http::{SessionAuthorization, X_WARPGATE_TICKET, authorization_token};
 use warpgate_core::authorize_and_spend_ticket;
 use warpgate_db_entities::Ticket;
 
@@ -83,6 +83,11 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
         if let Some(token_value) = authorization_token(&req, "Warpgate") {
             ticket_value = Some(token_value.to_string());
             session_is_temporary = true;
+        } else if let Some(header_value) = req.headers().get(&X_WARPGATE_TICKET) {
+            if let Ok(ticket_str) = header_value.to_str() {
+                ticket_value = Some(ticket_str.to_string());
+                session_is_temporary = true;
+            }
         }
 
         if session_is_temporary {
