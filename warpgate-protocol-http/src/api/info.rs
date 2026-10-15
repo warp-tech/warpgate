@@ -16,6 +16,7 @@ use warpgate_common_http::{
 use warpgate_core::ConfigProvider;
 use warpgate_db_entities::{LdapServer, Parameters};
 
+use crate::api::common::local_logout_disabled;
 use crate::common::{SessionExt, is_user_admin};
 
 pub struct Api;
@@ -121,6 +122,7 @@ pub struct Info {
     password_login_mode: Parameters::PasswordLoginMode,
     authorized_via_ticket: bool,
     authorized_via_sso_with_single_logout: bool,
+    local_logout_disabled: bool,
     own_credential_management_allowed: bool,
     ticket_self_service_enabled: bool,
     ticket_max_duration_seconds: Option<i64>,
@@ -319,6 +321,7 @@ impl Api {
             authorized_via_sso_with_single_logout: session
                 .get_sso_login_state()
                 .is_some_and(|state| state.supports_single_logout),
+            local_logout_disabled: local_logout_disabled(session, &config),
             external_hosts: protocol_external_hosts,
             ports: if auth_ctx.is_some() {
                 PortsInfo {

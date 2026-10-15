@@ -135,6 +135,13 @@ pub enum AuditEvent {
         reference: String,
         success: bool,
     },
+    SshCertificateIssued {
+        backend: String,
+        role: String,
+        principal: String,
+        key_id: String,
+        success: bool,
+    },
     /// `kubectl exec` — a command run inside an existing container.
     KubernetesExecStarted {
         subject: KubernetesAuditSubject,
@@ -496,6 +503,24 @@ impl AuditEvent {
                     reference = %reference,
                     success = %success,
                     "Resolved secret from backend"
+                );
+            }
+            Self::SshCertificateIssued {
+                backend,
+                role,
+                principal,
+                key_id,
+                success,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "SshCertificateIssued1",
+                    backend = %backend,
+                    role = %role,
+                    principal = %principal,
+                    key_id = %key_id,
+                    success = %success,
+                    "Requested an SSH certificate from backend"
                 );
             }
             Self::KubernetesExecStarted {

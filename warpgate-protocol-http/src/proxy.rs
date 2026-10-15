@@ -108,16 +108,18 @@ fn strip_warpgate_internal_query_params(pq: &PathAndQuery) -> Result<PathAndQuer
     let Some(query) = pq.query() else {
         return Ok(pq.clone());
     };
-    let query = form_urlencoded::parse(query.as_bytes())
-        .filter(|(key, _)| key != "warpgate-target" && key != "warpgate-ticket")
-        .fold(
-            form_urlencoded::Serializer::new(String::new()),
-            |mut s, (k, v)| {
-                s.append_pair(&k, &v);
-                s
-            },
-        )
-        .finish();
+    // Keep the other segments verbatim: the query isn't necessarily form-encoded and
+    // re-serialising it would rewrite bytes the upstream expects (e.g. `==` -> `=%3D`)
+    let query = query
+        .split('&')
+        .filter(|segment| {
+            !matches!(
+                form_urlencoded::parse(segment.as_bytes()).next(),
+                Some((key, _)) if key == "warpgate-target" || key == "warpgate-ticket"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("&");
     let path = pq.path();
     let rebuilt = if query.is_empty() {
         path.to_string()
@@ -819,5 +821,15 @@ mod tests {
         assert_eq!(strip("/search?warpgate-target=es&q=x"), "/search?q=x");
         assert_eq!(strip("/?q=x&warpgate-ticket=abc"), "/?q=x");
         assert_eq!(strip("/?warpgate-target=a&warpgate-ticket=b"), "/");
+        assert_eq!(strip("/?warpgate%2Dtarget=a&q=x"), "/?q=x");
+    }
+
+    #[test]
+    fn strip_keeps_other_query_bytes() {
+        assert_eq!(strip("/?eyJhIjoxfQ=="), "/?eyJhIjoxfQ==");
+        assert_eq!(strip("/c?eyJ+/w==&warpgate-ticket=t"), "/c?eyJ+/w==");
+        assert_eq!(strip("/?a=%20b&c=d+e"), "/?a=%20b&c=d+e");
+        assert_eq!(strip("/?flag&x=1"), "/?flag&x=1");
+        assert_eq!(strip("/?a=1&&b=2"), "/?a=1&&b=2");
     }
 }

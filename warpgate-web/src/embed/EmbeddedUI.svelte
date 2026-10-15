@@ -1,5 +1,6 @@
 <script lang="ts">
     import BannerModal from 'common/BannerModal.svelte'
+    import { navigateToExternalUrl } from 'common/helpers'
     import { api } from 'gateway/lib/api'
     import { onMount } from 'svelte'
     import logo from '../../public/assets/favicon.svg'
@@ -15,6 +16,7 @@
     let dragStartCoords: { x: number; y: number } | undefined
     let externalHost: string | undefined
     let banner = ''
+    let localLogoutDisabled = false
     // The embedded UI is also injected when only the banner is enabled, so the
     // floating menu renders separately from it.
     let showMenu = false
@@ -29,6 +31,7 @@
         const info = await api.getInfo()
         banner = info.banner
         showMenu = info.showSessionMenu
+        localLogoutDisabled = info.localLogoutDisabled
         externalHost = `${info.externalHosts?.http ?? info.externalHost}:${info.ports.http ?? 443}`
     })
 
@@ -79,6 +82,10 @@
     }
 
     async function logout() {
+        if (localLogoutDisabled) {
+            navigateToExternalUrl((await api.initiateSsoLogout()).url)
+            return
+        }
         await api.logout()
         location.reload()
     }

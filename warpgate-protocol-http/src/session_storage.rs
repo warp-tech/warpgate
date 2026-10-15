@@ -17,6 +17,7 @@ use tracing::error;
 use warpgate_common::{UserSessionId, WarpgateError};
 use warpgate_db_entities::{HttpSession, UserSession};
 
+use crate::SsoLoginState;
 use crate::common::SessionExt;
 use crate::session::SESSION_ID_SESSION_KEY;
 
@@ -235,7 +236,7 @@ impl SharedSessionStorage {
 
         transaction.commit().await?;
         if let Some(ended) = ended {
-            ended.emit();
+            ended.settle(&self.db).await;
         }
         Ok(())
     }
@@ -310,14 +311,32 @@ impl SessionStorage for SharedSessionStorage {
         let now = OffsetDateTime::now_utc();
         let data = serde_json::to_string(entries).map_err(InternalServerError)?;
         let user_session_id = Self::user_session_id_of(entries);
+
+        let (sso_provider, sso_subject, sso_sid) = {
+            // enforce column length for SSO state values
+            let sso = SsoLoginState::from_session_entries(entries)
+                .and_then(|state| Some((state.provider, state.subject?, state.sid)));
+            let fits = |value: &String| value.len() <= HttpSession::SSO_COLUMN_MAX_LENGTH;
+            match sso {
+                Some((provider, sub, sid)) => (
+                    Some(provider).filter(fits),
+                    Some(sub).filter(fits),
+                    sid.filter(fits),
+                ),
+                None => (None, None, None),
+            }
+        };
+
         let model = HttpSession::ActiveModel {
             id: Set(session_id.to_owned()),
             expires: Set(expires.map(|d| now + d)),
             data: Set(data),
             updated: Set(now),
-            // Mirrored out of the entries so ending, revocation and reaping
-            // query an indexed column instead of parsing JSON.
             user_session_id: Set(user_session_id),
+            // extracted from state to be indexable
+            sso_provider: Set(sso_provider),
+            sso_subject: Set(sso_subject),
+            sso_sid: Set(sso_sid),
         };
         let transaction = self.db.begin().await.map_err(InternalServerError)?;
 
@@ -353,6 +372,9 @@ impl SessionStorage for SharedSessionStorage {
                             HttpSession::Column::Data,
                             HttpSession::Column::Updated,
                             HttpSession::Column::UserSessionId,
+                            HttpSession::Column::SsoProvider,
+                            HttpSession::Column::SsoSubject,
+                            HttpSession::Column::SsoSid,
                         ])
                         .to_owned(),
                 )
@@ -403,6 +425,7 @@ mod tests {
             data: Set("{}".to_string()),
             updated: Set(past),
             user_session_id: Set(None),
+            ..Default::default()
         }
     }
 
@@ -646,6 +669,7 @@ mod tests {
             data: Set("{}".to_string()),
             updated: Set(updated),
             user_session_id: Set(None),
+            ..Default::default()
         };
         HttpSession::Entity::insert(null_row("stale", stale))
             .exec(&s.db)

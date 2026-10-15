@@ -113,8 +113,9 @@ the operator's own when they supply one, otherwise the chart's generated Secret.
 
 {{/*
 Database URL for setup and for the rendered config. The bundled database's
-password stays out of the manifests as a literal $WARPGATE_DB_PASSWORD: the
-setup shell expands it, and the init container substitutes it into the config.
+password stays out of the manifests as a literal $WARPGATE_DB_PASSWORD:
+Kubernetes expands it in the setup arguments, and `internal-install-files`
+substitutes it into the config.
 */}}
 {{- define "warpgate.databaseUrl" -}}
 {{- if .Values.setup.databaseUrl -}}
@@ -125,8 +126,8 @@ setup shell expands it, and the init container substitutes it into the config.
 {{- end }}
 
 {{/*
-Names of the environment variables the init container substitutes into the
-config file.
+Names of the environment variables `internal-install-files` substitutes into
+the config file.
 */}}
 {{- define "warpgate.configEnvVarReplace" -}}
 {{- $vars := list }}
@@ -158,28 +159,110 @@ bundled database's password.
 {{- end }}
 
 {{/*
-Listener ports and database for `unattended-setup`, shared by the setup Job and
-the podinit init container.
+`unattended-setup` arguments of the setup init container. `$VAR` / `${VAR}` in the database URL become Kubernetes' `$(VAR)`,
+expanded from the container's environment.
 */}}
 {{- define "warpgate.unattendedSetupArgs" -}}
-{{- if .Values.setup.http }} --http-port {{ .Values.setup.http }}{{ end }}
-{{- if .Values.setup.ssh }} --ssh-port {{ .Values.setup.ssh }}{{ end }}
-{{- if .Values.setup.mysql }} --mysql-port {{ .Values.setup.mysql }}{{ end }}
-{{- if .Values.setup.pgsql }} --postgres-port {{ .Values.setup.pgsql }}{{ end }}
-{{- if .Values.setup.kubernetes }} --kubernetes-port {{ .Values.setup.kubernetes }}{{ end }}
-{{- with include "warpgate.databaseUrl" . }} --database-url "{{ . }}"{{ end }}
-{{- if .Values.setup.recordSessions }} --record-sessions{{ end }}
+- --data-path=/data
+{{- with .Values.setup.http }}
+- --http-port={{ . }}
+{{- end }}
+{{- with .Values.setup.ssh }}
+- --ssh-port={{ . }}
+{{- end }}
+{{- with .Values.setup.mysql }}
+- --mysql-port={{ . }}
+{{- end }}
+{{- with .Values.setup.pgsql }}
+- --postgres-port={{ . }}
+{{- end }}
+{{- with .Values.setup.kubernetes }}
+- --kubernetes-port={{ . }}
+{{- end }}
+{{- with include "warpgate.databaseUrl" . }}
+- {{ printf "--database-url=%s" (regexReplaceAll `\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)` . "$$(${1}${2})") | quote }}
+{{- end }}
+{{- if .Values.setup.recordSessions }}
+- --record-sessions
+{{- end }}
+{{- if .Values.setup.disableIpV6 }}
+- --listen-address=0.0.0.0
+{{- end }}
+{{- end }}
+
+{{/*
+Image, security context and environment of the containers that run setup
+steps.
+*/}}
+{{- define "warpgate.setupContainer" -}}
+{{- with .Values.securityContext }}
+securityContext:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+{{- with include "warpgate.setupEnv" . }}
+env:
+  {{- . | trim | nindent 2 }}
+{{- end }}
+{{- end }}
+
+{{/*
+Projected volume sources laid out as the files must end up in /data, where
+`internal-install-files` copies them on every pod start. Empty when there is nothing to
+copy.
+*/}}
+{{- define "warpgate.seedSources" -}}
+{{- with include "warpgate.tlsSecretName" . }}
+- secret:
+    name: {{ . }}
+    items:
+      - key: tls.crt
+        path: tls.certificate.pem
+      - key: tls.key
+        path: tls.key.pem
+{{- end }}
+{{- with .Values.ssh_keys_secret }}
+- secret:
+    name: {{ . }}
+    items:
+      {{- range list "client-ed25519" "client-rsa" "host-ed25519" "host-rsa" }}
+      - key: {{ . }}
+        path: ssh-keys/{{ . }}
+      {{- end }}
+{{- end }}
+{{- with include "warpgate.configMapName" . }}
+- configMap:
+    name: {{ . }}
+    items:
+      - key: warpgate.yaml
+        path: warpgate.yaml
+{{- end }}
+{{- end }}
+
+{{/*
+Volume mounts of the deployment's init containers.
+*/}}
+{{- define "warpgate.initVolumeMounts" -}}
+- name: data
+  mountPath: /data
+{{- if include "warpgate.seedSources" . }}
+- name: seed
+  mountPath: /seed
+{{- end }}
+{{- with .Values.volume_mounts }}
+{{ toYaml . }}
+{{- end }}
 {{- end }}
 
 {{/*
 Non-empty when the chart itself has to provide /data/warpgate.yaml and a
-certificate: the setup Job writes them to its own volume, so without a shared
-PVC or an overrides_config the Warpgate pods would come up without either.
-Only for a shared database - a config pointing at a per-pod SQLite file would
-be a working config for an empty database.
+certificate: on an emptyDir they are gone with every pod, and regenerating
+them means running setup from scratch against the shared database on every
+start. Only for a shared database - a config pointing at a per-pod SQLite file
+would be a working config for an empty database.
 */}}
 {{- define "warpgate.renderConfig" -}}
-{{- if and (include "warpgate.databaseUrl" .) (not .Values.overrides_config) (not .Values.data.pvc.enabled) (ne .Values.setup.type "podinit") -}}
+{{- if and (include "warpgate.databaseUrl" .) (not .Values.overrides_config) (not .Values.data.pvc.enabled) -}}
 true
 {{- end -}}
 {{- end }}

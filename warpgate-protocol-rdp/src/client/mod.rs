@@ -9,7 +9,6 @@ mod logon;
 mod tls;
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
@@ -40,17 +39,14 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tracing::{debug, warn};
 use warpgate_common::{RdpTargetAuth, RdpTargetCompression, SecretResolver, TargetRdpOptions};
-use warpgate_core::{DesktopEvent, DesktopInput, DesktopRect, DesktopState};
+use warpgate_core::{
+    DESKTOP_CONNECT_TIMEOUT, DESKTOP_HANDSHAKE_TIMEOUT, DesktopConnectionError, DesktopEvent,
+    DesktopInput, DesktopRect, DesktopState, within_deadline,
+};
 
 pub(crate) use self::logon::LogonWatcher;
 use crate::clipboard::{Clipboard, ClipboardSink, TextClipboard};
-
-/// Deadline for the TCP connect to the target.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-/// Deadline for the RDP handshake (X.224, TLS, CredSSP — the last of which may reach out
-/// to a KDC). Without it a target that accepts the TCP connection but stalls mid-handshake
-/// would wedge the session forever with no event to report.
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+use crate::desktop_size::bound_desktop_size;
 
 type Framed = TokioFramed<tls::TargetTlsStream>;
 
@@ -86,15 +82,16 @@ pub async fn run(
     mut abort_rx: UnboundedReceiver<()>,
     logon: LogonWatcher,
     secrets: Arc<dyn SecretResolver>,
-) -> Result<()> {
+) -> Result<(), DesktopConnectionError> {
     event_tx
         .send(DesktopEvent::State(DesktopState::Connecting))
         .await
         .ok();
 
     let RdpTargetAuth::Password(auth) = &options.auth;
-    // The viewer-supplied size may be odd or out of range; keep the initial desktop within
-    // the same bounds the Display Control resize path enforces.
+    // The viewer-supplied size is untrusted; bound it the same way the native viewer's is,
+    // then make it a size the layout PDU accepts (even width), as the resize path does.
+    let (width, height) = bound_desktop_size(width, height);
     let (width, height) =
         MonitorLayoutEntry::adjust_display_size(u32::from(width), u32::from(height));
     let password = auth.password.resolve(&*secrets).await?;
@@ -108,8 +105,8 @@ pub async fn run(
     let (clipboard_tx, clipboard_rx) = unbounded_channel();
     let clipboard = Clipboard::deferred(ClientClipboardSink(clipboard_tx));
 
-    let (connection_result, framed) = tokio::time::timeout(
-        HANDSHAKE_TIMEOUT,
+    let (connection_result, framed) = within_deadline(
+        DESKTOP_HANDSHAKE_TIMEOUT,
         connect(
             config,
             options.host.clone(),
@@ -119,9 +116,7 @@ pub async fn run(
             clipboard.backend(),
         ),
     )
-    .await
-    .context("RDP handshake timed out")?
-    .context("RDP connection")?;
+    .await?;
 
     event_tx
         .send(DesktopEvent::State(DesktopState::Connected))
@@ -148,6 +143,7 @@ pub async fn run(
         &logon,
     )
     .await
+    .map_err(DesktopConnectionError::Session)
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -236,6 +232,7 @@ async fn active_loop(
                 }
                 if let Some((width, height)) = resize {
                     // The layout PDU rejects odd widths and sizes outside 200..=8192.
+                    let (width, height) = bound_desktop_size(width, height);
                     let size = MonitorLayoutEntry::adjust_display_size(
                         u32::from(width),
                         u32::from(height),
@@ -773,16 +770,17 @@ async fn connect(
     verify_tls: bool,
     tls_security: warpgate_common::RdpTlsSecurity,
     clipboard: TextClipboard<ClientClipboardSink>,
-) -> Result<(ConnectionResult, Framed)> {
-    let tcp_stream = tokio::time::timeout(
-        CONNECT_TIMEOUT,
-        TcpStream::connect((server_name.as_str(), port)),
-    )
-    .await
-    .context("TCP connect timed out")?
-    .context("TCP connect")?;
+) -> Result<(ConnectionResult, Framed), DesktopConnectionError> {
+    let tcp_stream = within_deadline(DESKTOP_CONNECT_TIMEOUT, async {
+        TcpStream::connect((server_name.as_str(), port))
+            .await
+            .map_err(DesktopConnectionError::Io)
+    })
+    .await?;
     tcp_stream.set_nodelay(true).ok();
-    let client_addr = tcp_stream.local_addr().context("local addr")?;
+    let client_addr = tcp_stream
+        .local_addr()
+        .map_err(DesktopConnectionError::Io)?;
 
     let mut framed = TokioFramed::new(tcp_stream);
     // Advertise the Display Control DVC so viewer-driven resolution changes can be pushed
@@ -804,7 +802,7 @@ async fn connect(
 
     let should_upgrade = ironrdp_tokio::connect_begin(&mut framed, &mut connector)
         .await
-        .context("connect_begin")?;
+        .map_err(|error| connector_error("connect_begin", error))?;
 
     let initial_stream = framed.into_inner_no_leftover();
     let (upgraded_stream, server_public_key) = tls::upgrade(
@@ -814,7 +812,7 @@ async fn connect(
         tls_security,
     )
     .await
-    .context("TLS upgrade")?;
+    .map_err(DesktopConnectionError::Tls)?;
 
     let upgraded = ironrdp_tokio::mark_as_upgraded(should_upgrade, &mut connector);
     let mut upgraded_framed = TokioFramed::new(upgraded_stream);
@@ -830,13 +828,26 @@ async fn connect(
         None,
     )
     .await
-    .context("connect_finalize")?;
+    .map_err(|error| connector_error("connect_finalize", error))?;
 
     if connection_result.desktop_size.width == 0 || connection_result.desktop_size.height == 0 {
         warn!("target reported a zero desktop size");
     }
 
     Ok((connection_result, upgraded_framed))
+}
+
+fn connector_error(step: &'static str, error: connector::ConnectorError) -> DesktopConnectionError {
+    let rejected = matches!(
+        error.kind(),
+        connector::ConnectorErrorKind::Credssp(_) | connector::ConnectorErrorKind::AccessDenied
+    );
+    let chain = anyhow::Error::from(error).context(step);
+    if rejected {
+        DesktopConnectionError::TargetRejectedCredentials(chain)
+    } else {
+        DesktopConnectionError::Handshake(chain)
+    }
 }
 
 #[cfg(test)]

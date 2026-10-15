@@ -12,7 +12,7 @@
     import EmptyState from 'common/EmptyState.svelte'
     import { stringifyError } from 'common/errors'
     import GroupColorIcon from 'common/GroupColorIcon.svelte'
-    import { resolveGroup } from 'common/groups'
+    import { orderForGroupedList, resolveGroup } from 'common/groups'
     import ItemList, {
         type LoadOptions,
         type PaginatedResponse,
@@ -22,7 +22,6 @@
     import { compare as naturalCompareFactory } from 'natural-orderby'
     import { from, map, type Observable } from 'rxjs'
     import { link } from 'svelte-spa-router'
-    import { firstBy } from 'thenby'
     import { adminPermissions } from '../../lib/store'
 
     let error: string | undefined = $state()
@@ -59,25 +58,14 @@
                 }),
             ]),
         ).pipe(
-            map(([_, targets]) => {
-                const natural = naturalCompareFactory()
-                const groupName = (target: Target) =>
-                    (
-                        groups.find(g => g.id === target.groupId)?.name ?? ''
-                    ).toLowerCase()
-
-                return targets.sort(
-                    firstBy((x: Target) => !x.groupId)
-                        // Natural sort between groups
-                        .thenBy((a: Target, b: Target) =>
-                            natural(groupName(a), groupName(b)),
-                        )
-                        // Natural sort within a group
-                        .thenBy((a, b) =>
-                            natural(a.name.toLowerCase(), b.name.toLowerCase()),
-                        ),
-                )
-            }),
+            map(([_, targets]) =>
+                orderForGroupedList(targets, options.search, {
+                    groupId: t => t.groupId,
+                    groupName: t =>
+                        groups.find(g => g.id === t.groupId)?.name ?? '',
+                    name: t => t.name,
+                }),
+            ),
             map(targets => ({
                 items: targets,
                 offset: 0,

@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
-use anyhow::Context;
 use bytes::Bytes;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{Receiver, UnboundedReceiver, channel, unbounded_channel};
 use tracing::{Instrument, debug, error, info_span, warn};
-use vnc::{ClientKeyEvent, PixelFormat, VncConnector, VncEncoding, VncEvent, X11Event};
+use vnc::{ClientKeyEvent, PixelFormat, VncConnector, VncEncoding, VncError, VncEvent, X11Event};
 use warpgate_common::{SecretResolver, TargetVncOptions, VncTargetAuth, WarpgateError};
 use warpgate_core::{
-    AdmittedTarget, DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopClientHandles, DesktopEvent,
-    DesktopInput, DesktopRect, DesktopState, LogonState,
+    AdmittedTarget, DESKTOP_CONNECT_TIMEOUT, DESKTOP_HANDSHAKE_TIMEOUT,
+    DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopClientHandles, DesktopConnectionError, DesktopEvent,
+    DesktopInput, DesktopRect, DesktopState, LogonState, within_deadline,
 };
 
 const fn rect_from(r: vnc::Rect) -> DesktopRect {
@@ -139,8 +139,11 @@ fn spawn_client(
             )
             .await
             {
-                error!(%error, "VNC backend client failed");
-                let _ = event_tx.send(DesktopEvent::Error(error.to_string())).await;
+                let _ = event_tx.send(DesktopEvent::backend_error(&error)).await;
+                error!(
+                    "VNC backend client failed: {:#}",
+                    anyhow::Error::from(error)
+                );
             }
             let _ = event_tx
                 .send(DesktopEvent::State(DesktopState::Disconnected))
@@ -165,15 +168,18 @@ async fn run(
     mut input_rx: Receiver<DesktopInput>,
     mut abort_rx: UnboundedReceiver<()>,
     secrets: Arc<dyn SecretResolver>,
-) -> anyhow::Result<()> {
+) -> Result<(), DesktopConnectionError> {
     event_tx
         .send(DesktopEvent::State(DesktopState::Connecting))
         .await
         .ok();
 
-    let stream = TcpStream::connect((options.host.clone(), options.port))
-        .await
-        .context("connecting to VNC target")?;
+    let stream = within_deadline(DESKTOP_CONNECT_TIMEOUT, async {
+        TcpStream::connect((options.host.clone(), options.port))
+            .await
+            .map_err(DesktopConnectionError::Io)
+    })
+    .await?;
 
     let password = match &options.auth {
         VncTargetAuth::Password(auth) => auth
@@ -190,16 +196,19 @@ async fn run(
     for encoding in encodings {
         connector = connector.add_encoding(*encoding);
     }
-    let client = connector
-        .allow_shared(true)
-        .set_pixel_format(PixelFormat::bgra())
-        .build()
-        .context("building VNC connector")?
-        .try_start()
-        .await
-        .context("starting VNC session")?
-        .finish()
-        .context("finishing VNC handshake")?;
+    let client = within_deadline(DESKTOP_HANDSHAKE_TIMEOUT, async {
+        connector
+            .allow_shared(true)
+            .set_pixel_format(PixelFormat::bgra())
+            .build()
+            .map_err(vnc_error)?
+            .try_start()
+            .await
+            .map_err(vnc_error)?
+            .finish()
+            .map_err(vnc_error)
+    })
+    .await?;
 
     event_tx
         .send(DesktopEvent::State(DesktopState::Connected))
@@ -209,7 +218,7 @@ async fn run(
     // Ask for an initial full frame.
     client.input(X11Event::FullRefresh).await.ok();
 
-    loop {
+    'session: loop {
         tokio::select! {
             event = client.poll_event() => {
                 match event {
@@ -235,7 +244,7 @@ async fn run(
                         for event in map_input(input) {
                             if let Err(error) = client.input(event).await {
                                 warn!(%error, "VNC input error");
-                                break;
+                                break 'session;
                             }
                         }
                     }
@@ -251,6 +260,16 @@ async fn run(
 
     client.close().await.ok();
     Ok(())
+}
+
+fn vnc_error(error: VncError) -> DesktopConnectionError {
+    match error {
+        VncError::WrongPassword | VncError::NoPassword => {
+            DesktopConnectionError::TargetRejectedCredentials(error.into())
+        }
+        VncError::IoError(error) => DesktopConnectionError::Io(error),
+        error => DesktopConnectionError::Handshake(error.into()),
+    }
 }
 
 fn map_event(event: VncEvent) -> Option<DesktopEvent> {
@@ -278,9 +297,31 @@ fn map_event(event: VncEvent) -> Option<DesktopEvent> {
         },
         VncEvent::Text(text) => DesktopEvent::Clipboard(text),
         VncEvent::Bell => DesktopEvent::Bell,
-        VncEvent::Error(message) => DesktopEvent::Error(message),
+        VncEvent::Error(message) => {
+            error!(%message, "VNC backend reported an error");
+            DesktopEvent::backend_error(&DesktopConnectionError::Session(anyhow::anyhow!(message)))
+        }
         // Everything else (including the server's pixel-format echo — we fix our own)
         // is not surfaced.
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use vnc::VncEvent;
+    use warpgate_core::DesktopEvent;
+
+    use super::map_event;
+
+    #[test]
+    fn a_decoder_error_is_not_shown_verbatim() {
+        let shown = match map_event(VncEvent::Error(
+            "Connection reset by peer (os error 54)".into(),
+        )) {
+            Some(DesktopEvent::Error(message)) => message,
+            other => format!("{other:?}"),
+        };
+        assert_eq!(shown, "Target connection failed: The target session failed");
+    }
 }

@@ -30,8 +30,6 @@ class Test:
         with admin_client(url) as api:
             role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
             user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
-            # Public key rather than password: sshpass drives ssh through its
-            # own pty, which would swallow the keypress we send to the menu.
             api.create_public_key_credential(
                 user.id,
                 sdk.NewPublicKeyCredential(

@@ -37,13 +37,4 @@ pub enum LdapError {
 
     #[error("LDAP lookup matched {count} entries, expected at most one: {filter}")]
     AmbiguousMatch { filter: String, count: usize },
-
-    #[error("Other error: {0}")]
-    Other(String),
-}
-
-impl From<String> for LdapError {
-    fn from(s: String) -> Self {
-        Self::Other(s)
-    }
 }

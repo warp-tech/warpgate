@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use poem::http::StatusCode;
 use poem::session::Session;
 use poem::web::Data;
 use poem::web::websocket::WebSocket;
@@ -14,19 +13,17 @@ use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect,
 };
-use tracing::warn;
 use warpgate_common::auth::ApprovalKind;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::cluster::{ClusterNotification, refresh_notification_stream};
 use warpgate_core::{
-    SessionApprovalRequestSnapshot, State, TargetSessionSnapshot, UserSessionSnapshot,
+    SessionApprovalRequestSnapshot, SessionsFilter, TargetSessionSnapshot, UserSessionSnapshot,
 };
 use warpgate_db_entities::{Node, SessionApprovalRequest, Target, TargetSession, UserSession};
 
+use super::AdminContext;
 use super::pagination::PaginatedResponse;
-use super::{AdminContext, ClusterOrAdminContext};
-use crate::api::cluster_proxy::fan_out_to_peers_expecting;
 use crate::api::common::require_admin_permission;
 
 pub struct Api;
@@ -101,30 +98,18 @@ impl Api {
     )]
     async fn api_close_all_sessions(
         &self,
-        admin: ClusterOrAdminContext,
+        admin: AdminContext,
         session: &Session,
-        req: &poem::Request,
     ) -> poem::Result<CloseAllSessionsResponse> {
         admin.require(AdminPermission::SessionsTerminate)?;
 
-        let intra_cluster = admin.is_intra_cluster_request();
-        if !intra_cluster {
-            // kill DB sessions before killing handles to avoid a race
-            UserSession::revoke_all(&admin.services().db)
-                .await
-                .map_err(poem::error::InternalServerError)?;
-        }
-
-        State::close_local_sessions(&admin.services().state, |_| true).await;
+        admin
+            .services()
+            .close_sessions(SessionsFilter::All)
+            .await
+            .map_err(poem::error::InternalServerError)?;
 
         session.purge();
-
-        if !intra_cluster {
-            for (node, status) in fan_out_to_peers_expecting(&admin, req, StatusCode::CREATED).await
-            {
-                warn!(%node, %status, "Failed to close sessions on a cluster node");
-            }
-        }
 
         Ok(CloseAllSessionsResponse::Ok)
     }

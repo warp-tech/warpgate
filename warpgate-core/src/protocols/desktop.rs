@@ -4,11 +4,14 @@
 //! protocol into these events/inputs so that a single renderer and a single
 //! recording format can serve every desktop protocol.
 
+use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use bytes::Bytes;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedSender};
+use warpgate_common::{UserFacingReason, WarpgateError, io_connect_reason};
 
 pub const DESKTOP_INPUT_CHANNEL_CAPACITY: usize = 256;
 
@@ -115,6 +118,66 @@ pub enum DesktopEvent {
     Error(String),
 }
 
+impl DesktopEvent {
+    pub fn backend_error(error: &DesktopConnectionError) -> Self {
+        Self::Error(format!(
+            "Target connection failed: {}",
+            error.user_facing_reason()
+        ))
+    }
+}
+
+/// Deadline for the TCP connect to a desktop target.
+pub const DESKTOP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Deadline for the protocol handshake with a desktop target (for RDP this includes TLS and
+/// CredSSP, which may reach out to a KDC). Without it a target that accepts the TCP connection
+/// but stalls mid-handshake would wedge the session forever with no event to report.
+pub const DESKTOP_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Run one step of connecting to a desktop target under `deadline`. An overrun is reported
+/// as a timed-out connection.
+pub async fn within_deadline<T>(
+    deadline: Duration,
+    step: impl Future<Output = Result<T, DesktopConnectionError>>,
+) -> Result<T, DesktopConnectionError> {
+    tokio::time::timeout(deadline, step)
+        .await
+        .unwrap_or_else(|_| {
+            Err(DesktopConnectionError::Io(
+                std::io::ErrorKind::TimedOut.into(),
+            ))
+        })
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DesktopConnectionError {
+    #[error(transparent)]
+    Warpgate(#[from] WarpgateError),
+    #[error("connecting to the target")]
+    Io(#[source] std::io::Error),
+    #[error("TLS upgrade")]
+    Tls(#[source] anyhow::Error),
+    #[error("target rejected the credentials")]
+    TargetRejectedCredentials(#[source] anyhow::Error),
+    #[error("protocol handshake")]
+    Handshake(#[source] anyhow::Error),
+    #[error("session")]
+    Session(#[source] anyhow::Error),
+}
+
+impl UserFacingReason for DesktopConnectionError {
+    fn user_facing_reason(&self) -> String {
+        match self {
+            Self::Warpgate(e) => e.user_facing_reason(),
+            Self::Io(e) => io_connect_reason(e).into(),
+            Self::Tls(_) => "TLS negotiation with the target failed".into(),
+            Self::TargetRejectedCredentials(_) => "Target rejected the credentials".into(),
+            Self::Handshake(_) => "Protocol negotiation with the target failed".into(),
+            Self::Session(_) => "The target session failed".into(),
+        }
+    }
+}
+
 /// A physical key position: a PC/AT set-1 "make" code, with `extended` marking the
 /// `E0` prefix that distinguishes e.g. the nav cluster from the numeric keypad.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -177,5 +240,39 @@ mod tests {
     #[test]
     fn a_backend_that_cannot_tell_never_suppresses() {
         assert!(!LogonState::logged_on().still_at_logon_screen());
+    }
+
+    fn shown(error: &DesktopConnectionError) -> String {
+        match DesktopEvent::backend_error(error) {
+            DesktopEvent::Error(message) => message,
+            other => format!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn backend_error_shows_a_reason_not_the_error_text() {
+        let secret = WarpgateError::from(warpgate_common::SecretError::Backend(
+            "permission denied on kv/app#token".into(),
+        ));
+        let error = DesktopConnectionError::from(secret);
+        assert!(error.to_string().contains("kv/app"));
+        assert_eq!(
+            shown(&error),
+            "Target connection failed: Secret backend error"
+        );
+
+        let error = DesktopConnectionError::Io(std::io::ErrorKind::ConnectionRefused.into());
+        assert_eq!(
+            shown(&error),
+            "Target connection failed: Target refused the connection"
+        );
+
+        let error = DesktopConnectionError::Session(
+            anyhow::anyhow!("vault said: kv/app#token").context("reading PDU"),
+        );
+        assert_eq!(
+            shown(&error),
+            "Target connection failed: The target session failed"
+        );
     }
 }

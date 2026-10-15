@@ -189,6 +189,26 @@ async fn find_request(
         .await?)
 }
 
+/// A revoked session (admin close, logout, cookie expiry) can no longer be admitted, so its
+/// pending questions must leave the inbox at once rather than wait for the reaper.
+#[tokio::test]
+async fn revoking_a_session_abandons_its_pending_requests() {
+    use SessionApprovalRequest::ApprovalRequestStatus as Status;
+
+    let db = migrated_db().await;
+    let revoked = UserSessionId(Uuid::new_v4());
+    let other = UserSessionId(Uuid::new_v4());
+    pending_row(&db, revoked, "a-target").await;
+    pending_row(&db, other, "a-target").await;
+
+    warpgate_db_entities::UserSession::revoke(&db, revoked)
+        .await
+        .unwrap();
+
+    assert_eq!(status_of(&db, revoked, "a-target").await, Status::Abandoned);
+    assert_eq!(status_of(&db, other, "a-target").await, Status::Pending);
+}
+
 /// Nothing else ends a request whose owning node died mid-hold: the guard's
 /// `Drop` never ran, and no waiter is left to time out. Without the reaper
 /// the row sits in the inbox forever, offering an administrator a session
@@ -1294,13 +1314,16 @@ mod delivery {
     use std::path::PathBuf;
     use std::sync::Arc;
 
+    use sea_orm::ActiveModelTrait;
     use tokio::sync::Mutex;
     use warpgate_common::auth::{
-        AuthResult, CredentialKind, CredentialPolicy, CredentialPolicyResponse,
+        AuthResult, AuthState, CredentialKind, CredentialPolicy, CredentialPolicyResponse,
     };
     use warpgate_common::{GlobalParams, User, WarpgateConfig, WarpgateConfigStore};
+    use warpgate_db_entities::Parameters;
 
     use super::*;
+    use crate::auth_state_store::{ApprovalRequestSink, wait_for_auth_completion};
     use crate::cluster::Cluster;
     use crate::login_protection::LoginProtectionService;
     use crate::rate_limiting::RateLimiterRegistry;
@@ -1524,6 +1547,135 @@ mod delivery {
                 .await
                 .consumed_at
                 .is_some()
+        );
+    }
+
+    async fn allow_web_approval_caching(db: &DatabaseConnection) {
+        let params = Parameters::Entity::get(db).await.unwrap();
+        Parameters::ActiveModel {
+            web_approval_grace_period_seconds: Set(Some(3600)),
+            ..params.into()
+        }
+        .update(db)
+        .await
+        .unwrap();
+    }
+
+    /// Records an approval for what `state_arc` asks, as the user's earlier
+    /// session would have left it.
+    async fn remember_approval_for(db: &DatabaseConnection, state_arc: &Arc<Mutex<AuthState>>) {
+        let subject = ApprovalSubject::from_auth_state(&*state_arc.lock().await);
+        let earlier = UserSessionId(Uuid::new_v4());
+        advertise_row_on(db, NodeId(Uuid::new_v4()), earlier, &subject).await;
+        assert!(
+            record_decision(
+                db,
+                earlier,
+                ApprovalKind::User,
+                &subject.target_name,
+                ApprovalDecision::Approved(ApprovalScope::Target),
+                ApprovalActor {
+                    username: Some(subject.user_info.username.clone()),
+                    user_id: subject.user_info.id,
+                },
+            )
+            .await
+            .unwrap()
+        );
+    }
+
+    fn remembered_ip() -> Option<std::net::IpAddr> {
+        Some("10.0.0.1".parse().unwrap())
+    }
+
+    /// A policy asking for the approval alongside a password puts the request
+    /// up before the password is in; once the password lands and a remembered
+    /// approval settles the ask, the request must come down — nobody is
+    /// waiting on a decision.
+    #[tokio::test]
+    async fn a_remembered_approval_withdraws_the_advertised_request() {
+        let db = migrated_db().await;
+        let services = test_services(&db).await;
+        allow_web_approval_caching(&db).await;
+        let user = test_user();
+        let session_id = UserSessionId(Uuid::new_v4());
+        let node = services.cluster.node_id;
+
+        let state_arc = services.auth_state_store.lock().await.create(
+            &session_id,
+            &user,
+            Protocol::Ssh,
+            "a-target",
+            Box::new(RequireWebApproval),
+            remembered_ip(),
+        );
+        remember_approval_for(&db, &state_arc).await;
+
+        assert!(advertise_user_request(&db, node, &state_arc).await.unwrap());
+        assert_eq!(
+            user_row(&db, session_id, "a-target").await.status,
+            SessionApprovalRequest::ApprovalRequestStatus::Pending
+        );
+
+        assert!(services.try_web_approval_bypass(&state_arc).await.unwrap());
+        assert!(matches!(
+            state_arc.lock().await.verify(),
+            AuthResult::Accepted { .. }
+        ));
+        assert_eq!(
+            user_row(&db, session_id, "a-target").await.status,
+            SessionApprovalRequest::ApprovalRequestStatus::Abandoned
+        );
+        // A settled ask is not put back up by a late advertiser.
+        assert!(!advertise_user_request(&db, node, &state_arc).await.unwrap());
+    }
+
+    /// With the approval remembered, the login is settled before any request
+    /// is put up, so the browser never sees one.
+    #[tokio::test]
+    async fn a_remembered_approval_is_never_advertised() {
+        let db = migrated_db().await;
+        let services = test_services(&db).await;
+        allow_web_approval_caching(&db).await;
+        let user = test_user();
+
+        let earlier = services.auth_state_store.lock().await.create(
+            &UserSessionId(Uuid::new_v4()),
+            &user,
+            Protocol::Ssh,
+            "a-target",
+            Box::new(RequireWebApproval),
+            remembered_ip(),
+        );
+        remember_approval_for(&db, &earlier).await;
+
+        let mut recording_store = AuthStateStore::new(ApprovalRequestSink {
+            db: db.clone(),
+            cluster: services.cluster.clone(),
+        });
+        let session_id = UserSessionId(Uuid::new_v4());
+        let state_arc = recording_store.create(
+            &session_id,
+            &user,
+            Protocol::Ssh,
+            "a-target",
+            Box::new(RequireWebApproval),
+            remembered_ip(),
+        );
+
+        let outcome =
+            tokio::time::timeout(Duration::from_secs(5), wait_for_auth_completion(&state_arc))
+                .await
+                .unwrap();
+        assert!(matches!(outcome, AuthResult::Accepted { .. }));
+        assert!(
+            find_question(
+                &db,
+                SessionApprovalRequest::Key::new(session_id, ApprovalKind::User, "a-target"),
+            )
+            .await
+            .unwrap()
+            .is_none()
         );
     }
 }

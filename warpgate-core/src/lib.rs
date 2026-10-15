@@ -31,4 +31,6 @@ pub use listener_status::*;
 pub use protocols::*;
 pub use secret_backend_registry::SecretBackendRegistry;
 pub use services::*;
-pub use state::{SharedSessionHandle, State, UserSessionState, UserSessionStateInit};
+pub use state::{
+    SessionsFilter, SharedSessionHandle, State, UserSessionState, UserSessionStateInit,
+};

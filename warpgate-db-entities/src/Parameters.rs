@@ -10,7 +10,9 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_aws::S3StorageConfig;
 use warpgate_common::auth::CredentialKind;
-use warpgate_common::{PasswordPolicy, Protocol, UserAuthCredential, UserRequireCredentialsPolicy};
+use warpgate_common::{
+    PasswordPolicy, Protocol, StoredSecret, UserAuthCredential, UserRequireCredentialsPolicy,
+};
 
 #[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(32))")]
@@ -280,9 +282,9 @@ pub struct Model {
     #[sea_orm(column_type = "Text", nullable)]
     pub retiring_key_fp: Option<String>,
     #[sea_orm(column_type = "Text")]
-    pub ssh_host_key_ed25519: String,
+    pub ssh_host_key_ed25519: StoredSecret,
     #[sea_orm(column_type = "Text")]
-    pub ssh_host_key_rsa: String,
+    pub ssh_host_key_rsa: StoredSecret,
     #[sea_orm(column_type = "Text")]
     pub logo: Option<String>, // data URI
 }
@@ -502,8 +504,8 @@ mod tests {
             default_credential_policy: "{}".into(),
             encryption_key_fp: None,
             retiring_key_fp: None,
-            ssh_host_key_ed25519: "".into(),
-            ssh_host_key_rsa: "".into(),
+            ssh_host_key_ed25519: StoredSecret::default(),
+            ssh_host_key_rsa: StoredSecret::default(),
             logo: None,
         }
     }

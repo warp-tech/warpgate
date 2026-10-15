@@ -82,6 +82,15 @@ pub(crate) async fn approval_is_remembered(
         .any(|row| row.match_digest.as_deref() == Some(digest.as_str())))
 }
 
+pub(crate) async fn web_approval_grace_period(
+    db: &DatabaseConnection,
+) -> Result<Option<Duration>, WarpgateError> {
+    Ok(Parameters::Entity::get(db)
+        .await?
+        .web_approval_grace_period_seconds
+        .and_then(i64_seconds_to_duration))
+}
+
 pub(crate) async fn admin_approval_timeout(
     db: &DatabaseConnection,
 ) -> Result<Duration, WarpgateError> {

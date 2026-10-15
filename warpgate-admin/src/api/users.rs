@@ -1,4 +1,3 @@
-use poem::http::StatusCode;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
@@ -13,14 +12,11 @@ use warpgate_common::{
     UserRequireCredentialsPolicy, WarpgateError,
 };
 use warpgate_common_http::errors::{bad_request, invalid_field};
-use warpgate_core::State;
+use warpgate_core::SessionsFilter;
 use warpgate_core::logging::{AuditEvent, format_related_ids};
-use warpgate_db_entities::{
-    AdminRole, Role, User, UserAdminRoleAssignment, UserRoleAssignment, UserSession,
-};
+use warpgate_db_entities::{AdminRole, Role, User, UserAdminRoleAssignment, UserRoleAssignment};
 
-use super::{AdminContext, ClusterOrAdminContext};
-use crate::api::cluster_proxy::fan_out_to_peers_expecting;
+use super::AdminContext;
 use crate::api::common::case_insensitive_search;
 
 #[derive(Object)]
@@ -123,29 +119,38 @@ impl ListApi {
         };
 
         let user = values.insert(db).await.map_err(WarpgateError::from)?;
-        let default_roles = Role::Entity::grant_default_roles(db, user.id).await?;
-
-        AuditEvent::UserCreated {
-            user_id: user.id,
-            username: user.username.clone(),
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
-
-        for role in default_roles {
-            AuditEvent::AccessRoleGranted {
-                grantee_id: user.id,
-                grantee_username: user.username.clone(),
-                role_id: role.id,
-                role_name: role.name,
-                actor_user_id: admin.auth.user_id(),
-                related_access_roles: format_related_ids(&[role.id]),
-            }
-            .emit();
-        }
+        on_user_created(db, &user, admin.auth.user_id()).await?;
 
         Ok(CreateUserResponse::Created(Json(user.try_into()?)))
     }
+}
+
+pub(crate) async fn on_user_created(
+    db: &sea_orm::DatabaseConnection,
+    user: &User::Model,
+    actor_user_id: Uuid,
+) -> Result<(), WarpgateError> {
+    let default_roles = Role::Entity::grant_default_roles(db, user.id).await?;
+
+    AuditEvent::UserCreated {
+        user_id: user.id,
+        username: user.username.clone(),
+        actor_user_id,
+    }
+    .emit();
+
+    for role in default_roles {
+        AuditEvent::AccessRoleGranted {
+            grantee_id: user.id,
+            grantee_username: user.username.clone(),
+            role_id: role.id,
+            role_name: role.name,
+            actor_user_id,
+            related_access_roles: format_related_ids(&[role.id]),
+        }
+        .emit();
+    }
+    Ok(())
 }
 
 #[derive(ApiResponse)]
@@ -266,6 +271,23 @@ impl DetailApi {
             )));
         }
 
+        let allowed_ip_ranges = match body.allowed_ip_ranges.clone() {
+            Some(ranges) => match User::parse_allowed_ip_ranges(ranges) {
+                Ok(ranges) => {
+                    serde_json::to_value(ranges.iter().map(ToString::to_string).collect::<Vec<_>>())
+                        .map_err(WarpgateError::from)?
+                }
+                Err(WarpgateError::InvalidNetworkAddress(range)) => {
+                    return Ok(UpdateUserResponse::BadRequest(invalid_field(
+                        "allowed_ip_ranges",
+                        &format!("not a valid IP network: {range}"),
+                    )));
+                }
+                Err(error) => return Err(error),
+            },
+            None => serde_json::Value::Null,
+        };
+
         let mut model: User::ActiveModel = user.into();
 
         model.username = Set(body.username.clone());
@@ -274,11 +296,7 @@ impl DetailApi {
             Set(serde_json::to_value(body.credential_policy.clone())
                 .map_err(WarpgateError::from)?);
         model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(i64::from));
-        model.allowed_ip_ranges = Set(match body.allowed_ip_ranges.clone() {
-            Some(ranges) => serde_json::to_value(ranges.into_iter().collect::<Vec<_>>())
-                .map_err(WarpgateError::from)?,
-            None => serde_json::Value::Null,
-        });
+        model.allowed_ip_ranges = Set(allowed_ip_ranges);
         let user = model.update(db).await?;
 
         warpgate_core::rate_limiting::apply_new_rate_limits(
@@ -293,29 +311,21 @@ impl DetailApi {
     #[oai(path = "/users/:id", method = "delete", operation_id = "delete_user")]
     async fn api_delete_user(
         &self,
-        admin: ClusterOrAdminContext,
+        admin: AdminContext,
         id: Path<Uuid>,
-        req: &poem::Request,
     ) -> Result<DeleteUserResponse, WarpgateError> {
         admin.require(AdminPermission::UsersDelete)?;
 
         let db = &admin.services().db;
 
-        let close_live_sessions = State::close_local_sessions(&admin.services().state, |s| {
-            s.user_info.as_ref().is_some_and(|u| u.id == id.0)
-        });
-        if admin.is_intra_cluster_request() {
-            close_live_sessions.await;
-            return Ok(DeleteUserResponse::Deleted);
-        }
-
         let Some(user) = User::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(DeleteUserResponse::NotFound);
         };
 
-        // kill DB sessions before killing handles to avoid a race
-        UserSession::revoke_all_for_user(db, user.id).await?;
-        close_live_sessions.await;
+        admin
+            .services()
+            .close_sessions(SessionsFilter::User { user_id: user.id })
+            .await?;
 
         UserRoleAssignment::Entity::delete_many()
             .filter(UserRoleAssignment::Column::UserId.eq(user.id))
@@ -335,11 +345,6 @@ impl DetailApi {
         .emit();
 
         user.delete(db).await?;
-
-        for (node, status) in fan_out_to_peers_expecting(&admin, req, StatusCode::NO_CONTENT).await
-        {
-            warn!(%node, %status, "Failed to close the user's sessions on a cluster node");
-        }
 
         Ok(DeleteUserResponse::Deleted)
     }

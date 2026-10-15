@@ -105,7 +105,7 @@ static API_RECORDING_SEQ: AtomicU64 = AtomicU64::new(0);
 pub async fn start_recording_api(
     target_session_id: &TargetSessionId,
     recordings: &SessionRecordings,
-) -> anyhow::Result<KubernetesRecorder> {
+) -> anyhow::Result<Option<KubernetesRecorder>> {
     let seq = API_RECORDING_SEQ.fetch_add(1, Ordering::Relaxed);
     recordings
         .start::<KubernetesRecorder, _>(
@@ -121,7 +121,7 @@ pub async fn start_recording_exec(
     target_session_id: &TargetSessionId,
     recordings: &SessionRecordings,
     metadata: SessionRecordingMetadata,
-) -> anyhow::Result<TerminalRecorder> {
+) -> anyhow::Result<Option<TerminalRecorder>> {
     recordings
         .start::<TerminalRecorder, _>(target_session_id, None, metadata)
         .await

@@ -1,4 +1,6 @@
 <script lang="ts">
+    import 'core-js/actual/map/group-by'
+
     import {
         faArrowRight,
         faEllipsisV,
@@ -22,7 +24,7 @@
     import EmptyState from 'common/EmptyState.svelte'
     import { stringifyError } from 'common/errors'
     import GettingStarted from 'common/GettingStarted.svelte'
-    import { resolveGroup } from 'common/groups'
+    import { orderForGroupedList, resolveGroup } from 'common/groups'
     import ItemList, {
         type LoadOptions,
         type PaginatedResponse,
@@ -34,11 +36,9 @@
         TargetKind,
         type TargetSnapshot,
     } from 'gateway/lib/api'
-    import { compare as naturalCompareFactory } from 'natural-orderby'
     import { from, map, type Observable } from 'rxjs'
     import { get } from 'svelte/store'
     import Fa from 'svelte-fa'
-    import { firstBy } from 'thenby'
     import {
         collapsedTargetGroups,
         openTargetsInNewTab,
@@ -65,33 +65,12 @@
     ): Observable<PaginatedResponse<TargetSnapshot>> {
         return from(api.getTargets({ search: options.search })).pipe(
             map(result => {
-                const naturalCompare = naturalCompareFactory()
-
-                result = result.sort(
-                    firstBy<TargetSnapshot, boolean>(
-                        (x: TargetSnapshot) => !x.group,
-                    )
-                        // Natural sort between groups
-                        .thenBy((a: TargetSnapshot, b: TargetSnapshot) =>
-                            naturalCompare(
-                                (a.group?.name ?? '').toLowerCase(),
-                                (b.group?.name ?? '').toLowerCase(),
-                            ),
-                        )
-                        // Natural sort within a group
-                        .thenBy((a: TargetSnapshot, b: TargetSnapshot) =>
-                            naturalCompare(
-                                a.name.toLowerCase(),
-                                b.name.toLowerCase(),
-                            ),
-                        ),
-                )
-
-                return {
-                    items: result,
-                    offset: 0,
-                    total: result.length,
-                }
+                const items = orderForGroupedList(result, options.search, {
+                    groupId: t => t.group?.id,
+                    groupName: t => t.group?.name ?? '',
+                    name: t => t.name,
+                })
+                return { items, offset: 0, total: items.length }
             }),
         )
     }

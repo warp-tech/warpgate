@@ -10,6 +10,7 @@ use sea_orm::prelude::StringLen;
 use sea_orm::{DeriveActiveEnum, EnumIter, FromJsonQueryResult};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::encryption::EncryptionError;
 use crate::{Secret, StoredSecret, UserFacingReason, WarpgateError};
 
 #[derive(Debug, thiserror::Error)]
@@ -26,17 +27,39 @@ pub enum SecretError {
     PathNotAllowed { backend: String, path: String },
     #[error("secret backend error: {0}")]
     Backend(String),
+    #[error("invalid SSH certificate request: {0}")]
+    InvalidSshSigningRequest(String),
+    #[error("SSH certificate signing failed (HTTP {status}): {message}")]
+    SshSigning { status: u16, message: String },
 }
 
 impl UserFacingReason for SecretError {
     fn user_facing_reason(&self) -> String {
         match self {
-            Self::InvalidRef(_) | Self::NotFound { .. } | Self::PathNotAllowed { .. } => {
-                "Invalid secret reference".into()
+            Self::InvalidRef(_) | Self::NotFound { .. } => "Invalid secret reference".into(),
+            Self::PathNotAllowed { .. } => {
+                "The secret backend is not allowed to be used for this path".into()
             }
             Self::InvalidBackendName(_) => "Invalid secret backend name".into(),
             Self::BackendNotConfigured { .. } | Self::Backend(_) => "Secret backend error".into(),
+            Self::InvalidSshSigningRequest(_) => "Invalid SSH certificate request".into(),
+            Self::SshSigning { status, message } => ssh_signing_reason(*status, message).into(),
         }
+    }
+}
+
+fn ssh_signing_reason(status: u16, message: &str) -> &'static str {
+    match status {
+        400 if message.contains("key_id is not allowed") => {
+            "The signing role does not permit a key ID; set allow_user_key_ids=true on it"
+        }
+        404 => "The secret backend has no signing role or mount at that path",
+        400 if message.contains("Unknown role") => {
+            "The secret backend has no signing role or mount at that path"
+        }
+        400 => "The signing role refused the request",
+        401 | 403 => "The secret backend denied the signing request",
+        _ => "SSH certificate signing failed",
     }
 }
 
@@ -105,14 +128,11 @@ impl VaultAuthConfig {
             Self::Kubernetes(_) => None,
         }
     }
+}
 
-    /// The login with its secret blanked, for API responses
-    pub fn redacted(&self) -> Self {
-        let mut redacted = self.clone();
-        if let Some(secret) = redacted.secret_mut() {
-            *secret = StoredSecret::default();
-        }
-        redacted
+impl StoredSecrets for VaultAuthConfig {
+    fn stored_secrets_mut(&mut self) -> Vec<&mut StoredSecret> {
+        self.secret_mut().into_iter().collect()
     }
 }
 
@@ -123,7 +143,8 @@ pub struct SecretBackendConfig {
     pub namespace: Option<String>,
     pub auth: VaultAuthConfig,
     pub tls_skip_verify: bool,
-    /// Allowed KV path prefixes (`mount/path`), empty = any
+    /// Path prefixes the backend may be used for, empty = any: `mount/path`
+    /// for a KV read, `mount/sign/role` for SSH certificate signing
     pub allowed_paths: Vec<String>,
 }
 
@@ -207,8 +228,8 @@ pub enum MaybeSecretRef {
     Inline(StoredSecret),
     Reference(SecretRef),
     /// A stored string that starts with the reference scheme but does not
-    /// parse. Kept verbatim, never treated as a credential and never
-    /// encrypted, so it stays visible and correctable; resolving it fails.
+    /// parse. Kept verbatim so it stays visible and correctable; resolving
+    /// it fails. A target's walk still redacts and encrypts it.
     Malformed(String),
 }
 
@@ -222,6 +243,13 @@ impl MaybeSecretRef {
 
     pub const fn is_inline(&self) -> bool {
         matches!(self, Self::Inline(_))
+    }
+
+    pub const fn inline_mut(&mut self) -> Option<&mut StoredSecret> {
+        match self {
+            Self::Inline(v) => Some(v),
+            Self::Reference(_) | Self::Malformed(_) => None,
+        }
     }
 
     /// The credential itself: the inline value decrypted, or the referenced secret fetched
@@ -254,6 +282,59 @@ impl MaybeSecretRef {
 impl Default for MaybeSecretRef {
     fn default() -> Self {
         Self::Inline(StoredSecret::default())
+    }
+}
+
+/// Walks through every secret value stored inside of a struct
+pub trait StoredSecrets {
+    fn stored_secrets_mut(&mut self) -> Vec<&mut StoredSecret>;
+
+    fn encrypt_all(&mut self) -> Result<(), EncryptionError> {
+        self.stored_secrets_mut()
+            .into_iter()
+            .try_for_each(StoredSecret::encrypt)
+    }
+
+    fn reencrypt_all(&mut self) -> Result<bool, EncryptionError> {
+        let mut changed = false;
+        for secret in self.stored_secrets_mut() {
+            changed |= secret.maybe_reencrypt()?;
+        }
+        Ok(changed)
+    }
+
+    fn all_decryptable(&mut self) -> bool {
+        self.stored_secrets_mut()
+            .iter()
+            .all(|secret| secret.reveal().is_ok())
+    }
+
+    fn redact(&mut self) {
+        for secret in self.stored_secrets_mut() {
+            *secret = StoredSecret::default();
+        }
+    }
+
+    #[must_use]
+    fn redacted(&self) -> Self
+    where
+        Self: Clone + Sized,
+    {
+        let mut redacted = self.clone();
+        redacted.redact();
+        redacted
+    }
+}
+
+impl StoredSecrets for StoredSecret {
+    fn stored_secrets_mut(&mut self) -> Vec<&mut StoredSecret> {
+        vec![self]
+    }
+}
+
+impl StoredSecrets for MaybeSecretRef {
+    fn stored_secrets_mut(&mut self) -> Vec<&mut StoredSecret> {
+        self.inline_mut().into_iter().collect()
     }
 }
 
@@ -343,6 +424,11 @@ text_column!(MaybeSecretRef, MaybeSecretRef::as_string, |s: String| Ok(
 ));
 text_column!(SecretRef, SecretRef::to_string, |s: String| s
     .parse::<SecretRef>());
+text_column!(
+    StoredSecret,
+    |s: &StoredSecret| s.stored_value().to_owned(),
+    |s: String| Ok(StoredSecret::from(s))
+);
 
 impl poem_openapi::types::Type for MaybeSecretRef {
     const IS_REQUIRED: bool = true;
