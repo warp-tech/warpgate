@@ -4,6 +4,7 @@ use time::OffsetDateTime;
 use tracing::info;
 use uuid::Uuid;
 
+use crate::AdminPermission;
 use crate::helpers::logging::format_related_ids;
 
 #[derive(Clone)]
@@ -42,6 +43,14 @@ pub enum AuditEvent {
         username: String,
         actor_user_id: Uuid,
     },
+    CredentialUpdated {
+        credential_type: String,
+        credential_name: Option<String>,
+        via: CredentialChangedVia,
+        user_id: Uuid,
+        username: String,
+        actor_user_id: Uuid,
+    },
     CredentialDeleted {
         credential_type: String,
         credential_name: Option<String>,
@@ -53,6 +62,13 @@ pub enum AuditEvent {
     UserCreated {
         user_id: Uuid,
         username: String,
+        actor_user_id: Uuid,
+    },
+    UserUpdated {
+        user_id: Uuid,
+        username: String,
+        credential_policy: String,
+        allowed_ip_ranges: String,
         actor_user_id: Uuid,
     },
     UserDeleted {
@@ -114,6 +130,23 @@ pub enum AuditEvent {
         role_name: String,
         expires_at: Option<OffsetDateTime>,
         revocation_cleared: bool,
+        actor_user_id: Uuid,
+    },
+    AdminRoleCreated {
+        admin_role_id: Uuid,
+        admin_role_name: String,
+        permissions: Vec<AdminPermission>,
+        actor_user_id: Uuid,
+    },
+    AdminRoleUpdated {
+        admin_role_id: Uuid,
+        admin_role_name: String,
+        permissions: Vec<AdminPermission>,
+        actor_user_id: Uuid,
+    },
+    AdminRoleDeleted {
+        admin_role_id: Uuid,
+        admin_role_name: String,
         actor_user_id: Uuid,
     },
     RoleCreated {
@@ -310,6 +343,26 @@ impl AuditEvent {
                     );
                 }
             }
+            Self::CredentialUpdated {
+                credential_type,
+                credential_name,
+                via,
+                user_id,
+                username,
+                actor_user_id,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "CredentialUpdated1",
+                    credential_type = %credential_type,
+                    credential_name = credential_name.as_deref().unwrap_or_default(),
+                    via = %via,
+                    user_id = %user_id,
+                    username = %username,
+                    related_users = %format_related_ids(&[*user_id, *actor_user_id]),
+                    "Updated credential"
+                );
+            }
             Self::CredentialDeleted {
                 credential_type,
                 credential_name,
@@ -355,6 +408,24 @@ impl AuditEvent {
                     username = %username,
                         related_users = %format_related_ids(&[*user_id, *actor_user_id]),
                     "Created user"
+                );
+            }
+            Self::UserUpdated {
+                user_id,
+                username,
+                credential_policy,
+                allowed_ip_ranges,
+                actor_user_id,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "UserUpdated1",
+                    user_id = %user_id,
+                    username = %username,
+                    credential_policy = %credential_policy,
+                    allowed_ip_ranges = %allowed_ip_ranges,
+                    related_users = %format_related_ids(&[*user_id, *actor_user_id]),
+                    "Updated user"
                 );
             }
             Self::UserDeleted {
@@ -472,6 +543,55 @@ impl AuditEvent {
                     related_users = %format_related_ids(&[*grantee_id, *actor_user_id]),
                     related_access_roles = %format_related_ids(&[*role_id]),
                     "Changed access role expiry"
+                );
+            }
+            Self::AdminRoleCreated {
+                admin_role_id,
+                admin_role_name,
+                permissions,
+                actor_user_id,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "AdminRoleCreated1",
+                    admin_role_id = %admin_role_id,
+                    admin_role_name = %admin_role_name,
+                    ?permissions,
+                    related_users = %format_related_ids(&[*actor_user_id]),
+                    related_admin_roles = %format_related_ids(&[*admin_role_id]),
+                    "Created admin role"
+                );
+            }
+            Self::AdminRoleUpdated {
+                admin_role_id,
+                admin_role_name,
+                permissions,
+                actor_user_id,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "AdminRoleUpdated1",
+                    admin_role_id = %admin_role_id,
+                    admin_role_name = %admin_role_name,
+                    ?permissions,
+                    related_users = %format_related_ids(&[*actor_user_id]),
+                    related_admin_roles = %format_related_ids(&[*admin_role_id]),
+                    "Updated admin role"
+                );
+            }
+            Self::AdminRoleDeleted {
+                admin_role_id,
+                admin_role_name,
+                actor_user_id,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "AdminRoleDeleted1",
+                    admin_role_id = %admin_role_id,
+                    admin_role_name = %admin_role_name,
+                    related_users = %format_related_ids(&[*actor_user_id]),
+                    related_admin_roles = %format_related_ids(&[*admin_role_id]),
+                    "Deleted admin role"
                 );
             }
             Self::RoleCreated {
