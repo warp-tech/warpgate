@@ -3,6 +3,12 @@
   "title": "WarpgateConfigStore",
   "type": "object",
   "properties": {
+    "custom_logout_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "database_url": {
       "type": "string",
       "default": "sqlite:data/db"

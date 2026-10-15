@@ -145,6 +145,7 @@ pub struct Info {
     show_session_menu: bool,
     logo_etag: Option<String>,
     config_warnings: Option<Vec<String>>,
+    custom_logout_url: Option<String>,
 }
 
 #[derive(ApiResponse)]
@@ -393,6 +394,7 @@ impl Api {
             logo_etag: parameters.logo_etag(),
             show_session_menu: parameters.show_session_menu,
             config_warnings: can_edit_config.then(warnings),
+            custom_logout_url: config.store.custom_logout_url.clone(),
         })))
     }
 
