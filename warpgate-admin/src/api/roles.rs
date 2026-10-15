@@ -9,6 +9,7 @@ use warpgate_common::{
     AdminPermission, Role as RoleConfig, Target as TargetConfig, User as UserConfig, WarpgateError,
 };
 use warpgate_common_http::errors::invalid_field;
+use warpgate_core::logging::AuditEvent;
 use warpgate_db_entities::{Role, Target, TargetRoleAssignment, User, UserRoleAssignment};
 
 use super::AdminContext;
@@ -89,6 +90,13 @@ impl ListApi {
         };
 
         let role = values.insert(db).await.map_err(WarpgateError::from)?;
+
+        AuditEvent::RoleCreated {
+            role_id: role.id,
+            role_name: role.name.clone(),
+            actor_user_id: admin.auth.user_id(),
+        }
+        .emit();
 
         Ok(CreateRoleResponse::Created(Json(role.into())))
     }
@@ -176,6 +184,13 @@ impl DetailApi {
         model.is_default = Set(body.is_default.unwrap_or(current_is_default));
         let role = model.update(db).await?;
 
+        AuditEvent::RoleUpdated {
+            role_id: role.id,
+            role_name: role.name.clone(),
+            actor_user_id: admin.auth.user_id(),
+        }
+        .emit();
+
         Ok(UpdateRoleResponse::Ok(Json(role.into())))
     }
 
@@ -204,7 +219,16 @@ impl DetailApi {
             .exec(db)
             .await?;
 
+        let (role_id, role_name) = (role.id, role.name.clone());
         role.delete(db).await?;
+
+        AuditEvent::RoleDeleted {
+            role_id,
+            role_name,
+            actor_user_id: admin.auth.user_id(),
+        }
+        .emit();
+
         Ok(DeleteRoleResponse::Deleted)
     }
 

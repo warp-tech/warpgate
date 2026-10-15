@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use time::OffsetDateTime;
 use tracing::info;
 use uuid::Uuid;
 
@@ -104,6 +105,60 @@ pub enum AuditEvent {
         admin_role_name: String,
         actor_user_id: Uuid,
         related_admin_roles: String,
+    },
+    /// Covers renewals, which also clear a revocation.
+    AccessRoleExpiryChanged {
+        grantee_id: Uuid,
+        grantee_username: String,
+        role_id: Uuid,
+        role_name: String,
+        expires_at: Option<OffsetDateTime>,
+        revocation_cleared: bool,
+        actor_user_id: Uuid,
+    },
+    RoleCreated {
+        role_id: Uuid,
+        role_name: String,
+        actor_user_id: Uuid,
+    },
+    RoleUpdated {
+        role_id: Uuid,
+        role_name: String,
+        actor_user_id: Uuid,
+    },
+    RoleDeleted {
+        role_id: Uuid,
+        role_name: String,
+        actor_user_id: Uuid,
+    },
+    TargetCreated {
+        target_id: Uuid,
+        target_name: String,
+        actor_user_id: Uuid,
+    },
+    TargetUpdated {
+        target_id: Uuid,
+        target_name: String,
+        actor_user_id: Uuid,
+    },
+    TargetDeleted {
+        target_id: Uuid,
+        target_name: String,
+        actor_user_id: Uuid,
+    },
+    TargetRoleAdded {
+        target_id: Uuid,
+        target_name: String,
+        role_id: Uuid,
+        role_name: String,
+        actor_user_id: Uuid,
+    },
+    TargetRoleRemoved {
+        target_id: Uuid,
+        target_name: String,
+        role_id: Uuid,
+        role_name: String,
+        actor_user_id: Uuid,
     },
     // currently used for RDP logon PDU
     TargetLogon {
@@ -394,6 +449,154 @@ impl AuditEvent {
                     related_users = %format_related_ids(&[*grantee_id, *actor_user_id]),
                     ?related_admin_roles,
                     "Revoked admin role"
+                );
+            }
+            Self::AccessRoleExpiryChanged {
+                grantee_id,
+                grantee_username,
+                role_id,
+                role_name,
+                expires_at,
+                revocation_cleared,
+                actor_user_id,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "AccessRoleExpiryChanged1",
+                    grantee_id = %grantee_id,
+                    grantee_username = %grantee_username,
+                    role_id = %role_id,
+                    role_name = %role_name,
+                    ?expires_at,
+                    revocation_cleared,
+                    related_users = %format_related_ids(&[*grantee_id, *actor_user_id]),
+                    related_access_roles = %format_related_ids(&[*role_id]),
+                    "Changed access role expiry"
+                );
+            }
+            Self::RoleCreated {
+                role_id,
+                role_name,
+                actor_user_id,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "RoleCreated1",
+                    role_id = %role_id,
+                    role_name = %role_name,
+                    related_users = %format_related_ids(&[*actor_user_id]),
+                    related_access_roles = %format_related_ids(&[*role_id]),
+                    "Created access role"
+                );
+            }
+            Self::RoleUpdated {
+                role_id,
+                role_name,
+                actor_user_id,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "RoleUpdated1",
+                    role_id = %role_id,
+                    role_name = %role_name,
+                    related_users = %format_related_ids(&[*actor_user_id]),
+                    related_access_roles = %format_related_ids(&[*role_id]),
+                    "Updated access role"
+                );
+            }
+            Self::RoleDeleted {
+                role_id,
+                role_name,
+                actor_user_id,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "RoleDeleted1",
+                    role_id = %role_id,
+                    role_name = %role_name,
+                    related_users = %format_related_ids(&[*actor_user_id]),
+                    related_access_roles = %format_related_ids(&[*role_id]),
+                    "Deleted access role"
+                );
+            }
+            Self::TargetCreated {
+                target_id,
+                target_name,
+                actor_user_id,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "TargetCreated1",
+                    target_id = %target_id,
+                    target_name = %target_name,
+                    related_users = %format_related_ids(&[*actor_user_id]),
+                    "Created target"
+                );
+            }
+            Self::TargetUpdated {
+                target_id,
+                target_name,
+                actor_user_id,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "TargetUpdated1",
+                    target_id = %target_id,
+                    target_name = %target_name,
+                    related_users = %format_related_ids(&[*actor_user_id]),
+                    "Updated target"
+                );
+            }
+            Self::TargetDeleted {
+                target_id,
+                target_name,
+                actor_user_id,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "TargetDeleted1",
+                    target_id = %target_id,
+                    target_name = %target_name,
+                    related_users = %format_related_ids(&[*actor_user_id]),
+                    "Deleted target"
+                );
+            }
+            Self::TargetRoleAdded {
+                target_id,
+                target_name,
+                role_id,
+                role_name,
+                actor_user_id,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "TargetRoleAdded1",
+                    target_id = %target_id,
+                    target_name = %target_name,
+                    role_id = %role_id,
+                    role_name = %role_name,
+                    related_users = %format_related_ids(&[*actor_user_id]),
+                    related_access_roles = %format_related_ids(&[*role_id]),
+                    "Added access role to target"
+                );
+            }
+            Self::TargetRoleRemoved {
+                target_id,
+                target_name,
+                role_id,
+                role_name,
+                actor_user_id,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "TargetRoleRemoved1",
+                    target_id = %target_id,
+                    target_name = %target_name,
+                    role_id = %role_id,
+                    role_name = %role_name,
+                    related_users = %format_related_ids(&[*actor_user_id]),
+                    related_access_roles = %format_related_ids(&[*role_id]),
+                    "Removed access role from target"
                 );
             }
             Self::TargetSessionStarted {

@@ -766,11 +766,27 @@ impl RolesApi {
             return Ok(UpdateUserRoleResponse::NotFound);
         };
 
+        let Some(grantee) = User::Entity::find_by_id(id.0).one(db).await? else {
+            return Ok(UpdateUserRoleResponse::NotFound);
+        };
+
+        let revocation_cleared = assignment.revoked_at.is_some();
         let mut model: UserRoleAssignment::ActiveModel = assignment.into();
         model.expires_at = Set(body.expires_at);
         // If renewing an expired role, clear revoked_at
         model.revoked_at = Set(None);
         let updated = model.update(db).await?;
+
+        AuditEvent::AccessRoleExpiryChanged {
+            grantee_id: grantee.id,
+            grantee_username: grantee.username,
+            role_id: role.id,
+            role_name: role.name.clone(),
+            expires_at: updated.expires_at,
+            revocation_cleared,
+            actor_user_id: admin.auth.user_id(),
+        }
+        .emit();
 
         Ok(UpdateUserRoleResponse::Ok(Json(build_assignment_response(
             &updated, &role,

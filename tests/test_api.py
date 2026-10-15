@@ -4,6 +4,7 @@ DB field type related issues that don't surface on SQLite (e.g. timestamp types)
 """
 
 import contextlib
+import time
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional, Set
 from json import load
@@ -1312,3 +1313,77 @@ def test_update_target_rejects_empty_name(admin_client: sdk.DefaultApi):
         admin_client.update_target(target.id, _ssh_target_request(""))
     assert err.value.status == 400
     assert admin_client.get_target(target.id).name == target.name
+
+
+
+def test_admin_changes_to_roles_and_targets_are_audited(
+    pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
+):
+    url = f"https://localhost:{pg_wg.http_port}"
+    full_admin = {
+        k: True if isinstance(v, bool) else v
+        for k, v in make_limited_admin_role_payload().items()
+    }
+    actor = _create_user_with_role(
+        admin_client, _create_admin_role(admin_client, full_admin).id
+    )
+    # Audit entries are only stored for requests made in a user session
+    session = requests.Session()
+    session.verify = False
+    login = session.post(
+        f"{url}/@warpgate/api/auth/login",
+        json={"username": actor.username, "password": "123"},
+    )
+    assert login.ok, login.text
+    api = f"{url}/@warpgate/admin/api"
+
+    def call(method, path, json=None):
+        resp = session.request(method, f"{api}{path}", json=json)
+        resp.raise_for_status()
+        return resp.json() if resp.content else None
+
+    tag = uuid4().hex
+    role = call("POST", "/roles", {"name": f"audit-role-{tag}"})
+    call("PUT", f"/role/{role['id']}", {"name": role["name"]})
+    target_body = _ssh_target_request(f"audit-target-{tag}").to_dict()
+    target = call("POST", "/targets", target_body)
+    call("PUT", f"/targets/{target['id']}", target_body)
+    call("POST", f"/targets/{target['id']}/roles/{role['id']}")
+    call("DELETE", f"/targets/{target['id']}/roles/{role['id']}")
+
+    user = admin_client.create_user(sdk.CreateUserRequest(username=f"audit-user-{tag}"))
+    admin_client.add_user_role(user.id, role["id"])
+    admin_client.delete_user_role(user.id, role["id"])
+    call("PUT", f"/users/{user.id}/roles/{role['id']}", {"expires_at": None})
+
+    call("DELETE", f"/targets/{target['id']}")
+    call("DELETE", f"/role/{role['id']}")
+
+    expected = {
+        "RoleCreated1",
+        "RoleUpdated1",
+        "RoleDeleted1",
+        "TargetCreated1",
+        "TargetUpdated1",
+        "TargetDeleted1",
+        "TargetRoleAdded1",
+        "TargetRoleRemoved1",
+        "AccessRoleExpiryChanged1",
+    }
+    # log entries are written to the DB asynchronously
+    deadline = time.monotonic() + 10
+    while True:
+        entries = {
+            e.values["_type"]: e
+            for e in admin_client.get_logs(sdk.GetLogsRequest(search=tag, limit=100))
+            if (e.values or {}).get("_type") in expected
+        }
+        if expected <= entries.keys() or time.monotonic() > deadline:
+            break
+        time.sleep(0.2)
+
+    assert entries.keys() == expected
+    assert all(e.username == actor.username for e in entries.values())
+    added = entries["TargetRoleAdded1"].values
+    assert (added["target_name"], added["role_name"]) == (target["name"], role["name"])
+    assert entries["AccessRoleExpiryChanged1"].values["revocation_cleared"] in (True, "true")
