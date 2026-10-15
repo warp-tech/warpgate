@@ -4,6 +4,7 @@ DB field type related issues that don't surface on SQLite (e.g. timestamp types)
 """
 
 import contextlib
+import time
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional, Set
 from json import load
@@ -1312,3 +1313,180 @@ def test_update_target_rejects_empty_name(admin_client: sdk.DefaultApi):
         admin_client.update_target(target.id, _ssh_target_request(""))
     assert err.value.status == 400
     assert admin_client.get_target(target.id).name == target.name
+
+
+def _logged_in_full_admin(url: str, admin_client: sdk.DefaultApi):
+    """Audit entries are only stored for requests made in a user session, so
+    the audited changes are made by a logged-in admin rather than via a token.
+    Returns the admin and a `call(method, path, json)` helper bound to it."""
+    full_admin = {
+        k: True if isinstance(v, bool) else v
+        for k, v in make_limited_admin_role_payload().items()
+    }
+    actor = _create_user_with_role(
+        admin_client, _create_admin_role(admin_client, full_admin).id
+    )
+    session = requests.Session()
+    session.verify = False
+    login = session.post(
+        f"{url}/@warpgate/api/auth/login",
+        json={"username": actor.username, "password": "123"},
+    )
+    assert login.ok, login.text
+
+    def call(method, path, json=None):
+        resp = session.request(method, f"{url}/@warpgate{path}", json=json)
+        resp.raise_for_status()
+        return resp.json() if resp.content else None
+
+    return actor, call
+
+
+def _wait_for_audit_entries(
+    admin_client: sdk.DefaultApi,
+    tag: str,
+    expected: set,
+    key: Callable = lambda values: values.get("_type"),
+):
+    """Polls the log for entries mentioning `tag` until one exists for each
+    `key(values)` in `expected`. Returns them as {key: entry}."""
+    # log entries are written to the DB asynchronously
+    deadline = time.monotonic() + 10
+    while True:
+        entries = {
+            key(e.values): e
+            for e in admin_client.get_logs(sdk.GetLogsRequest(search=tag, limit=100))
+            if key(e.values or {}) in expected
+        }
+        if expected <= entries.keys() or time.monotonic() > deadline:
+            return entries
+        time.sleep(0.2)
+
+
+def test_admin_changes_to_roles_and_targets_are_audited(
+    pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
+):
+    actor, call = _logged_in_full_admin(f"https://localhost:{pg_wg.http_port}", admin_client)
+
+    tag = uuid4().hex
+    role = call("POST", "/admin/api/roles", {"name": f"audit-role-{tag}"})
+    call("PUT", f"/admin/api/role/{role['id']}", {"name": role["name"]})
+    target_body = _ssh_target_request(f"audit-target-{tag}").to_dict()
+    target = call("POST", "/admin/api/targets", target_body)
+    call("PUT", f"/admin/api/targets/{target['id']}", target_body)
+    call("POST", f"/admin/api/targets/{target['id']}/roles/{role['id']}")
+    call("DELETE", f"/admin/api/targets/{target['id']}/roles/{role['id']}")
+
+    user = admin_client.create_user(sdk.CreateUserRequest(username=f"audit-user-{tag}"))
+    admin_client.add_user_role(user.id, role["id"])
+    admin_client.delete_user_role(user.id, role["id"])
+    call("PUT", f"/admin/api/users/{user.id}/roles/{role['id']}", {"expires_at": None})
+
+    call("DELETE", f"/admin/api/targets/{target['id']}")
+    call("DELETE", f"/admin/api/role/{role['id']}")
+
+    expected = {
+        "RoleCreated1",
+        "RoleUpdated1",
+        "RoleDeleted1",
+        "TargetCreated1",
+        "TargetUpdated1",
+        "TargetDeleted1",
+        "TargetRoleAdded1",
+        "TargetRoleRemoved1",
+        "AccessRoleExpiryChanged1",
+    }
+    entries = _wait_for_audit_entries(admin_client, tag, expected)
+
+    assert entries.keys() == expected
+    assert all(e.username == actor.username for e in entries.values())
+    added = entries["TargetRoleAdded1"].values
+    assert (added["target_name"], added["role_name"]) == (target["name"], role["name"])
+    assert entries["AccessRoleExpiryChanged1"].values["revocation_cleared"] in (True, "true")
+
+
+def test_admin_changes_to_admin_roles_users_and_tokens_are_audited(
+    pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
+):
+    actor, call = _logged_in_full_admin(f"https://localhost:{pg_wg.http_port}", admin_client)
+
+    tag = uuid4().hex
+    admin_role_body = make_limited_admin_role_payload(name=f"audit-admin-role-{tag}")
+    admin_role = call("POST", "/admin/api/admin-roles", admin_role_body)
+    call(
+        "PUT",
+        f"/admin/api/admin-roles/{admin_role['id']}",
+        {**admin_role_body, "users_edit": True},
+    )
+    call("DELETE", f"/admin/api/admin-roles/{admin_role['id']}")
+
+    user = admin_client.create_user(sdk.CreateUserRequest(username=f"audit-user-{tag}"))
+    call(
+        "PUT",
+        f"/admin/api/users/{user.id}",
+        {"username": user.username, "allowed_ip_ranges": ["10.0.0.0/8"]},
+    )
+    key = admin_client.create_public_key_credential(
+        user.id,
+        sdk.NewPublicKeyCredential(
+            label=f"key-{tag}",
+            openssh_public_key="ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBKL5C+OCN2hAbPoR+mwG4M402Z0XVDOuV5k7n6zCRIMsgnYiyz6a61Zcw/RRHoQAb7ndqUyk8eAi9gjPEiGq2d0=",
+        ),
+    )
+    call(
+        "PUT",
+        f"/admin/api/users/{user.id}/credentials/public-keys/{key.id}",
+        {"label": f"key-{tag}", "openssh_public_key": key.openssh_public_key},
+    )
+    sso = admin_client.create_sso_credential(
+        user.id, sdk.NewSsoCredential(email=f"{tag}@example.com")
+    )
+    call(
+        "PUT",
+        f"/admin/api/users/{user.id}/credentials/sso/{sso.id}",
+        {"email": f"{tag}@example.org"},
+    )
+    cert = admin_client.issue_certificate_credential(
+        user.id,
+        sdk.IssueCertificateCredentialRequest(
+            label=f"cert-{tag}",
+            public_key_pem="-----BEGIN PUBLIC KEY-----\nMFswDQYJKoZIhvcNAQEBBQADSgAwRwJAXWRPQyGlEY+SXz8Uslhe+MLjTgWd8lf/\nnA0hgCm9JFKC1tq1S73cQ9naClNXsMqY7pwPt1bSY8jYRqHHbdoUvwIDAQAB\n-----END PUBLIC KEY-----",
+        ),
+    )
+    call(
+        "PATCH",
+        f"/admin/api/users/{user.id}/credentials/certificates/{cert.credential.id}",
+        {"label": f"cert-renamed-{tag}"},
+    )
+
+    expiry = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    token = call("POST", "/api/profile/api-tokens", {"label": f"token-{tag}", "expiry": expiry})
+    call("DELETE", f"/api/profile/api-tokens/{token['token']['id']}")
+
+    expected = {
+        ("AdminRoleCreated1", None),
+        ("AdminRoleUpdated1", None),
+        ("AdminRoleDeleted1", None),
+        ("UserUpdated1", None),
+        ("CredentialUpdated1", "public_key"),
+        ("CredentialUpdated1", "sso"),
+        ("CredentialUpdated1", "certificate"),
+        ("CredentialCreated1", "api_token"),
+        ("CredentialDeleted1", "api_token"),
+    }
+    entries = _wait_for_audit_entries(
+        admin_client,
+        tag,
+        expected,
+        key=lambda values: (values.get("_type"), values.get("credential_type")),
+    )
+
+    assert entries.keys() == expected
+    assert all(e.username == actor.username for e in entries.values())
+    assert "UsersEdit" in entries[("AdminRoleUpdated1", None)].values["permissions"]
+    assert "10.0.0.0/8" in entries[("UserUpdated1", None)].values["allowed_ip_ranges"]
+    assert (
+        entries[("CredentialUpdated1", "certificate")].values["credential_name"]
+        == f"cert-renamed-{tag}"
+    )
+    assert entries[("CredentialCreated1", "api_token")].values["credential_name"] == f"token-{tag}"

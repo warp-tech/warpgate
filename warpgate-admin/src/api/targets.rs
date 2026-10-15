@@ -11,6 +11,7 @@ use warpgate_common::{
     TargetSSHOptions, WarpgateError,
 };
 use warpgate_common_http::errors::invalid_field;
+use warpgate_core::logging::AuditEvent;
 use warpgate_db_entities::Target::fuzzy_filter_targets;
 use warpgate_db_entities::{
     KnownHost, Role, Target, TargetGroup, TargetRoleAssignment, Ticket, TicketRequest,
@@ -149,6 +150,13 @@ impl ListApi {
             Err(err) => return Err(WarpgateError::from(err)),
         };
 
+        AuditEvent::TargetCreated {
+            target_id: target.id,
+            target_name: target.name.clone(),
+            actor_user_id: admin.auth.user_id(),
+        }
+        .emit();
+
         Ok(CreateTargetResponse::Created(Json(maybe_redacted_target(
             &admin, target,
         )?)))
@@ -269,6 +277,13 @@ impl DetailApi {
             Err(err) => return Err(WarpgateError::from(err)),
         };
 
+        AuditEvent::TargetUpdated {
+            target_id: target.id,
+            target_name: target.name.clone(),
+            actor_user_id: admin.auth.user_id(),
+        }
+        .emit();
+
         warpgate_core::rate_limiting::apply_new_rate_limits(
             &services.rate_limiter_registry,
             &services.state,
@@ -323,7 +338,16 @@ impl DetailApi {
                 .await?;
         }
 
+        let (target_id, target_name) = (target.id, target.name.clone());
         target.delete(db).await?;
+
+        AuditEvent::TargetDeleted {
+            target_id,
+            target_name,
+            actor_user_id: admin.auth.user_id(),
+        }
+        .emit();
+
         Ok(DeleteTargetResponse::Deleted)
     }
 
@@ -449,12 +473,30 @@ impl RolesApi {
             return Ok(AddTargetRoleResponse::AlreadyExists);
         }
 
+        let target = Target::Entity::find_by_id(id.0)
+            .one(db)
+            .await?
+            .ok_or(WarpgateError::InvalidTarget)?;
+        let role = Role::Entity::find_by_id(role_id.0)
+            .one(db)
+            .await?
+            .ok_or_else(|| WarpgateError::RoleNotFound(role_id.0.to_string()))?;
+
         let values = TargetRoleAssignment::ActiveModel {
             target_id: Set(id.0),
             role_id: Set(role_id.0),
         };
 
         values.insert(db).await.map_err(WarpgateError::from)?;
+
+        AuditEvent::TargetRoleAdded {
+            target_id: target.id,
+            target_name: target.name,
+            role_id: role.id,
+            role_name: role.name,
+            actor_user_id: admin.auth.user_id(),
+        }
+        .emit();
 
         Ok(AddTargetRoleResponse::Created)
     }
@@ -485,6 +527,27 @@ impl RolesApi {
         };
 
         model.delete(db).await.map_err(WarpgateError::from)?;
+
+        // Names are best-effort: the assignment row is the authoritative part
+        let target_name = Target::Entity::find_by_id(id.0)
+            .one(db)
+            .await?
+            .map(|t| t.name)
+            .unwrap_or_default();
+        let role_name = Role::Entity::find_by_id(role_id.0)
+            .one(db)
+            .await?
+            .map(|r| r.name)
+            .unwrap_or_default();
+
+        AuditEvent::TargetRoleRemoved {
+            target_id: id.0,
+            target_name,
+            role_id: role_id.0,
+            role_name,
+            actor_user_id: admin.auth.user_id(),
+        }
+        .emit();
 
         Ok(DeleteTargetRoleResponse::Deleted)
     }

@@ -202,10 +202,24 @@ impl DetailApi {
             return Ok(UpdateCertificateCredentialResponse::NotFound);
         };
 
+        let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
+            return Ok(UpdateCertificateCredentialResponse::NotFound);
+        };
+
         let mut am = cred.into_active_model();
 
         am.label = Set(body.label.clone());
         let model = am.update(db).await?;
+
+        AuditEvent::CredentialUpdated {
+            credential_type: "certificate".to_string(),
+            credential_name: Some(model.label.clone()),
+            via: CredentialChangedVia::Admin,
+            user_id: *user_id,
+            username: user.username,
+            actor_user_id: admin.auth.user_id(),
+        }
+        .emit();
 
         Ok(UpdateCertificateCredentialResponse::Updated(Json(
             model.into(),
