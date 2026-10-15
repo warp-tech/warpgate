@@ -1,26 +1,20 @@
 use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
-use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
-};
+use poem_openapi::{ApiResponse, OpenApi};
+use sea_orm::{EntityTrait, ModelTrait, QueryFilter, QueryOrder};
+use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::{
     AdminPermission, Role as RoleConfig, Target as TargetConfig, User as UserConfig, WarpgateError,
 };
 use warpgate_common_http::errors::invalid_field;
-use warpgate_db_entities::{Role, Target, TargetRoleAssignment, User, UserRoleAssignment};
+use warpgate_core::resources::ResourceError;
+use warpgate_core::resources::roles::{self as store, RoleDataRequest};
+use warpgate_db_entities::{Role, Target, User};
 
 use super::AdminContext;
 use super::targets::maybe_redacted_target;
 use crate::api::common::case_insensitive_search;
-
-#[derive(Object)]
-struct RoleDataRequest {
-    name: String,
-    description: Option<String>,
-    is_default: Option<bool>,
-}
 
 #[derive(ApiResponse)]
 enum GetRolesResponse {
@@ -31,6 +25,9 @@ enum GetRolesResponse {
 enum CreateRoleResponse {
     #[oai(status = 201)]
     Created(Json<RoleConfig>),
+
+    #[oai(status = 409)]
+    Conflict(Json<String>),
 
     #[oai(status = 400)]
     BadRequest(Json<String>),
@@ -68,29 +65,19 @@ impl ListApi {
         admin: AdminContext,
         body: Json<RoleDataRequest>,
     ) -> Result<CreateRoleResponse, WarpgateError> {
-        use warpgate_db_entities::Role;
-
         admin.require(AdminPermission::AccessRolesCreate)?;
 
-        if body.name.is_empty() {
-            return Ok(CreateRoleResponse::BadRequest(invalid_field(
+        match store::create(&admin.services().db, &body).await {
+            Ok(role) => Ok(CreateRoleResponse::Created(Json(role.into()))),
+            Err(ResourceError::EmptyName) => Ok(CreateRoleResponse::BadRequest(invalid_field(
                 "name",
                 "role name is empty",
-            )));
+            ))),
+            Err(ResourceError::NameTaken) => Ok(CreateRoleResponse::Conflict(Json(
+                "Name already exists".into(),
+            ))),
+            Err(err) => Err(err.into()),
         }
-
-        let db = &admin.services().db;
-
-        let values = Role::ActiveModel {
-            id: Set(Uuid::new_v4()),
-            name: Set(body.name.clone()),
-            description: Set(body.description.clone().unwrap_or_default()),
-            is_default: Set(body.is_default.unwrap_or(false)),
-        };
-
-        let role = values.insert(db).await.map_err(WarpgateError::from)?;
-
-        Ok(CreateRoleResponse::Created(Json(role.into())))
     }
 }
 
@@ -106,6 +93,10 @@ enum GetRoleResponse {
 enum UpdateRoleResponse {
     #[oai(status = 200)]
     Ok(Json<RoleConfig>),
+    #[oai(status = 400)]
+    BadRequest,
+    #[oai(status = 409)]
+    Conflict(Json<String>),
     #[oai(status = 404)]
     NotFound,
 }
@@ -163,20 +154,18 @@ impl DetailApi {
     ) -> Result<UpdateRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesEdit)?;
 
-        let db = &admin.services().db;
-
-        let Some(role) = Role::Entity::find_by_id(id.0).one(db).await? else {
-            return Ok(UpdateRoleResponse::NotFound);
-        };
-
-        let current_is_default = role.is_default;
-        let mut model: Role::ActiveModel = role.into();
-        model.name = Set(body.name.clone());
-        model.description = Set(body.description.clone().unwrap_or_default());
-        model.is_default = Set(body.is_default.unwrap_or(current_is_default));
-        let role = model.update(db).await?;
-
-        Ok(UpdateRoleResponse::Ok(Json(role.into())))
+        match store::update(&admin.services().db, id.0, &body).await {
+            Ok(role) => Ok(UpdateRoleResponse::Ok(Json(role.into()))),
+            Err(ResourceError::EmptyName) => {
+                warn!("Rejecting request: role name is empty");
+                Ok(UpdateRoleResponse::BadRequest)
+            }
+            Err(ResourceError::NameTaken) => Ok(UpdateRoleResponse::Conflict(Json(
+                "Name already exists".into(),
+            ))),
+            Err(ResourceError::NotFound) => Ok(UpdateRoleResponse::NotFound),
+            Err(err) => Err(err.into()),
+        }
     }
 
     #[oai(path = "/role/:id", method = "delete", operation_id = "delete_role")]
@@ -187,25 +176,11 @@ impl DetailApi {
     ) -> Result<DeleteRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesDelete)?;
 
-        let db = &admin.services().db;
-
-        let Some(role) = Role::Entity::find_by_id(id.0).one(db).await? else {
-            return Ok(DeleteRoleResponse::NotFound);
-        };
-
-        // Clean up referencing assignments before deleting the role
-        UserRoleAssignment::Entity::delete_many()
-            .filter(UserRoleAssignment::Column::RoleId.eq(id.0))
-            .exec(db)
-            .await?;
-
-        TargetRoleAssignment::Entity::delete_many()
-            .filter(TargetRoleAssignment::Column::RoleId.eq(id.0))
-            .exec(db)
-            .await?;
-
-        role.delete(db).await?;
-        Ok(DeleteRoleResponse::Deleted)
+        match store::delete(&admin.services().db, id.0).await {
+            Ok(()) => Ok(DeleteRoleResponse::Deleted),
+            Err(ResourceError::NotFound) => Ok(DeleteRoleResponse::NotFound),
+            Err(err) => Err(err.into()),
+        }
     }
 
     #[oai(
