@@ -252,7 +252,7 @@
                                 min="0"
                                 aria-label="Grouping window in minutes"
                                 bind:value={$groupWindowMinutes}
-                            />
+                            >
                             <span class="input-group-text">min</span>
                         </div>
                     {/if}
@@ -292,11 +292,13 @@
                             </div>
                             <strong>{describeGroup(group)}</strong>
                             <span class="badge bg-secondary ms-2">
-                                {group.sessions.length} sessions
+                                {group.sessions.length}
+                                sessions
                             </span>
 
                             <div class="meta">
-                                over {formatDistance(
+                                over
+                                {formatDistance(
                                     new Date(oldest.started),
                                     new Date(newest.ended ?? new Date()),
                                 )}
