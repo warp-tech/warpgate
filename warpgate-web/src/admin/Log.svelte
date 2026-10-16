@@ -18,14 +18,25 @@
         $target = $target === 'audit' ? 'all' : 'audit'
     }
 
-    type FilterKind = 'user' | 'access-role' | 'admin-role'
+    type FilterKind = 'user' | 'access-role' | 'admin-role' | 'sessions'
+
+    /** Comma-separated session IDs, e.g. a group from the sessions list */
+    let sessionIds = $derived(
+        filterKind === 'sessions'
+            ? (params?.id?.split(',').filter(x => x) ?? [])
+            : undefined,
+    )
 
     let filters = $derived({
-        target: filterKind
-            ? 'audit'
-            : $target === 'audit'
-              ? 'audit'
-              : undefined,
+        target:
+            filterKind === 'sessions'
+                ? undefined
+                : filterKind
+                  ? 'audit'
+                  : $target === 'audit'
+                    ? 'audit'
+                    : undefined,
+        sessionIds,
         relatedUsers: filterKind === 'user' ? params?.id : undefined,
         relatedAccessRoles:
             filterKind === 'access-role' ? params?.id : undefined,
@@ -44,6 +55,8 @@
                 access role audit log: ID <code>{params?.id}</code>
             {:else if filterKind === 'admin-role'}
                 admin role audit log: ID <code>{params?.id}</code>
+            {:else if filterKind === 'sessions'}
+                log of {sessionIds?.length} sessions
             {:else}
                 log
             {/if}

@@ -5713,6 +5713,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "session_ids": {
+            "type": "array",
+            "description": "Matches entries from any of these sessions, e.g. a group of sessions",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
           "username": {
             "type": "string"
           },

@@ -22,6 +22,7 @@
     interface Props {
         filters?: {
             sessionId?: string
+            sessionIds?: string[]
             target?: string
             relatedUsers?: string
             relatedAccessRoles?: string
