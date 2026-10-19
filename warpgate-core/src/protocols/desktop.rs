@@ -172,7 +172,9 @@ pub enum DesktopConnectionError {
     Handshake(#[source] anyhow::Error),
     #[error("session")]
     Session(#[source] anyhow::Error),
-    #[error("target reported a {width}x{height} desktop, above the {MAX_DESKTOP_DIM} per-edge limit")]
+    #[error(
+        "target reported a {width}x{height} desktop, above the {MAX_DESKTOP_DIM} per-edge limit"
+    )]
     OversizedDesktop { width: u16, height: u16 },
 }
 
