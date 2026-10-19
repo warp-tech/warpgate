@@ -31,6 +31,18 @@ pub struct KubernetesAuditSubject {
     pub target_name: String,
 }
 
+/// Who opened a TCP tunnel, to which target and from where. Both tunnel audit
+/// events carry exactly this identity.
+#[derive(Clone)]
+pub struct TcpTunnelSubject {
+    pub session_id: Uuid,
+    pub user_id: Uuid,
+    pub username: String,
+    pub target_id: Uuid,
+    pub target_name: String,
+    pub client_ip: String,
+}
+
 #[derive(Clone)]
 pub enum AuditEvent {
     CredentialCreated {
@@ -174,6 +186,19 @@ pub enum AuditEvent {
         /// stream instead and sends no query at all, so this is often absent —
         /// and an empty list would read as "no ports", which is not the same.
         ports: Option<String>,
+    },
+    /// A SOCKS5 client was connected through to its `tcp` target.
+    TcpTunnelOpened { subject: TcpTunnelSubject },
+    /// The tunnel ended. Always emitted once a `TcpTunnelOpened` has been, even
+    /// when the tunnel was aborted by an administrator or failed.
+    TcpTunnelClosed {
+        subject: TcpTunnelSubject,
+        /// Bytes the client sent towards the target.
+        bytes_to_target: u64,
+        /// Bytes the target sent back to the client.
+        bytes_from_target: u64,
+        /// `closed`, `idle_timeout`, `error` or `aborted`.
+        reason: String,
     },
     /// The cluster refused a streaming request — typically RBAC. Recorded
     /// separately because a denied attempt is exactly as interesting as a
@@ -595,6 +620,42 @@ impl AuditEvent {
                     pod = %pod,
                     ports = ports.as_deref(),
                     "Kubernetes port forwarding"
+                );
+            }
+            Self::TcpTunnelOpened { subject } => {
+                info!(
+                    target: "audit",
+                    _type = "TcpTunnelOpened1",
+                    session = %subject.session_id,
+                    user_id = %subject.user_id,
+                    username = %subject.username,
+                    target_id = %subject.target_id,
+                    target_name = %subject.target_name,
+                    related_users = %format_related_ids(&[subject.user_id]),
+                    client_ip = %subject.client_ip,
+                    "TCP tunnel opened"
+                );
+            }
+            Self::TcpTunnelClosed {
+                subject,
+                bytes_to_target,
+                bytes_from_target,
+                reason,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "TcpTunnelClosed1",
+                    session = %subject.session_id,
+                    user_id = %subject.user_id,
+                    username = %subject.username,
+                    target_id = %subject.target_id,
+                    target_name = %subject.target_name,
+                    related_users = %format_related_ids(&[subject.user_id]),
+                    client_ip = %subject.client_ip,
+                    bytes_to_target = %bytes_to_target,
+                    bytes_from_target = %bytes_from_target,
+                    reason = %reason,
+                    "TCP tunnel closed"
                 );
             }
             Self::KubernetesStreamRejected {

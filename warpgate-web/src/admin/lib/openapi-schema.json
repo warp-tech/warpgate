@@ -8049,6 +8049,9 @@
           },
           {
             "$ref": "#/components/schemas/TargetOptions_TargetRdpOptions"
+          },
+          {
+            "$ref": "#/components/schemas/TargetOptions_TargetTcpOptions"
           }
         ],
         "discriminator": {
@@ -8060,7 +8063,8 @@
             "MySql": "#/components/schemas/TargetOptions_TargetMySqlOptions",
             "Postgres": "#/components/schemas/TargetOptions_TargetPostgresOptions",
             "Vnc": "#/components/schemas/TargetOptions_TargetVncOptions",
-            "Rdp": "#/components/schemas/TargetOptions_TargetRdpOptions"
+            "Rdp": "#/components/schemas/TargetOptions_TargetRdpOptions",
+            "Tcp": "#/components/schemas/TargetOptions_TargetTcpOptions"
           }
         }
       },
@@ -8193,6 +8197,28 @@
           },
           {
             "$ref": "#/components/schemas/TargetSSHOptions"
+          }
+        ]
+      },
+      "TargetOptions_TargetTcpOptions": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Tcp"
+                ],
+                "example": "Tcp"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/TargetTcpOptions"
           }
         ]
       },
@@ -8393,6 +8419,25 @@
           "node_hostname": {
             "type": "string",
             "description": "Hostname of the serving node, while registered."
+          }
+        }
+      },
+      "TargetTcpOptions": {
+        "type": "object",
+        "title": "TargetTcpOptions",
+        "description": "A plain TCP endpoint reached through the SOCKS5 listener. It carries no\ncredentials; the gateway only ever dials this address.",
+        "required": [
+          "host",
+          "port"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 1.0
           }
         }
       },
@@ -8913,6 +8958,12 @@
             }
           },
           "rdp": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "tcp": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CredentialKind"

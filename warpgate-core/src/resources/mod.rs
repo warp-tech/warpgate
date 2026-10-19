@@ -11,6 +11,8 @@ use crate::db::is_unique_violation;
 pub enum ResourceError {
     #[error("name is empty")]
     EmptyName,
+    #[error("target host is empty")]
+    EmptyHost,
     #[error("name already taken")]
     NameTaken,
     #[error("not found")]
