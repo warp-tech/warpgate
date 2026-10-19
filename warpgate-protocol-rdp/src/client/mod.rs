@@ -680,7 +680,7 @@ fn build_config(
         domain: options.domain.clone(),
         enable_tls: true,
         enable_credssp: true,
-        keyboard_type: KeyboardType::IbmEnhanced,
+        keyboard_type: KeyboardType::IBM_ENHANCED,
         keyboard_subtype: 0,
         keyboard_layout: 0,
         keyboard_functional_keys_count: 12,
