@@ -9028,6 +9028,7 @@ dependencies = [
  "warpgate-protocol-mysql",
  "warpgate-protocol-postgres",
  "warpgate-protocol-rdp",
+ "warpgate-protocol-socks",
  "warpgate-protocol-ssh",
  "warpgate-protocol-vnc",
  "warpgate-tls",
@@ -9544,6 +9545,23 @@ dependencies = [
  "warpgate-desktop-ui",
  "warpgate-tls",
  "x509-cert",
+]
+
+[[package]]
+name = "warpgate-protocol-socks"
+version = "0.30.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "socket2",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+ "warpgate-common",
+ "warpgate-core",
+ "warpgate-tls",
 ]
 
 [[package]]
