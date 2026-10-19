@@ -308,10 +308,16 @@ impl DetailApi {
             .exec(db)
             .await?;
 
-        Ticket::Entity::delete_many()
+        let tickets = Ticket::Entity::find()
             .filter(Ticket::Column::TargetId.eq(target.id))
-            .exec(db)
+            .all(db)
             .await?;
+        for ticket in tickets {
+            admin
+                .services()
+                .delete_ticket_closing_sessions(ticket.id)
+                .await?;
+        }
 
         let options = serde_json::from_value::<TargetOptions>(target.options.clone())?;
         if let TargetOptions::Ssh(ssh_options) = &options {

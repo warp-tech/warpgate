@@ -4,7 +4,10 @@ use std::time::Duration;
 
 use anyhow::Result;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter};
+use sea_orm::{
+    ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait,
+};
+use time::OffsetDateTime;
 use tokio::sync::{Mutex, broadcast};
 use tracing::warn;
 use uuid::Uuid;
@@ -13,7 +16,9 @@ use warpgate_common::{
     GlobalParams, Protocol, Secret, UserSessionId, WarpgateConfig, WarpgateError,
 };
 use warpgate_db_entities::Parameters::MfaEnforcement;
-use warpgate_db_entities::{OtpCredential, Parameters, SsoCredential, UserSession};
+use warpgate_db_entities::{
+    OtpCredential, Parameters, SsoCredential, TargetSession, Ticket, TicketRequest, UserSession,
+};
 
 use crate::auth_state_store::ApprovalRequestSink;
 use crate::cluster::{Cluster, ClusterNotification};
@@ -52,12 +57,51 @@ const APPROVAL_SWEEP_INTERVAL: Duration = Duration::from_secs(1);
 /// close); everything within this window becomes one cluster notification.
 const SESSION_CHANGE_COALESCE_WINDOW: Duration = Duration::from_millis(100);
 
+const TICKET_EXPIRY_SWEEP_INTERVAL: Duration = Duration::from_secs(5);
+
 impl Services {
     pub async fn close_sessions(&self, scope: SessionsFilter) -> Result<(), WarpgateError> {
         scope.revoke(&self.db).await?;
         State::close_local_sessions(&self.state, &scope).await;
         self.cluster.close_sessions_on_peers(&scope).await;
         Ok(())
+    }
+
+    pub async fn delete_ticket_closing_sessions(
+        &self,
+        ticket_id: Uuid,
+    ) -> Result<(), WarpgateError> {
+        let admitted = TargetSession::open_user_sessions_admitted_by_tickets(
+            &self.db,
+            Ticket::Column::Id.eq(ticket_id),
+        )
+        .await?;
+
+        let txn = self.db.begin().await?;
+        TicketRequest::Entity::delete_many()
+            .filter(TicketRequest::Column::TicketId.eq(Some(ticket_id)))
+            .exec(&txn)
+            .await?;
+        Ticket::Entity::delete_by_id(ticket_id).exec(&txn).await?;
+        txn.commit().await?;
+
+        if !admitted.is_empty() {
+            self.close_sessions(SessionsFilter::Sessions { ids: admitted })
+                .await?;
+        }
+        Ok(())
+    }
+
+    pub async fn close_sessions_of_expired_tickets(&self) -> Result<(), WarpgateError> {
+        let ids = TargetSession::open_user_sessions_admitted_by_tickets(
+            &self.db,
+            Ticket::Column::Expiry.lt(OffsetDateTime::now_utc()),
+        )
+        .await?;
+        if ids.is_empty() {
+            return Ok(());
+        }
+        self.close_sessions(SessionsFilter::Sessions { ids }).await
     }
 
     pub async fn new(
@@ -153,6 +197,19 @@ impl Services {
                             | broadcast::error::TryRecvError::Closed)
                     ) {}
                     cluster.notify_global(ClusterNotification::SessionsChanged);
+                }
+            });
+        }
+
+        {
+            let services = services.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(TICKET_EXPIRY_SWEEP_INTERVAL);
+                loop {
+                    interval.tick().await;
+                    if let Err(error) = services.close_sessions_of_expired_tickets().await {
+                        warn!("Failed to close sessions of expired tickets: {error}");
+                    }
                 }
             });
         }
