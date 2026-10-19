@@ -9,7 +9,7 @@ use warpgate_common::{SecretResolver, TargetVncOptions, VncTargetAuth, WarpgateE
 use warpgate_core::{
     AdmittedTarget, DESKTOP_CONNECT_TIMEOUT, DESKTOP_HANDSHAKE_TIMEOUT,
     DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopClientHandles, DesktopConnectionError, DesktopEvent,
-    DesktopInput, DesktopRect, DesktopState, LogonState, within_deadline,
+    DesktopInput, DesktopRect, DesktopState, LogonState, check_desktop_size, within_deadline,
 };
 
 const fn rect_from(r: vnc::Rect) -> DesktopRect {
@@ -223,10 +223,13 @@ async fn run(
             event = client.poll_event() => {
                 match event {
                     Ok(Some(event)) => {
-                        if let Some(mapped) = map_event(event)
-                            && event_tx.send(mapped).await.is_err()
-                        {
-                            break;
+                        if let Some(mapped) = map_event(event) {
+                            if let DesktopEvent::Resize { width, height } = mapped {
+                                check_desktop_size(width, height)?;
+                            }
+                            if event_tx.send(mapped).await.is_err() {
+                                break;
+                            }
                         }
                         // Keep the framebuffer flowing.
                         client.input(X11Event::Refresh).await.ok();

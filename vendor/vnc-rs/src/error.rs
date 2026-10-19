@@ -19,6 +19,8 @@ pub enum VncError {
     WrongServerMessage,
     #[error("Image data cannot be decoded correctly")]
     InvalidImageData,
+    #[error("Framebuffer or rectangle size exceeds the limit")]
+    OversizedImage,
     #[error("The VNC client isn't started. Or it is already closed")]
     ClientNotRunning,
     #[error(transparent)]

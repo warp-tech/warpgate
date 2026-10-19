@@ -41,7 +41,7 @@ use tracing::{debug, warn};
 use warpgate_common::{RdpTargetAuth, RdpTargetCompression, SecretResolver, TargetRdpOptions};
 use warpgate_core::{
     DESKTOP_CONNECT_TIMEOUT, DESKTOP_HANDSHAKE_TIMEOUT, DesktopConnectionError, DesktopEvent,
-    DesktopInput, DesktopRect, DesktopState, within_deadline,
+    DesktopInput, DesktopRect, DesktopState, check_desktop_size, within_deadline,
 };
 
 pub(crate) use self::logon::LogonWatcher;
@@ -428,6 +428,7 @@ async fn reactivate(
 
         active_stage.set_share_id(share_id);
         active_stage.set_enable_server_pointer(enable_server_pointer);
+        check_desktop_size(desktop_size.width, desktop_size.height)?;
 
         if image.width() != desktop_size.width || image.height() != desktop_size.height {
             debug!(
@@ -833,6 +834,10 @@ async fn connect(
     if connection_result.desktop_size.width == 0 || connection_result.desktop_size.height == 0 {
         warn!("target reported a zero desktop size");
     }
+    check_desktop_size(
+        connection_result.desktop_size.width,
+        connection_result.desktop_size.height,
+    )?;
 
     Ok((connection_result, upgraded_framed))
 }

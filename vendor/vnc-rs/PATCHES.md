@@ -67,6 +67,19 @@ on a personal Git fork so the build is hermetic and reviewable.
      (0/1 map correctly, 2 and `u32::MAX` reject) and the reason-string length cap
      (rejects over-limit, reads in-limit).
 
+4. **Bound target-chosen framebuffer and rectangle sizes** — `src/client/connection.rs`,
+   `src/error.rs`
+   - ServerInit and `DesktopSize` pseudo-rectangles above `MAX_SCREEN_DIM` (8192) per edge
+     are rejected with the new `VncError::OversizedImage` before anything is allocated.
+   - `decode_loop` takes the current screen size (`screen: (u16, u16)`, seeded from
+     ServerInit and updated by `DesktopSize`) and rejects any update rectangle that does
+     not fit inside it before handing it to a decoder; cursor pseudo-rectangles only have
+     their extent bounded (x/y is the hotspot). Upstream decoders size their buffers from
+     the rectangle alone, so a 4-byte Tight fill of 65535x65535 would otherwise allocate
+     16 GiB.
+   - Unit tests in `connection.rs` (`size_limit_tests`) cover an oversized Tight fill, a
+     rectangle past the framebuffer edge and an oversized `DesktopSize`.
+
 ## Nothing else changed
 
 `PixelFormat` (incl. `TryFrom<[u8;16]>`), `VncEvent`, `VncEncoding`, `VncError`, `Rect` are
