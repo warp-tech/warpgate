@@ -29,7 +29,7 @@ use warpgate_core::{ConfigProvider, vet_credential_bearer};
 use warpgate_db_entities::User;
 use warpgate_sso::WarpgateIdToken;
 
-use crate::middleware::assert_mfa_setup_gate;
+use crate::middleware::{assert_mfa_setup_gate, is_session_bootstrap_path, warpgate_surface_path};
 use crate::session::SessionStore;
 use crate::session_storage::SharedSessionStorage;
 
@@ -110,17 +110,21 @@ fn session_host_is_authorized(request_host: Option<&str>, base_host: &str) -> bo
 }
 
 /// Whether a state-changing (or WebSocket) request to Warpgate's own endpoints
-/// was made by another site, so the session cookie it carries must not count.
-/// The cookie is `SameSite=None` on HTTPS, so the browser attaches it anyway.
-/// Target traffic is left alone - targets do their own CSRF checks, and
-/// host-bound targets on subdomains rely on the shared cookie. Sibling
-/// subdomains pass, as they do for [`session_host_is_authorized`]. A request
-/// without `Origin` or `Sec-Fetch-Site` did not come from a browser page.
-fn is_untrusted_cross_site_api_request(req: &Request, base_host: Option<&str>) -> bool {
+/// came from a page on any other origin, so the session cookie it carries must
+/// not count. The cookie is `SameSite=None` on HTTPS and shared with every
+/// target subdomain, so the browser attaches it to requests from other sites
+/// and from target pages alike - hence `same-site` is no better than
+/// `cross-site`. Target traffic is left alone; targets do their own CSRF
+/// checks. A request without `Origin`, `Referer` or `Sec-Fetch-Site` did not
+/// come from a browser page.
+///
+/// Only the host is compared. The listener speaks TLS only, so the scheme
+/// adds nothing, and the port is routinely stripped or rewritten by reverse
+/// proxies while Warpgate serves nothing on another port of the same host.
+fn is_cross_origin_api_request(req: &Request, request_host: Option<&str>) -> bool {
     let headers = req.headers();
-    let path = req.uri().path();
 
-    if !path.starts_with("/@warpgate/") && !path.starts_with("/_warpgate/") {
+    if warpgate_surface_path(req.uri().path()).is_none() {
         return false;
     }
 
@@ -134,27 +138,35 @@ fn is_untrusted_cross_site_api_request(req: &Request, base_host: Option<&str>) -
 
     if headers
         .get("sec-fetch-site")
-        .is_some_and(|v| v.as_bytes() == b"cross-site")
+        .is_some_and(|v| v.as_bytes() == b"cross-site" || v.as_bytes() == b"same-site")
     {
         return true;
     }
 
-    let Some(origin) = headers.get(http::header::ORIGIN) else {
+    let Some(source) = headers
+        .get(http::header::ORIGIN)
+        .or_else(|| headers.get(http::header::REFERER))
+    else {
         return false;
     };
 
     // An opaque ("null") or unparsable origin is never ours.
-    let origin_host = origin
+    let source = source
         .to_str()
         .ok()
-        .and_then(|o| o.parse::<http::Uri>().ok())
-        .and_then(|uri| uri.host().map(str::to_owned));
-    match (origin_host, base_host) {
-        (Some(origin_host), Some(base_host)) => {
-            !session_host_is_authorized(Some(&origin_host), base_host)
-        }
+        .and_then(|s| url::Url::parse(s).ok())
+        .and_then(|url| url.host_str().map(str::to_owned));
+    match (source, request_host) {
+        (Some(host), Some(request_host)) => !host.eq_ignore_ascii_case(request_host),
         _ => true,
     }
+}
+
+/// restricted sessions are only allowed to access the API parts needed for login/logout and captive MFA flow
+fn is_session_restricted_on_host(request_host: Option<&str>, control_plane_host: &str) -> bool {
+    request_host.is_none_or(|host| {
+        !host.eq_ignore_ascii_case(control_plane_host) && !is_localhost_host(host)
+    })
 }
 
 #[derive(Serialize, Deserialize)]
@@ -527,12 +539,13 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
     if session_auth.is_some() && !is_cluster_peer {
         // Host binding only means something when `external_host` pins an
         // origin. Without it the external URL is derived from Host header
-        let base_host = {
+        let (base_host, control_plane_host) = {
             let config = ctx.services().config.lock().await;
-            construct_external_url(None, &config, None)
+            let base_host = construct_external_url(None, &config, None)
                 .await
                 .ok()
-                .and_then(|url| url.host_str().map(str::to_owned))
+                .and_then(|url| url.host_str().map(str::to_owned));
+            (base_host, config.control_plane_host())
         };
         let request_host = ctx.trusted_hostname(&req);
         if let Some(base_host) = &base_host
@@ -545,10 +558,23 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
             );
             session.clear();
             session_auth = None;
-        } else if is_untrusted_cross_site_api_request(&req, base_host.or(request_host).as_deref()) {
-            // The session itself is fine - only this request's use of it is not.
+        } else if control_plane_host
+            .as_deref()
+            .is_some_and(|control_plane_host| {
+                is_session_restricted_on_host(request_host.as_deref(), control_plane_host)
+            })
+            && warpgate_surface_path(req.uri().path()).is_some()
+            && !is_session_bootstrap_path(req.method(), req.uri().path())
+        {
+            tracing::debug!(
+                "Session cookie ignored for {} {} on non-control-plane host {request_host:?}",
+                req.method(),
+                req.uri().path(),
+            );
+            session_auth = None;
+        } else if is_cross_origin_api_request(&req, request_host.as_deref()) {
             tracing::warn!(
-                "Session cookie ignored for cross-site {} {}",
+                "Session cookie ignored for cross-origin {} {}",
                 req.method(),
                 req.uri().path()
             );
@@ -678,18 +704,17 @@ mod tests {
     }
 
     #[test]
-    fn cross_site_warpgate_requests() {
+    fn cross_origin_warpgate_requests() {
         use http::Method;
 
-        use super::is_untrusted_cross_site_api_request;
+        use super::is_cross_origin_api_request;
 
-        let base = Some("example.com");
         let check = |method: Method, path: &str, headers: &[(&str, &str)]| {
             let mut req = poem::Request::builder().method(method).uri_str(path);
             for (k, v) in headers {
                 req = req.header(*k, *v);
             }
-            is_untrusted_cross_site_api_request(&req.finish(), base)
+            is_cross_origin_api_request(&req.finish(), Some("example.com"))
         };
         let api = "/@warpgate/admin/api/sessions/x/close";
         let evil = [("origin", "https://evil.example")];
@@ -707,13 +732,8 @@ mod tests {
             "/@warpgate/api/x/stream",
             &[("upgrade", "websocket"), ("origin", "https://evil.example")]
         ));
-        assert!(!check(
-            Method::POST,
-            api,
-            &[("origin", "https://example.com")]
-        ));
-        // Host-bound targets live on subdomains and share the cookie.
-        assert!(!check(
+        // Target pages on subdomains share the cookie but not the trust.
+        assert!(check(
             Method::POST,
             api,
             &[
@@ -721,12 +741,60 @@ mod tests {
                 ("sec-fetch-site", "same-site")
             ]
         ));
-        // Non-browser clients send neither header.
+        assert!(check(Method::POST, api, &[("sec-fetch-site", "same-site")]));
+        assert!(check(
+            Method::POST,
+            api,
+            &[("referer", "https://evil.example/page")]
+        ));
+        assert!(!check(
+            Method::POST,
+            api,
+            &[("origin", "https://example.com")]
+        ));
+        // Proxies strip or rewrite the port, so only the host counts.
+        assert!(!check(
+            Method::POST,
+            api,
+            &[
+                ("origin", "https://Example.com:8443"),
+                ("sec-fetch-site", "same-origin")
+            ]
+        ));
+        assert!(!check(
+            Method::POST,
+            api,
+            &[("referer", "https://example.com/@warpgate")]
+        ));
+        // Non-browser clients send none of the headers.
         assert!(!check(Method::POST, api, &[]));
         // Navigations and reads are not state changes.
         assert!(!check(Method::GET, api, &evil));
         // Target traffic is the target's business.
         assert!(!check(Method::POST, "/some/form", &evil));
+    }
+
+    #[test]
+    fn session_restricted_off_the_control_plane() {
+        use super::is_session_restricted_on_host;
+
+        assert!(!is_session_restricted_on_host(
+            Some("example.com"),
+            "example.com"
+        ));
+        assert!(!is_session_restricted_on_host(
+            Some("EXAMPLE.com"),
+            "example.com"
+        ));
+        assert!(is_session_restricted_on_host(
+            Some("t.example.com"),
+            "example.com"
+        ));
+        assert!(!is_session_restricted_on_host(
+            Some("localhost"),
+            "example.com"
+        ));
+        assert!(is_session_restricted_on_host(None, "example.com"));
     }
 
     #[test]

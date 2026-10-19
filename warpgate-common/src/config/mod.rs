@@ -963,11 +963,28 @@ pub struct WarpgateConfig {
     pub store: WarpgateConfigStore,
 }
 
+/// Ignores anything that does not look like a bare hostname or at least a
+/// legacy host:port.
+fn bare_host_name(value: &str) -> Option<String> {
+    Some(value.parse::<Authority>().ok()?.host().to_owned())
+}
+
 impl WarpgateConfig {
     pub fn external_host_name(&self) -> Option<String> {
-        let ext = self.store.external_host.as_deref()?;
-        // ignore anything that does not look like a bare hostname or at least a legacy host:port
-        Some(ext.parse::<Authority>().ok()?.host().to_owned())
+        bare_host_name(self.store.external_host.as_deref()?)
+    }
+
+    /// The host where /@warpgate API access is allowed, here either the HTTP external host or the global external host
+    pub fn control_plane_host(&self) -> Option<String> {
+        let external_host = self.external_host_name()?;
+        Some(
+            self.store
+                .http
+                .external_host
+                .as_deref()
+                .and_then(bare_host_name)
+                .unwrap_or(external_host),
+        )
     }
 
     pub fn validate(&self) {
@@ -1034,5 +1051,33 @@ mod tests {
         );
         assert_eq!(name("https://warp.example.com:8888"), None);
         assert_eq!(name("warp.example.com/gateway"), None);
+    }
+
+    #[test]
+    fn control_plane_host_needs_external_host() {
+        let host = |ext: Option<&str>, http_ext: Option<&str>| {
+            WarpgateConfig {
+                store: WarpgateConfigStore {
+                    external_host: ext.map(ToOwned::to_owned),
+                    http: super::HttpConfig {
+                        external_host: http_ext.map(ToOwned::to_owned),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            }
+            .control_plane_host()
+        };
+
+        assert_eq!(host(None, None), None);
+        assert_eq!(host(None, Some("portal.example.com")), None);
+        assert_eq!(
+            host(Some("example.com"), None).as_deref(),
+            Some("example.com")
+        );
+        assert_eq!(
+            host(Some("example.com"), Some("portal.example.com:8443")).as_deref(),
+            Some("portal.example.com")
+        );
     }
 }

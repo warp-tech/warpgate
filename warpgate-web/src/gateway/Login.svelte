@@ -6,6 +6,7 @@
     } from '@fortawesome/free-brands-svg-icons'
     import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
     import { Alert, Button, FormGroup } from '@sveltestrap/sveltestrap'
+    import { onControlPlane } from 'common/controlPlane'
     import { stringifyError } from 'common/errors'
     import { navigateToExternalUrl, routeQueryParams } from 'common/helpers'
     import Loadable from 'common/Loadable.svelte'
@@ -20,6 +21,7 @@
         SsoProviderKind,
     } from 'gateway/lib/api'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
+    import { get } from 'svelte/store'
     import Fa from 'svelte-fa'
     import { replace } from 'svelte-spa-router'
 
@@ -79,8 +81,12 @@
     }
 
     function success() {
-        const target = nextURL ? sanitizeRedirect(nextURL) : undefined
-        if (target) {
+        const next = nextURL ? sanitizeRedirect(nextURL) : undefined
+        const target = onControlPlane(
+            get(serverInfo),
+            new URL(next ?? '/@warpgate#/', location.origin),
+        )
+        if (next || new URL(target).origin !== location.origin) {
             location.assign(target)
         } else {
             replace('/')

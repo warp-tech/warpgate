@@ -1,9 +1,12 @@
+use std::sync::LazyLock;
+
 use poem::error::ResponseError;
 use poem::http::header::HeaderValue;
 use poem::http::{HeaderName, Method, StatusCode};
 use poem::session::Session;
 use poem::web::Redirect;
 use poem::{IntoResponse, Request, Response};
+use regex::Regex;
 use thiserror::Error;
 use warpgate_common_http::auth::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
@@ -15,36 +18,67 @@ pub static MFA_SETUP_REQUIRED_HEADER: HeaderName =
     HeaderName::from_static("x-warpgate-mfa-setup-required");
 
 const MFA_GATE_PASSED_SESSION_KEY: &str = "mfa_gate_passed";
-/// The path relative to the Warpgate app surface, or `None` for proxied
-/// target paths.
-fn warpgate_surface_path(path: &str) -> Option<&str> {
+
+/// The path relative to the @warpgate prefix, None for proxied paths
+pub fn warpgate_surface_path(path: &str) -> Option<&str> {
     path.strip_prefix("/@warpgate")
         .or_else(|| path.strip_prefix("/_warpgate"))
 }
 
-/// The URLs a web user held in the MFA enrollment flow may still reach: the
-/// SPA shells and their assets (both apps steer held users to the setup route
-/// client-side), the enrollment endpoint itself, and enough of the auth API
-/// to log in and out. Everything else - including target proxying, the admin
-/// API and the web-auth approval endpoints - is blocked.
-fn is_mfa_setup_allowed(method: &Method, path: &str) -> bool {
+/// Whether a request is allowed during
+/// * MFA setup or
+/// * Cross-site request
+pub fn is_session_bootstrap_path(method: &Method, path: &str) -> bool {
+    #[allow(clippy::unwrap_used)]
+    static ALLOW_ANY: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"^(?x)
+            (
+            |   / # root doc
+            |   /assets/.*
+            |   /api/auth/state
+            |   /api/sso/(logout|return)
+            )$",
+        )
+        .unwrap()
+    });
+    #[allow(clippy::unwrap_used)]
+    static ALLOW_GET: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"^(?x)(
+                /admin # admin doc
+            |   /api/(
+                    info
+                |   logo
+                |   sso/providers(/[^/]+/start)?
+                )
+            )$",
+        )
+        .unwrap()
+    });
+    #[allow(clippy::unwrap_used)]
+    static ALLOW_POST: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"^(?x)
+                /api/(
+                    profile/credentials/otp
+                |   auth/(login|otp|logout)
+                )
+            $",
+        )
+        .unwrap()
+    });
+
     let Some(path) = warpgate_surface_path(path) else {
         return false;
     };
-    if path.is_empty() || path == "/" || path.starts_with("/assets/") {
-        return true;
-    }
-    match path {
-        "/admin" | "/api/info" => method == Method::GET,
-        "/api/profile/credentials/otp"
-        | "/api/auth/login"
-        | "/api/auth/otp"
-        | "/api/auth/logout" => method == Method::POST,
-        // The user's own login state only - the `/api/auth/state/:id/...`
-        // approval endpoints stay blocked.
-        "/api/auth/state" | "/api/sso/logout" => true,
-        _ => false,
-    }
+
+    ALLOW_ANY.is_match(path)
+        || match *method {
+            Method::GET => ALLOW_GET.is_match(path),
+            Method::POST => ALLOW_POST.is_match(path),
+            _ => false,
+        }
 }
 
 #[derive(Debug, Error)]
@@ -90,7 +124,7 @@ pub async fn assert_mfa_setup_gate(
     req: &Request,
     session: &Session,
 ) -> poem::Result<()> {
-    if is_mfa_setup_allowed(req.method(), req.original_uri().path()) {
+    if is_session_bootstrap_path(req.method(), req.original_uri().path()) {
         return Ok(());
     }
 
@@ -143,6 +177,22 @@ mod tests {
             (Method::DELETE, "/@warpgate/api/auth/state", true),
             (Method::POST, "/@warpgate/api/auth/login", true),
             (Method::POST, "/@warpgate/api/auth/otp", true),
+            // Login page essentials
+            (Method::GET, "/@warpgate/api/logo", true),
+            (Method::GET, "/@warpgate/api/sso/providers", true),
+            (
+                Method::GET,
+                "/@warpgate/api/sso/providers/google/start",
+                true,
+            ),
+            (Method::GET, "/@warpgate/api/sso/return", true),
+            (Method::POST, "/@warpgate/api/sso/return", true),
+            (
+                Method::POST,
+                "/@warpgate/api/sso/providers/google/backchannel-logout",
+                false,
+            ),
+            (Method::GET, "/@warpgate/api/sso/providers/a/b/start", false),
             // Wrong methods
             (Method::POST, "/@warpgate/api/info", false),
             (Method::GET, "/@warpgate/api/profile/credentials/otp", false),
@@ -176,7 +226,7 @@ mod tests {
             (Method::POST, "/warpgate-target=x", false),
         ] {
             assert_eq!(
-                is_mfa_setup_allowed(&method, path),
+                is_session_bootstrap_path(&method, path),
                 allowed,
                 "{method} {path}"
             );
