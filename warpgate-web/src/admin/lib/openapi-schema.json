@@ -6147,8 +6147,7 @@
           "text",
           "target",
           "values",
-          "timestamp",
-          "session_id"
+          "timestamp"
         ],
         "properties": {
           "id": {

@@ -14,6 +14,7 @@ use sea_orm::EntityTrait;
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
+use tracing::Instrument;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthResult, AuthState, AuthStateUserInfo, CredentialKind};
 use warpgate_common::helpers::username::username_eq_ci;
@@ -615,10 +616,17 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
     };
 
     if let Some(auth) = auth {
+        // additional span to include the session_username for token requests
+        let span = match &auth {
+            RequestAuthorization::UserToken { username, .. } => {
+                tracing::info_span!("API token", session_username = %username)
+            }
+            _ => tracing::Span::none(),
+        };
         // build context and attach it instead of raw authorization
         let actx = ctx.to_authenticated(auth);
         assert_mfa_setup_gate(&actx, &req, session).await?;
-        Ok(ep.data(actx).data(ctx).call(req).await?)
+        Ok(ep.data(actx).data(ctx).call(req).instrument(span).await?)
     } else {
         Ok(ep.data(ctx).call(req).await?)
     }

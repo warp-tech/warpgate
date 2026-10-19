@@ -56,16 +56,27 @@ fn values_to_log_entry_data(
 ) -> Option<LogEntry::ActiveModel> {
     use sea_orm::ActiveValue::Set;
 
-    let session_id = (*values).remove("session");
-    let username = (*values)
-        .remove("session_username")
-        .or_else(|| (*values).get("username").cloned());
+    let session_id = (*values)
+        .remove("session")
+        .and_then(|x| Uuid::parse_str(&x).ok());
+
+    // include audit events even if they don't have a session ID
+    if session_id.is_none() && target != "audit" {
+        return None;
+    }
+
+    // In a session, username field = session user
+    // outside it's the subject and session_username is the actor
+    let username = (*values).remove("session_username").or_else(|| {
+        (*values)
+            .get("username")
+            .cloned()
+            .filter(|_| session_id.is_some())
+    });
     let related_users = (*values).remove("related_users");
     let related_access_roles = (*values).remove("related_access_roles");
     let related_admin_roles = (*values).remove("related_admin_roles");
     let message = (*values).remove("message").unwrap_or_default();
-
-    let session_id = session_id.and_then(|x| Uuid::parse_str(&x).ok())?;
 
     Some(LogEntry::ActiveModel {
         id: Set(Uuid::new_v4()),
