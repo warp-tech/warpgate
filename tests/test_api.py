@@ -1312,3 +1312,83 @@ def test_update_target_rejects_empty_name(admin_client: sdk.DefaultApi):
         admin_client.update_target(target.id, _ssh_target_request(""))
     assert err.value.status == 400
     assert admin_client.get_target(target.id).name == target.name
+
+
+HTTP_HEADER_SECRET = "Bearer s3cr3t-upstream"
+HTTP_URL_PASSWORD = "p4ss"
+
+
+def _http_target_request(name: str) -> sdk.TargetDataRequest:
+    return sdk.TargetDataRequest(
+        name=name,
+        require_approval=False,
+        ticket_requests_disabled=False,
+        ticket_require_approval=False,
+        options=sdk.TargetOptions(
+            sdk.TargetOptionsTargetHTTPOptions(
+                kind="Http",
+                headers={"Authorization": HTTP_HEADER_SECRET},
+                url=f"https://u:{HTTP_URL_PASSWORD}@upstream.example/",
+                tls=sdk.Tls(mode=sdk.TlsMode.PREFERRED, verify=True),
+            )
+        ),
+    )
+
+
+def test_http_target_credentials_are_redacted_for_admins_without_targets_edit(
+    pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
+):
+    url = f"https://localhost:{pg_wg.http_port}"
+    target = admin_client.create_target(_http_target_request(f"http-{uuid4()}"))
+    role = admin_client.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
+    admin_client.add_target_role(target.id, role.id)
+
+    lesser_role = _create_admin_role(
+        admin_client, make_limited_admin_role_payload(recordings_view=True)
+    )
+    lesser = _create_user_with_role(admin_client, lesser_role.id)
+    token = _create_user_api_token(url, lesser.username, "123")
+
+    s = requests.Session()
+    s.verify = False
+    s.headers["X-Warpgate-Token"] = token
+    api = f"{url}/@warpgate/admin/api"
+    bodies = {}
+    for path in ["/targets", f"/targets/{target.id}", f"/role/{role.id}/targets"]:
+        resp = s.get(f"{api}{path}")
+        assert resp.status_code == 200, (path, resp.status_code)
+        # The target must be in the response, or the absence checks prove nothing.
+        assert "upstream.example" in resp.text, path
+        bodies[path] = resp.text
+    leaks = {
+        path: [v for v in (HTTP_HEADER_SECRET, HTTP_URL_PASSWORD) if v in body]
+        for path, body in bodies.items()
+    }
+    assert not any(leaks.values()), f"credentials visible to a RecordingsView admin: {leaks}"
+
+    # Redacted values must not be writable back through this admin.
+    resp = s.put(
+        f"{api}/targets/{target.id}",
+        json=s.get(f"{api}/targets/{target.id}").json()
+        | {"ticket_requests_disabled": False, "ticket_require_approval": False},
+    )
+    assert resp.status_code in {401, 403}, resp.status_code
+
+    # A TargetsEdit admin still sees the values and an edit round-trips them.
+    full = admin_client.get_target(target.id)
+    http = full.options.actual_instance
+    assert http.headers == {"Authorization": HTTP_HEADER_SECRET}
+    assert http.url == f"https://u:{HTTP_URL_PASSWORD}@upstream.example/"
+    admin_client.update_target(
+        target.id,
+        sdk.TargetDataRequest(
+            name=full.name,
+            options=full.options,
+            require_approval=False,
+            ticket_requests_disabled=False,
+            ticket_require_approval=False,
+        ),
+    )
+    after = admin_client.get_target(target.id).options.actual_instance
+    assert after.headers == http.headers
+    assert after.url == http.url
