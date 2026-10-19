@@ -18,6 +18,10 @@ export interface ConnectionOptions {
     oidcClientSecret?: string
 }
 
+// The listeners that have a port of their own in the server info; `tcp` targets
+// are served by the `socks` one.
+export type ListenerID = keyof Info['ports']
+
 export function makeCommonSelectorUsername(opt: ConnectionOptions): string {
     if (opt.ticketSecret) {
         return `ticket-${opt.ticketSecret}`
@@ -27,7 +31,7 @@ export function makeCommonSelectorUsername(opt: ConnectionOptions): string {
 
 export function protocolHost(
     opt: ConnectionOptions,
-    protocol: ProtocolID,
+    protocol: ListenerID,
 ): string {
     const globalHost = opt.serverInfo?.externalHost ?? 'warpgate-host'
     const hosts = opt.serverInfo?.externalHosts
@@ -36,14 +40,14 @@ export function protocolHost(
 
 export function protocolPort(
     opt: ConnectionOptions,
-    protocol: ProtocolID,
+    protocol: ListenerID,
 ): number | undefined {
     return opt.serverInfo?.ports[protocol]
 }
 
 export function protocolPortString(
     opt: ConnectionOptions,
-    protocol: ProtocolID,
+    protocol: ListenerID,
 ): string {
     return (
         protocolPort(opt, protocol)?.toString() ?? `warpgate-${protocol}-port`
@@ -129,6 +133,22 @@ export function makeExamplePostgreSQLURI(opt: ConnectionOptions): string {
     return `postgresql://${makePostgreSQLUsername(opt)}${pwSuffix}@${protocolHost(opt, 'postgres')}:${protocolPortString(opt, 'postgres')}/${dbName}?sslmode=require`
 }
 
+export const makeSocksUsername = makeMySQLUsername
+
+export function makeExampleSocksCommand(opt: ConnectionOptions): string {
+    // curl splits --proxy-user on the first colon, so the `#` selector is used
+    // rather than `user:target`. A ticket ignores the password.
+    const password = opt.ticketSecret ? '' : '<password>'
+    return shellEscape([
+        'curl',
+        '--proxy',
+        `socks5h://${protocolHost(opt, 'socks')}:${protocolPortString(opt, 'socks')}`,
+        '--proxy-user',
+        `${makeSocksUsername(opt)}:${password}`,
+        'http://<target-host>:<target-port>/',
+    ])
+}
+
 export function makeTargetURL(opt: ConnectionOptions): string {
     const host = `${opt.targetExternalHost ?? protocolHost(opt, 'http')}:${protocolPort(opt, 'http') ?? 443}`
 
@@ -170,6 +190,8 @@ export const possibleCredentials: Record<string, Set<CredentialKind>> = {
         CredentialKind.Totp,
         CredentialKind.WebUserApproval,
     ]),
+    // SOCKS5 carries a username and password and nothing else
+    tcp: new Set([CredentialKind.Password]),
 }
 
 export function abbreviatePublicKey(key: string): string {
@@ -316,6 +338,7 @@ export const PROTOCOL_PROPERTIES: Record<string, ProtocolProperties> = {
     Kubernetes: { sessionsCanBeClosed: false },
     VNC: { sessionsCanBeClosed: true },
     RDP: { sessionsCanBeClosed: true },
+    TCP: { sessionsCanBeClosed: true },
 }
 
 export type ProtocolID =
@@ -326,6 +349,7 @@ export type ProtocolID =
     | 'kubernetes'
     | 'vnc'
     | 'rdp'
+    | 'tcp'
 
 // Get effective possible credentials for a protocol, considering global SSH auth settings
 export function getEffectivePossibleCredentials(

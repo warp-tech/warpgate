@@ -45,6 +45,11 @@
             value: TargetKind.Rdp,
             description: 'Access a Windows remote desktop in the browser',
         },
+        {
+            name: 'TCP',
+            value: TargetKind.Tcp,
+            description: 'Reach a TCP service through the SOCKS5 proxy',
+        },
     ]
 </script>
 

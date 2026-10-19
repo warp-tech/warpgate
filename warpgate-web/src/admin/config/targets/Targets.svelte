@@ -196,6 +196,9 @@
                         {#if target.options.kind === TargetKind.Rdp}
                             RDP
                         {/if}
+                        {#if target.options.kind === TargetKind.Tcp}
+                            TCP
+                        {/if}
                     </small>
                 </a>
             {/snippet}

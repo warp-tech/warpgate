@@ -12,6 +12,7 @@
     import CollapsibleBlock from 'common/CollapsibleBlock.svelte'
     import CopyableTextArea from 'common/CopyableTextArea.svelte'
     import {
+        type ListenerID,
         makeCommonSelectorUsername,
         makeExampleKubectlCommand,
         makeExampleMySQLCommand,
@@ -19,11 +20,13 @@
         makeExamplePostgreSQLCommand,
         makeExamplePostgreSQLURI,
         makeExampleSCPCommand,
+        makeExampleSocksCommand,
         makeExampleSSHCommand,
         makeKubeconfig,
         makeMySQLUsername,
         makeOidcKubeconfig,
         makePostgreSQLUsername,
+        makeSocksUsername,
         makeTargetURL,
         protocolHost,
         protocolPortString,
@@ -199,9 +202,7 @@
     let oidcKubeconfig = $derived(makeOidcKubeconfig(opts))
     let exampleKubectlCommand = $derived(makeExampleKubectlCommand(opts))
 
-    function protocolEndpoint(
-        protocol: 'ssh' | 'mysql' | 'postgres' | 'rdp' | 'vnc',
-    ) {
+    function protocolEndpoint(protocol: ListenerID) {
         return `${protocolHost(opts, protocol)}:${protocolPortString(opts, protocol)}`
     }
 </script>
@@ -536,4 +537,36 @@
 {#if targetKind === TargetKind.Vnc}
     <CopyableTextArea label="VNC endpoint" value={protocolEndpoint('vnc')} />
     <CopyableTextArea label="VNC username" value={commonSelectorUsername} />
+{/if}
+
+{#if targetKind === TargetKind.Tcp}
+    <CopyableTextArea
+        label="Example command"
+        value={makeExampleSocksCommand(opts)}
+    />
+    <CollapsibleBlock
+        label="Advanced"
+        persistKey="connectionInstructionsAdvancedOpen"
+    >
+        <div class="mt-3">
+            <CopyableTextArea
+                label="SOCKS5 proxy"
+                value={`socks5h://${protocolEndpoint('socks')}`}
+            />
+            <CopyableTextArea
+                label="SOCKS5 username"
+                value={makeSocksUsername(opts)}
+            />
+        </div>
+    </CollapsibleBlock>
+
+    <Alert color="info" class="mt-3">
+        Request the target's own host and port, using the proxy to resolve the
+        name (<code>socks5h</code>); Warpgate refuses any other address. The
+        password is sent without encryption.
+        {#if !ticketSecret}
+            If your client can't send a <code>#</code> or <code>:</code> in the
+            username, percent-encode it in a proxy URL.
+        {/if}
+    </Alert>
 {/if}

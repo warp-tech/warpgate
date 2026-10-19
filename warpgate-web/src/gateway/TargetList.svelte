@@ -275,6 +275,9 @@
                 {#if target.kind === TargetKind.Rdp}
                     RDP
                 {/if}
+                {#if target.kind === TargetKind.Tcp}
+                    TCP
+                {/if}
             </small>
             {#if target.kind === TargetKind.Http}
                 <Button color="link" size="sm" tabindex={-1}>

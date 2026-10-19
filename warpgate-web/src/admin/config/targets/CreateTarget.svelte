@@ -111,6 +111,11 @@
                     tlsSecurity: RdpTlsSecurity.Tls12,
                     compression: RdpTargetCompression.Remotefx,
                 },
+                Tcp: {
+                    kind: TargetKind.Tcp,
+                    host: '192.168.0.1',
+                    port: 8080,
+                },
             }[params.kind]
             if (!options) {
                 return

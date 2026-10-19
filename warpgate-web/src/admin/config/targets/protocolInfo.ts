@@ -181,4 +181,24 @@ export const protocolInfo: Partial<Record<TargetKind, string>> = {
 * Web approval
 * Ticket
 `,
+
+    [TargetKind.Tcp]: `
+## Warpgate ↔ target
+
+* A plain TCP connection to the configured host and port. The name is resolved on every connection.
+* Warpgate does not authenticate to the target and does not inspect the traffic.
+
+## Warpgate ↔ client
+
+* The client connects through Warpgate's SOCKS5 listener (disabled by default) and must request exactly this host and port; Warpgate only ever connects to the address configured here.
+* Authentication is the SOCKS5 username/password method. The password and ticket secrets are **not encrypted** on the wire, so the listener only accepts local connections unless \`socks.allow_cleartext\` is set.
+* One connection is one session. Only the session and its byte counts are recorded, not the traffic.
+
+## Supported Warpgate credentials
+
+* Password
+* Ticket
+
+OTP, SSO and web approval cannot be collected over SOCKS5: users that need them can only connect with a ticket.
+`,
 }

@@ -38,6 +38,7 @@
     import ProtocolDocs from './ProtocolDocs.svelte'
     import TargetRdpOptions from './rdp/Options.svelte'
     import TargetSshOptions from './ssh/Options.svelte'
+    import TargetTcpOptions from './tcp/Options.svelte'
     import TargetVncOptions from './vnc/Options.svelte'
 
     interface Props {
@@ -272,6 +273,10 @@
                                 name={target.name}
                                 bind:options={target.options}
                             />
+                        {/if}
+
+                        {#if target.options.kind === 'Tcp'}
+                            <TargetTcpOptions bind:options={target.options} />
                         {/if}
 
                         {#if target.options.kind === 'Rdp'}
