@@ -620,6 +620,7 @@ mod tests {
                 prefix: "p/".into(),
                 credentials: S3Credentials::Auto(AutoCredentials {}),
                 scratch_path: Some("/var/lib/warpgate/recordings-scratch".into()),
+                proxy_downloads: true,
             }),
             RecordingsStorageConfig::S3(S3StorageConfig {
                 bucket: "b".into(),
@@ -632,6 +633,7 @@ mod tests {
                     secret_access_key: Some("secret".into()),
                 }),
                 scratch_path: None,
+                proxy_downloads: false,
             }),
         ] {
             let json = serde_json::to_string(&config).unwrap();
@@ -658,5 +660,6 @@ mod tests {
             panic!("expected S3");
         };
         assert_eq!(s3.scratch_path, None);
+        assert!(!s3.proxy_downloads, "configs stored before the option existed keep redirecting");
     }
 }

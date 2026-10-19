@@ -46,6 +46,7 @@
                       pathStyle: false,
                       prefix: '',
                       credentials: { mode: 'Auto' },
+                      proxyDownloads: false,
                   }
                 : { kind: 'Disk', path: './data/recordings' }
     }
@@ -1218,6 +1219,27 @@
                                     <HelpText>
                                         Most S3-compatible services (e.g. MinIO,
                                         RustFS) require path-style addressing.
+                                    </HelpText>
+                                    <label
+                                        for="recordingsS3ProxyDownloads"
+                                        class="d-flex align-items-center mb-2"
+                                    >
+                                        <Input
+                                            id="recordingsS3ProxyDownloads"
+                                            class="mb-0 me-2"
+                                            type="switch"
+                                            bind:checked={s3.proxyDownloads}
+                                        />
+                                        <div>
+                                            Serve recordings through Warpgate
+                                        </div>
+                                    </label>
+                                    <HelpText>
+                                        Warpgate streams recordings to the
+                                        browser itself instead of redirecting
+                                        it to the bucket. Enable this when the
+                                        bucket is not reachable from admins'
+                                        browsers.
                                     </HelpText>
 
                                     <FormGroup floating label="Credentials">

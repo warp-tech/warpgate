@@ -7082,6 +7082,11 @@
           "scratch_path": {
             "type": "string",
             "description": "Local directory buffering recordings before upload, resolved against the\nconfig file's directory unless absolute. Defaults to `data/recordings-scratch`."
+          },
+          "proxy_downloads": {
+            "type": "boolean",
+            "description": "Stream completed recordings to the browser through Warpgate instead of\nredirecting it to a presigned URL, so the bucket only has to be\nreachable from Warpgate itself.",
+            "default": false
           }
         }
       },
