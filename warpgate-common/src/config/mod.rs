@@ -910,6 +910,9 @@ pub struct WarpgateConfigStore {
     #[serde(default)]
     pub external_host: Option<String>,
 
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_logout_url: Option<String>,
+
     #[serde(default = "_default_database_url")]
     #[schemars(with = "String")]
     pub database_url: Secret<String>,
@@ -945,6 +948,7 @@ impl Default for WarpgateConfigStore {
             sso_providers: vec![],
             recordings: <_>::default(),
             external_host: None,
+            custom_logout_url: None,
             database_url: _default_database_url(),
             ssh: <_>::default(),
             http: <_>::default(),

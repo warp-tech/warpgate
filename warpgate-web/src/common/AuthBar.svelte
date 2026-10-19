@@ -16,7 +16,10 @@
     async function logout() {
         await api.logout()
         await reloadServerInfo()
-        location.href = '/@warpgate'
+        const redirectUrl = $serverInfo?.customLogoutUrl
+            ? $serverInfo.customLogoutUrl
+            : '/@warpgate'
+        location.href = redirectUrl
     }
 
     async function singleLogout() {
