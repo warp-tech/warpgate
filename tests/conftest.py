@@ -209,6 +209,7 @@ class WarpgateProcess:
     kubernetes_port: int
     vnc_port: int
     rdp_port: int
+    socks_port: int
     # Everything the gateway wrote, for asserting on its log; unset when the
     # caller redirected its output elsewhere.
     log_path: Optional[Path] = None
@@ -989,6 +990,7 @@ class ProcessManager:
             kubernetes_port = alloc_port()
             vnc_port = alloc_port()
             rdp_port = alloc_port()
+            socks_port = alloc_port()
 
             config = yaml.safe_load(share_with.config_path.open())
             for section, port in [
@@ -1002,6 +1004,9 @@ class ProcessManager:
             ]:
                 if isinstance(config.get(section), dict):
                     config[section]["listen"] = f"0.0.0.0:{port}"
+            # SOCKS5 only listens on loopback
+            if isinstance(config.get("socks"), dict):
+                config["socks"]["listen"] = f"127.0.0.1:{socks_port}"
             if config_patch:
                 always_merger.merge(config, config_patch)
             # Same directory as the shared config so relative DB/cert paths resolve.
@@ -1016,6 +1021,7 @@ class ProcessManager:
             kubernetes_port = alloc_port()
             vnc_port = alloc_port()
             rdp_port = alloc_port()
+            socks_port = alloc_port()
 
             data_dir = self.ctx.tmpdir / f"wg-data-{uuid.uuid4()}"
             data_dir.mkdir(parents=True)
@@ -1064,6 +1070,8 @@ class ProcessManager:
                 str(postgres_port),
                 "--kubernetes-port",
                 str(kubernetes_port),
+                "--socks-port",
+                str(socks_port),
                 "--data-path",
                 data_dir,
                 "--external-host",
@@ -1142,6 +1150,7 @@ class ProcessManager:
             kubernetes_port,
             vnc_port,
             rdp_port,
+            socks_port,
         ):
             port_owners[port] = p
         return WarpgateProcess(
@@ -1154,6 +1163,7 @@ class ProcessManager:
             kubernetes_port=kubernetes_port,
             vnc_port=vnc_port,
             rdp_port=rdp_port,
+            socks_port=socks_port,
             log_path=log_path,
         )
 
