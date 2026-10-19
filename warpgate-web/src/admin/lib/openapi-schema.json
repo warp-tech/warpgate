@@ -8265,6 +8265,12 @@
           "domain": {
             "type": "string"
           },
+          "kdc_url": {
+            "type": "string",
+            "description": "Kerberos KDC for network-level authentication: `tcp://dc:88`, `udp://dc:88`\nor a KDC proxy `https://` URL. When set, CredSSP negotiates Kerberos (falling\nback to NTLM), which accounts barred from NTLM (Protected Users) require.\nThe target host must then be a name matching its `TERMSRV/` SPN, not an IP.",
+            "maxLength": 2048,
+            "pattern": "^$|^(tcp|udp|https?)://.+"
+          },
           "auth": {
             "$ref": "#/components/schemas/RdpTargetAuth"
           },

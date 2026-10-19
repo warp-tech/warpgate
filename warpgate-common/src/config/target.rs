@@ -299,6 +299,14 @@ pub struct TargetRdpOptions {
     #[serde(default)]
     pub domain: Option<String>,
 
+    /// Kerberos KDC for network-level authentication: `tcp://dc:88`, `udp://dc:88`
+    /// or a KDC proxy `https://` URL. When set, CredSSP negotiates Kerberos (falling
+    /// back to NTLM), which accounts barred from NTLM (Protected Users) require.
+    /// The target host must then be a name matching its `TERMSRV/` SPN, not an IP.
+    #[serde(default)]
+    #[oai(validator(max_length = 2048, pattern = r"^$|^(tcp|udp|https?)://.+"))]
+    pub kdc_url: Option<String>,
+
     #[serde(default)]
     pub auth: RdpTargetAuth,
 

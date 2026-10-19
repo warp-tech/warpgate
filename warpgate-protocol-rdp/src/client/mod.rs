@@ -17,6 +17,7 @@ use ironrdp::cliprdr::backend::ClipboardMessage;
 use ironrdp::connector::connection_activation::{
     ConnectionActivationFactory, ConnectionActivationState,
 };
+use ironrdp::connector::credssp::KerberosConfig;
 use ironrdp::connector::{self, ConnectionResult, Credentials};
 use ironrdp::core::WriteBuf;
 use ironrdp::displaycontrol::client::DisplayControlClient;
@@ -113,6 +114,7 @@ pub async fn run(
             options.port,
             options.verify_tls,
             options.tls_security,
+            options.kdc_url.clone().filter(|url| !url.is_empty()),
             clipboard.backend(),
         ),
     )
@@ -770,8 +772,15 @@ async fn connect(
     port: u16,
     verify_tls: bool,
     tls_security: warpgate_common::RdpTlsSecurity,
+    kdc_url: Option<String>,
     clipboard: TextClipboard<ClientClipboardSink>,
 ) -> Result<(ConnectionResult, Framed), DesktopConnectionError> {
+    // Without a Kerberos config IronRDP runs CredSSP over NTLM only.
+    let kerberos_config = kdc_url
+        .map(|url| KerberosConfig::new(Some(url), config.client_name.clone()))
+        .transpose()
+        .map_err(|error| connector_error("kerberos_config", error))?;
+
     let tcp_stream = within_deadline(DESKTOP_CONNECT_TIMEOUT, async {
         TcpStream::connect((server_name.as_str(), port))
             .await
@@ -826,7 +835,7 @@ async fn connect(
         &mut network_client,
         server_name.into(),
         server_public_key,
-        None,
+        kerberos_config,
     )
     .await
     .map_err(|error| connector_error("connect_finalize", error))?;
