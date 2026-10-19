@@ -48,7 +48,12 @@
     <select
         class="form-control"
         value={options.auth.kind}
-        onchange={e => setAuthKind((e.currentTarget as HTMLSelectElement).value as 'None' | 'Password')}
+        onchange={e =>
+            setAuthKind(
+                (e.currentTarget as HTMLSelectElement).value as
+                    | 'None'
+                    | 'Password',
+            )}
     >
         <option value="None">None</option>
         <option value="Password">Password</option>
@@ -62,7 +67,7 @@
         intendedUsage={{
             kind: 'Target',
             id,
-            name
+            name,
         }}
     />
 {/if}

@@ -147,7 +147,9 @@
             </div>
         {/snippet}
 
-        {#snippet item(session)}
+        {#snippet item(
+            session,
+        )}
             <a
                 class="list-group-item list-group-item-action"
                 href="/status/sessions/{session.id}"
@@ -168,7 +170,10 @@
 
                     <div class="meta">
                         {#if session.ended}
-                            {formatDistance(new Date(session.started), new Date(session.ended))}
+                            {formatDistance(
+                                new Date(session.started),
+                                new Date(session.ended),
+                            )}
                         {/if}
                     </div>
 

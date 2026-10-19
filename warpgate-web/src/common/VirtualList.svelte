@@ -53,7 +53,8 @@
     {/each}
 </div>
 <div
-    style:height="{$virtualizer.getTotalSize() - ((rows.at(-1)?.end ?? margin) - margin)}px"
+    style:height="{$virtualizer.getTotalSize() -
+        ((rows.at(-1)?.end ?? margin) - margin)}px"
 ></div>
 
 <style lang="scss">

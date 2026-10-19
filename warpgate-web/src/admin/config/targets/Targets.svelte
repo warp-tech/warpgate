@@ -136,7 +136,10 @@
             virtual
             bind:collapsedGroups={$collapsedGroups}
         >
-            {#snippet header(_items, groupControls)}
+            {#snippet header(
+                _items,
+                groupControls,
+            )}
                 <ListOverflowMenu {groupControls} />
             {/snippet}
             {#snippet empty()}
@@ -145,10 +148,15 @@
                     hint="Targets are destinations on the internal network that your users will connect to"
                 />
             {/snippet}
-            {#snippet groupHeader(group, state)}
+            {#snippet groupHeader(
+                group,
+                state,
+            )}
                 <CollapsibleGroupHeader {group} {state} />
             {/snippet}
-            {#snippet item(target)}
+            {#snippet item(
+                target,
+            )}
                 <a
                     class="list-group-item list-group-item-action"
                     href="/config/targets/{target.id}"

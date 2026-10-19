@@ -77,7 +77,10 @@
                     <Input
                         type="select"
                         value={keySource}
-                        onchange={(e) => changeKeySource((e.target as HTMLSelectElement).value)}
+                        onchange={e =>
+                            changeKeySource(
+                                (e.target as HTMLSelectElement).value,
+                            )}
                     >
                         <option value="paste">Pasting a private key</option>
                         <option value="reference">

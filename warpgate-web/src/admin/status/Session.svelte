@@ -112,7 +112,10 @@
         </div>
         <div class="text-muted ms-auto">
             {#if session.ended}
-                {formatDistance(new Date(session.started), new Date(session.ended))}
+                {formatDistance(
+                    new Date(session.started),
+                    new Date(session.ended),
+                )}
                 long
             {/if}
             {#if session.nodeHostname}
@@ -163,9 +166,11 @@
                     <Fa fw icon={faHand} />
                     {#if approval.status === ApprovalRequestStatus.Approved}
                         <span class="text-muted">Approved for</span>
-                    {:else if approval.status === ApprovalRequestStatus.Rejected}
+                    {:else if approval.status ===
+                        ApprovalRequestStatus.Rejected}
                         <span class="text-muted">Rejected for</span>
-                    {:else if approval.status === ApprovalRequestStatus.TimedOut}
+                    {:else if approval.status ===
+                        ApprovalRequestStatus.TimedOut}
                         <span class="text-muted">Request timed out for</span>
                     {/if}
                 {/if}
@@ -212,7 +217,9 @@
                 {/if}
             </div>
 
-            {#each getRecordingsForSession(targetSession) as recording (recording.id)}
+            {#each getRecordingsForSession(
+                targetSession,
+            ) as recording (recording.id)}
                 {@const metadata = JSON.parse(recording.metadata)}
                 <div class="list-group-item">
                     <div class="indent">·</div>
@@ -226,7 +233,9 @@
                     {/if}
 
                     <Badge
-                        href={$adminPermissions.recordingsView ? `#/status/recordings/${recording.id}` : undefined}
+                        href={$adminPermissions.recordingsView
+                            ? `#/status/recordings/${recording.id}`
+                            : undefined}
                         color="warning"
                         class="d-flex align-items-center"
                     >
@@ -236,7 +245,9 @@
 
                     <div class="meta-fields ms-2">
                         {#if metadata}
-                            {#each recordingMetadataToFieldSet(metadata) as item (item[0])}
+                            {#each recordingMetadataToFieldSet(
+                                metadata,
+                            ) as item (item[0])}
                                 <small class="me-2">
                                     <span class="text-muted"> {item[0]}: </span>
                                     {item[1]}
@@ -269,7 +280,8 @@
         }}
     />
 
-    {#if !session.ended && PROTOCOL_PROPERTIES[session.protocol]?.sessionsCanBeClosed}
+    {#if !session.ended &&
+        PROTOCOL_PROPERTIES[session.protocol]?.sessionsCanBeClosed}
         <StickyActionBar>
             <AsyncButton color="warning" click={close}>
                 Close session now

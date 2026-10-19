@@ -104,9 +104,9 @@
 
             <form
                 onsubmit={e => {
-            e.preventDefault()
-            update()
-        }}
+                    e.preventDefault()
+                    update()
+                }}
             >
                 <FormGroup>
                     <Label for="name">Name</Label>
@@ -140,10 +140,10 @@
                                 class="btn btn-secondary gap-2 d-flex align-items-center"
                                 class:active={color === value}
                                 disabled={saving}
-                                onclick={(e) => {
-                                e.preventDefault()
-                                color = value
-                            }}
+                                onclick={e => {
+                                    e.preventDefault()
+                                    color = value
+                                }}
                                 title={value || 'None'}
                             >
                                 <GroupColorIcon color={value} />

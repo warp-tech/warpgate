@@ -112,7 +112,9 @@
 
 {#key gen}
     <ItemList {load} showSearch={false}>
-        {#snippet item(backend)}
+        {#snippet item(
+            backend,
+        )}
             {const probe = $derived(health.get(backend.id))}
             <div class="list-group-item px-0">
                 <div class="d-flex align-items-center gap-2">
@@ -130,7 +132,7 @@
                             class="ms-auto"
                             color="link px-0"
                             onclick={e => {
-                            e.preventDefault()
+                                e.preventDefault()
                                 openEdit(backend)
                             }}
                         >
@@ -140,7 +142,7 @@
                             class="ms-3"
                             color="link px-0"
                             onclick={e => {
-                            e.preventDefault()
+                                e.preventDefault()
                                 remove(backend)
                             }}
                         >

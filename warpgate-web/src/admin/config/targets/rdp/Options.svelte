@@ -56,7 +56,7 @@
         intendedUsage={{
             kind: 'Target',
             id,
-            name
+            name,
         }}
     />
 {/if}

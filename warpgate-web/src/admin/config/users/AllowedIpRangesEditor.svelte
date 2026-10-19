@@ -42,7 +42,7 @@
                 <Input
                     placeholder="e.g. 192.168.1.0/24"
                     value={range}
-                    on:input={(e) => {
+                    on:input={e => {
                         if (ranges) {
                             ranges[index] = e.target.value
                             ranges = [...ranges]

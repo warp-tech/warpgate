@@ -144,7 +144,9 @@
 
 <div class="container-max-md">
     <Loadable promise={initPromise} bind:value={role}>
-        {#snippet children(role)}
+        {#snippet children(
+            role,
+        )}
             <div class="page-summary-bar">
                 <div>
                     <h1>{role.name}</h1>
@@ -173,17 +175,27 @@
                                     bind:checked={role[key]}
                                     {disabled}
                                     onchange={e => {
-                                const checked = (e.target as HTMLInputElement).checked
-                                if (checked) {
-                                    enablePermissionDependenciesRecursive(role, key)
-                                } else {
-                                    disablePermissionDependantsRecursive(role, key)
-                                }
-                            }}
+                                        const checked = (
+                                            e.target as HTMLInputElement
+                                        ).checked
+                                        if (checked) {
+                                            enablePermissionDependenciesRecursive(
+                                                role,
+                                                key,
+                                            )
+                                        } else {
+                                            disablePermissionDependantsRecursive(
+                                                role,
+                                                key,
+                                            )
+                                        }
+                                    }}
                                 >
                                 <span class="form-check-label">
                                     {label}
-                                    {#if ADMIN_PERMISSIONS.find(p=>p.key===key)?.dangerous}
+                                    {#if ADMIN_PERMISSIONS.find(
+                                        p => p.key === key,
+                                    )?.dangerous}
                                         <span
                                             id="warn-{key}"
                                             class="text-warning ms-1"
@@ -239,7 +251,9 @@
 
             <h4 class="mt-4">Assigned users</h4>
             <ItemList load={loadUsers}>
-                {#snippet item(user)}
+                {#snippet item(
+                    user,
+                )}
                     <a
                         class="list-group-item list-group-item-action"
                         href="/config/users/{user.id}"

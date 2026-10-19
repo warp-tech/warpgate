@@ -89,7 +89,9 @@
 </script>
 
 <SidebarNavContainer {routes} prefix="/config">
-    {#snippet navItems(sidebarMode)}
+    {#snippet navItems(
+        sidebarMode,
+    )}
         <NavListItem
             class="mb-2"
             title="Targets"
@@ -134,8 +136,8 @@
             class="mb-2"
             title="Tickets"
             description={$serverInfo?.ticketSelfServiceEnabled
-            ? 'Access credentials — users can request tickets from their profile'
-            : 'Temporary access credentials'}
+                ? 'Access credentials — users can request tickets from their profile'
+                : 'Temporary access credentials'}
             href="/config/tickets"
             small={sidebarMode}
         />

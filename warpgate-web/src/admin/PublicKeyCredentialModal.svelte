@@ -64,19 +64,19 @@
     toggle={_cancel}
     {isOpen}
     on:open={() => {
-    if (instance) {
-        label = instance.label
-        opensshPublicKey = instance.opensshPublicKey
-    }
-    field?.focus()
-}}
+        if (instance) {
+            label = instance.label
+            opensshPublicKey = instance.opensshPublicKey
+        }
+        field?.focus()
+    }}
 >
     <Form
         {validated}
         on:submit={e => {
-        _save()
-        e.preventDefault()
-    }}
+            _save()
+            e.preventDefault()
+        }}
     >
         <ModalBody>
             <FormGroup floating label="Label">
@@ -107,7 +107,7 @@
                 type="submit"
                 color="primary"
                 class="modal-button"
-                on:click={() => validated = true}
+                on:click={() => (validated = true)}
             >
                 Save
             </Button>

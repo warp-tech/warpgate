@@ -138,7 +138,8 @@
                             />
                             <DropdownMenu end>
                                 <DropdownItem
-                                    onclick={() => approve(ApprovalScope.AllTargets)}
+                                    onclick={() =>
+                                        approve(ApprovalScope.AllTargets)}
                                 >
                                     Authorize for all targets & remember for
                                     {graceLabel}

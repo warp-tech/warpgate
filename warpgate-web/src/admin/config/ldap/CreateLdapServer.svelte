@@ -99,7 +99,12 @@
         <h1>add an LDAP server</h1>
     </div>
 
-    <form onsubmit={e => {e.preventDefault(); create()}}>
+    <form
+        onsubmit={e => {
+            e.preventDefault()
+            create()
+        }}
+    >
         <FormGroup floating label="Name">
             <Input bind:value={name} required />
         </FormGroup>
@@ -118,7 +123,9 @@
 
         {#if testResult}
             <div
-                class="alert {testResult.success ? 'alert-success' : 'alert-danger'}"
+                class="alert {testResult.success
+                    ? 'alert-success'
+                    : 'alert-danger'}"
                 role="alert"
             >
                 {testResult.message}

@@ -157,9 +157,9 @@
     <div class="narrow-page">
         <Form
             on:submit={e => {
-            create()
-            e.preventDefault()
-        }}
+                create()
+                e.preventDefault()
+            }}
         >
             <!-- Defualt button for key handling -->
             <Button class="d-none" type="submit"></Button>

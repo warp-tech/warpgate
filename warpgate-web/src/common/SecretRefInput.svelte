@@ -332,7 +332,9 @@
             <div class="text-muted small">Checking…</div>
         {:else if testResult}
             <div
-                class={testResult.ok ? 'text-success small' : 'text-danger small'}
+                class={testResult.ok
+                    ? 'text-success small'
+                    : 'text-danger small'}
             >
                 {testResult.ok ? 'Secret is available' : testResult.error}
             </div>

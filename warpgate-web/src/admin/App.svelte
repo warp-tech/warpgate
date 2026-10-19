@@ -118,7 +118,7 @@
             {#if $serverInfo?.username}
                 <a
                     use:link
-                    use:active={{path: /^\/status\//}}
+                    use:active={{ path: /^\/status\// }}
                     href="/status/sessions"
                 >
                     Status
@@ -126,7 +126,7 @@
                 <a
                     use:link
                     use:active
-                    use:active={{path: /^\/config\//}}
+                    use:active={{ path: /^\/config\// }}
                     href="/config"
                 >
                     Config

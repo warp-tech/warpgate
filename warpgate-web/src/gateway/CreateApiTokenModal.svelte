@@ -77,9 +77,9 @@
     <Form
         {validated}
         on:submit={e => {
-        _save()
-        e.preventDefault()
-    }}
+            _save()
+            e.preventDefault()
+        }}
     >
         <ModalHeader> New API token </ModalHeader>
         <ModalBody>
@@ -105,7 +105,7 @@
             <Button
                 color="primary"
                 class="modal-button"
-                on:click={() => validated = true}
+                on:click={() => (validated = true)}
             >
                 Create
             </Button>

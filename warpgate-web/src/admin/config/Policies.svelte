@@ -63,19 +63,26 @@
             <Alert
                 color="danger"
                 dismissible
-                onclose={() => { updateError = undefined }}
+                onclose={() => {
+                    updateError = undefined
+                }}
             >
                 {updateError}
             </Alert>
         {/if}
         <Loadable promise={initPromise}>
-            {#snippet children(parameters)}
+            {#snippet children(
+                parameters,
+            )}
                 {#if parameters}
                     <form
                         bind:this={formEl}
                         oninput={refreshValidity}
                         onchange={refreshValidity}
-                        onsubmit={e => { e.preventDefault(); save() }}
+                        onsubmit={e => {
+                            e.preventDefault()
+                            save()
+                        }}
                     >
                         <FormGroup>
                             <!-- svelte-ignore a11y_label_has_associated_control -->

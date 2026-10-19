@@ -106,11 +106,11 @@
             on:pointerdown|preventDefault={startDragging}
             on:pointermove={drag}
             on:pointerup|stopPropagation|preventDefault={() => {
-            if (!dragging) {
-                menuVisible = !menuVisible
-            }
-            endDragging()
-        }}
+                if (!dragging) {
+                    menuVisible = !menuVisible
+                }
+                endDragging()
+            }}
             on:pointercancel={endDragging}
         >
 
