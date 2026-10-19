@@ -24,6 +24,8 @@ struct GetLogsRequest {
     after: Option<OffsetDateTime>,
     limit: Option<u64>,
     session_id: Option<Uuid>,
+    /// Matches entries from any of these sessions, e.g. a group of sessions
+    session_ids: Option<Vec<Uuid>>,
     username: Option<String>,
     search: Option<String>,
     target: Option<String>,
@@ -57,6 +59,11 @@ impl Api {
         }
         if let Some(ref session_id) = body.session_id {
             q = q.filter(LogEntry::Column::SessionId.eq(*session_id));
+        }
+        if let Some(ref session_ids) = body.session_ids
+            && !session_ids.is_empty()
+        {
+            q = q.filter(LogEntry::Column::SessionId.is_in(session_ids.clone()));
         }
         if let Some(ref username) = body.username {
             q = q.filter(LogEntry::Column::Username.eq(username.clone()));

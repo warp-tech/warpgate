@@ -93,6 +93,12 @@
                 filterKind: 'admin-role',
             },
         }),
+        '/log/sessions/:id': wrap({
+            asyncComponent: () => import('./Log.svelte'),
+            props: {
+                filterKind: 'sessions',
+            },
+        }),
         '/config': wrap({
             asyncComponent: () => import('./config/Config.svelte'),
         }),
