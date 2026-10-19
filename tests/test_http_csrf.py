@@ -99,7 +99,7 @@ class TestHttpCsrf:
         info = session.get(f"{target}/@warpgate/api/info")
         assert info.status_code == 200
         assert info.json()["username"] == setup["admin"].username
-        assert info.json()["external_hosts"]["http"] == CONTROL_PLANE
+        assert info.json()["control_plane_host"] == CONTROL_PLANE
 
         resp = session.get(f"{target}/probe", allow_redirects=False)
         assert resp.status_code // 100 == 2, resp.text
@@ -162,7 +162,7 @@ class TestHttpCsrfMfaGate:
 
             info = session.get(f"{target}/@warpgate/api/info").json()
             assert info["needs_mfa_setup"] is True
-            assert info["external_hosts"]["http"] == CONTROL_PLANE
+            assert info["control_plane_host"] == CONTROL_PLANE
 
             resp = session.post(
                 f"{cp}/@warpgate/api/profile/credentials/otp",
