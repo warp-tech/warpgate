@@ -1236,8 +1236,8 @@
                                     </label>
                                     <HelpText>
                                         Warpgate streams recordings to the
-                                        browser itself instead of redirecting
-                                        it to the bucket. Enable this when the
+                                        browser itself instead of redirecting it
+                                        to the bucket. Enable this when the
                                         bucket is not reachable from admins'
                                         browsers.
                                     </HelpText>
