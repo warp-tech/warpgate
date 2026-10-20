@@ -6,17 +6,17 @@ use std::sync::Arc;
 use pgwire::messages::{DecodeContext, PgWireBackendMessage, ProtocolVersion};
 use rsasl::config::SASLConfig;
 use rsasl::prelude::{Mechname, SASLClient};
-use tokio::net::TcpStream;
 use tracing::{debug, info, warn};
-use warpgate_common::{SecretResolver, TargetPostgresOptions, WarpgateError};
-use warpgate_core::AdmittedTarget;
+use warpgate_common::{TargetPostgresOptions, UserSessionId, WarpgateError};
+use warpgate_core::{AdmittedTarget, Services};
+use warpgate_protocol_ssh::{TargetStream, connect_target_stream};
 use warpgate_tls::{ClientTlsStream, TlsMode, configure_tls_connector};
 
 use crate::error::PostgresError;
 use crate::stream::{PgWireGenericBackendMessage, PostgresEncode, PostgresStream};
 
 pub struct PostgresClient {
-    pub stream: PostgresStream<TcpStream, ClientTlsStream<TcpStream>>,
+    pub stream: PostgresStream<TargetStream, ClientTlsStream<TargetStream>>,
     decode_context: DecodeContext,
 }
 
@@ -59,11 +59,19 @@ impl PostgresClient {
     pub async fn connect(
         admitted: AdmittedTarget<TargetPostgresOptions>,
         options: ConnectionOptions,
-        secrets: &dyn SecretResolver,
+        services: &Services,
+        session_id: UserSessionId,
     ) -> Result<Self, PostgresError> {
         let target = admitted.specific_target().options().clone();
-        let stream = TcpStream::connect((target.host.clone(), target.port)).await?;
-        stream.set_nodelay(true)?;
+        let stream = connect_target_stream(
+            services,
+            session_id,
+            target.jump_host,
+            &target.host,
+            target.port,
+            Some(&admitted.user_info().username),
+        )
+        .await?;
 
         let mut stream = PostgresStream::new(stream);
         let mut ctx = DecodeContext::new(options.protocol_version);
@@ -130,7 +138,7 @@ impl PostgresClient {
         let effective_password = match &target.auth {
             warpgate_common::DatabaseTargetAuth::Password(auth) => auth
                 .password
-                .resolve(secrets)
+                .resolve(&*services.secret_backends)
                 .await?
                 .expose_secret()
                 .clone(),
@@ -210,7 +218,7 @@ impl PostgresClient {
     }
 
     async fn run_sasl_auth(
-        stream: &mut PostgresStream<TcpStream, ClientTlsStream<TcpStream>>,
+        stream: &mut PostgresStream<TargetStream, ClientTlsStream<TargetStream>>,
         mechanisms: Vec<String>,
         username: &str,
         password: &str,

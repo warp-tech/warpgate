@@ -296,7 +296,8 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                 max_packet_size: handshake.max_packet_size,
                 capabilities: self.capabilities,
             },
-            &*self.services.secret_backends,
+            &self.services,
+            self.id,
         )
         .await
         {

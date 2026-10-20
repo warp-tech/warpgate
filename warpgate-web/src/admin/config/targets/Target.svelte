@@ -35,6 +35,7 @@
     import { replace } from 'svelte-spa-router'
     import TlsConfiguration from '../../TlsConfiguration.svelte'
     import HttpHeadersEditor from './http/HeadersEditor.svelte'
+    import JumpHostSelect from './JumpHostSelect.svelte'
     import ProtocolDocs from './ProtocolDocs.svelte'
     import TargetRdpOptions from './rdp/Options.svelte'
     import TargetSshOptions from './ssh/Options.svelte'
@@ -311,7 +312,10 @@
                         {#if target.options.kind === 'MySql' ||
                             target.options.kind === 'Postgres'}
                             <div class="row">
-                                <div class="col-8">
+                                <JumpHostSelect
+                                    bind:value={target.options.jumpHost}
+                                />
+                                <div class="col" style="flex-grow: 2">
                                     <FormGroup floating label="Target host">
                                         <input
                                             class="form-control"
@@ -319,7 +323,7 @@
                                         >
                                     </FormGroup>
                                 </div>
-                                <div class="col-4">
+                                <div class="col">
                                     <FormGroup floating label="Target port">
                                         <input
                                             class="form-control"
