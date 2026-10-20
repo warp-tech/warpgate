@@ -1326,7 +1326,8 @@ mod delivery {
     use sea_orm::ActiveModelTrait;
     use tokio::sync::Mutex;
     use warpgate_common::auth::{
-        AuthResult, AuthState, CredentialKind, CredentialPolicy, CredentialPolicyResponse,
+        AllCredentialsPolicy, AuthResult, AuthState, CredentialKind, CredentialPolicy,
+        CredentialPolicyResponse,
     };
     use warpgate_common::{GlobalParams, User, WarpgateConfig, WarpgateConfigStore};
     use warpgate_db_entities::Parameters;
@@ -1637,6 +1638,158 @@ mod delivery {
         );
         // A settled ask is not put back up by a late advertiser.
         assert!(!advertise_user_request(&db, node, &state_arc).await.unwrap());
+    }
+
+    /// A login of `user` to "a-target" from `address`, waiting on nothing but
+    /// the approval, its request up in the browser.
+    async fn waiting_login(
+        services: &Services,
+        user: &User,
+        address: &str,
+    ) -> (UserSessionId, Arc<Mutex<AuthState>>) {
+        let session_id = UserSessionId(Uuid::new_v4());
+        let state_arc = services.auth_state_store.lock().await.create(
+            &session_id,
+            user,
+            Protocol::Postgres,
+            "a-target",
+            Box::new(RequireWebApproval),
+            Some(address.parse().unwrap()),
+        );
+        assert!(
+            advertise_user_request(&services.db, services.cluster.node_id, &state_arc)
+                .await
+                .unwrap()
+        );
+        (session_id, state_arc)
+    }
+
+    /// The user's own answer to one request, as given from the browser.
+    async fn answer(
+        db: &DatabaseConnection,
+        user: &User,
+        session_id: UserSessionId,
+        scope: ApprovalScope,
+    ) {
+        assert!(
+            record_decision(
+                db,
+                session_id,
+                ApprovalKind::User,
+                "a-target",
+                ApprovalDecision::Approved(scope),
+                ApprovalActor {
+                    username: Some(user.username.clone()),
+                    user_id: user.id,
+                },
+            )
+            .await
+            .unwrap()
+        );
+    }
+
+    async fn admitted(state_arc: &Arc<Mutex<AuthState>>) -> bool {
+        matches!(state_arc.lock().await.verify(), AuthResult::Accepted { .. })
+    }
+
+    /// A client opening its connections at once (a connection pool starting
+    /// up) puts up one request per connection before any is answered.
+    /// Answering one with "remember" lets in the others it covers and takes
+    /// their requests down; a login from another address still waits for its
+    /// own answer.
+    #[tokio::test]
+    async fn a_remembered_approval_admits_the_logins_already_waiting_on_it() {
+        let db = migrated_db().await;
+        let services = test_services(&db).await;
+        allow_web_approval_caching(&db).await;
+        let user = test_user();
+        let (answered, answered_state) = waiting_login(&services, &user, "10.0.0.1").await;
+        let (covered, covered_state) = waiting_login(&services, &user, "10.0.0.1").await;
+        let (elsewhere, elsewhere_state) = waiting_login(&services, &user, "10.0.0.2").await;
+
+        answer(&db, &user, answered, ApprovalScope::Target).await;
+        services.apply_decided_user_approvals().await.unwrap();
+
+        assert!(admitted(&answered_state).await);
+        assert!(admitted(&covered_state).await);
+        assert_eq!(
+            user_row(&db, covered, "a-target").await.status,
+            SessionApprovalRequest::ApprovalRequestStatus::Abandoned
+        );
+        assert!(!admitted(&elsewhere_state).await);
+        assert_eq!(
+            user_row(&db, elsewhere, "a-target").await.status,
+            SessionApprovalRequest::ApprovalRequestStatus::Pending
+        );
+    }
+
+    /// "Authorize" without remembering answers its own request only.
+    #[tokio::test]
+    async fn an_approval_not_remembered_admits_only_its_own_login() {
+        let db = migrated_db().await;
+        let services = test_services(&db).await;
+        allow_web_approval_caching(&db).await;
+        let user = test_user();
+        let (answered, answered_state) = waiting_login(&services, &user, "10.0.0.1").await;
+        let (other, other_state) = waiting_login(&services, &user, "10.0.0.1").await;
+
+        answer(&db, &user, answered, ApprovalScope::Once).await;
+        services.apply_decided_user_approvals().await.unwrap();
+
+        assert!(admitted(&answered_state).await);
+        assert!(!admitted(&other_state).await);
+        assert_eq!(
+            user_row(&db, other, "a-target").await.status,
+            SessionApprovalRequest::ApprovalRequestStatus::Pending
+        );
+    }
+
+    /// Without a cache period nothing is remembered.
+    #[tokio::test]
+    async fn without_a_cache_period_an_approval_admits_only_its_own_login() {
+        let db = migrated_db().await;
+        let services = test_services(&db).await;
+        let user = test_user();
+        let (answered, answered_state) = waiting_login(&services, &user, "10.0.0.1").await;
+        let (_, other_state) = waiting_login(&services, &user, "10.0.0.1").await;
+
+        answer(&db, &user, answered, ApprovalScope::Target).await;
+        services.apply_decided_user_approvals().await.unwrap();
+
+        assert!(admitted(&answered_state).await);
+        assert!(!admitted(&other_state).await);
+    }
+
+    /// An approval is remembered by the credentials a login presented, so a
+    /// login still owing one is left to its own flow — even when the approval
+    /// was remembered for a login that presented none.
+    #[tokio::test]
+    async fn a_login_still_owing_a_credential_is_left_to_its_own_flow() {
+        let db = migrated_db().await;
+        let services = test_services(&db).await;
+        allow_web_approval_caching(&db).await;
+        let user = test_user();
+        let (answered, _) = waiting_login(&services, &user, "10.0.0.1").await;
+        let both = [CredentialKind::Password, CredentialKind::WebUserApproval];
+        let owing = services.auth_state_store.lock().await.create(
+            &UserSessionId(Uuid::new_v4()),
+            &user,
+            Protocol::Postgres,
+            "a-target",
+            Box::new(AllCredentialsPolicy {
+                required_credential_types: both.into(),
+                supported_credential_types: both.into(),
+            }),
+            Some("10.0.0.1".parse().unwrap()),
+        );
+
+        answer(&db, &user, answered, ApprovalScope::Target).await;
+        services.apply_decided_user_approvals().await.unwrap();
+
+        assert!(matches!(
+            owing.lock().await.verify(),
+            AuthResult::Need(ref kinds) if kinds.contains(&CredentialKind::WebUserApproval)
+        ));
     }
 
     /// With the approval remembered, the login is settled before any request
