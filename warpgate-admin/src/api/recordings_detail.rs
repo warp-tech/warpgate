@@ -5,9 +5,10 @@ use std::time::{Duration, Instant};
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use poem::error::{InternalServerError, NotFoundError};
+use poem::http::{StatusCode, header};
 use poem::web::websocket::{Message, WebSocket, WebSocketStream};
 use poem::web::{Data, Redirect, StaticFileRequest};
-use poem::{IntoResponse, handler};
+use poem::{Body, IntoResponse, handler};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -16,6 +17,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader};
 use tokio::sync::broadcast;
 use tracing::error;
 use uuid::Uuid;
+use warpgate_aws::S3RangeRead;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::recordings::{LiveChunk, RecordingFile};
@@ -90,8 +92,15 @@ pub async fn api_get_recording_tcpdump(
 
     let recording = find_recording(&ctx, id.0, Some(RecordingKind::Traffic)).await?;
     let owner = recording_owner(&ctx, &recording).await?;
+    let range = request_range(req);
     proxy_or_serve(&ctx, req, owner, None::<&()>, || {
-        serve_recording_file(&ctx, &recording, RecordingFile::TcpDumpData, static_req)
+        serve_recording_file(
+            &ctx,
+            &recording,
+            RecordingFile::TcpDumpData,
+            static_req,
+            range,
+        )
     })
     .await
 }
@@ -107,8 +116,15 @@ pub async fn api_get_recording_data(
 
     let recording = find_recording(&ctx, id.0, None).await?;
     let owner = recording_owner(&ctx, &recording).await?;
+    let range = request_range(req);
     proxy_or_serve(&ctx, req, owner, None::<&()>, || {
-        serve_recording_file(&ctx, &recording, RecordingFile::NDJsonData, static_req)
+        serve_recording_file(
+            &ctx,
+            &recording,
+            RecordingFile::NDJsonData,
+            static_req,
+            range,
+        )
     })
     .await
 }
@@ -124,8 +140,9 @@ pub async fn api_get_recording_index(
 
     let recording = find_recording(&ctx, id.0, None).await?;
     let owner = recording_owner(&ctx, &recording).await?;
+    let range = request_range(req);
     proxy_or_serve(&ctx, req, owner, None::<&()>, || {
-        serve_recording_file(&ctx, &recording, RecordingFile::Index, static_req)
+        serve_recording_file(&ctx, &recording, RecordingFile::Index, static_req, range)
     })
     .await
 }
@@ -135,6 +152,7 @@ async fn serve_recording_file(
     recording: &Recording::Model,
     file: RecordingFile,
     static_req: StaticFileRequest,
+    range: Option<String>,
 ) -> poem::Result<poem::Response> {
     let access = ctx
         .services()
@@ -149,6 +167,12 @@ async fn serve_recording_file(
         .map_err(InternalServerError)?
     {
         Ok(Redirect::temporary(url).into_response())
+    } else if let Some(read) = access
+        .open_proxied(range.as_deref())
+        .await
+        .map_err(InternalServerError)?
+    {
+        Ok(proxied_response(read, file.mime_type()))
     } else if let Some(path) = access.local_path() {
         Ok(static_req
             .create_response(path, false, false)?
@@ -159,6 +183,41 @@ async fn serve_recording_file(
             "recording file access has neither an external URL nor a local path",
         )))
     }
+}
+
+/// The `Range` header of a recording download, forwarded to S3 when the
+/// download is proxied (the player seeks by reopening at a byte offset).
+fn request_range(req: &poem::Request) -> Option<String> {
+    req.headers()
+        .get(header::RANGE)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string)
+}
+
+/// Relays an S3 object to the browser, keeping the status and headers the
+/// player relies on for `Range` requests.
+fn proxied_response(read: S3RangeRead, content_type: &'static str) -> poem::Response {
+    let object = match read {
+        S3RangeRead::Object(object) => object,
+        S3RangeRead::NotSatisfiable => {
+            return StatusCode::RANGE_NOT_SATISFIABLE.into_response();
+        }
+    };
+    let mut response = poem::Response::builder()
+        .status(if object.content_range.is_some() {
+            StatusCode::PARTIAL_CONTENT
+        } else {
+            StatusCode::OK
+        })
+        .content_type(content_type)
+        .header(header::ACCEPT_RANGES, "bytes");
+    if let Some(length) = object.content_length {
+        response = response.header(header::CONTENT_LENGTH, length);
+    }
+    if let Some(content_range) = object.content_range {
+        response = response.header(header::CONTENT_RANGE, content_range);
+    }
+    response.body(Body::from_async_read(object.body))
 }
 
 /// Messages pushed to a recording live-view WebSocket, serialised with a `type`
