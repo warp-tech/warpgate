@@ -75,7 +75,7 @@ pub async fn spend_use(db: &DatabaseConnection, ticket_id: Uuid) -> Result<(), W
     Ok(())
 }
 
-pub async fn refund_use(db: &DatabaseConnection, ticket_id: Uuid) -> Result<(), WarpgateError> {
+pub async fn refund_use(db: &impl ConnectionTrait, ticket_id: Uuid) -> Result<(), WarpgateError> {
     Entity::update_many()
         .col_expr(Column::UsesLeft, Expr::col(Column::UsesLeft).add(1))
         .filter(Column::Id.eq(ticket_id))

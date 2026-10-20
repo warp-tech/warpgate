@@ -18,8 +18,9 @@ pub(super) struct PendingApproval {
     session_id: UserSessionId,
     target: String,
     db: DatabaseConnection,
-    /// How to close the request if there is no decision
-    close_as: Option<SessionApprovalRequest::UndecidedApprovalRequestStatus>,
+    /// `started` of the decided asking to acknowledge; without one the
+    /// request is abandoned
+    decided: Option<OffsetDateTime>,
 }
 
 impl Drop for PendingApproval {
@@ -27,22 +28,30 @@ impl Drop for PendingApproval {
         let session_id = self.session_id;
         let target = std::mem::take(&mut self.target);
         let db = self.db.clone();
-        let close_as = self.close_as;
+        let decided = self.decided;
         tokio::spawn(async move {
-            let _ = match close_as {
-                Some(status) => {
-                    close_request(&db, session_id, ApprovalKind::Admin, &target, status)
-                        .await
-                        .map(|_| ())
-                }
-                None => {
+            let result = match decided {
+                Some(started) => {
                     mark_consumed(
                         &db,
                         SessionApprovalRequest::Key::new(session_id, ApprovalKind::Admin, &target),
+                        started,
                     )
                     .await
                 }
+                None => close_request(
+                    &db,
+                    session_id,
+                    ApprovalKind::Admin,
+                    &target,
+                    SessionApprovalRequest::UndecidedApprovalRequestStatus::Abandoned,
+                )
+                .await
+                .map(|_| ()),
             };
+            if let Err(error) = result {
+                warn!(%error, %session_id, %target, "Failed to close an approval request");
+            }
         });
     }
 }
@@ -53,17 +62,33 @@ impl PendingApproval {
             session_id: subject.session_id,
             target: subject.target_name.clone(),
             db,
-            close_as: Some(SessionApprovalRequest::UndecidedApprovalRequestStatus::Abandoned),
+            decided: None,
         }
     }
 
-    pub(super) const fn timed_out(&mut self) {
-        self.close_as = Some(SessionApprovalRequest::UndecidedApprovalRequestStatus::TimedOut);
+    pub(super) const fn decided(&mut self, started: OffsetDateTime) {
+        self.decided = Some(started);
     }
+}
 
-    pub(super) const fn decided(&mut self) {
-        self.close_as = None;
+/// Returns whether this close is what ended the request, in which case it
+/// is also audited
+pub(super) async fn close_timed_out(
+    db: &DatabaseConnection,
+    subject: &ApprovalSubject,
+) -> Result<bool, WarpgateError> {
+    let closed = close_request(
+        db,
+        subject.session_id,
+        ApprovalKind::Admin,
+        &subject.target_name,
+        SessionApprovalRequest::UndecidedApprovalRequestStatus::TimedOut,
+    )
+    .await?;
+    if closed {
+        subject.emit_timed_out_event();
     }
+    Ok(closed)
 }
 
 /// Idempotently write a request rentry
@@ -95,7 +120,8 @@ pub(super) async fn advertise_admin_request(
 pub(super) const POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 pub(super) enum DecisionWaitOutcome {
-    Decided(ApprovalDecision),
+    /// With the `started` of the asking it was read from
+    Decided(ApprovalDecision, OffsetDateTime),
     /// The row is gone
     Ended,
     TimedOut,
@@ -124,6 +150,34 @@ pub(super) fn row_state(row: &SessionApprovalRequest::Model) -> Result<RowState,
     Ok(RowState::Decided(decision))
 }
 
+async fn find_row(
+    db: &DatabaseConnection,
+    session_id: UserSessionId,
+    kind: ApprovalKind,
+    target: &str,
+) -> Result<Option<SessionApprovalRequest::Model>, WarpgateError> {
+    Ok(SessionApprovalRequest::Entity::find()
+        .filter(SessionApprovalRequest::Key::new(session_id, kind, target).into_condition())
+        .one(db)
+        .await?)
+}
+
+/// The decision on the row and the `started` of its asking, if it carries one
+pub(super) async fn row_decision(
+    db: &DatabaseConnection,
+    session_id: UserSessionId,
+    kind: ApprovalKind,
+    target: &str,
+) -> Result<Option<(ApprovalDecision, OffsetDateTime)>, WarpgateError> {
+    let Some(row) = find_row(db, session_id, kind, target).await? else {
+        return Ok(None);
+    };
+    Ok(match row_state(&row)? {
+        RowState::Decided(decision) => Some((decision, row.started)),
+        RowState::Pending | RowState::Ended => None,
+    })
+}
+
 pub(super) async fn await_row_decision(
     db: &DatabaseConnection,
     session_id: UserSessionId,
@@ -139,13 +193,11 @@ pub(super) async fn await_row_decision(
             () = tokio::time::sleep_until(deadline) => return Ok(DecisionWaitOutcome::TimedOut),
             // The first tick is immediate
             _ = ticker.tick() => {
-                match SessionApprovalRequest::Entity::find().filter(
-                    SessionApprovalRequest::Key::new(session_id, kind, target).into_condition()
-                ).one(db).await {
+                match find_row(db, session_id, kind, target).await {
                     Ok(Some(row)) => match row_state(&row)? {
                         RowState::Pending => {}
                         RowState::Decided(decision) => {
-                            return Ok(DecisionWaitOutcome::Decided(decision));
+                            return Ok(DecisionWaitOutcome::Decided(decision, row.started));
                         }
                         // Something else ended it
                         RowState::Ended => return Ok(DecisionWaitOutcome::Ended),

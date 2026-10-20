@@ -8,9 +8,7 @@ use tracing::warn;
 use warpgate_common::auth::{ApprovalKind, RememberApprovalBy};
 use warpgate_common::{UserSessionId, WarpgateError};
 use warpgate_db_entities::SessionApprovalRequest;
-use warpgate_db_entities::SessionApprovalRequest::{
-    Advertised, UndecidedApprovalRequestStatus, close_request, mark_consumed,
-};
+use warpgate_db_entities::SessionApprovalRequest::{Advertised, mark_consumed};
 
 use super::*;
 use crate::cluster::ClusterNotification;
@@ -194,14 +192,31 @@ impl Services {
         )
         .await?
         {
-            DecisionWaitOutcome::Decided(decision) => {
-                guard.decided();
+            DecisionWaitOutcome::Decided(decision, started) => {
+                guard.decided(started);
                 decision
             }
+            // Closed before returning: `Expired` ends the session, and a
+            // question left open past that point could still be approved
             DecisionWaitOutcome::TimedOut => {
-                guard.timed_out();
-                subject.emit_timed_out_event();
-                return Ok(GateOutcome::Expired);
+                if close_timed_out(&self.db, &subject).await? {
+                    return Ok(GateOutcome::Expired);
+                }
+                // A decision landed between the last poll and the close
+                match row_decision(
+                    &self.db,
+                    session_id,
+                    ApprovalKind::Admin,
+                    &subject.target_name,
+                )
+                .await?
+                {
+                    Some((decision, started)) => {
+                        guard.decided(started);
+                        decision
+                    }
+                    None => return Ok(GateOutcome::Expired),
+                }
             }
             DecisionWaitOutcome::Ended => return Ok(GateOutcome::Expired),
         };
@@ -278,17 +293,7 @@ impl Services {
                 #[allow(clippy::cast_possible_wrap)]
                 let window = time::Duration::seconds(timeout.as_secs() as i64);
                 if time::OffsetDateTime::now_utc() - row.started >= window {
-                    if close_request(
-                        &self.db,
-                        subject.session_id,
-                        ApprovalKind::Admin,
-                        &subject.target_name,
-                        UndecidedApprovalRequestStatus::TimedOut,
-                    )
-                    .await?
-                    {
-                        subject.emit_timed_out_event();
-                    }
+                    close_timed_out(&self.db, &subject).await?;
                     if matches!(
                         self.announce_admin_request(&subject).await?,
                         Advertised::TicketExhausted
@@ -299,7 +304,7 @@ impl Services {
                 Ok(PolledGate::Pending)
             }
             RowState::Decided(decision) => {
-                mark_consumed(&self.db, key).await?;
+                mark_consumed(&self.db, key, row.started).await?;
                 match decision {
                     ApprovalDecision::Approved(_) => {
                         Ok(PolledGate::Approved(ApprovedTarget::new(authorization)))
