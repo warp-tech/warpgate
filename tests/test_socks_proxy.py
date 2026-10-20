@@ -389,6 +389,26 @@ class TestDenials:
                 assert socks.authenticate(sock, username, password) == socks.AUTH_DENIED, what
                 assert socks.at_eof(sock), what
 
+    def test_ip_restricted_user_gets_a_denial(self, setup):
+        # Core rejects an out-of-range client address before the success byte.
+        # That must be the same 01 01 as any other refusal: a dropped
+        # connection would reveal the user exists and has allowed_ip_ranges.
+        setup.api.update_user(
+            setup.user.id,
+            sdk.UserDataRequest(
+                username=setup.user.username,
+                allowed_ip_ranges=["192.0.2.0/24"],  # excludes the loopback client
+            ),
+        )
+        with socks.connect(setup.port) as sock:
+            assert socks.greet(sock) == b"\x05\x02"
+            got = b""
+            try:
+                got = socks.authenticate(sock, setup.selector, "123")
+            except socks.SocksClosed as e:
+                got = repr(e).encode()
+            assert got == socks.AUTH_DENIED, got
+
     def test_unauthorised_target(self, setup):
         target = _create_target(setup.api, setup.role, setup.echo.port, assign=False)
         other = _create_user(

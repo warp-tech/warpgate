@@ -133,10 +133,10 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> SocksSession<S> {
             {
                 Ok(Some(approved)) => approved,
                 Ok(None) => return Ok(()),
-                // The core fails on a name it doesn't know instead of denying it, but
-                // that must look like any other refusal on the wire.
-                Err(SocksError::Warpgate(WarpgateError::UserNotFound(_))) => {
-                    warn!("Authentication for an unknown user");
+                // Core raises every WarpgateError before the success byte, so a
+                // denial here must look like any other refusal on the wire.
+                Err(SocksError::Warpgate(error)) => {
+                    warn!(%error, "Authentication failed");
                     return self.send_denied().await;
                 }
                 Err(error) => return Err(error),
