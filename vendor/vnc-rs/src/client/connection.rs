@@ -128,7 +128,15 @@ impl VncInner {
             };
 
             let pf = pixel_format.as_ref().unwrap();
-            if let Err(e) = decode_loop(&mut conn_ch_rx, pf, &output_func, decoding_stop_rx).await {
+            if let Err(e) = decode_loop(
+                &mut conn_ch_rx,
+                pf,
+                (width, height),
+                &output_func,
+                decoding_stop_rx,
+            )
+            .await
+            {
                 if let VncError::IoError(e) = e {
                     if let std::io::ErrorKind::UnexpectedEof = e.kind() {
                         // this should be a normal case when the network connection disconnects
@@ -340,6 +348,7 @@ where
 
     let screen_width = stream.read_u16().await?;
     let screen_height = stream.read_u16().await?;
+    check_screen_size(screen_width, screen_height)?;
     let mut send_our_pf = false;
 
     output_func(VncEvent::SetResolution(
@@ -386,15 +395,40 @@ where
     Ok(())
 }
 
+/// Warpgate fork: largest framebuffer edge accepted from a target (ServerInit or
+/// DesktopSize). Every consumer allocates `width * height * bpp`, so an unchecked
+/// 65535x65535 would cost 16 GiB.
+const MAX_SCREEN_DIM: u16 = 8192;
+
+fn check_screen_size(width: u16, height: u16) -> Result<(), VncError> {
+    if width > MAX_SCREEN_DIM || height > MAX_SCREEN_DIM {
+        return Err(VncError::OversizedImage);
+    }
+    Ok(())
+}
+
+/// Warpgate fork: an update rectangle the target placed outside the framebuffer. Checked
+/// before the rectangle reaches a decoder, since every decoder sizes its buffers from the
+/// rectangle alone (a 4-byte Tight fill of 65535x65535 would otherwise allocate 16 GiB).
+fn check_rect_in_screen(rect: &Rect, screen: (u16, u16)) -> Result<(), VncError> {
+    let fits = |pos: u16, len: u16, max: u16| u32::from(pos) + u32::from(len) <= u32::from(max);
+    if fits(rect.x, rect.width, screen.0) && fits(rect.y, rect.height, screen.1) {
+        Ok(())
+    } else {
+        Err(VncError::OversizedImage)
+    }
+}
+
 /// Warpgate fork addition: this RFB server→client decode loop is `pub` so callers can
 /// drive it over an arbitrary byte stream (e.g. a tee of a proxied VNC connection) to
 /// decode framebuffer updates for recording, without owning the socket or the handshake.
 /// `stream` must be positioned at a server message boundary (right after the handshake);
-/// `pf` is the negotiated pixel format. Runs until `stop_ch` fires, EOF, or a decode
-/// error. See PATCHES.md.
+/// `pf` is the negotiated pixel format and `screen` the framebuffer size from ServerInit.
+/// Runs until `stop_ch` fires, EOF, or a decode error. See PATCHES.md.
 pub async fn decode_loop<S, F, Fut>(
     stream: &mut S,
     pf: &PixelFormat,
+    mut screen: (u16, u16),
     output_func: &F,
     mut stop_ch: oneshot::Receiver<()>,
 ) -> Result<(), VncError>
@@ -419,6 +453,14 @@ where
                     let rect = ImageRect::read(stream).await?;
                     // trace!("Encoding: {:?}", rect.encoding);
 
+                    match rect.encoding {
+                        VncEncoding::DesktopSizePseudo | VncEncoding::LastRectPseudo => {}
+                        // A cursor rect carries the hotspot in x/y, so only its extent is bounded.
+                        VncEncoding::CursorPseudo => {
+                            check_screen_size(rect.rect.width, rect.rect.height)?
+                        }
+                        _ => check_rect_in_screen(&rect.rect, screen)?,
+                    }
                     match rect.encoding {
                         VncEncoding::Raw => {
                             raw_decoder
@@ -452,6 +494,8 @@ where
                             cursor.decode(pf, &rect.rect, stream, output_func).await?;
                         }
                         VncEncoding::DesktopSizePseudo => {
+                            check_screen_size(rect.rect.width, rect.rect.height)?;
+                            screen = (rect.rect.width, rect.rect.height);
                             output_func(VncEvent::SetResolution(
                                 (rect.rect.width, rect.rect.height).into(),
                             ))
@@ -536,4 +580,54 @@ where
         .await;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod size_limit_tests {
+    use std::io::Cursor;
+
+    use super::*;
+
+    fn framebuffer_update(x: u16, y: u16, w: u16, h: u16, encoding: i32) -> Vec<u8> {
+        let mut msg = vec![0, 0, 0, 1];
+        for v in [x, y, w, h] {
+            msg.extend_from_slice(&v.to_be_bytes());
+        }
+        msg.extend_from_slice(&encoding.to_be_bytes());
+        msg
+    }
+
+    async fn decode(msg: Vec<u8>, screen: (u16, u16)) -> Result<(), VncError> {
+        let (_stop_tx, stop_rx) = oneshot::channel();
+        let pf = PixelFormat::bgra();
+        decode_loop(&mut Cursor::new(msg), &pf, screen, &|_| async { Ok(()) }, stop_rx).await
+    }
+
+    #[tokio::test]
+    async fn oversized_fill_is_rejected_before_allocation() {
+        let mut msg = framebuffer_update(0, 0, 65535, 65535, VncEncoding::Tight as i32);
+        msg.extend_from_slice(&[0x80, 0, 0, 0]); // Tight fill, 3 colour bytes
+        assert!(matches!(
+            decode(msg, (1024, 768)).await,
+            Err(VncError::OversizedImage)
+        ));
+    }
+
+    #[tokio::test]
+    async fn rect_past_the_edge_is_rejected() {
+        let msg = framebuffer_update(1000, 0, 100, 10, VncEncoding::Raw as i32);
+        assert!(matches!(
+            decode(msg, (1024, 768)).await,
+            Err(VncError::OversizedImage)
+        ));
+    }
+
+    #[tokio::test]
+    async fn oversized_desktop_size_is_rejected() {
+        let msg = framebuffer_update(0, 0, 9000, 100, VncEncoding::DesktopSizePseudo as i32);
+        assert!(matches!(
+            decode(msg, (1024, 768)).await,
+            Err(VncError::OversizedImage)
+        ));
+    }
 }

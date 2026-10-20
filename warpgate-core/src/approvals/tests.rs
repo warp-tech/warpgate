@@ -907,6 +907,15 @@ async fn only_an_approval_is_remembered() {
 }
 
 async fn ticket_with_uses(db: &DatabaseConnection, uses: i16) -> Uuid {
+    seed_ticket(db, Some(uses), None).await
+}
+
+/// A ticket row with the user and target rows its foreign keys need
+pub(crate) async fn seed_ticket(
+    db: &DatabaseConnection,
+    uses_left: Option<i16>,
+    expiry: Option<OffsetDateTime>,
+) -> Uuid {
     use warpgate_db_entities::Target::TargetKind;
     use warpgate_db_entities::{Target, Ticket, User};
 
@@ -951,9 +960,9 @@ async fn ticket_with_uses(db: &DatabaseConnection, uses: i16) -> Uuid {
         user_id: Set(user_id),
         description: Set(String::new()),
         target_id: Set(target_id),
-        uses_left: Set(Some(uses)),
+        uses_left: Set(uses_left),
         self_service: Set(false),
-        expiry: Set(None),
+        expiry: Set(expiry),
         created: Set(OffsetDateTime::now_utc()),
     })
     .exec(db)

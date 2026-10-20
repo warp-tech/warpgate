@@ -312,7 +312,11 @@
     <h4 class="m-0">Credentials</h4>
     <span class="ms-auto"></span>
     {#if $adminPermissions.usersEdit}
-        <Button size="sm" color="link" on:click={() => creatingPassword = true}>
+        <Button
+            size="sm"
+            color="link"
+            on:click={() => (creatingPassword = true)}
+        >
             Add password
         </Button>
         <Button
@@ -343,16 +347,16 @@
             Public key credentials will be loaded from LDAP
         </Tooltip>
 
-        <Button size="sm" color="link" on:click={() => creatingOtp = true}>
+        <Button size="sm" color="link" on:click={() => (creatingOtp = true)}>
             Add OTP
         </Button>
         <Button
             size="sm"
             color="link"
             on:click={() => {
-        editingSsoCredentialInstance = null
-        editingSsoCredential = true
-    }}
+                editingSsoCredentialInstance = null
+                editingSsoCredential = true
+            }}
         >
             Add SSO
         </Button>
@@ -380,7 +384,9 @@
                             {credential.label}
                         </div>
                         <small class="d-block text-muted"
-                            >{abbreviatePublicKey(credential.opensshPublicKey)}</small
+                            >{abbreviatePublicKey(
+                                credential.opensshPublicKey,
+                            )}</small
                         >
                     </div>
                     <CredentialUsedStateBadge {credential} />
@@ -413,22 +419,25 @@
                     </span>
                 {/if}
 
-                {#if credential.kind === CredentialKind.PublicKey || credential.kind === CredentialKind.Sso}
+                {#if credential.kind === CredentialKind.PublicKey ||
+                    credential.kind === CredentialKind.Sso}
                     <Button
                         class="px-0"
                         color="link"
-                        disabled={credential.kind === CredentialKind.PublicKey && (ldapLinked || !$adminPermissions.usersEdit)}
+                        disabled={credential.kind ===
+                            CredentialKind.PublicKey &&
+                            (ldapLinked || !$adminPermissions.usersEdit)}
                         onclick={e => {
-                    if (credential.kind === CredentialKind.Sso) {
-                        editingSsoCredentialInstance = credential
-                        editingSsoCredential = true
-                    }
-                    if (credential.kind === CredentialKind.PublicKey) {
-                        editingPublicKeyCredentialInstance = credential
-                        editingPublicKeyCredential = true
-                    }
-                    e.preventDefault()
-                }}
+                            if (credential.kind === CredentialKind.Sso) {
+                                editingSsoCredentialInstance = credential
+                                editingSsoCredential = true
+                            }
+                            if (credential.kind === CredentialKind.PublicKey) {
+                                editingPublicKeyCredentialInstance = credential
+                                editingPublicKeyCredential = true
+                            }
+                            e.preventDefault()
+                        }}
                     >
                         Change
                     </Button>
@@ -436,11 +445,12 @@
                 <Button
                     class="px-0"
                     color="link"
-                    disabled={credential.kind === CredentialKind.PublicKey && (ldapLinked || !$adminPermissions.usersEdit)}
+                    disabled={credential.kind === CredentialKind.PublicKey &&
+                        (ldapLinked || !$adminPermissions.usersEdit)}
                     onclick={e => {
-                    deleteCredential(credential)
-                    e.preventDefault()
-                }}
+                        deleteCredential(credential)
+                        e.preventDefault()
+                    }}
                 >
                     Delete
                 </Button>
@@ -489,8 +499,8 @@
         save={saveCertificateCredential}
         {username}
         onClose={() => {
-        editingCertificateCredential = false
-    }}
+            editingCertificateCredential = false
+        }}
     />
 {/if}
 

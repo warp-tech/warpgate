@@ -241,7 +241,7 @@
 {/if}
 
 <Loadable promise={initPromise}>
-    <Modal isOpen={showForm} toggle={() => showForm = false}>
+    <Modal isOpen={showForm} toggle={() => (showForm = false)}>
         <ModalBody>
             <h4 class="mb-3">Request a ticket</h4>
 
@@ -271,16 +271,19 @@
 
                     <FormGroup
                         floating
-                        label={descriptionRequired ? 'Description (required)' : 'Description'}
+                        label={descriptionRequired
+                            ? 'Description (required)'
+                            : 'Description'}
                     >
                         <input
                             type="text"
                             bind:value={description}
                             class="form-control"
-                            class:is-invalid={descriptionMissing && descriptionTouched}
+                            class:is-invalid={descriptionMissing &&
+                                descriptionTouched}
                             placeholder="Why do you need access?"
                             maxlength="2000"
-                            onblur={() => descriptionTouched = true}
+                            onblur={() => (descriptionTouched = true)}
                         >
                         {#if descriptionMissing}
                             <small class="form-text text-muted">
@@ -314,7 +317,9 @@
             {:else if ticketRequestTargets}
                 <EmptyState
                     title="No targets available"
-                    hint={unavailableTarget ? `${unavailableTarget} is not available for ticket requests.` : ''}
+                    hint={unavailableTarget
+                        ? `${unavailableTarget} is not available for ticket requests.`
+                        : ''}
                 />
             {/if}
         </ModalBody>
@@ -331,7 +336,7 @@
             <Button
                 class="modal-button"
                 color="secondary"
-                onclick={() => showForm = false}
+                onclick={() => (showForm = false)}
             >
                 Close
             </Button>
@@ -364,7 +369,8 @@
                                 >
                             {/if}
                         </div>
-                        {#if request.status === TicketRequestStatus.Approved && !request.ticketId}
+                        {#if request.status === TicketRequestStatus.Approved &&
+                            !request.ticketId}
                             <AsyncButton
                                 color="success"
                                 click={() => activateRequest(request)}
@@ -379,7 +385,7 @@
                 {/each}
             </div>
             {#if !showAllRequests && requests.length > REQUEST_PAGE_SIZE}
-                <Button color="link" onclick={() => showAllRequests = true}>
+                <Button color="link" onclick={() => (showAllRequests = true)}>
                     Show all {requests.length} requests
                 </Button>
             {/if}

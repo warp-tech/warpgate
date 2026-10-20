@@ -47,7 +47,9 @@
         </div>
 
         <ItemList load={loadRoles} showSearch={true}>
-            {#snippet item(role)}
+            {#snippet item(
+                role,
+            )}
                 <a
                     class="list-group-item list-group-item-action d-flex align-items-center"
                     href="/config/admin-roles/{role.id}"

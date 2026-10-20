@@ -11,6 +11,7 @@ use warpgate_common::{UserFacingReason, WarpgateError};
 use crate::ext::is_navigation_request;
 use crate::insert_security_headers;
 use crate::internal_page::internal_page;
+use crate::logging::redacted_uri;
 
 // Response-body JSON errors do not hit render_error and need manual logging here
 pub fn bad_request(reason: impl Into<String>) -> Json<String> {
@@ -36,7 +37,7 @@ pub fn render_error(error: poem::Error, method: &Method, uri: &Uri, as_document:
         tracing::error!(
             correlation_id = %correlation_id,
             %method,
-            %uri,
+            uri = %redacted_uri(uri),
             // {:#} for single line format
             error = %format!("{error:#}"),
             "Request failed with an internal error"

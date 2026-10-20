@@ -229,10 +229,10 @@
                                     <AsyncButton
                                         color="success"
                                         click={() =>
-                                        approveSession(
-                                            entry.session,
-                                            ApprovalScope.Target,
-                                        )}
+                                            approveSession(
+                                                entry.session,
+                                                ApprovalScope.Target,
+                                            )}
                                     >
                                         Approve for
                                         {formatDurationAsHumantime(
@@ -249,21 +249,24 @@
 
                                         <DropdownMenu end>
                                             <DropdownItem
-                                                onclick={() => approveSession(
-                                                    entry.session,
-                                                    ApprovalScope.AllTargets,
-                                                )}
+                                                onclick={() =>
+                                                    approveSession(
+                                                        entry.session,
+                                                        ApprovalScope.AllTargets,
+                                                    )}
                                             >
                                                 Approve for all targets for
                                                 {formatDurationAsHumantime(
-                                                    entry.session.cachingGraceSeconds,
+                                                    entry.session
+                                                        .cachingGraceSeconds,
                                                 )}
                                             </DropdownItem>
                                             <DropdownItem
-                                                onclick={() => approveSession(
-                                                    entry.session,
-                                                    ApprovalScope.Once,
-                                                )}
+                                                onclick={() =>
+                                                    approveSession(
+                                                        entry.session,
+                                                        ApprovalScope.Once,
+                                                    )}
                                             >
                                                 Approve this time only
                                             </DropdownItem>
@@ -273,10 +276,10 @@
                                     <AsyncButton
                                         color="success"
                                         click={() =>
-                                        approveSession(
-                                            entry.session,
-                                            ApprovalScope.Once,
-                                        )}
+                                            approveSession(
+                                                entry.session,
+                                                ApprovalScope.Once,
+                                            )}
                                     >
                                         Approve
                                     </AsyncButton>
@@ -294,13 +297,15 @@
                         <div>
                             <div>
                                 <strong>
-                                    {entry.ticket.username ?? entry.ticket.userId}
+                                    {entry.ticket.username ??
+                                        entry.ticket.userId}
                                 </strong>
                                 <span class="text-muted">
                                     needs a ticket for
                                 </span>
                                 <strong>
-                                    {entry.ticket.targetName ?? entry.ticket.targetId}
+                                    {entry.ticket.targetName ??
+                                        entry.ticket.targetId}
                                 </strong>
                             </div>
                             <div class="small text-muted">

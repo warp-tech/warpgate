@@ -329,7 +329,7 @@
                 <button
                     type="button"
                     class="nav-link {kubeconfigMode === 'oidc' ? 'active' : ''}"
-                    onclick={() => kubeconfigMode = 'oidc'}
+                    onclick={() => (kubeconfigMode = 'oidc')}
                 >
                     OIDC with kubelogin
                 </button>
@@ -337,8 +337,10 @@
             <li class="nav-item">
                 <button
                     type="button"
-                    class="nav-link {kubeconfigMode === 'certificate' ? 'active' : ''}"
-                    onclick={() => kubeconfigMode = 'certificate'}
+                    class="nav-link {kubeconfigMode === 'certificate'
+                        ? 'active'
+                        : ''}"
+                    onclick={() => (kubeconfigMode = 'certificate')}
                 >
                     Certificate authentication
                 </button>
@@ -393,11 +395,12 @@
                                     href="#"
                                     action
                                     class="list-group-item list-group-item-action d-flex align-items-center gap-3"
-                                    active={cert.credential.id === selectedCertId}
+                                    active={cert.credential.id ===
+                                        selectedCertId}
                                     onclick={e => {
-                                    e.preventDefault()
-                                    selectCertificate(cert.credential.id)
-                                }}
+                                        e.preventDefault()
+                                        selectCertificate(cert.credential.id)
+                                    }}
                                 >
                                     <Fa fw icon={faCertificate} />
                                     <div class="me-auto">
@@ -405,14 +408,16 @@
                                     </div>
                                     {#if cert.hasLocalKey}
                                         <Badge
-                                            id="cert-status-badge-{cert.credential.id}"
+                                            id="cert-status-badge-{cert
+                                                .credential.id}"
                                             color="success"
                                         >
                                             Key available
                                         </Badge>
                                     {:else}
                                         <Badge
-                                            id="cert-status-badge-{cert.credential.id}"
+                                            id="cert-status-badge-{cert
+                                                .credential.id}"
                                             color="warning"
                                         >
                                             No private key
@@ -444,11 +449,13 @@
 
                         {#if $serverInfo?.ownCredentialManagementAllowed}
                             <Button
-                                color={certificates.length > 0 ? 'secondary' : 'primary'}
+                                color={certificates.length > 0
+                                    ? 'secondary'
+                                    : 'primary'}
                                 class="d-flex w-100 text-center justify-content-center align-items-center gap-2 my-3"
                                 onclick={() => {
-                            issuingCertificate = true
-                        }}
+                                    issuingCertificate = true
+                                }}
                             >
                                 <Fa fw icon={faPlus} />
                                 <div>
@@ -514,7 +521,10 @@
         save={issueCertificate}
         username={username ?? ''}
         storeInBrowserByDefault={true}
-        onClose={() => { issuingCertificate = false; loadCertificates() }}
+        onClose={() => {
+            issuingCertificate = false
+            loadCertificates()
+        }}
     />
 {/if}
 

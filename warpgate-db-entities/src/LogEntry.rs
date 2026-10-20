@@ -16,7 +16,7 @@ pub struct Model {
     pub target: String,
     pub values: JsonValue,
     pub timestamp: OffsetDateTime,
-    pub session_id: Uuid,
+    pub session_id: Option<Uuid>,
     pub username: Option<String>,
     pub related_users: Option<String>,
     pub related_access_roles: Option<String>,

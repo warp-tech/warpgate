@@ -182,7 +182,10 @@
     bind:collapsedGroups={$collapsedTargetGroups}
     virtual
 >
-    {#snippet header(items, groupControls)}
+    {#snippet header(
+        items,
+        groupControls,
+    )}
         {#if items?.length}
             <ListOverflowMenu {groupControls}>
                 <div class="dropdown-header">Preferences</div>
@@ -197,7 +200,8 @@
                             label="Open targets in a new tab"
                             onchange={e =>
                                 setOpenTargetsInNewTab(
-                                    (e.currentTarget as HTMLInputElement).checked,
+                                    (e.currentTarget as HTMLInputElement)
+                                        .checked,
                                 )}
                             onmousedown={e => e.stopPropagation()}
                         />
@@ -218,10 +222,15 @@
     {#snippet empty()}
         <EmptyState title="You don't have access to any targets yet" />
     {/snippet}
-    {#snippet groupHeader(group, state)}
+    {#snippet groupHeader(
+        group,
+        state,
+    )}
         <CollapsibleGroupHeader {group} {state} />
     {/snippet}
-    {#snippet item(target)}
+    {#snippet item(
+        target,
+    )}
         <a
             class="list-group-item list-group-item-action target-item gap-3"
             href={urlForTarget(target)}
@@ -277,9 +286,9 @@
                     color="link"
                     size="sm"
                     onclick={e => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                }}
+                        e.preventDefault()
+                        e.stopPropagation()
+                    }}
                 >
                     <Fa icon={faEllipsisV} fw />
                 </DropdownToggle>
@@ -287,32 +296,35 @@
                     {#if target.kind === TargetKind.Ssh && webClientsEnabled}
                         <DropdownItem
                             onclick={e => {
-                            void openInBrowser(target, () =>
-                                openWebSshSession(target.id))
-                            e.preventDefault()
-                            e.stopPropagation()
-                        }}
+                                void openInBrowser(target, () =>
+                                    openWebSshSession(target.id),
+                                )
+                                e.preventDefault()
+                                e.stopPropagation()
+                            }}
                         >
                             Web terminal
                         </DropdownItem>
                     {/if}
-                    {#if (target.kind === TargetKind.Vnc || target.kind === TargetKind.Rdp) && webClientsEnabled}
+                    {#if (target.kind === TargetKind.Vnc ||
+                        target.kind === TargetKind.Rdp) &&
+                        webClientsEnabled}
                         <DropdownItem
                             onclick={e => {
-                            openWebDesktopSession(target.id)
-                            e.preventDefault()
-                            e.stopPropagation()
-                        }}
+                                openWebDesktopSession(target.id)
+                                e.preventDefault()
+                                e.stopPropagation()
+                            }}
                         >
                             Web desktop
                         </DropdownItem>
                     {/if}
                     <DropdownItem
                         onclick={e => {
-                        showInstructions(target)
-                        e.preventDefault()
-                        e.stopPropagation()
-                    }}
+                            showInstructions(target)
+                            e.preventDefault()
+                            e.stopPropagation()
+                        }}
                     >
                         Connection instructions
                     </DropdownItem>
@@ -339,7 +351,7 @@
 
 <Modal
     isOpen={!!instructionsTarget}
-    toggle={() => instructionsTarget = undefined}
+    toggle={() => (instructionsTarget = undefined)}
     size="lg"
 >
     <ModalBody>
@@ -348,8 +360,11 @@
                 targetName={instructionsTarget.name}
                 username={$serverInfo?.username}
                 targetKind={instructionsTarget.kind ?? TargetKind.Ssh}
-                targetDefaultDatabaseName={(instructionsTarget.kind === TargetKind.MySql || instructionsTarget.kind === TargetKind.Postgres)
-                    ? instructionsTarget.defaultDatabaseName : undefined}
+                targetDefaultDatabaseName={instructionsTarget.kind ===
+                    TargetKind.MySql ||
+                instructionsTarget.kind === TargetKind.Postgres
+                    ? instructionsTarget.defaultDatabaseName
+                    : undefined}
             />
         {/if}
     </ModalBody>
@@ -359,8 +374,10 @@
             <Button
                 color="primary"
                 class="d-flex align-items-center justify-content-center gap-2 modal-button"
-                onclick={() => openInBrowser(sshTarget, () =>
-                    openWebSshSession(sshTarget.id))}
+                onclick={() =>
+                    openInBrowser(sshTarget, () =>
+                        openWebSshSession(sshTarget.id),
+                    )}
             >
                 <Fa icon={faTerminal} />
                 Web terminal
@@ -370,7 +387,9 @@
             color="secondary"
             class="modal-button"
             block
-            on:click={() => { instructionsTarget = undefined }}
+            on:click={() => {
+                instructionsTarget = undefined
+            }}
         >
             Close
         </Button>

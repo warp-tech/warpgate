@@ -261,9 +261,10 @@
                     {@const progress = ($timestamp - click.time) / CLICK_ANIM_S}
                     <span
                         class="click-ring"
-                        style="left: {canvasW ? 100 * click.x / canvasW : 0}%;
-                               top: {canvasH ? 100 * click.y / canvasH : 0}%;
-                               transform: translate(-50%, -50%) scale({0.4 + progress});
+                        style="left: {canvasW ? (100 * click.x) / canvasW : 0}%;
+                               top: {canvasH ? (100 * click.y) / canvasH : 0}%;
+                               transform: translate(-50%, -50%) scale({0.4 +
+                            progress});
                                opacity: {1 - progress};"
                     ></span>
                 {/each}
@@ -290,7 +291,7 @@
         onTogglePlaying={() => player.togglePlaying()}
         onToggleFullscreen={toggleFullscreen}
         onGoLive={() => player.goLive()}
-        onSeek={pct => player.scrub($duration * pct / 100)}
+        onSeek={pct => player.scrub(($duration * pct) / 100)}
     />
 </div>
 

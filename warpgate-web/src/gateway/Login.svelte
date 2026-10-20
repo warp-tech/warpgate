@@ -6,6 +6,7 @@
     } from '@fortawesome/free-brands-svg-icons'
     import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
     import { Alert, Button, FormGroup } from '@sveltestrap/sveltestrap'
+    import { onControlPlane } from 'common/controlPlane'
     import { stringifyError } from 'common/errors'
     import { navigateToExternalUrl, routeQueryParams } from 'common/helpers'
     import Loadable from 'common/Loadable.svelte'
@@ -20,6 +21,7 @@
         SsoProviderKind,
     } from 'gateway/lib/api'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
+    import { get } from 'svelte/store'
     import Fa from 'svelte-fa'
     import { replace } from 'svelte-spa-router'
 
@@ -79,8 +81,12 @@
     }
 
     function success() {
-        const target = nextURL ? sanitizeRedirect(nextURL) : undefined
-        if (target) {
+        const next = nextURL ? sanitizeRedirect(nextURL) : undefined
+        const target = onControlPlane(
+            get(serverInfo),
+            new URL(next ?? '/@warpgate#/', location.origin),
+        )
+        if (next || new URL(target).origin !== location.origin) {
             location.assign(target)
         } else {
             replace('/')
@@ -177,9 +183,9 @@
     <form
         autocomplete="on"
         onsubmit={e => {
-        login()
-        e.preventDefault()
-    }}
+            login()
+            e.preventDefault()
+        }}
     >
         <FormGroup floating label="Username">
             <!-- svelte-ignore a11y_autofocus -->
@@ -221,7 +227,9 @@
 <Loadable promise={initPromise}>
     <div class="content">
         <div class="page-summary-bar">
-            {#if authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected}
+            {#if authState === ApiAuthState.NotStarted ||
+                authState === ApiAuthState.Failed ||
+                authState === ApiAuthState.IpRejected}
                 <h1 style="margin-left: -4px">Welcome</h1>
             {:else}
                 <h1>Continue login</h1>
@@ -231,9 +239,9 @@
             <form
                 class="d-flex align-items-stretch gap-2"
                 onsubmit={e => {
-                login()
-                e.preventDefault()
-            }}
+                    login()
+                    e.preventDefault()
+                }}
             >
                 <FormGroup floating label="One-time password" class="w-100">
                     <!-- svelte-ignore a11y_autofocus -->
@@ -260,7 +268,12 @@
                 </Button>
             </form>
         {/if}
-        {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected) && passwordLoginAllowed && (!passwordLoginMinimized || showPasswordLogin)}
+        {#if (authState === ApiAuthState.NotStarted ||
+            authState === ApiAuthState.PasswordNeeded ||
+            authState === ApiAuthState.Failed ||
+            authState === ApiAuthState.IpRejected) &&
+            passwordLoginAllowed &&
+            (!passwordLoginMinimized || showPasswordLogin)}
             {@render localLoginForm()}
         {/if}
 
@@ -286,10 +299,17 @@
             <Alert class="mt-3" color="danger">{error}</Alert>
         {/if}
 
-        {#if authState === ApiAuthState.SsoNeeded || authState === ApiAuthState.NotStarted || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected}
+        {#if authState === ApiAuthState.SsoNeeded ||
+            authState === ApiAuthState.NotStarted ||
+            authState === ApiAuthState.Failed ||
+            authState === ApiAuthState.IpRejected}
             <Loadable promise={ssoProvidersPromise}>
-                {#snippet children(ssoProviders)}
-                    {#if ssoProviders.length && passwordLoginAllowed && !(passwordLoginMinimized && !showPasswordLogin)}
+                {#snippet children(
+                    ssoProviders,
+                )}
+                    {#if ssoProviders.length &&
+                        passwordLoginAllowed &&
+                        !(passwordLoginMinimized && !showPasswordLogin)}
                         <div class="sso-separator"></div>
                     {/if}
                     <div class="sso-buttons">
@@ -300,7 +320,8 @@
                                 disabled={busy}
                                 onclick={() => startSSO(ssoProvider)}
                             >
-                                {#if ssoProvider.kind === SsoProviderKind.Google}
+                                {#if ssoProvider.kind ===
+                                    SsoProviderKind.Google}
                                     <Fa fw class="me-2" icon={faGoogle} />
                                 {/if}
                                 {#if ssoProvider.kind === SsoProviderKind.Azure}
@@ -313,26 +334,36 @@
                             </button>
                         {/each}
                     </div>
-                    {#if ssoProviders.length && passwordLoginAllowed && passwordLoginMinimized && !showPasswordLogin}
+                    {#if ssoProviders.length &&
+                        passwordLoginAllowed &&
+                        passwordLoginMinimized &&
+                        !showPasswordLogin}
                         <div class="sso-separator"></div>
                     {/if}
                 {/snippet}
             </Loadable>
         {/if}
 
-        {#if (authState === ApiAuthState.NotStarted || authState === ApiAuthState.PasswordNeeded || authState === ApiAuthState.Failed || authState === ApiAuthState.IpRejected) && passwordLoginMinimized && !showPasswordLogin}
+        {#if (authState === ApiAuthState.NotStarted ||
+            authState === ApiAuthState.PasswordNeeded ||
+            authState === ApiAuthState.Failed ||
+            authState === ApiAuthState.IpRejected) &&
+            passwordLoginMinimized &&
+            !showPasswordLogin}
             <div class="text-center">
                 <button
                     type="button"
                     class="btn btn-link"
-                    onclick={() => showPasswordLogin = true}
+                    onclick={() => (showPasswordLogin = true)}
                 >
                     Password login
                 </button>
             </div>
         {/if}
 
-        {#if authState !== ApiAuthState.NotStarted && authState !== ApiAuthState.Failed && authState !== ApiAuthState.IpRejected}
+        {#if authState !== ApiAuthState.NotStarted &&
+            authState !== ApiAuthState.Failed &&
+            authState !== ApiAuthState.IpRejected}
             <button
                 type="button"
                 class="btn w-100 mt-3 btn-secondary login-view-button"

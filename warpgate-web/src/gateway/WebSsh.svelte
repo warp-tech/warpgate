@@ -323,8 +323,14 @@
                     active={id === activeChannelId}
                     {fontSize}
                     readOnly={!connected}
-                    onInput={data => send({ type: 'input', channel_id: id, data: bytesToBase64(data) })}
-                    onResize={(cols, rows) => send({ type: 'resize', channel_id: id, cols, rows })}
+                    onInput={data =>
+                        send({
+                            type: 'input',
+                            channel_id: id,
+                            data: bytesToBase64(data),
+                        })}
+                    onResize={(cols, rows) =>
+                        send({ type: 'resize', channel_id: id, cols, rows })}
                     onTitleChange={title => {
                         channels.set(id, {
                             ...channel,
@@ -348,7 +354,8 @@
                         tabindex="0"
                         role="button"
                         onclick={() => switchToChannel(id)}
-                        onkeydown={e => e.key === 'Enter' && switchToChannel(id)}
+                        onkeydown={e =>
+                            e.key === 'Enter' && switchToChannel(id)}
                     >
                         <span class="label"
                             >{ch.terminalTitle ?? ch.label}</span
@@ -356,7 +363,10 @@
                         <button
                             type="button"
                             class="btn btn-link btn-sm close-button"
-                            onclick={e => { e.stopPropagation(); closeTab(id) }}
+                            onclick={e => {
+                                e.stopPropagation()
+                                closeTab(id)
+                            }}
                         >
                             <Fa icon={faTimes} />
                         </button>
@@ -402,7 +412,10 @@
                         type="button"
                         class="btn btn-sm btn-secondary"
                         disabled={fontSize <= FONT_SIZE_MIN}
-                        onclick={() => { zoomOut(); menuOpen = true }}
+                        onclick={() => {
+                            zoomOut()
+                            menuOpen = true
+                        }}
                         aria-label="Zoom out"
                     >
                         <Fa icon={faMinus} />
@@ -414,7 +427,10 @@
                         type="button"
                         class="btn btn-sm btn-secondary"
                         disabled={fontSize >= FONT_SIZE_MAX}
-                        onclick={() => { zoomIn(); menuOpen = true }}
+                        onclick={() => {
+                            zoomIn()
+                            menuOpen = true
+                        }}
                         aria-label="Zoom in"
                     >
                         <Fa icon={faPlus} />
@@ -423,7 +439,10 @@
                 {#if sessionInfo}
                     <DropdownItem divider />
                     <DropdownItem
-                        onclick={() => { showInstructions = true; menuOpen = false }}
+                        onclick={() => {
+                            showInstructions = true
+                            menuOpen = false
+                        }}
                     >
                         Connect from your machine
                     </DropdownItem>
@@ -436,7 +455,7 @@
 {#if sessionInfo}
     <Modal
         isOpen={showInstructions}
-        toggle={() => showInstructions = false}
+        toggle={() => (showInstructions = false)}
         size="lg"
     >
         <ModalBody>
@@ -450,7 +469,7 @@
             <Button
                 color="secondary"
                 class="modal-button"
-                onclick={() => showInstructions = false}
+                onclick={() => (showInstructions = false)}
             >
                 Close
             </Button>
@@ -473,10 +492,10 @@
                 color="danger"
                 class="modal-button"
                 onclick={() => {
-                send({ type: 'reject_host_key' })
-                pendingHostKey = null
-                disconnect()
-            }}
+                    send({ type: 'reject_host_key' })
+                    pendingHostKey = null
+                    disconnect()
+                }}
             >
                 Reject and disconnect
             </Button>
@@ -484,9 +503,9 @@
                 color="primary"
                 class="modal-button"
                 onclick={() => {
-                send({ type: 'accept_host_key' })
-                pendingHostKey = null
-            }}
+                    send({ type: 'accept_host_key' })
+                    pendingHostKey = null
+                }}
             >
                 Accept and connect
             </Button>

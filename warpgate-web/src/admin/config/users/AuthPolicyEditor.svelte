@@ -214,7 +214,8 @@
 </script>
 
 {#if globalParameters && globalParameters.mfaEnforcement !== 'Off'}
-    {#if globalParameters.mfaPolicyExemptSsoUsers && existingCredentials?.some(x => x.kind === CredentialKind.Sso)}
+    {#if globalParameters.mfaPolicyExemptSsoUsers &&
+        existingCredentials?.some(x => x.kind === CredentialKind.Sso)}
         <InfoBox>
             MFA enforcement is on, but is set to exempt this user from MFA
             requirements because they have an SSO credential.
@@ -233,7 +234,8 @@
         <div class="list-group-item">
             <div class="d-flex align-items-center">
                 <strong>{protocol.name}</strong>
-                {#if possibleCredentials(protocol.id).size > 0 || value[protocol.id]?.length}
+                {#if possibleCredentials(protocol.id).size > 0 ||
+                    value[protocol.id]?.length}
                     <Input
                         type="checkbox"
                         id={`policy-editor-${protocol.id}`}
@@ -259,7 +261,9 @@
                         {@const enforced =
                             mfaEnforcedFactor(protocol.id) === kind}
                         {@const missingCredential =
-                            enabled && availableKinds && !availableKinds.has(kind)}
+                            enabled &&
+                            availableKinds &&
+                            !availableKinds.has(kind)}
                         {@const unsupported =
                             (enabled || enforced) &&
                             !possibleCredentials(protocol.id).has(kind)}
@@ -279,7 +283,10 @@
                             {#if missingCredential || unsupported}
                                 <Fa icon={faWarning} class="text-warning" />
                             {/if}
-                            {#if mandatory || enforced || missingCredential || unsupported}
+                            {#if mandatory ||
+                                enforced ||
+                                missingCredential ||
+                                unsupported}
                                 <Tooltip
                                     target={`policy-editor-${protocol.id}${kind}-wrap`}
                                     animation

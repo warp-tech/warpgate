@@ -42,18 +42,18 @@
     toggle={_cancel}
     {isOpen}
     on:open={() => {
-    if (instance) {
-        provider = instance.provider ?? null
-        email = instance.email
-    }
-}}
+        if (instance) {
+            provider = instance.provider ?? null
+            email = instance.email
+        }
+    }}
 >
     <Form
         {validated}
         on:submit={e => {
-        _save()
-        e.preventDefault()
-    }}
+            _save()
+            e.preventDefault()
+        }}
     >
         <ModalBody>
             <FormGroup floating label="E-mail">
@@ -61,7 +61,9 @@
             </FormGroup>
 
             <Loadable promise={api.getSsoProviders()}>
-                {#snippet children(providers)}
+                {#snippet children(
+                    providers,
+                )}
                     {#if !providers.length}
                         <Alert color="warning">
                             You don't have any SSO providers configured. Add
@@ -86,7 +88,7 @@
                 type="submit"
                 color="primary"
                 class="modal-button"
-                on:click={() => validated = true}
+                on:click={() => (validated = true)}
             >
                 Save
             </Button>

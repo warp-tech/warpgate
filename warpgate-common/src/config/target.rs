@@ -299,6 +299,14 @@ pub struct TargetRdpOptions {
     #[serde(default)]
     pub domain: Option<String>,
 
+    /// Kerberos KDC for network-level authentication: `tcp://dc:88`, `udp://dc:88`
+    /// or a KDC proxy `https://` URL. When set, CredSSP negotiates Kerberos (falling
+    /// back to NTLM), which accounts barred from NTLM (Protected Users) require.
+    /// The target host must then be a name matching its `TERMSRV/` SPN, not an IP.
+    #[serde(default)]
+    #[oai(validator(max_length = 2048, pattern = r"^$|^(tcp|udp|https?)://.+"))]
+    pub kdc_url: Option<String>,
+
     #[serde(default)]
     pub auth: RdpTargetAuth,
 
@@ -495,6 +503,24 @@ impl TargetSecrets for TargetHTTPOptions {
     }
 }
 
+impl TargetHTTPOptions {
+    fn redact_credentials(&mut self) {
+        // redact secrets/tokens that might be passed via headers
+        self.headers.values_mut().for_each(String::clear);
+        // redact auth from the URL
+        self.url = url::Url::parse(&self.url)
+            .ok()
+            .filter(url::Url::has_host)
+            .map(|mut url| {
+                // Infallible once the URL has a host
+                let _ = url.set_username("");
+                let _ = url.set_password(None);
+                url.into()
+            })
+            .unwrap_or_default();
+    }
+}
+
 impl TargetSecrets for TargetKubernetesOptions {
     fn secrets_mut(&mut self) -> Vec<&mut MaybeSecretRef> {
         match &mut self.auth {
@@ -569,11 +595,24 @@ impl StoredSecrets for TargetOptions {
             })
             .collect()
     }
+
+    fn redact(&mut self) {
+        for secret in self.stored_secrets_mut() {
+            *secret = StoredSecret::default();
+        }
+        if let Self::Http(options) = self {
+            options.redact_credentials();
+        }
+    }
 }
 
 impl StoredSecrets for Target {
     fn stored_secrets_mut(&mut self) -> Vec<&mut StoredSecret> {
         self.options.stored_secrets_mut()
+    }
+
+    fn redact(&mut self) {
+        self.options.redact();
     }
 }
 
@@ -584,8 +623,9 @@ mod tests {
         DatabaseTargetAuth, DatabaseTargetIamRoleAuth, DatabaseTargetPasswordAuth, MaybeSecretRef,
         PostgresProtocolVersion, RdpTargetCompression, RdpTlsSecurity, SSHTargetAuth, SecretRef,
         SshTargetCertificateAuth, SshTargetIamRoleAuth, SshTargetPasswordAuth,
-        SshTargetPublicKeyAuth, TargetHTTPOptions, TargetKubernetesOptions, TargetMySqlOptions,
-        TargetOptions, TargetPostgresOptions, TargetRdpOptions, TargetSSHOptions, Tls,
+        SshTargetPublicKeyAuth, Target, TargetHTTPOptions, TargetKubernetesOptions,
+        TargetMySqlOptions, TargetOptions, TargetPostgresOptions, TargetRdpOptions,
+        TargetSSHOptions, Tls,
     };
     use crate::{StoredSecrets, TargetSecrets};
 
@@ -827,6 +867,49 @@ mod tests {
 
         assert_eq!(snapshot["mysql"]["auth"]["password"], "", "{snapshot}");
         assert_eq!(snapshot["mysql"]["host"], "db");
+    }
+
+    /// An HTTP target's upstream credentials live in its headers and in the
+    /// URL's userinfo, not in a secret slot.
+    #[test]
+    fn redaction_blanks_http_headers_and_url_userinfo() {
+        let target: Target = serde_json::from_value(serde_json::json!({
+            "name": "web", "description": "", "rate_limit_bytes_per_second": null,
+            "group_id": null, "ticket_max_duration_seconds": null,
+            "ticket_requests_disabled": false, "ticket_require_approval": false,
+            "require_approval": false, "ticket_max_uses": null,
+            "http": {
+                "url": "https://u:p4ss@upstream.example:8443/base?q=1",
+                "headers": {"Authorization": "Bearer s3cr3t-upstream"},
+            },
+        }))
+        .unwrap();
+
+        for snapshot in [
+            serde_json::to_value(target.redacted()).unwrap(),
+            serde_json::to_value(target.options.redacted()).unwrap(),
+        ] {
+            let http = snapshot.get("http").unwrap();
+            assert_eq!(http["url"], "https://upstream.example:8443/base?q=1");
+            assert_eq!(http["headers"]["Authorization"], "", "{snapshot}");
+        }
+    }
+
+    #[test]
+    fn url_redaction_only_touches_userinfo() {
+        for (url, redacted) in [
+            ("http://upstream/a@b?c=@", "http://upstream/a@b?c=@"),
+            ("http://a:b@c@upstream", "http://upstream/"),
+            ("u:p@upstream/x", ""),
+            ("", ""),
+        ] {
+            let mut options: TargetHTTPOptions = serde_json::from_str("{}").unwrap();
+            options.url = url.into();
+            let TargetOptions::Http(options) = TargetOptions::Http(options).redacted() else {
+                unreachable!()
+            };
+            assert_eq!(options.url, redacted, "{url}");
+        }
     }
 
     #[test]

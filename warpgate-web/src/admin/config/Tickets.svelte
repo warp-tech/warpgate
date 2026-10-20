@@ -92,9 +92,7 @@
         {#if $adminPermissions.ticketRequestsManage && pendingRequestCount}
             <div class="mt-4 text-muted">
                 {pendingRequestCount}
-                pending request{pendingRequestCount === 1
-                    ? ''
-                    : 's'}
+                pending request{pendingRequestCount === 1 ? '' : 's'}
                 awaiting action in
                 <a use:link href="/status/requests">Status &rarr; Requests</a>.
             </div>
@@ -131,7 +129,9 @@
                                         class="text-muted d-flex align-items-center gap-2"
                                     >
                                         <Fa
-                                            icon={ticket.expiry > new Date() ? faCalendarCheck : faCalendarXmark}
+                                            icon={ticket.expiry > new Date()
+                                                ? faCalendarCheck
+                                                : faCalendarXmark}
                                         />
                                         Until {ticket.expiry?.toLocaleString()}
                                     </small>
@@ -161,9 +161,9 @@
                             <Button
                                 color="link"
                                 onclick={e => {
-                                deleteTicket(ticket)
-                                e.preventDefault()
-                            }}
+                                    deleteTicket(ticket)
+                                    e.preventDefault()
+                                }}
                                 disabled={!$adminPermissions.ticketsDelete}
                             >
                                 Delete
@@ -187,9 +187,11 @@
                         class="form-control form-control-sm"
                         value={requestHistoryFilter ?? ''}
                         onchange={e => {
-                    const v = e.currentTarget.value
-                    requestHistoryFilter = v ? v as TicketRequestStatus : undefined
-                }}
+                            const v = e.currentTarget.value
+                            requestHistoryFilter = v
+                                ? (v as TicketRequestStatus)
+                                : undefined
+                        }}
                     >
                         <option value="">All</option>
                         <option value={TicketRequestStatus.Approved}>
@@ -225,17 +227,25 @@
                                 {#if request.requestedDurationSeconds}
                                     <small class="d-block text-muted">
                                         Duration:
-                                        {formatDurationAsHumantime(request.requestedDurationSeconds)}
+                                        {formatDurationAsHumantime(
+                                            request.requestedDurationSeconds,
+                                        )}
                                     </small>
                                 {/if}
                                 {#if request.resolvedByUserId}
                                     <small class="d-block text-muted">
-                                        {request.status === TicketRequestStatus.Approved ? 'Approved' : 'Denied'}
+                                        {request.status ===
+                                        TicketRequestStatus.Approved
+                                            ? 'Approved'
+                                            : 'Denied'}
                                         by
-                                        {request.resolvedByUsername ?? request.resolvedByUserId}
+                                        {request.resolvedByUsername ??
+                                            request.resolvedByUserId}
                                     </small>
                                 {/if}
-                                {#if request.status === TicketRequestStatus.Approved && !request.ticketId}
+                                {#if request.status ===
+                                    TicketRequestStatus.Approved &&
+                                    !request.ticketId}
                                     <small class="d-block text-info">
                                         Awaiting user activation
                                     </small>

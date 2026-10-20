@@ -17,6 +17,7 @@ use ironrdp::cliprdr::backend::ClipboardMessage;
 use ironrdp::connector::connection_activation::{
     ConnectionActivationFactory, ConnectionActivationState,
 };
+use ironrdp::connector::credssp::KerberosConfig;
 use ironrdp::connector::{self, ConnectionResult, Credentials};
 use ironrdp::core::WriteBuf;
 use ironrdp::displaycontrol::client::DisplayControlClient;
@@ -41,7 +42,7 @@ use tracing::{debug, warn};
 use warpgate_common::{RdpTargetAuth, RdpTargetCompression, SecretResolver, TargetRdpOptions};
 use warpgate_core::{
     DESKTOP_CONNECT_TIMEOUT, DESKTOP_HANDSHAKE_TIMEOUT, DesktopConnectionError, DesktopEvent,
-    DesktopInput, DesktopRect, DesktopState, within_deadline,
+    DesktopInput, DesktopRect, DesktopState, check_desktop_size, within_deadline,
 };
 
 pub(crate) use self::logon::LogonWatcher;
@@ -113,6 +114,7 @@ pub async fn run(
             options.port,
             options.verify_tls,
             options.tls_security,
+            options.kdc_url.clone().filter(|url| !url.is_empty()),
             clipboard.backend(),
         ),
     )
@@ -428,6 +430,7 @@ async fn reactivate(
 
         active_stage.set_share_id(share_id);
         active_stage.set_enable_server_pointer(enable_server_pointer);
+        check_desktop_size(desktop_size.width, desktop_size.height)?;
 
         if image.width() != desktop_size.width || image.height() != desktop_size.height {
             debug!(
@@ -679,7 +682,7 @@ fn build_config(
         domain: options.domain.clone(),
         enable_tls: true,
         enable_credssp: true,
-        keyboard_type: KeyboardType::IbmEnhanced,
+        keyboard_type: KeyboardType::IBM_ENHANCED,
         keyboard_subtype: 0,
         keyboard_layout: 0,
         keyboard_functional_keys_count: 12,
@@ -769,8 +772,15 @@ async fn connect(
     port: u16,
     verify_tls: bool,
     tls_security: warpgate_common::RdpTlsSecurity,
+    kdc_url: Option<String>,
     clipboard: TextClipboard<ClientClipboardSink>,
 ) -> Result<(ConnectionResult, Framed), DesktopConnectionError> {
+    // Without a Kerberos config IronRDP runs CredSSP over NTLM only.
+    let kerberos_config = kdc_url
+        .map(|url| KerberosConfig::new(Some(url), config.client_name.clone()))
+        .transpose()
+        .map_err(|error| connector_error("kerberos_config", error))?;
+
     let tcp_stream = within_deadline(DESKTOP_CONNECT_TIMEOUT, async {
         TcpStream::connect((server_name.as_str(), port))
             .await
@@ -825,7 +835,7 @@ async fn connect(
         &mut network_client,
         server_name.into(),
         server_public_key,
-        None,
+        kerberos_config,
     )
     .await
     .map_err(|error| connector_error("connect_finalize", error))?;
@@ -833,6 +843,10 @@ async fn connect(
     if connection_result.desktop_size.width == 0 || connection_result.desktop_size.height == 0 {
         warn!("target reported a zero desktop size");
     }
+    check_desktop_size(
+        connection_result.desktop_size.width,
+        connection_result.desktop_size.height,
+    )?;
 
     Ok((connection_result, upgraded_framed))
 }

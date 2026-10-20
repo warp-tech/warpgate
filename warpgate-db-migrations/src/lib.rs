@@ -96,6 +96,8 @@ mod m00089_secret_backends;
 mod m00090_logo;
 mod m00091_drop_cluster_token;
 mod m00092_http_session_sso_identity;
+mod m00093_log_session_id_nullable;
+mod m00094_unique_role_names;
 
 pub(crate) mod helpers;
 
@@ -197,6 +199,8 @@ impl MigratorTrait for Migrator {
             Box::new(m00090_logo::Migration),
             Box::new(m00091_drop_cluster_token::Migration),
             Box::new(m00092_http_session_sso_identity::Migration),
+            Box::new(m00093_log_session_id_nullable::Migration),
+            Box::new(m00094_unique_role_names::Migration),
         ]
     }
 }

@@ -86,7 +86,13 @@
     </div>
 
     {#if error}
-        <Alert color="danger" dismissible onclose={() => { error = undefined }}>
+        <Alert
+            color="danger"
+            dismissible
+            onclose={() => {
+                error = undefined
+            }}
+        >
             {error}
             <Button color="link" size="sm" onclick={load}>Retry</Button>
         </Alert>
@@ -122,7 +128,7 @@
             </div>
         {/if}
 
-        {#if blockedIps && (blockedIps.length > 0)}
+        {#if blockedIps && blockedIps.length > 0}
             <div class="section-header">
                 <h5 class="m-0">Blocked IPs</h5>
                 <span class="badge text-bg-danger">{blockedIps.length}</span>
@@ -154,7 +160,7 @@
             </div>
         {/if}
 
-        {#if lockedUsers && (lockedUsers.length > 0)}
+        {#if lockedUsers && lockedUsers.length > 0}
             <div class="section-header">
                 <h5 class="m-0">Locked users</h5>
                 <span class="badge text-bg-warning">{lockedUsers.length}</span>

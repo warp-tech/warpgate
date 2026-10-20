@@ -13,8 +13,8 @@ mod terminal_screen;
 pub use desktop::{
     DESKTOP_CONNECT_TIMEOUT, DESKTOP_HANDSHAKE_TIMEOUT, DESKTOP_INPUT_CHANNEL_CAPACITY,
     DesktopClientHandles, DesktopConnectionError, DesktopEvent, DesktopInput, DesktopRect,
-    DesktopState, LogonState, MAX_CLIPBOARD_BYTES, Scancode, truncate_clipboard_contents,
-    truncate_clipboard_contents_in_place, within_deadline,
+    DesktopState, LogonState, MAX_CLIPBOARD_BYTES, MAX_DESKTOP_DIM, Scancode, check_desktop_size,
+    truncate_clipboard_contents, truncate_clipboard_contents_in_place, within_deadline,
 };
 pub use framebuffer::{Framebuffer, PngEncodeError, Rect, decode_png_rgba};
 pub use handle::{AdmittedTarget, SessionHandle, TargetSessionStart, WarpgateServerHandle};
