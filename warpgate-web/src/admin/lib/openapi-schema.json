@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.30.0-7-g3617129e-modified"
+    "version": "v0.30.0-modified"
   },
   "servers": [
     {
@@ -327,6 +327,16 @@
               }
             }
           },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "400": {
             "description": "",
             "content": {
@@ -420,6 +430,19 @@
               "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/Role"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -7867,8 +7890,7 @@
             "minimum": 1.0
           },
           "ticket_requests_disabled": {
-            "type": "boolean",
-            "description": "Required on every write, so that saving a target without mentioning a\ngate is refused rather than quietly taking it off."
+            "type": "boolean"
           },
           "ticket_require_approval": {
             "type": "boolean"
