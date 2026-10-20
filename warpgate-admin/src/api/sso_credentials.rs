@@ -177,6 +177,19 @@ impl DetailApi {
         let Some(model) = SsoCredential::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(UpdateSsoCredentialResponse::NotFound);
         };
+        let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
+            return Ok(UpdateSsoCredentialResponse::NotFound);
+        };
+
+        AuditEvent::CredentialUpdated {
+            credential_type: "sso".to_string(),
+            credential_name: Some(model.email.clone()),
+            via: CredentialChangedVia::Admin,
+            user_id: *user_id,
+            username: user.username,
+            actor_user_id: admin.auth.user_id(),
+        }
+        .emit();
 
         Ok(UpdateSsoCredentialResponse::Updated(Json(model.into())))
     }

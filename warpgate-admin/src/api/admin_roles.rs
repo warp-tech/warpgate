@@ -5,6 +5,7 @@ use sea_orm::{ActiveModelTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, AdminRole as AdminRoleConfig, WarpgateError};
 use warpgate_core::consts::BUILTIN_ADMIN_ROLE_NAME;
+use warpgate_core::logging::AuditEvent;
 use warpgate_db_entities::{AdminRole, User};
 
 use super::AdminContext;
@@ -158,6 +159,15 @@ impl ListApi {
 
         let role = values.insert(db).await?;
         let role_config: AdminRoleConfig = role.into();
+
+        AuditEvent::AdminRoleCreated {
+            admin_role_id: role_config.id,
+            admin_role_name: role_config.name.clone(),
+            permissions: role_config.permissions(),
+            actor_user_id: admin.auth.user_id(),
+        }
+        .emit();
+
         Ok(CreateAdminRoleResponse::Created(Json(role_config)))
     }
 }
@@ -224,8 +234,17 @@ impl DetailApi {
         model.config_edit = Set(body.config_edit);
         model.admin_roles_manage = Set(body.admin_roles_manage);
         model.ticket_requests_manage = Set(body.ticket_requests_manage);
-        let role = model.update(db).await?;
-        Ok(UpdateAdminRoleResponse::Ok(Json(role.into())))
+        let role: AdminRoleConfig = model.update(db).await?.into();
+
+        AuditEvent::AdminRoleUpdated {
+            admin_role_id: role.id,
+            admin_role_name: role.name.clone(),
+            permissions: role.permissions(),
+            actor_user_id: admin.auth.user_id(),
+        }
+        .emit();
+
+        Ok(UpdateAdminRoleResponse::Ok(Json(role)))
     }
 
     #[oai(
@@ -250,7 +269,16 @@ impl DetailApi {
             return Ok(DeleteAdminRoleResponse::Forbidden);
         }
 
+        let (admin_role_id, admin_role_name) = (role.id, role.name.clone());
         role.delete(db).await?;
+
+        AuditEvent::AdminRoleDeleted {
+            admin_role_id,
+            admin_role_name,
+            actor_user_id: admin.auth.user_id(),
+        }
+        .emit();
+
         Ok(DeleteAdminRoleResponse::Deleted)
     }
 

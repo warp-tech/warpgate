@@ -288,16 +288,26 @@ impl DetailApi {
             None => serde_json::Value::Null,
         };
 
+        let credential_policy =
+            serde_json::to_value(body.credential_policy.clone()).map_err(WarpgateError::from)?;
+
         let mut model: User::ActiveModel = user.into();
 
         model.username = Set(body.username.clone());
         model.description = Set(body.description.clone().unwrap_or_default());
-        model.credential_policy =
-            Set(serde_json::to_value(body.credential_policy.clone())
-                .map_err(WarpgateError::from)?);
+        model.credential_policy = Set(credential_policy.clone());
         model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(i64::from));
-        model.allowed_ip_ranges = Set(allowed_ip_ranges);
+        model.allowed_ip_ranges = Set(allowed_ip_ranges.clone());
         let user = model.update(db).await?;
+
+        AuditEvent::UserUpdated {
+            user_id: user.id,
+            username: user.username.clone(),
+            credential_policy: credential_policy.to_string(),
+            allowed_ip_ranges: allowed_ip_ranges.to_string(),
+            actor_user_id: admin.auth.user_id(),
+        }
+        .emit();
 
         warpgate_core::rate_limiting::apply_new_rate_limits(
             &admin.services().rate_limiter_registry,
@@ -766,11 +776,27 @@ impl RolesApi {
             return Ok(UpdateUserRoleResponse::NotFound);
         };
 
+        let Some(grantee) = User::Entity::find_by_id(id.0).one(db).await? else {
+            return Ok(UpdateUserRoleResponse::NotFound);
+        };
+
+        let revocation_cleared = assignment.revoked_at.is_some();
         let mut model: UserRoleAssignment::ActiveModel = assignment.into();
         model.expires_at = Set(body.expires_at);
         // If renewing an expired role, clear revoked_at
         model.revoked_at = Set(None);
         let updated = model.update(db).await?;
+
+        AuditEvent::AccessRoleExpiryChanged {
+            grantee_id: grantee.id,
+            grantee_username: grantee.username,
+            role_id: role.id,
+            role_name: role.name.clone(),
+            expires_at: updated.expires_at,
+            revocation_cleared,
+            actor_user_id: admin.auth.user_id(),
+        }
+        .emit();
 
         Ok(UpdateUserRoleResponse::Ok(Json(build_assignment_response(
             &updated, &role,
