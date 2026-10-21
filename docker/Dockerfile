@@ -31,7 +31,7 @@ RUN adduser warpgate --disabled-password --gecos "" --uid ${USER_ID} --home /dat
     && mkdir -p /data \
     && chown -R ${USER_ID}:${USER_ID} /data
 
-FROM gcr.io/distroless/cc-debian12
+FROM gcr.io/distroless/cc-debian13
 LABEL maintainer=heywoodlh
 
 COPY --from=build /etc/passwd /etc/passwd
