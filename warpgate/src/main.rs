@@ -95,6 +95,11 @@ pub(crate) struct UnattendedSetupArgs {
     #[clap(long)]
     pub(crate) rdp_port: Option<u16>,
 
+    /// Enable SOCKS5 and set port. Listens on 127.0.0.1 only, because SOCKS5
+    /// sends credentials unencrypted
+    #[clap(long)]
+    pub(crate) socks_port: Option<u16>,
+
     /// Enable session recording
     #[clap(long)]
     pub(crate) record_sessions: bool,

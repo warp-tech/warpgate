@@ -95,6 +95,10 @@ impl ListApi {
                 "name",
                 "target name is empty",
             ))),
+            Err(ResourceError::EmptyHost) => Ok(CreateTargetResponse::BadRequest(invalid_field(
+                "options.host",
+                "target host is empty",
+            ))),
             Err(ResourceError::NameTaken) => Ok(CreateTargetResponse::Conflict(Json(
                 "Name already exists".into(),
             ))),
@@ -181,6 +185,10 @@ impl DetailApi {
             Ok(target) => target,
             Err(ResourceError::EmptyName) => {
                 warn!("Rejecting request: target name is empty");
+                return Ok(UpdateTargetResponse::BadRequest);
+            }
+            Err(ResourceError::EmptyHost) => {
+                warn!("Rejecting request: target host is empty");
                 return Ok(UpdateTargetResponse::BadRequest);
             }
             Err(ResourceError::ProtocolChange) => {

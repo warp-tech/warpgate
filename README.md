@@ -106,6 +106,16 @@ Warpgate is a service that you deploy on the bastion/DMZ host, which will accept
 
 Run `warpgate setup` to interactively generate a config file, including port bindings. See [Getting started](https://warpgate.null.page/getting-started/) for details.
 
+### TCP targets over SOCKS5
+
+A `tcp` target is a plain host and port, reached through an optional SOCKS5 listener. It is off by default: enable it with `--socks-port` in `warpgate unattended-setup` (or `socks.enable: true` in the config file); it listens on `127.0.0.1:1080` unless `socks.listen` says otherwise.
+
+* Log in with a username and password (`user#target`, or `user:target`), or with a ticket as the username (`ticket-<secret>`, any password). Users whose policy needs OTP or in-browser approval can only connect with a ticket.
+* The client must request exactly the target's host and port; Warpgate only ever connects to the configured address, resolving its name on every connection. Only `CONNECT` is supported. With curl, use `socks5h://` so that the name is sent to Warpgate: `curl --proxy socks5h://127.0.0.1:1080 --proxy-user 'alice#my-target:password' http://my-target-host:8080/`
+* Every connection is a session of its own. Warpgate records the session and the bytes moved (audit events `TcpTunnelOpened` and `TcpTunnelClosed`), not the traffic.
+* **SOCKS5 has no encryption**: the password or ticket is sent in clear text. That is why the listener refuses to bind to anything but a loopback address unless `socks.allow_cleartext: true` is set; do that only on a network you trust, and prefer single-use tickets there.
+* `socks.idle_timeout` (e.g. `10m`) closes tunnels that carry no traffic; it is off by default. `socks.proxy_protocol`, `socks.external_host` and `socks.external_port` work as they do for the other listeners.
+
 It receives connections with specifically formatted credentials, authenticates the user locally, connects to the target itself, and then connects both parties together while (optionally) recording the session.
 
 When connecting through HTTPS, Warpgate presents a selection of available targets, and will then proxy all traffic in a session to the selected target. You can switch between targets at any time.

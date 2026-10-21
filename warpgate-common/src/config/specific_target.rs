@@ -1,6 +1,6 @@
 use super::target::{
     Target, TargetHTTPOptions, TargetKubernetesOptions, TargetMySqlOptions, TargetOptions,
-    TargetPostgresOptions, TargetRdpOptions, TargetSSHOptions, TargetVncOptions,
+    TargetPostgresOptions, TargetRdpOptions, TargetSSHOptions, TargetTcpOptions, TargetVncOptions,
 };
 use crate::{Protocol, WarpgateError};
 
@@ -31,6 +31,7 @@ target_options_variant!(MySql, TargetMySqlOptions, Protocol::MySql);
 target_options_variant!(Postgres, TargetPostgresOptions, Protocol::Postgres);
 target_options_variant!(Vnc, TargetVncOptions, Protocol::Vnc);
 target_options_variant!(Rdp, TargetRdpOptions, Protocol::Rdp);
+target_options_variant!(Tcp, TargetTcpOptions, Protocol::Tcp);
 
 /// A [`Target`], optionally narrowed down to a specific protocol/type
 #[derive(Debug, Clone)]

@@ -1,4 +1,4 @@
-use std::net::{Ipv6Addr, SocketAddr};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
 use crate::{ListenEndpoint, Secret};
@@ -81,6 +81,13 @@ pub fn _default_kubernetes_listen() -> ListenEndpoint {
 #[inline]
 pub fn _default_vnc_listen() -> ListenEndpoint {
     ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 5900))
+}
+
+/// SOCKS5 carries its password in the clear, so it only listens on loopback by
+/// default; see [`SocksConfig::allow_cleartext`](super::SocksConfig).
+#[inline]
+pub fn _default_socks_listen() -> ListenEndpoint {
+    ListenEndpoint::from(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1080))
 }
 
 #[inline]

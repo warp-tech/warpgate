@@ -232,6 +232,16 @@ pub struct TargetPostgresOptions {
     pub protocol_version: PostgresProtocolVersion,
 }
 
+/// A plain TCP endpoint reached through the SOCKS5 listener. It carries no
+/// credentials; the gateway only ever dials this address.
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct TargetTcpOptions {
+    pub host: String,
+
+    #[oai(validator(minimum(value = "1")))]
+    pub port: u16,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct TargetVncOptions {
     #[serde(default = "_default_empty_string")]
@@ -439,6 +449,8 @@ pub enum TargetOptions {
     Vnc(TargetVncOptions),
     #[serde(rename = "rdp")]
     Rdp(TargetRdpOptions),
+    #[serde(rename = "tcp")]
+    Tcp(TargetTcpOptions),
 }
 
 impl TargetOptions {
@@ -460,6 +472,7 @@ impl TargetOptions {
             TargetOptions::Postgres(_) => Protocol::Postgres,
             TargetOptions::Vnc(_) => Protocol::Vnc,
             TargetOptions::Rdp(_) => Protocol::Rdp,
+            TargetOptions::Tcp(_) => Protocol::Tcp,
         }
     }
 
@@ -568,6 +581,12 @@ impl TargetSecrets for TargetRdpOptions {
     }
 }
 
+impl TargetSecrets for TargetTcpOptions {
+    fn secrets_mut(&mut self) -> Vec<&mut MaybeSecretRef> {
+        vec![]
+    }
+}
+
 impl TargetSecrets for TargetOptions {
     fn secrets_mut(&mut self) -> Vec<&mut MaybeSecretRef> {
         match self {
@@ -578,6 +597,7 @@ impl TargetSecrets for TargetOptions {
             TargetOptions::Postgres(o) => o.secrets_mut(),
             TargetOptions::Vnc(o) => o.secrets_mut(),
             TargetOptions::Rdp(o) => o.secrets_mut(),
+            TargetOptions::Tcp(o) => o.secrets_mut(),
         }
     }
 }
@@ -725,6 +745,22 @@ mod tests {
         assert_eq!(absent.tls, Tls::default());
     }
 
+    #[test]
+    fn a_tcp_target_is_a_host_and_port_and_nothing_secret() {
+        let options: TargetOptions =
+            serde_json::from_str(r#"{"tcp":{"host":"db.internal","port":5432}}"#).unwrap();
+
+        assert_eq!(options.protocol(), crate::Protocol::Tcp);
+        assert!(options.secret_references().is_empty());
+        assert_eq!(
+            serde_json::to_value(&options).unwrap(),
+            serde_json::json!({"tcp": {"host": "db.internal", "port": 5432}})
+        );
+        // there is no sensible default for either
+        assert!(serde_json::from_str::<TargetOptions>(r#"{"tcp":{"host":"h"}}"#).is_err());
+        assert!(serde_json::from_str::<TargetOptions>(r#"{"tcp":{"port":22}}"#).is_err());
+    }
+
     /// These fields stopped being `Option`, and m00087 drops the explicit nulls
     /// left behind rather than translating them. Their defaults therefore have to
     /// keep producing what the old `unwrap_or` did.
@@ -813,6 +849,7 @@ mod tests {
             TargetOptions::Postgres(postgres),
             TargetOptions::Vnc(vnc),
             TargetOptions::Rdp(rdp),
+            TargetOptions::Tcp(serde_json::from_str(r#"{"host":"h","port":1}"#).unwrap()),
             TargetOptions::Kubernetes(k8s_token),
             TargetOptions::Kubernetes(k8s_cert),
             TargetOptions::Http(serde_json::from_str(r#"{"url":"http://t"}"#).unwrap()),

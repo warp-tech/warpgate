@@ -40,6 +40,7 @@
         { id: 'kubernetes', name: 'Kubernetes' },
         { id: 'vnc', name: 'VNC' },
         { id: 'rdp', name: 'RDP' },
+        { id: 'tcp', name: 'TCP (SOCKS5)' },
     ]
 
     const possibleCredentialsByProtocol = $derived(
@@ -92,6 +93,12 @@
             [
                 [CredentialKind.WebUserApproval, true],
                 'Users will need to log in to the Warpgate UI to see the 2FA auth prompt for Kubernetes access.',
+            ],
+        ]),
+        tcp: new Map([
+            [
+                [CredentialKind.WebUserApproval, true],
+                'SOCKS5 cannot show an approval prompt: users who need it can only connect with a ticket.',
             ],
         ]),
     }

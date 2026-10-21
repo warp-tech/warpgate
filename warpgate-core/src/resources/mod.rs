@@ -11,6 +11,8 @@ use crate::db::is_unique_violation;
 pub enum ResourceError {
     #[error("name is empty")]
     EmptyName,
+    #[error("target host is empty")]
+    EmptyHost,
     #[error("name already taken")]
     NameTaken,
     #[error("not found")]
@@ -126,6 +128,9 @@ mod tests {
         assert!(matches!(result, Err(ResourceError::NameTaken)));
         let result = targets::create(&db, &ssh("")).await;
         assert!(matches!(result, Err(ResourceError::EmptyName)));
+        let blank_tcp = target("tcp", json!({"tcp": {"host": " ", "port": 22}}));
+        let result = targets::create(&db, &blank_tcp).await;
+        assert!(matches!(result, Err(ResourceError::EmptyHost)));
         let http = target("web", json!({"http": {"url": "https://web"}}));
         let result = targets::update(&db, web.id, &http).await;
         assert!(matches!(result, Err(ResourceError::ProtocolChange)));

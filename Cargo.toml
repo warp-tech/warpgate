@@ -21,6 +21,7 @@ members = [
     "warpgate-protocol-mysql",
     "warpgate-protocol-postgres",
     "warpgate-protocol-rdp",
+    "warpgate-protocol-socks",
     "warpgate-protocol-ssh",
     "warpgate-protocol-vnc",
     "warpgate-desktop-ui",

@@ -11,8 +11,9 @@ use defaults::{
     _default_audit_retention, _default_cookie_max_age, _default_database_url, _default_false,
     _default_http_listen, _default_kubernetes_listen, _default_mysql_advertised_version,
     _default_mysql_listen, _default_postgres_listen, _default_rdp_listen, _default_recordings_path,
-    _default_retention, _default_session_max_age, _default_ssh_inactivity_timeout,
-    _default_ssh_listen, _default_ssh_target_handshake_timeout, _default_vnc_listen,
+    _default_retention, _default_session_max_age, _default_socks_listen,
+    _default_ssh_inactivity_timeout, _default_ssh_listen, _default_ssh_target_handshake_timeout,
+    _default_vnc_listen,
 };
 use poem::http::uri::Authority;
 use poem_openapi::{Object, Union};
@@ -107,6 +108,8 @@ pub struct UserRequireCredentialsPolicy {
     pub vnc: Option<Vec<CredentialKind>>,
     #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub rdp: Option<Vec<CredentialKind>>,
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
+    pub tcp: Option<Vec<CredentialKind>>,
 }
 
 impl UserRequireCredentialsPolicy {
@@ -805,6 +808,61 @@ impl VncConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
+pub struct SocksConfig {
+    #[serde(default = "_default_false")]
+    pub enable: bool,
+
+    /// Loopback by default: the RFC 1929 password and tickets cross the wire
+    /// unencrypted. Any other address needs `allow_cleartext`.
+    #[serde(default = "_default_socks_listen")]
+    pub listen: ListenEndpoint,
+
+    /// Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.
+    #[serde(default)]
+    pub proxy_protocol: bool,
+
+    #[serde(default)]
+    pub external_port: Option<u16>,
+
+    #[serde(default)]
+    pub external_host: Option<String>,
+
+    /// Permit `listen` to be a non-loopback address even though SOCKS5 has no
+    /// transport encryption.
+    #[serde(default = "_default_false")]
+    pub allow_cleartext: bool,
+
+    /// Close a tunnel after this long without traffic. Off by default.
+    #[serde(default, with = "humantime_serde")]
+    #[schemars(with = "Option<String>")]
+    pub idle_timeout: Option<Duration>,
+}
+
+impl Default for SocksConfig {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            listen: _default_socks_listen(),
+            proxy_protocol: false,
+            external_port: None,
+            external_host: None,
+            allow_cleartext: false,
+            idle_timeout: None,
+        }
+    }
+}
+
+impl SocksConfig {
+    pub fn external_port(&self) -> u16 {
+        self.external_port.unwrap_or_else(|| self.listen.port())
+    }
+
+    pub fn external_host(&self) -> Option<String> {
+        self.external_host.clone()
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
 pub struct RdpConfig {
     #[serde(default = "_default_false")]
     pub enable: bool,
@@ -936,6 +994,9 @@ pub struct WarpgateConfigStore {
     pub rdp: RdpConfig,
 
     #[serde(default)]
+    pub socks: SocksConfig,
+
+    #[serde(default)]
     pub log: LogConfig,
 }
 
@@ -953,6 +1014,7 @@ impl Default for WarpgateConfigStore {
             postgres: <_>::default(),
             vnc: <_>::default(),
             rdp: <_>::default(),
+            socks: <_>::default(),
             log: <_>::default(),
         }
     }
@@ -1008,7 +1070,7 @@ impl WarpgateConfig {
 mod tests {
     use std::time::Duration;
 
-    use super::{SshConfig, WarpgateConfig, WarpgateConfigStore};
+    use super::{SocksConfig, SshConfig, WarpgateConfig, WarpgateConfigStore};
 
     #[test]
     fn keepalive_interval_is_a_humantime_string() {
@@ -1019,6 +1081,28 @@ mod tests {
                 .unwrap()
                 .contains(r#""keepalive_interval":"1m""#)
         );
+    }
+
+    #[test]
+    fn socks_is_off_by_default_and_only_listens_on_loopback() {
+        for config in [
+            SocksConfig::default(),
+            serde_json::from_str::<SocksConfig>("{}").unwrap(),
+            WarpgateConfigStore::default().socks,
+        ] {
+            assert!(!config.enable);
+            assert!(!config.allow_cleartext);
+            assert!(config.idle_timeout.is_none());
+            assert!(config.listen.address().ip().is_loopback());
+            assert_eq!(config.listen.address().port(), 1080);
+            assert_eq!(config.external_port(), 1080);
+        }
+    }
+
+    #[test]
+    fn socks_idle_timeout_is_a_humantime_string() {
+        let config = serde_json::from_str::<SocksConfig>(r#"{"idle_timeout": "10m"}"#).unwrap();
+        assert_eq!(config.idle_timeout, Some(Duration::from_secs(600)));
     }
 
     #[test]

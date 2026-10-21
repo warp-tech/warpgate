@@ -39,6 +39,11 @@ fn set_data(
     model: &mut Target::ActiveModel,
     data: &TargetDataRequest,
 ) -> Result<(), ResourceError> {
+    if let TargetOptions::Tcp(tcp) = &data.options
+        && tcp.host.trim().is_empty()
+    {
+        return Err(ResourceError::EmptyHost);
+    }
     model.name = Set(data.name.clone());
     model.description = Set(data.description.clone().unwrap_or_default());
     model.options = Set(serialize_options_for_storage(data.options.clone())?);

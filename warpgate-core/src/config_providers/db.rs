@@ -482,6 +482,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                 postgres,
                 vnc,
                 rdp,
+                tcp,
             } = req;
 
             for (protocol, required) in [
@@ -492,6 +493,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                 (Protocol::Postgres, postgres),
                 (Protocol::Vnc, vnc),
                 (Protocol::Rdp, rdp),
+                (Protocol::Tcp, tcp),
             ] {
                 if let Some(required) = required {
                     policy

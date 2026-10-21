@@ -408,6 +408,26 @@
         response_status: string
     }
 
+    /** Identity both TCP tunnel audit events carry. */
+    interface TcpTunnelEvent {
+        user_id: string
+        username: string
+        target_id: string
+        target_name: string
+        client_ip: string
+    }
+
+    interface TcpTunnelOpened1 extends TcpTunnelEvent {
+        _type: 'TcpTunnelOpened1'
+    }
+
+    interface TcpTunnelClosed1 extends TcpTunnelEvent {
+        _type: 'TcpTunnelClosed1'
+        bytes_to_target: string
+        bytes_from_target: string
+        reason: string
+    }
+
     type RichLogEntry =
         | AccessRoleGranted1
         | AccessRoleRevoked1
@@ -430,6 +450,8 @@
         | KubernetesStreamRejected1
         | KubernetesDebugContainerCreated1
         | KubernetesPodCreated1
+        | TcpTunnelOpened1
+        | TcpTunnelClosed1
 
     function richLogType(entry: LogEntry): string {
         return String(entry.values?._type ?? '').replace(/^"|"$/g, '')
@@ -456,6 +478,8 @@
         'KubernetesStreamRejected1',
         'KubernetesDebugContainerCreated1',
         'KubernetesPodCreated1',
+        'TcpTunnelOpened1',
+        'TcpTunnelClosed1',
     ])
 
     function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
@@ -889,6 +913,44 @@
                                             id={richEntry.target_id}
                                             name={richEntry.target_name}
                                         />
+                                    </div>
+                                {:else if richEntry?._type ===
+                                    'TcpTunnelOpened1'}
+                                    <div class="rich-entry">
+                                        <UserBadge
+                                            id={richEntry.user_id}
+                                            name={richEntry.username}
+                                        />
+                                        opened a TCP tunnel to
+                                        <TargetBadge
+                                            id={richEntry.target_id}
+                                            name={richEntry.target_name}
+                                        />
+                                        from
+                                        <strong>{richEntry.client_ip}</strong>
+                                    </div>
+                                {:else if richEntry?._type ===
+                                    'TcpTunnelClosed1'}
+                                    <div class="rich-entry">
+                                        TCP tunnel of
+                                        <UserBadge
+                                            id={richEntry.user_id}
+                                            name={richEntry.username}
+                                        />
+                                        to
+                                        <TargetBadge
+                                            id={richEntry.target_id}
+                                            name={richEntry.target_name}
+                                        />
+                                        closed ({richEntry.reason}):
+                                        <strong
+                                            >{richEntry.bytes_to_target}</strong
+                                        >
+                                        bytes sent,
+                                        <strong
+                                            >{richEntry.bytes_from_target}</strong
+                                        >
+                                        received
                                     </div>
                                 {:else if richEntry?._type ===
                                     'KubernetesStreamRejected1'}

@@ -1,0 +1,22 @@
+[package]
+name = "warpgate-protocol-socks"
+version = "0.30.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+socket2 = { version = "0.6", features = ["all"], default-features = false }
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+url.workspace = true
+warpgate-common = { path = "../warpgate-common", default-features = false }
+warpgate-core = { path = "../warpgate-core", default-features = false }
+warpgate-tls = { path = "../warpgate-tls", default-features = false }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+uuid.workspace = true

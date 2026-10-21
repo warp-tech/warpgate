@@ -16,8 +16,8 @@ use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{
     GlobalParams, HttpConfig, KubernetesConfig, ListenEndpoint, MySqlConfig, PostgresConfig,
-    RdpConfig, Secret, SshConfig, SshHostKeyVerificationMode, VncConfig, WarpgateConfig,
-    WarpgateConfigStore,
+    RdpConfig, Secret, SocksConfig, SshConfig, SshHostKeyVerificationMode, VncConfig,
+    WarpgateConfig, WarpgateConfigStore,
 };
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
 use warpgate_core::db::connect_to_db_and_migrate;
@@ -97,6 +97,7 @@ struct Answers {
     kubernetes: Listener,
     vnc: Listener,
     rdp: Listener,
+    socks: Listener,
     host_key_verification: SshHostKeyVerificationMode,
     record_sessions: bool,
     admin_password: Secret<String>,
@@ -122,6 +123,15 @@ impl Answers {
             kubernetes: listener(args.kubernetes_port, KubernetesConfig::default().listen),
             vnc: listener(args.vnc_port, VncConfig::default().listen),
             rdp: listener(args.rdp_port, RdpConfig::default().listen),
+            // Not on `--listen-address`: SOCKS5 refuses to listen beyond loopback
+            socks: Listener {
+                enable: args.socks_port.is_some(),
+                listen: ListenEndpoint::from(SocketAddr::new(
+                    SocksConfig::default().listen.address().ip(),
+                    args.socks_port
+                        .unwrap_or_else(|| SocksConfig::default().listen.address().port()),
+                )),
+            },
             host_key_verification: args.host_key_verification,
             record_sessions: args.record_sessions,
             admin_password: args.admin_password(),
@@ -178,6 +188,13 @@ impl Answers {
 
         let vnc = prompt_listener(&theme, "VNC", VncConfig::default().listen, false)?;
         let rdp = prompt_listener(&theme, "RDP", RdpConfig::default().listen, false)?;
+        let socks = prompt_listener(&theme, "SOCKS5", SocksConfig::default().listen, false)?;
+        if socks.enable && !socks.listen.address().ip().is_loopback() {
+            info!(
+                "SOCKS5 sends credentials unencrypted and will refuse to start on a non-loopback"
+            );
+            info!("address unless you also set `socks.allow_cleartext: true` in the config file.");
+        }
 
         let record_sessions = dialoguer::Confirm::with_theme(&theme)
             .default(true)
@@ -200,6 +217,7 @@ impl Answers {
             kubernetes,
             vnc,
             rdp,
+            socks,
             host_key_verification: SshHostKeyVerificationMode::default(),
             record_sessions,
             admin_password,
@@ -237,6 +255,11 @@ impl Answers {
             ),
             (&self.vnc, &mut store.vnc.enable, &mut store.vnc.listen),
             (&self.rdp, &mut store.rdp.enable, &mut store.rdp.listen),
+            (
+                &self.socks,
+                &mut store.socks.enable,
+                &mut store.socks.listen,
+            ),
         ] {
             *enable = listener.enable;
             *listen = listener.listen.clone();

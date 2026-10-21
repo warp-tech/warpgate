@@ -82,6 +82,9 @@
         if (target.options.kind === 'Rdp') {
             address = `${target.options.host}:${target.options?.port}`
         }
+        if (target.options.kind === 'Tcp') {
+            address = `${target.options.host}:${target.options?.port}`
+        }
         return address
     }
 

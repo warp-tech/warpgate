@@ -22,6 +22,7 @@ use warpgate_protocol_kubernetes::KubernetesProtocolServer;
 use warpgate_protocol_mysql::MySQLProtocolServer;
 use warpgate_protocol_postgres::PostgresProtocolServer;
 use warpgate_protocol_rdp::RdpProtocolServer;
+use warpgate_protocol_socks::SocksProtocolServer;
 use warpgate_protocol_ssh::SSHProtocolServer;
 use warpgate_protocol_vnc::VncProtocolServer;
 
@@ -186,6 +187,38 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
             });
         supervisors.push(
             spawn_supervisor("SSH", false, factory, selector, &config_rx, status_registry).await?,
+        );
+    }
+
+    {
+        let status_registry = services.listener_status.clone();
+        let services = services.clone();
+        let factory: ServerFactory = Arc::new(move |address, proxy_protocol, tls| {
+            let services = services.clone();
+            async move {
+                SocksProtocolServer::new(&services)
+                    .bind(address, proxy_protocol, tls)
+                    .await
+            }
+            .boxed()
+        });
+        let selector: ConfigSelector<WarpgateConfig> =
+            Arc::new(|c: &WarpgateConfig| ListenerParams {
+                enabled: c.store.socks.enable,
+                endpoint: c.store.socks.listen.clone(),
+                proxy_protocol: c.store.socks.proxy_protocol,
+                tls: Vec::new(),
+            });
+        supervisors.push(
+            spawn_supervisor(
+                "SOCKS",
+                false,
+                factory,
+                selector,
+                &config_rx,
+                status_registry,
+            )
+            .await?,
         );
     }
 

@@ -368,7 +368,7 @@ impl Model {
             // Protocols that can't prompt for an OTP
             (
                 MfaEnforcement::Require,
-                Protocol::MySql | Protocol::Postgres | Protocol::Kubernetes,
+                Protocol::MySql | Protocol::Postgres | Protocol::Kubernetes | Protocol::Tcp,
             ) => Some(CredentialKind::WebUserApproval),
         }
     }
@@ -549,7 +549,12 @@ mod tests {
         assert_eq!(factors.get(&Protocol::Ssh), Some(&CredentialKind::Totp));
         assert_eq!(factors.get(&Protocol::Rdp), Some(&CredentialKind::Totp));
         assert_eq!(factors.get(&Protocol::Vnc), Some(&CredentialKind::Totp));
-        for protocol in [Protocol::MySql, Protocol::Postgres, Protocol::Kubernetes] {
+        for protocol in [
+            Protocol::MySql,
+            Protocol::Postgres,
+            Protocol::Kubernetes,
+            Protocol::Tcp,
+        ] {
             assert_eq!(
                 factors.get(&protocol),
                 Some(&CredentialKind::WebUserApproval)

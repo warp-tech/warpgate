@@ -98,6 +98,18 @@
         }
       ]
     },
+    "socks": {
+      "$ref": "#/$defs/SocksConfig",
+      "default": {
+        "allow_cleartext": false,
+        "enable": false,
+        "external_host": null,
+        "external_port": null,
+        "idle_timeout": null,
+        "listen": "127.0.0.1:1080",
+        "proxy_protocol": false
+      }
+    },
     "ssh": {
       "$ref": "#/$defs/SshConfig",
       "default": {
@@ -448,6 +460,55 @@
         "certificate",
         "key"
       ]
+    },
+    "SocksConfig": {
+      "type": "object",
+      "properties": {
+        "allow_cleartext": {
+          "description": "Permit `listen` to be a non-loopback address even though SOCKS5 has no\ntransport encryption.",
+          "type": "boolean",
+          "default": false
+        },
+        "enable": {
+          "type": "boolean",
+          "default": false
+        },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "external_port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "default": null,
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "idle_timeout": {
+          "description": "Close a tunnel after this long without traffic. Off by default.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "listen": {
+          "description": "Loopback by default: the RFC 1929 password and tickets cross the wire\nunencrypted. Any other address needs `allow_cleartext`.",
+          "$ref": "#/$defs/ListenEndpoint",
+          "default": "127.0.0.1:1080"
+        },
+        "proxy_protocol": {
+          "description": "Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.",
+          "type": "boolean",
+          "default": false
+        }
+      }
     },
     "SshConfig": {
       "type": "object",
