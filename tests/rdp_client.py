@@ -40,11 +40,13 @@ def have_xfreerdp():
     return _xfreerdp_bin() is not None
 
 
-def full_connect(host, port, selector, password, timeout):
+def full_connect(host, port, selector, password, timeout, extra_args=()):
     """Attempt a full RDP connection to Warpgate's listener, to drive its auth verdict.
 
-    Returns xfreerdp's stdout+stderr (only useful for debugging). Whether Warpgate accepted
-    is read server-side, not from this output. `selector` is the `user:target` string.
+    Returns xfreerdp's stdout+stderr. Whether Warpgate accepted is read server-side, not
+    from this output, which is otherwise only useful for debugging; `extra_args` (e.g. a
+    `/log-filters:` to log what the client receives) makes it something to assert on.
+    `selector` is the `user:target` string.
     """
     binary = _xfreerdp_bin()
     assert binary is not None, "xfreerdp not installed"
@@ -57,6 +59,7 @@ def full_connect(host, port, selector, password, timeout):
         "/cert:ignore",  # Warpgate's listener uses a self-signed test cert
         "/sec:tls",  # Warpgate terminates TLS (no NLA), so pin the security mode
         "/log-level:INFO",
+        *extra_args,
     ]
     try:
         result = subprocess.run(cmd, capture_output=True, timeout=timeout)
