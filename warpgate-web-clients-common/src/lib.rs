@@ -101,6 +101,32 @@ pub trait Sheddable {
 struct Outbox<M> {
     buffer: VecDeque<M>,
     phase: SessionPhase,
+    /// The latest phase is still in `buffer`, not yet delivered
+    phase_queued: bool,
+}
+
+impl<M: Sheddable + From<SessionPhase>> Outbox<M> {
+    fn transition(&mut self, phase: SessionPhase, shed_cap: usize) {
+        self.phase = phase.clone();
+        self.phase_queued = true;
+        WebSession::<M>::enqueue(&mut self.buffer, M::from(phase), shed_cap);
+    }
+
+    /// Re-send the current phase to a newly attached client, unless it is already
+    /// queued: a duplicate `connected` makes the web SSH client open a second channel.
+    fn replay_phase(&mut self, shed_cap: usize) {
+        if self.phase_queued {
+            return;
+        }
+        self.phase_queued = true;
+        let phase = self.phase.clone();
+        WebSession::<M>::enqueue(&mut self.buffer, M::from(phase), shed_cap);
+    }
+
+    fn drain(&mut self) -> Vec<M> {
+        self.phase_queued = false;
+        self.buffer.drain(..).collect()
+    }
 }
 
 /// Protocol-agnostic session core: identity, a bounded replayable outbound buffer, the
@@ -149,6 +175,7 @@ impl<M: Sheddable + From<SessionPhase>> WebSession<M> {
             outbox: Mutex::new(Outbox {
                 buffer: VecDeque::with_capacity(initial_capacity),
                 phase: SessionPhase::Connecting,
+                phase_queued: false,
             }),
             output_notify: Notify::new(),
             shed_cap,
@@ -184,9 +211,7 @@ impl<M: Sheddable + From<SessionPhase>> WebSession<M> {
     }
 
     async fn transition(&self, phase: SessionPhase) {
-        let mut outbox = self.outbox.lock().await;
-        outbox.phase = phase.clone();
-        Self::enqueue(&mut outbox.buffer, M::from(phase), self.shed_cap);
+        self.outbox.lock().await.transition(phase, self.shed_cap);
         self.output_notify.notify_waiters();
     }
 
@@ -198,14 +223,12 @@ impl<M: Sheddable + From<SessionPhase>> WebSession<M> {
     }
 
     pub async fn replay_phase(&self) {
-        let mut outbox = self.outbox.lock().await;
-        let phase = outbox.phase.clone();
-        Self::enqueue(&mut outbox.buffer, M::from(phase), self.shed_cap);
+        self.outbox.lock().await.replay_phase(self.shed_cap);
         self.output_notify.notify_waiters();
     }
 
     pub async fn drain_buffer(&self) -> Vec<M> {
-        self.outbox.lock().await.buffer.drain(..).collect()
+        self.outbox.lock().await.drain()
     }
 
     pub fn wait_buffer(&self) -> Notified<'_> {
@@ -488,4 +511,63 @@ pub async fn run_stream_loop<S, M, Fut>(
     }
 
     session.start_disconnect_timer(registry).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, PartialEq)]
+    struct TestMessage(SessionPhase);
+
+    impl From<SessionPhase> for TestMessage {
+        fn from(phase: SessionPhase) -> Self {
+            Self(phase)
+        }
+    }
+
+    impl Sheddable for TestMessage {
+        fn is_droppable(&self) -> bool {
+            false
+        }
+    }
+
+    fn outbox() -> Outbox<TestMessage> {
+        Outbox {
+            buffer: VecDeque::new(),
+            phase: SessionPhase::Connecting,
+            phase_queued: false,
+        }
+    }
+
+    #[test]
+    fn replay_does_not_repeat_an_undelivered_phase() {
+        let mut outbox = outbox();
+        outbox.transition(SessionPhase::Connecting, 16);
+        outbox.transition(SessionPhase::Connected, 16);
+
+        // the first WebSocket attaches before anything was delivered
+        outbox.replay_phase(16);
+
+        assert_eq!(
+            outbox.drain(),
+            vec![
+                TestMessage(SessionPhase::Connecting),
+                TestMessage(SessionPhase::Connected),
+            ]
+        );
+    }
+
+    #[test]
+    fn replay_resends_the_phase_after_delivery() {
+        let mut outbox = outbox();
+        outbox.transition(SessionPhase::Connected, 16);
+        outbox.drain();
+
+        // a reconnecting WebSocket needs the current phase again
+        outbox.replay_phase(16);
+        outbox.replay_phase(16);
+
+        assert_eq!(outbox.drain(), vec![TestMessage(SessionPhase::Connected)]);
+    }
 }
