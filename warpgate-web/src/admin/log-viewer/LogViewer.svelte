@@ -578,11 +578,13 @@
                                 </div>
                                 <div class="session">
                                     {#if item.sessionId}
+                                        <!-- Short ID; the full one is in the tooltip -->
                                         <a
                                             href="/status/sessions/{item.sessionId}"
+                                            title={item.sessionId}
                                             use:link
                                         >
-                                            {item.sessionId}
+                                            {item.sessionId.slice(0, 8)}
                                         </a>
                                     {/if}
                                 </div>
