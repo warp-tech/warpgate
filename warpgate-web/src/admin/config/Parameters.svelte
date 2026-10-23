@@ -1099,6 +1099,38 @@
                                         by users in various applications is a
                                         security concern.
                                     </HelpText>
+
+                                    <FormGroup
+                                        floating
+                                        label="Remote desktop recording frame rate (1-30 fps)"
+                                    >
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            max="30"
+                                            class="form-control"
+                                            value={parameters.desktopRecordingFrameRate}
+                                            onchange={e => {
+                                                const v = parseInt(
+                                                    e.currentTarget.value,
+                                                    10,
+                                                )
+                                                parameters.desktopRecordingFrameRate =
+                                                    Number.isNaN(v)
+                                                        ? 30
+                                                        : Math.min(
+                                                              30,
+                                                              Math.max(1, v),
+                                                          )
+                                            }}
+                                        >
+                                    </FormGroup>
+                                    <HelpText>
+                                        Lower values make recordings of busy
+                                        screens much smaller, at the cost of
+                                        smoothness on playback. Applies to
+                                        sessions started after the change.
+                                    </HelpText>
                                 {/if}
 
                                 <FormGroup floating label="Storage backend">

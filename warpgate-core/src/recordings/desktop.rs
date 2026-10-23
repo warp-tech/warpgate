@@ -23,7 +23,8 @@ const PNG_OFFLOAD_ENCODING_ABOVE_SIZE: usize = 64 * 1024;
 /// drag) emits hundreds of tiny rects per second; without a cap the recorder PNG-encodes
 /// every one and pins a core. We instead composite them into the framebuffer and encode the
 /// coalesced dirty region at most this often — a recording only needs a handful of fps.
-const MIN_RECORD_FRAME_INTERVAL: f32 = 1.0 / 30.0;
+/// Upper bound for the `desktop_recording_frame_rate` parameter (and its default).
+const MAX_RECORD_FRAME_RATE: i16 = 30;
 
 /// A rectangle as serialised in the recording stream. Matches the shape of the
 /// `rect` field in the web-desktop WebSocket `ServerMessage`, so the browser can
@@ -168,7 +169,7 @@ struct RecorderState {
     last_keyframe_time: f32,
     duration: f32,
     /// Union of framebuffer pixels blitted but not yet PNG-encoded — deferred by
-    /// `MIN_RECORD_FRAME_INTERVAL` and flushed as one rect.
+    /// the recorder's frame interval and flushed as one rect.
     dirty: Option<Rect>,
     /// Time of the last encoded delta frame; gates the frame-rate cap.
     last_frame_time: f32,
@@ -204,6 +205,9 @@ pub struct DesktopRecorder {
     // we do not record keyboard inputs at windows logon screen
     sign_in: OnceLock<LogonState>,
     record_keyboard: bool,
+    /// Shortest time between two encoded delta frames, from the
+    /// `desktop_recording_frame_rate` parameter.
+    frame_interval: f32,
 }
 
 impl DesktopRecorder {
@@ -351,7 +355,7 @@ impl DesktopRecorder {
                     width: u32::from(rect.width),
                     height: u32::from(rect.height),
                 });
-                if time - st.last_frame_time >= MIN_RECORD_FRAME_INTERVAL {
+                if time - st.last_frame_time >= self.frame_interval {
                     self.flush_delta(&mut st, time).await?;
                 }
             }
@@ -614,21 +618,27 @@ impl Drop for DesktopRecorder {
     }
 }
 
+/// The shortest time between two encoded delta frames for a frame rate,
+/// clamped to 1..=`MAX_RECORD_FRAME_RATE`.
+fn frame_interval(frame_rate: i16) -> f32 {
+    1.0 / f32::from(frame_rate.clamp(1, MAX_RECORD_FRAME_RATE))
+}
+
 impl Recorder for DesktopRecorder {
     fn kind() -> RecordingKind {
         RecordingKind::Desktop
     }
 
     async fn new(opener: &RecordingWriterOpener) -> Result<Self> {
+        let parameters = Parameters::Entity::get(&opener.db).await?;
         Ok(Self {
             data_writer: Arc::new(opener.open_ndjson_data().await?),
             index_writer: Arc::new(opener.open_index().await?),
             started_at: Instant::now(),
             state: Arc::new(Mutex::new(RecorderState::default())),
             sign_in: OnceLock::new(),
-            record_keyboard: Parameters::Entity::get(&opener.db)
-                .await?
-                .record_desktop_keyboard_input,
+            record_keyboard: parameters.record_desktop_keyboard_input,
+            frame_interval: frame_interval(parameters.desktop_recording_frame_rate),
         })
     }
 }
@@ -636,6 +646,15 @@ impl Recorder for DesktopRecorder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frame_interval_follows_the_frame_rate_and_is_clamped() {
+        assert!((frame_interval(30) - 1.0 / 30.0).abs() < f32::EPSILON);
+        assert!((frame_interval(5) - 0.2).abs() < f32::EPSILON);
+        assert!((frame_interval(1) - 1.0).abs() < f32::EPSILON);
+        assert!((frame_interval(0) - 1.0).abs() < f32::EPSILON);
+        assert!((frame_interval(120) - 1.0 / 30.0).abs() < f32::EPSILON);
+    }
 
     #[test]
     fn item_json_shape_matches_server_message() {
