@@ -3,7 +3,9 @@
         faFileContract,
         faFlaskVial,
     } from '@fortawesome/free-solid-svg-icons'
+    import { adminHref } from 'common/adminLink'
     import InfoBox from 'common/InfoBox.svelte'
+    import { serverInfo } from 'gateway/lib/store'
     import Fa from 'svelte-fa'
     import ApiTokenManager from './ApiTokenManager.svelte'
 </script>
@@ -25,14 +27,18 @@
 
     <div class="col">
         <h4>Admin API</h4>
-        <a class="link" target="_blank" href="/@warpgate/admin/api/playground">
+        <a
+            class="link"
+            target="_blank"
+            href={adminHref($serverInfo, '/api/playground')}
+        >
             <Fa icon={faFlaskVial} fw />
             <span>Playground</span>
         </a>
         <a
             class="link"
             target="_blank"
-            href="/@warpgate/admin/api/openapi.json"
+            href={adminHref($serverInfo, '/api/openapi.json')}
         >
             <Fa icon={faFileContract} fw />
             <span>Schema</span>

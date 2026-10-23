@@ -10,6 +10,7 @@ use warpgate_common::version::warpgate_version;
 use warpgate_common::{AdminPermission, AdminPermissionSet, warnings};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
+use warpgate_common_http::listener::HttpListenerKind;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
 };
@@ -139,6 +140,9 @@ pub struct Info {
     otp_setup_enforced: bool,
     setup_state: Option<SetupState>,
     admin_permissions: Option<AdminPermissions>,
+    /// Where the admin UI is served when it is on a separate listener and this
+    /// request came to the main one. Only for users with admin access.
+    admin_url: Option<String>,
     running_on_ec2: Option<bool>,
     should_prompt_analytics: bool,
     /// Login banner, shown to unauthenticated visitors too. Empty when unset.
@@ -296,6 +300,19 @@ impl Api {
 
         let can_edit_config = admin_permissions.as_ref().is_some_and(|p| p.config_edit);
 
+        let admin_url = match (&config.store.http.admin, &auth_ctx) {
+            (Some(admin), Some(ctx))
+                if HttpListenerKind::of(req) == Some(HttpListenerKind::Main)
+                    && is_user_admin(ctx).await? =>
+            {
+                let mut url = construct_external_url(Some(req), &config, None).await?;
+                let _ = url.set_port(Some(admin.external_port()));
+                url.set_path("/@warpgate/admin");
+                Some(url.to_string())
+            }
+            _ => None,
+        };
+
         let should_prompt_analytics = {
             let instance_older_than_a_week = time::OffsetDateTime::now_utc()
                 - parameters.instance_created_at
@@ -387,6 +404,7 @@ impl Api {
             setup_state,
             has_ldap: auth_ctx.is_some() && has_ldap,
             admin_permissions,
+            admin_url,
             running_on_ec2: if auth_ctx.is_some() {
                 Some(warpgate_aws::check_ec2().await)
             } else {

@@ -3,6 +3,7 @@
     import { Button } from '@sveltestrap/sveltestrap'
     import { serverInfo } from 'gateway/lib/store'
     import Fa from 'svelte-fa'
+    import { adminHref } from './adminLink'
     import {
         loadPendingRequests,
         watchPendingRequests,
@@ -12,16 +13,21 @@
     const { collapsed = false, class: className = '' } = $props()
 
     // Absolute so this works from either app shell
-    const PAGE_URL = '/@warpgate/admin#/status/requests'
+    let pageUrl = $derived(adminHref($serverInfo, '#/status/requests'))
+    // With the admin UI on a separate listener the admin API is not reachable
+    // from this page, so there is nothing to poll.
+    let adminElsewhere = $derived(!!$serverInfo?.adminUrl)
 
     let sessionCount = $state(0)
     let ticketCount = $state(0)
 
     let canSeeSessions = $derived(
-        $serverInfo?.adminPermissions?.approveSessions ?? false,
+        !adminElsewhere &&
+            ($serverInfo?.adminPermissions?.approveSessions ?? false),
     )
     let canManageTickets = $derived(
-        $serverInfo?.adminPermissions?.ticketRequestsManage ?? false,
+        !adminElsewhere &&
+            ($serverInfo?.adminPermissions?.ticketRequestsManage ?? false),
     )
     let canSeeAny = $derived(canSeeSessions || canManageTickets)
     let count = $derived(sessionCount + ticketCount)
@@ -58,7 +64,7 @@
 
 {#if canSeeAny && count > 0}
     <Button
-        href={PAGE_URL}
+        href={pageUrl}
         color="success"
         size={collapsed ? 'sm' : undefined}
         class={classnames('d-flex align-items-center gap-2', className)}

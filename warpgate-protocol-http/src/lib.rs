@@ -18,11 +18,15 @@ pub use common::{PROTOCOL_NAME, SsoLoginState};
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use http::HeaderValue;
-use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
+use poem::endpoint::{BoxEndpoint, EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
+use poem::error::NotFoundError;
 use poem::middleware::SetHeader;
 use poem::session::ServerSession;
 use poem::web::Data;
-use poem::{Endpoint, EndpointExt, FromRequest, IntoEndpoint, IntoResponse, Route, Server};
+use poem::{
+    Endpoint, EndpointExt, FromRequest, IntoEndpoint, IntoResponse, Request, Response, Route,
+    Server,
+};
 use poem_openapi::OpenApiService;
 use tokio::sync::Mutex;
 use tracing::{Instrument, warn};
@@ -31,9 +35,12 @@ use warpgate_common::ListenEndpoint;
 use warpgate_common::helpers::proxy_protocol::MaybeProxyProtocolAcceptor;
 use warpgate_common::version::warpgate_version;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
-use warpgate_common_http::cluster_tls::{ClusterTlsConfigs, cluster_aware_tls_acceptor};
+use warpgate_common_http::cluster_tls::{
+    ClusterTlsConfigs, cluster_aware_tls_acceptor, is_cluster_peer_request,
+};
 use warpgate_common_http::errors::render_errors;
 use warpgate_common_http::ext::construct_external_url;
+use warpgate_common_http::listener::HttpListenerKind;
 use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
@@ -59,12 +66,24 @@ use crate::session_storage::SharedSessionStorage;
 
 pub struct HTTPProtocolServer {
     services: Services,
+    listener: HttpListenerKind,
 }
 
 impl HTTPProtocolServer {
+    /// The server for `http.listen`.
     pub fn new(services: &Services) -> Self {
         Self {
             services: services.clone(),
+            listener: HttpListenerKind::Main,
+        }
+    }
+
+    /// The server for `http.admin.listen`: the same app, with the admin UI and
+    /// admin API always served.
+    pub fn new_admin(services: &Services) -> Self {
+        Self {
+            services: services.clone(),
+            listener: HttpListenerKind::Admin,
         }
     }
 }
@@ -182,6 +201,26 @@ impl ProtocolServer for HTTPProtocolServer {
             let openapi_ui_route = api_service.stoplight_elements();
             let openapi_spec_route = api_service.spec_endpoint();
             let admin_api_app = admin_api_app().into_endpoint();
+            // With `http.admin` set, the admin UI and API live on the admin
+            // listener; the main listener answers them only to cluster peers,
+            // which forward admin calls to each other's main HTTP port. Read
+            // per request, so a config reload needs no rebind.
+            let admin_guard = {
+                let services = self.services.clone();
+                let listener = self.listener;
+                move |ep: Arc<BoxEndpoint<'static, Response>>, req: Request| {
+                    let services = services.clone();
+                    async move {
+                        if listener == HttpListenerKind::Main && !is_cluster_peer_request(&req) {
+                            let moved = services.config.lock().await.store.http.admin.is_some();
+                            if moved {
+                                return Err(NotFoundError.into());
+                            }
+                        }
+                        ep.call(req).await
+                    }
+                }
+            };
 
             Route::new()
                 .nest(
@@ -199,7 +238,11 @@ impl ProtocolServer for HTTPProtocolServer {
                 )
                 .nest(
                     "/admin/api",
-                    endpoint_auth(admin_api_app).with(cache_bust()),
+                    endpoint_auth(admin_api_app)
+                        .with(cache_bust())
+                        .map_to_response()
+                        .boxed()
+                        .around(admin_guard.clone()),
                 )
                 .at(
                     // Served unauthenticated like the gateway shell: the admin API is
@@ -223,7 +266,10 @@ impl ProtocolServer for HTTPProtocolServer {
                                     .insert(http::header::CONTENT_SECURITY_POLICY, value);
                             }
                             Ok(resp)
-                        }),
+                        })
+                        .map_to_response()
+                        .boxed()
+                        .around(admin_guard),
                 )
                 .at("/api/logo", poem::get(api::logo::api_get_logo))
                 .at(
@@ -310,7 +356,14 @@ impl ProtocolServer for HTTPProtocolServer {
             ))
             .with(CookieHostMiddleware::new(base_cookie_domain))
             .with(cluster_peer_extension())
-            .data(UnauthenticatedRequestContext::new(self.services.clone()).await)
+            .data(
+                UnauthenticatedRequestContext::new_for_listener(
+                    self.services.clone(),
+                    self.listener,
+                )
+                .await,
+            )
+            .data(self.listener)
             .data(http_client_cache.clone())
             .data(session_store.clone())
             .data(session_storage.clone())

@@ -58,6 +58,21 @@ impl ListenEndpoint {
         }
     }
 
+    /// Whether binding both endpoints would claim the same socket: the same
+    /// port, and addresses that are equal or where one side is unspecified in
+    /// that family (`[::]` covers IPv4 too, as in [`Self::addresses_to_listen_on`]).
+    pub fn overlaps(&self, other: &Self) -> bool {
+        if self.0.port() != other.0.port() {
+            return false;
+        }
+        self.addresses_to_listen_on().iter().any(|a| {
+            other.addresses_to_listen_on().iter().any(|b| {
+                a.is_ipv4() == b.is_ipv4()
+                    && (a.ip() == b.ip() || a.ip().is_unspecified() || b.ip().is_unspecified())
+            })
+        })
+    }
+
     /// Binds every address without listening, so nothing can connect before
     /// the real listener is up (e.g. a `wait_port()` poll racing startup).
     pub fn probe(&self) -> Result<(), WarpgateError> {
@@ -220,5 +235,39 @@ mod tests {
             let (_, peer) = listener.accept().await.unwrap();
             assert_eq!(peer, client.local_addr().unwrap());
         }
+    }
+}
+
+#[cfg(test)]
+mod overlap_tests {
+    use super::ListenEndpoint;
+
+    fn ep(s: &str) -> ListenEndpoint {
+        ListenEndpoint(s.parse().unwrap())
+    }
+
+    #[test]
+    fn same_port_and_address_overlap() {
+        assert!(ep("127.0.0.1:8888").overlaps(&ep("127.0.0.1:8888")));
+    }
+
+    #[test]
+    fn unspecified_overlaps_any_address_of_its_family() {
+        assert!(ep("0.0.0.0:8888").overlaps(&ep("10.0.0.5:8888")));
+        assert!(ep("10.0.0.5:8888").overlaps(&ep("0.0.0.0:8888")));
+        assert!(ep("[::1]:8888").overlaps(&ep("[::]:8888")));
+    }
+
+    #[test]
+    fn ipv6_unspecified_covers_ipv4() {
+        assert!(ep("[::]:8888").overlaps(&ep("0.0.0.0:8888")));
+        assert!(ep("127.0.0.1:8888").overlaps(&ep("[::]:8888")));
+    }
+
+    #[test]
+    fn different_ports_or_addresses_do_not_overlap() {
+        assert!(!ep("0.0.0.0:8888").overlaps(&ep("0.0.0.0:8889")));
+        assert!(!ep("127.0.0.1:8888").overlaps(&ep("10.0.0.5:8888")));
+        assert!(!ep("[::1]:8888").overlaps(&ep("127.0.0.1:8888")));
     }
 }

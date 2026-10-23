@@ -3,6 +3,7 @@
     import { Button } from '@sveltestrap/sveltestrap'
     import { hasAdminAccess } from 'admin/lib/store'
     import AuthBar from 'common/AuthBar.svelte'
+    import { adminHref } from 'common/adminLink'
     import BannerModal from 'common/BannerModal.svelte'
     import Brand from 'common/Brand.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
@@ -150,7 +151,7 @@
                 <div class="ms-auto d-flex align-items-center">
                     {#if $hasAdminAccess && !$serverInfo?.needsMfaSetup}
                         <a
-                            href="/@warpgate/admin"
+                            href={adminHref($serverInfo)}
                             class="btn btn-warning btn-sm d-flex align-items-center gap-1 me-3"
                         >
                             <Fa icon={faCog} class="mx-1" />

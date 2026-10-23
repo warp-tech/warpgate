@@ -119,9 +119,11 @@ fn session_host_is_authorized(request_host: Option<&str>, base_host: &str) -> bo
 /// checks. A request without `Origin`, `Referer` or `Sec-Fetch-Site` did not
 /// come from a browser page.
 ///
-/// Only the host is compared. The listener speaks TLS only, so the scheme
-/// adds nothing, and the port is routinely stripped or rewritten by reverse
-/// proxies while Warpgate serves nothing on another port of the same host.
+/// On the main listener only the host is compared. The listener speaks TLS
+/// only, so the scheme adds nothing, and the port is routinely stripped or
+/// rewritten by reverse proxies. With a separate admin listener (`http.admin`)
+/// Warpgate serves two ports of one host, so on that listener the port of the
+/// `Origin`/`Referer` must also match the port the request was sent to.
 fn is_cross_origin_api_request(req: &Request, request_host: Option<&str>) -> bool {
     let headers = req.headers();
 
@@ -152,15 +154,26 @@ fn is_cross_origin_api_request(req: &Request, request_host: Option<&str>) -> boo
     };
 
     // An opaque ("null") or unparsable origin is never ours.
-    let source = source
-        .to_str()
-        .ok()
-        .and_then(|s| url::Url::parse(s).ok())
-        .and_then(|url| url.host_str().map(str::to_owned));
-    match (source, request_host) {
-        (Some(host), Some(request_host)) => !host.eq_ignore_ascii_case(request_host),
-        _ => true,
+    let Some(source) = source.to_str().ok().and_then(|s| url::Url::parse(s).ok()) else {
+        return true;
+    };
+    let (Some(source_host), Some(request_host)) = (source.host_str(), request_host) else {
+        return true;
+    };
+    if !source_host.eq_ignore_ascii_case(request_host) {
+        return true;
     }
+    use warpgate_common_http::listener::HttpListenerKind;
+    if HttpListenerKind::of(req) == Some(HttpListenerKind::Admin) {
+        let request_port = headers
+            .get(http::header::HOST)
+            .and_then(|h| h.to_str().ok())
+            .and_then(|h| h.parse::<http::uri::Authority>().ok())
+            .or_else(|| req.uri().authority().cloned())
+            .map(|authority| authority.port_u16().unwrap_or(443));
+        return request_port != source.port_or_known_default();
+    }
+    false
 }
 
 /// restricted sessions are only allowed to access the API parts needed for login/logout and captive MFA flow

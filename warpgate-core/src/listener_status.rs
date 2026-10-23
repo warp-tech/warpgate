@@ -29,4 +29,7 @@ pub struct ListenerStatus {
     pub certificates: Vec<TlsCertificateInfo>,
 }
 
+/// The listener status name of the separate admin listener (`http.admin`).
+pub const ADMIN_LISTENER_NAME: &str = "HTTP admin";
+
 pub type ListenerStatusRegistry = Arc<Mutex<HashMap<String, ListenerStatus>>>;

@@ -29,7 +29,9 @@ pub fn raw_remote_ip(req: &Request) -> Option<String> {
 pub async fn get_client_ip(req: &Request, services: &Services) -> Option<String> {
     let trust_x_forwarded_headers = {
         let config = services.config.lock().await;
-        config.store.http.trust_x_forwarded_headers
+        crate::listener::HttpListenerKind::of(req)
+            .unwrap_or(crate::listener::HttpListenerKind::Main)
+            .trust_x_forwarded_headers(&config)
     };
 
     trusted_client_ip(req, raw_remote_ip(req), trust_x_forwarded_headers)
