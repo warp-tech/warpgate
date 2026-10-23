@@ -135,7 +135,7 @@ export function makeTargetURL(opt: ConnectionOptions): string {
     if (opt.ticketSecret) {
         return `${location.protocol}//${host}/?warpgate-ticket=${opt.ticketSecret}`
     }
-    return `${location.protocol}//${host}/?warpgate-target=${opt.targetName}`
+    return `${location.protocol}//${host}/?warpgate-target=${encodeURIComponent(opt.targetName ?? '')}`
 }
 
 export const possibleCredentials: Record<string, Set<CredentialKind>> = {
