@@ -419,6 +419,26 @@
                                             Disable to prevent SCP recordings
                                             from wasting storage space.
                                         </HelpText>
+                                        <label
+                                            for="recordRsync"
+                                            class="d-flex align-items-center mt-2"
+                                        >
+                                            <Input
+                                                id="recordRsync"
+                                                class="mb-0 me-2"
+                                                type="switch"
+                                                bind:checked={parameters.recordRsync}
+                                            />
+                                            <div>Record rsync transfers</div>
+                                        </label>
+                                        <HelpText>
+                                            Disable to prevent rsync uploads and
+                                            downloads from storing file contents
+                                            in session recordings. Only direct
+                                            rsync server commands are
+                                            recognized; shell wrappers and
+                                            compound commands remain recorded.
+                                        </HelpText>
                                     {/if}
                                 </Subsection>
                             </Section>

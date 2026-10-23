@@ -6386,6 +6386,9 @@
           "record_scp": {
             "type": "boolean"
           },
+          "record_rsync": {
+            "type": "boolean"
+          },
           "record_desktop_keyboard_input": {
             "type": "boolean"
           },
@@ -6516,6 +6519,7 @@
           "show_session_menu",
           "password_policy",
           "record_scp",
+          "record_rsync",
           "record_desktop_keyboard_input",
           "login_protection_enabled",
           "login_protection_retention_seconds",
@@ -6606,6 +6610,9 @@
             "format": "int64"
           },
           "record_scp": {
+            "type": "boolean"
+          },
+          "record_rsync": {
             "type": "boolean"
           },
           "record_desktop_keyboard_input": {
