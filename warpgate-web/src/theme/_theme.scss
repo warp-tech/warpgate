@@ -31,8 +31,14 @@
     --#{$prefix}btn-active-shadow: #{$btn-active-box-shadow};
     --#{$prefix}btn-disabled-color: #{$disabled-color};
     --#{$prefix}btn-disabled-bg: #{$real-background};
+    // Underline marks links; on buttons it only confirms hover and focus
+    text-decoration-line: none;
+    text-decoration-color: rgba(var(--color-rgb), 0.5);
+
+    &:hover,
+    &:focus-visible {
         text-decoration-line: underline;
-        text-decoration-color: rgba(var(--color-rgb), 0.5);
+    }
 }
 
 // Layout & components
