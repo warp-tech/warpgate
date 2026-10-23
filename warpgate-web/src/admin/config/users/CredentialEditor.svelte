@@ -21,7 +21,13 @@
         faKeyboard,
         faMobileScreen,
     } from '@fortawesome/free-solid-svg-icons'
-    import { Button, Tooltip } from '@sveltestrap/sveltestrap'
+    import {
+        Button,
+        Dropdown,
+        DropdownItem,
+        DropdownMenu,
+        DropdownToggle,
+    } from '@sveltestrap/sveltestrap'
     import {
         api,
         CredentialKind,
@@ -312,54 +318,53 @@
     <h4 class="m-0">Credentials</h4>
     <span class="ms-auto"></span>
     {#if $adminPermissions.usersEdit}
-        <Button
-            size="sm"
-            color="link"
-            on:click={() => (creatingPassword = true)}
-        >
-            Add password
-        </Button>
-        <Button
-            size="sm"
-            color="link"
-            on:click={() => {
-                editingCertificateCredential = true
-            }}
-        >
-            Issue certificate
-        </Button>
-        <Button
-            id="addPublicKeyCredentialButton"
-            size="sm"
-            color="link"
-            on:click={() => {
-                if (ldapLinked) {
-                    return
-                }
-                editingPublicKeyCredentialInstance = null
-                editingPublicKeyCredential = true
-            }}
-            title={ldapLinked ? 'SSH keys are managed by LDAP' : ''}
-        >
-            Add public key
-        </Button>
-        <Tooltip delay="250" target="addPublicKeyCredentialButton" animation>
-            Public key credentials will be loaded from LDAP
-        </Tooltip>
-
-        <Button size="sm" color="link" on:click={() => (creatingOtp = true)}>
-            Add OTP
-        </Button>
-        <Button
-            size="sm"
-            color="link"
-            on:click={() => {
-                editingSsoCredentialInstance = null
-                editingSsoCredential = true
-            }}
-        >
-            Add SSO
-        </Button>
+        <!-- One entry point instead of five inline links; each item names
+        the credential it creates -->
+        <Dropdown>
+            <DropdownToggle caret color="primary" size="sm">
+                Add credential
+            </DropdownToggle>
+            <DropdownMenu end>
+                <DropdownItem onclick={() => (creatingPassword = true)}>
+                    <Fa fw icon={faKeyboard} />
+                    Password
+                </DropdownItem>
+                <DropdownItem
+                    disabled={ldapLinked}
+                    aria-disabled={ldapLinked}
+                    onclick={() => {
+                        // A disabled item still takes keyboard clicks
+                        if (ldapLinked) {
+                            return
+                        }
+                        editingPublicKeyCredentialInstance = null
+                        editingPublicKeyCredential = true
+                    }}
+                >
+                    <Fa fw icon={faKey} />
+                    {ldapLinked ? 'Public key (managed by LDAP)' : 'Public key'}
+                </DropdownItem>
+                <DropdownItem onclick={() => (creatingOtp = true)}>
+                    <Fa fw icon={faMobileScreen} />
+                    One-time password
+                </DropdownItem>
+                <DropdownItem
+                    onclick={() => (editingCertificateCredential = true)}
+                >
+                    <Fa fw icon={faCertificate} />
+                    Certificate
+                </DropdownItem>
+                <DropdownItem
+                    onclick={() => {
+                        editingSsoCredentialInstance = null
+                        editingSsoCredential = true
+                    }}
+                >
+                    <Fa fw icon={faIdBadge} />
+                    SSO identity
+                </DropdownItem>
+            </DropdownMenu>
+        </Dropdown>
     {/if}
 </div>
 
