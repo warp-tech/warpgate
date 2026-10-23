@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { adminHref } from 'common/adminLink'
     import 'core-js/actual/map/group-by'
 
     import {
@@ -348,7 +349,10 @@
                     </DropdownItem>
                     {#if canEditTargets}
                         <DropdownItem
-                            href={`/@warpgate/admin#/config/targets/${target.id}`}
+                            href={adminHref(
+                                $serverInfo,
+                                `#/config/targets/${target.id}`,
+                            )}
                             onclick={e => e.stopPropagation()}
                         >
                             Edit target

@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.30.0-modified"
+    "version": "v0.30.0-1-ga2570d76-modified"
   },
   "servers": [
     {
@@ -2243,6 +2243,10 @@
           },
           "admin_permissions": {
             "$ref": "#/components/schemas/AdminPermissions"
+          },
+          "admin_url": {
+            "type": "string",
+            "description": "Where the admin UI is served when it is on a separate listener and this\nrequest came to the main one. Only for users with admin access."
           },
           "running_on_ec2": {
             "type": "boolean"
