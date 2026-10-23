@@ -8,6 +8,7 @@
         Modal,
         ModalBody,
         ModalFooter,
+        ModalHeader,
     } from '@sveltestrap/sveltestrap'
     import base32Encode from 'base32-encode'
     import CopyButton from 'common/CopyButton.svelte'
@@ -112,6 +113,7 @@
 </script>
 
 <Modal toggle={_cancel} {isOpen} on:open={() => field?.focus()}>
+    <ModalHeader>Add a one-time password</ModalHeader>
     <Form
         {validated}
         on:submit={e => {
@@ -187,7 +189,7 @@
                 Confirm
             </Button>
 
-            <Button class="modal-button" color="danger" on:click={_cancel}>
+            <Button class="modal-button" color="secondary" on:click={_cancel}>
                 Cancel
             </Button>
         </ModalFooter>

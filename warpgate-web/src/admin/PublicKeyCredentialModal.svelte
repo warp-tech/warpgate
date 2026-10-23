@@ -7,6 +7,7 @@
         Modal,
         ModalBody,
         ModalFooter,
+        ModalHeader,
     } from '@sveltestrap/sveltestrap'
 
     import type { ExistingPublicKeyCredential } from './lib/api'
@@ -18,6 +19,8 @@
     }
 
     let { isOpen = $bindable(true), instance, save }: Props = $props()
+
+    const title = $derived(instance ? 'Edit public key' : 'Add a public key')
 
     let field: HTMLInputElement | undefined = $state()
     let label: string = $state('')
@@ -71,6 +74,7 @@
         field?.focus()
     }}
 >
+    <ModalHeader>{title}</ModalHeader>
     <Form
         {validated}
         on:submit={e => {
@@ -112,7 +116,7 @@
                 Save
             </Button>
 
-            <Button class="modal-button" color="danger" on:click={_cancel}>
+            <Button class="modal-button" color="secondary" on:click={_cancel}>
                 Cancel
             </Button>
         </ModalFooter>

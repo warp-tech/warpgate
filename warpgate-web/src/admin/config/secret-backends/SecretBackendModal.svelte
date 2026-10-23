@@ -7,6 +7,7 @@
         Modal,
         ModalBody,
         ModalFooter,
+        ModalHeader,
     } from '@sveltestrap/sveltestrap'
     import type {
         BackendType,
@@ -23,6 +24,10 @@
     }
 
     let { isOpen = $bindable(true), instance, save }: Props = $props()
+
+    const title = $derived(
+        instance ? 'Edit secret backend' : 'Add a secret backend',
+    )
 
     let validated = $state(false)
 
@@ -93,6 +98,7 @@
 </script>
 
 <Modal toggle={_cancel} {isOpen} on:open={reset}>
+    <ModalHeader>{title}</ModalHeader>
     <Form
         {validated}
         on:submit={e => {
@@ -205,7 +211,7 @@
             >
                 Save
             </Button>
-            <Button class="modal-button" color="danger" on:click={_cancel}>
+            <Button class="modal-button" color="secondary" on:click={_cancel}>
                 Cancel
             </Button>
         </ModalFooter>

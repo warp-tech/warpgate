@@ -8,6 +8,7 @@
         Modal,
         ModalBody,
         ModalFooter,
+        ModalHeader,
     } from '@sveltestrap/sveltestrap'
     import { ResponseError as AdminApiResponseError } from 'admin/lib/api'
     import {
@@ -53,6 +54,7 @@
 </script>
 
 <Modal toggle={_cancel} {isOpen} on:open={() => field?.focus()}>
+    <ModalHeader>Set a password</ModalHeader>
     <Form
         {validated}
         on:submit={e => {
@@ -108,7 +110,7 @@
                 Create
             </Button>
 
-            <Button class="modal-button" color="danger" on:click={_cancel}>
+            <Button class="modal-button" color="secondary" on:click={_cancel}>
                 Cancel
             </Button>
         </ModalFooter>
