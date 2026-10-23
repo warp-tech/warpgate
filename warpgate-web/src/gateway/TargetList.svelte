@@ -245,6 +245,19 @@
                 e.stopPropagation()
                 selectTarget(target)
             }}
+            role={urlForTarget(target) ? undefined : 'button'}
+            tabindex={urlForTarget(target) ? undefined : 0}
+            onkeydown={e => {
+                // Targets without a URL (databases, Kubernetes) are not links,
+                // so Enter and Space have to be handled here
+                if (
+                    !urlForTarget(target) &&
+                    (e.key === 'Enter' || e.key === ' ')
+                ) {
+                    e.preventDefault()
+                    selectTarget(target)
+                }
+            }}
         >
             <span class="me-auto">
                 <div class="d-flex align-items-center gap-2">
@@ -285,6 +298,7 @@
                 <DropdownToggle
                     color="link"
                     size="sm"
+                    aria-label={`More actions for ${target.name}`}
                     onclick={e => {
                         e.preventDefault()
                         e.stopPropagation()
