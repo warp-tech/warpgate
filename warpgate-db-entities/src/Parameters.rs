@@ -236,6 +236,7 @@ pub struct Model {
     pub password_policy_require_special: bool,
     pub max_api_token_duration_seconds: Option<i64>,
     pub record_scp: bool,
+    pub record_rsync: bool,
     /// Whether keystrokes are kept in desktop session recordings.
     pub record_desktop_keyboard_input: bool,
     pub tutorial_dismissed: bool,
@@ -472,6 +473,7 @@ mod tests {
             password_policy_require_special: false,
             max_api_token_duration_seconds: None,
             record_scp: true,
+            record_rsync: true,
             record_desktop_keyboard_input: true,
             admin_approval_timeout_seconds: None,
             admin_approval_grace_period_seconds: None,

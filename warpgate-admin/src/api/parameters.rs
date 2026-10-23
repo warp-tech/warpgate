@@ -81,6 +81,7 @@ struct ParameterValues {
     pub password_policy: PasswordPolicy,
     pub max_api_token_duration_seconds: Option<i64>,
     pub record_scp: bool,
+    pub record_rsync: bool,
     pub record_desktop_keyboard_input: bool,
     pub login_protection_enabled: bool,
     pub login_protection_retention_seconds: i32,
@@ -137,6 +138,7 @@ struct ParameterUpdate {
     #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
     pub max_api_token_duration_seconds: Option<Option<i64>>,
     pub record_scp: Option<bool>,
+    pub record_rsync: Option<bool>,
     pub record_desktop_keyboard_input: Option<bool>,
     pub login_protection_enabled: Option<bool>,
     #[oai(validator(minimum(value = "1")))]
@@ -259,6 +261,7 @@ impl Api {
             password_policy: parameters.password_policy(),
             max_api_token_duration_seconds: parameters.max_api_token_duration_seconds,
             record_scp: parameters.record_scp,
+            record_rsync: parameters.record_rsync,
             record_desktop_keyboard_input: parameters.record_desktop_keyboard_input,
             login_protection_enabled: parameters.login_protection_enabled,
             login_protection_retention_seconds: parameters.login_protection_retention_seconds,
@@ -375,6 +378,7 @@ impl Api {
         parameters.max_api_token_duration_seconds =
             body.max_api_token_duration_seconds.map_or(NotSet, Set);
         parameters.record_scp = body.record_scp.map_or(NotSet, Set);
+        parameters.record_rsync = body.record_rsync.map_or(NotSet, Set);
         parameters.record_desktop_keyboard_input =
             body.record_desktop_keyboard_input.map_or(NotSet, Set);
 
