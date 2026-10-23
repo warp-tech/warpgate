@@ -117,6 +117,18 @@
             await deleteCertificateKey(credential.id)
         }
     }
+
+    function policyRequires(kind: CredentialKind): boolean {
+        if (!creds?.credentialPolicy) {
+            return false
+        }
+        return Object.values(creds.credentialPolicy).some(
+            (combos?: CredentialKind[][]) =>
+                combos?.some((combo: CredentialKind[]) =>
+                    combo.includes(kind),
+                ) ?? false,
+        )
+    }
 </script>
 
 <Loadable promise={initPromise}>
@@ -146,9 +158,9 @@
                     class="ms-2"
                     color="link"
                     onclick={e => {
-                        changingPassword = true
-                        e.preventDefault()
-                    }}
+                    changingPassword = true
+                    e.preventDefault()
+                }}
                 >
                     {#if creds.password === PasswordState.Unset}
                         Set password
@@ -163,10 +175,7 @@
             </div>
         </div>
 
-        {#if creds.password === PasswordState.Unset &&
-            Object.values(creds.credentialPolicy).some(l =>
-                l?.includes(CredentialKind.Password),
-            )}
+        {#if creds.password === PasswordState.Unset && policyRequires(CredentialKind.Password)}
             <Alert color="warning">
                 Your credential policy requires using a password for
                 authentication. Without one, you won't be able to log in.
@@ -179,9 +188,9 @@
             <Button
                 color="link"
                 onclick={e => {
-                    creatingOtpCredential = true
-                    e.preventDefault()
-                }}
+            creatingOtpCredential = true
+            e.preventDefault()
+        }}
             >
                 Add device
             </Button>
@@ -203,9 +212,9 @@
                             ? 'One-time passwords are required on this server - add another device first'
                             : ''}
                         onclick={e => {
-                            deleteOtp(credential)
-                            e.preventDefault()
-                        }}
+                    deleteOtp(credential)
+                    e.preventDefault()
+                }}
                     >
                         Delete
                     </Button>
@@ -213,10 +222,7 @@
             {/each}
         </div>
 
-        {#if creds.otp.length === 0 &&
-            Object.values(creds.credentialPolicy).some(l =>
-                l?.includes(CredentialKind.Totp),
-            )}
+        {#if creds.otp.length === 0 && policyRequires(CredentialKind.Totp)}
             <Alert color="warning">
                 Your credential policy requires using a one-time password for
                 authentication. Without one, you won't be able to log in.
@@ -235,12 +241,12 @@
                 id="addPublicKeyCredentialButton"
                 title={creds.ldapLinked ? 'SSH keys are managed by LDAP' : ''}
                 onclick={e => {
-                    if (creds?.ldapLinked) {
-                        return
-                    }
-                    creatingPublicKeyCredential = true
-                    e.preventDefault()
-                }}
+                if (creds?.ldapLinked) {
+                    return
+                }
+                creatingPublicKeyCredential = true
+                e.preventDefault()
+            }}
             >
                 Add key
             </Button>
@@ -269,13 +275,11 @@
                         class="ms-2"
                         color="link"
                         disabled={creds.ldapLinked}
-                        title={creds.ldapLinked
-                            ? 'SSH keys are managed by LDAP'
-                            : ''}
+                        title={creds.ldapLinked ? 'SSH keys are managed by LDAP' : ''}
                         onclick={e => {
-                            deletePublicKey(credential)
-                            e.preventDefault()
-                        }}
+                    deletePublicKey(credential)
+                    e.preventDefault()
+                }}
                     >
                         Delete
                     </Button>
@@ -283,8 +287,7 @@
             {/each}
         </div>
 
-        {#if creds.publicKeys.length === 0 &&
-            creds.credentialPolicy.ssh?.includes(CredentialKind.PublicKey)}
+        {#if creds.publicKeys.length === 0 && creds.credentialPolicy.ssh?.some(c => c.includes(CredentialKind.PublicKey))}
             <Alert color="warning">
                 Your credential policy requires using a public key for
                 authentication. Without one, you won't be able to log in.
@@ -297,9 +300,9 @@
             <Button
                 color="link"
                 onclick={e => {
-                    issuingCertificateCredential = true
-                    e.preventDefault()
-                }}
+            issuingCertificateCredential = true
+            e.preventDefault()
+        }}
             >
                 Issue certificate
             </Button>
@@ -322,9 +325,9 @@
                         color="link"
                         class="ms-2"
                         onclick={e => {
-                            deleteCertificate(credential)
-                            e.preventDefault()
-                        }}
+                    deleteCertificate(credential)
+                    e.preventDefault()
+                }}
                     >
                         Delete
                     </Button>
@@ -332,10 +335,7 @@
             {/each}
         </div>
 
-        {#if creds.certificates.length === 0 &&
-            creds.credentialPolicy.kubernetes?.includes(
-                CredentialKind.Certificate,
-            )}
+        {#if creds.certificates.length === 0 && creds.credentialPolicy.kubernetes?.some(c => c.includes(CredentialKind.Certificate))}
             <Alert color="warning">
                 Your credential policy requires using a certificate for
                 authentication. Without one, you won't be able to log in.
@@ -392,8 +392,8 @@
         save={issueCertificate}
         username={$serverInfo.username}
         onClose={() => {
-            issuingCertificateCredential = false
-        }}
+        issuingCertificateCredential = false
+    }}
     />
 {/if}
 
