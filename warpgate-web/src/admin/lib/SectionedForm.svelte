@@ -131,7 +131,9 @@
                 : 'is-hidden'}"
         >
             <nav class="sectioned-form-tabs" bind:this={tabsElement}>
-                <div class="nav nav-pills gap-2 p-2 overflow-x-auto">
+                <div
+                    class="nav nav-pills flex-nowrap gap-2 p-2 overflow-x-auto"
+                >
                     {#each sections as section (section.id)}
                         <a
                             href={`#${section.id}-heading`}
@@ -187,7 +189,6 @@
         background: var(--bs-body-bg);
         transition: opacity 120ms ease;
 
-        flex-wrap: nowrap;
         white-space: nowrap;
     }
 
