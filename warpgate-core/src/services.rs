@@ -5,7 +5,8 @@ use std::time::Duration;
 use anyhow::Result;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait,
+    ColumnTrait, DatabaseConnection, EntityTrait, JoinType, PaginatorTrait, QueryFilter,
+    QuerySelect, RelationTrait, TransactionTrait,
 };
 use time::OffsetDateTime;
 use tokio::sync::{Mutex, broadcast};
@@ -29,8 +30,8 @@ use crate::rate_limiting::RateLimiterRegistry;
 use crate::recordings::SessionRecordings;
 use crate::resources::AdmittedSessions;
 use crate::{
-    AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, ListenerStatusRegistry,
-    SecretBackendRegistry, SessionsFilter, State,
+    AuthStateStore, ConfigProvider, ConfigProviderEnum, DatabaseConfigProvider,
+    ListenerStatusRegistry, SecretBackendRegistry, SessionsFilter, State,
 };
 
 #[derive(Clone)]
@@ -108,6 +109,40 @@ impl Services {
         )
         .await?;
         self.close_admitted_sessions(AdmittedSessions(ids)).await
+    }
+
+    /// Close sessions whose role-based access has ended: their user no longer
+    /// holds an active role assignment (not expired, not revoked) that grants
+    /// the target. Ticket-admitted sessions are left to the ticket sweep.
+    pub async fn close_sessions_without_role_access(&self) -> Result<(), WarpgateError> {
+        let open: Vec<(UserSessionId, Uuid, Option<Uuid>)> = TargetSession::Entity::find()
+            .join(
+                JoinType::InnerJoin,
+                TargetSession::Relation::UserSession.def(),
+            )
+            .filter(TargetSession::Column::Ended.is_null())
+            .filter(TargetSession::Column::TicketId.is_null())
+            .select_only()
+            .column(TargetSession::Column::UserSessionId)
+            .column(TargetSession::Column::TargetId)
+            .column(UserSession::Column::UserId)
+            .into_tuple()
+            .all(&self.db)
+            .await?;
+        let mut lost: Vec<UserSessionId> = Vec::new();
+        for (session, target, user) in open {
+            // Sessions without a user (e.g. the admin token) are not role-admitted.
+            let Some(user) = user else { continue };
+            if !lost.contains(&session)
+                && !self
+                    .config_provider
+                    .authorize_target_by_id(user, target)
+                    .await?
+            {
+                lost.push(session);
+            }
+        }
+        self.close_admitted_sessions(AdmittedSessions(lost)).await
     }
 
     pub async fn new(
@@ -215,6 +250,9 @@ impl Services {
                     interval.tick().await;
                     if let Err(error) = services.close_sessions_of_expired_tickets().await {
                         warn!("Failed to close sessions of expired tickets: {error}");
+                    }
+                    if let Err(error) = services.close_sessions_without_role_access().await {
+                        warn!("Failed to close sessions without role access: {error}");
                     }
                 }
             });
