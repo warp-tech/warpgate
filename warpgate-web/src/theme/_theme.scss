@@ -281,6 +281,11 @@ ul.pagination {
     gap: 0.5rem;
 }
 
+// Object names lead in lists; descriptions and metadata stay secondary
+.list-group-item strong {
+    color: var(--#{$prefix}emphasis-color);
+}
+
 .nav-pills {
     background: var(--bs-body-bg);
 
