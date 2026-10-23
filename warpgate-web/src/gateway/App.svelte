@@ -12,7 +12,7 @@
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import { get } from 'svelte/store'
     import Fa from 'svelte-fa'
-    import Router, { push, type RouteDetail } from 'svelte-spa-router'
+    import Router, { push, type RouteDetail, router } from 'svelte-spa-router'
     import { wrap } from 'svelte-spa-router/wrap'
     import { type AuthStateResponseInternal, api } from './lib/api'
 
@@ -137,7 +137,7 @@
 
 <BannerModal banner={$serverInfo?.banner ?? ''} />
 
-<div class="container">
+<div class="container" class:wide={router.location === '/'}>
     <Loadable promise={initPromise}>
         {#if redirecting}
             <DelayedSpinner />
@@ -213,6 +213,11 @@
 
         display: flex;
         flex-direction: column;
+
+        // The target list holds dozens of one-line rows; give it room
+        &.wide {
+            width: 1080px;
+        }
     }
 
     main {
