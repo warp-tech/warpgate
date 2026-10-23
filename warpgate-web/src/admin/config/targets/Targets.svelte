@@ -18,7 +18,7 @@
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
     import ListOverflowMenu from 'common/ListOverflowMenu.svelte'
-    import { TargetKind } from 'gateway/lib/api'
+    import { TARGET_KIND_LABELS } from 'common/targetKinds'
     import { compare as naturalCompareFactory } from 'natural-orderby'
     import { from, map, type Observable } from 'rxjs'
     import { link } from 'svelte-spa-router'
@@ -175,27 +175,7 @@
                         {/if}
                     </div>
                     <small class="text-muted ms-auto">
-                        {#if target.options.kind === TargetKind.Http}
-                            HTTP
-                        {/if}
-                        {#if target.options.kind === TargetKind.MySql}
-                            MySQL
-                        {/if}
-                        {#if target.options.kind === TargetKind.Postgres}
-                            PostgreSQL
-                        {/if}
-                        {#if target.options.kind === TargetKind.Ssh}
-                            SSH
-                        {/if}
-                        {#if target.options.kind === TargetKind.Kubernetes}
-                            Kubernetes
-                        {/if}
-                        {#if target.options.kind === TargetKind.Vnc}
-                            VNC
-                        {/if}
-                        {#if target.options.kind === TargetKind.Rdp}
-                            RDP
-                        {/if}
+                        {TARGET_KIND_LABELS[target.options.kind]}
                     </small>
                 </a>
             {/snippet}
