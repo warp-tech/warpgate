@@ -5,8 +5,9 @@
         faExternalLink,
     } from '@fortawesome/free-solid-svg-icons'
     import { ListGroup } from '@sveltestrap/sveltestrap'
+    import { adminHref } from 'common/adminLink'
     import { api, type SetupState } from 'gateway/lib/api'
-    import { reloadServerInfo } from 'gateway/lib/store'
+    import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import Fa from 'svelte-fa'
 
     export let setupState: SetupState
@@ -43,7 +44,7 @@
         </a>
 
         <a
-            href="/@warpgate/admin#/config/targets/create"
+            href={adminHref($serverInfo, '#/config/targets/create')}
             class="list-group-item list-group-item-action d-flex align-items-center"
         >
             <Fa icon={setupState.hasTargets ? faCircleCheck : faCircle} />
@@ -57,7 +58,7 @@
         </a>
 
         <a
-            href="/@warpgate/admin#/config/users/create"
+            href={adminHref($serverInfo, '#/config/users/create')}
             class="list-group-item list-group-item-action d-flex align-items-center"
         >
             <Fa icon={setupState.hasUsers ? faCircleCheck : faCircle} />

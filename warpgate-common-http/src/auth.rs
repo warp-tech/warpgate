@@ -111,13 +111,17 @@ pub struct UnauthenticatedRequestContext {
 /// Provided to API handlers as Data<>
 impl UnauthenticatedRequestContext {
     pub async fn new(services: warpgate_core::Services) -> Self {
-        let should_trust_x_forwarded = services
-            .config
-            .lock()
-            .await
-            .store
-            .http
-            .trust_x_forwarded_headers;
+        Self::new_for_listener(services, crate::listener::HttpListenerKind::Main).await
+    }
+
+    /// The context for one HTTP listener, with that listener's
+    /// `trust_x_forwarded_headers`.
+    pub async fn new_for_listener(
+        services: warpgate_core::Services,
+        listener: crate::listener::HttpListenerKind,
+    ) -> Self {
+        let should_trust_x_forwarded =
+            listener.trust_x_forwarded_headers(&*services.config.lock().await);
         Self {
             services,
             should_trust_x_forwarded,

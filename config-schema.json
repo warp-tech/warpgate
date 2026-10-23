@@ -134,9 +134,55 @@
     }
   },
   "$defs": {
+    "HttpAdminListenerConfig": {
+      "description": "A separate listener for the admin UI and admin API (`http.admin`).",
+      "type": "object",
+      "properties": {
+        "external_port": {
+          "description": "The port the admin listener is reached on from outside, if a proxy or\nport mapping changes it. Defaults to the `listen` port.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "listen": {
+          "description": "Where the admin UI and admin API are served. Must not overlap\n`http.listen`.",
+          "$ref": "#/$defs/ListenEndpoint"
+        },
+        "proxy_protocol": {
+          "description": "Accept HAProxy PROXY protocol v1/v2 headers on this listener.",
+          "type": "boolean",
+          "default": false
+        },
+        "trust_x_forwarded_headers": {
+          "description": "Overrides `http.trust_x_forwarded_headers` for this listener.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "listen"
+      ]
+    },
     "HttpConfig": {
       "type": "object",
       "properties": {
+        "admin": {
+          "description": "Serve the admin UI and admin API on a separate listener. When set, the\nmain listener answers them only to authenticated cluster peers.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HttpAdminListenerConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "certificate": {
           "type": "string",
           "default": ""

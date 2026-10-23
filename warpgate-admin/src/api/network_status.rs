@@ -53,6 +53,11 @@ impl Api {
             .values()
             .cloned()
             .collect();
+        // The admin listener is optional; while it is not configured it is not a listener at all.
+        listeners.retain(|l| {
+            !(l.name == warpgate_core::ADMIN_LISTENER_NAME
+                && l.state == warpgate_core::ListenerState::Disabled)
+        });
         listeners.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(GetListenerStatesResponse::Ok(Json(listeners)))
     }
