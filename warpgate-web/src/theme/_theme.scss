@@ -306,3 +306,42 @@ code {
     padding: 0.2rem 0.4rem;
     border-radius: 5px;
 }
+
+// One focus indicator for every control: a 2px outline in the accent colour.
+// Fields mark focus with their own border; list rows draw the outline inside
+// so neighbouring rows don't cover it. Elements focused from script
+// (tabindex="-1", such as an opening dialog) get no outline.
+@mixin focus-ring {
+    outline: 2px solid var(--#{$prefix}primary);
+    outline-offset: 2px;
+}
+
+:where(a, button, summary, [tabindex]:not([tabindex="-1"])):focus-visible {
+    @include focus-ring;
+}
+
+// Bootstrap replaces the outline with a shadow on these, at a higher
+// specificity than the rule above
+.btn,
+.btn-close,
+.nav-link,
+.page-link,
+.dropdown-item,
+.form-check-input {
+    &:focus-visible {
+        @include focus-ring;
+        box-shadow: none;
+    }
+}
+
+.list-group-item:focus-visible {
+    outline-offset: -2px;
+}
+
+.form-control,
+.form-select {
+    &:focus {
+        border-color: var(--#{$prefix}primary);
+        box-shadow: 0 0 0 1px var(--#{$prefix}primary);
+    }
+}
