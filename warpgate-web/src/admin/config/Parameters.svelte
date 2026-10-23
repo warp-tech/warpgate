@@ -435,9 +435,9 @@
                                             Disable to prevent rsync uploads and
                                             downloads from storing file contents
                                             in session recordings. Only direct
-                                            rsync server commands are
-                                            recognized; shell wrappers and
-                                            compound commands remain recorded.
+                                            rsync server commands without shell
+                                            metacharacters are recognized;
+                                            wrapped commands remain recorded.
                                         </HelpText>
                                     {/if}
                                 </Subsection>

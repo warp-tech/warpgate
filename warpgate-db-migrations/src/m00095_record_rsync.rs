@@ -59,30 +59,18 @@ mod tests {
         let manager = SchemaManager::new(&db);
 
         Migration.up(&manager).await.unwrap();
-        let row = db
-            .query_one(Statement::from_string(
-                db.get_database_backend(),
-                "SELECT record_scp, record_rsync FROM parameters",
-            ))
-            .await
-            .unwrap()
-            .unwrap();
+        let query = Statement::from_string(
+            db.get_database_backend(),
+            "SELECT record_scp, record_rsync FROM parameters",
+        );
+        let row = db.query_one(query.clone()).await.unwrap().unwrap();
         assert!(!row.try_get::<bool>("", "record_scp").unwrap());
         assert!(row.try_get::<bool>("", "record_rsync").unwrap());
 
         Migration.down(&manager).await.unwrap();
-        assert!(
-            !manager
-                .has_column("parameters", "record_rsync")
-                .await
-                .unwrap()
-        );
+        assert!(db.query_one(query.clone()).await.is_err());
         Migration.up(&manager).await.unwrap();
-        assert!(
-            manager
-                .has_column("parameters", "record_rsync")
-                .await
-                .unwrap()
-        );
+        let row = db.query_one(query).await.unwrap().unwrap();
+        assert!(row.try_get::<bool>("", "record_rsync").unwrap());
     }
 }
