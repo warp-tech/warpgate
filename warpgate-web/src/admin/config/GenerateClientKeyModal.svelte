@@ -7,6 +7,7 @@
         Modal,
         ModalBody,
         ModalFooter,
+        ModalHeader,
     } from '@sveltestrap/sveltestrap'
 
     import { SSHClientKeyKind } from 'admin/lib/api'
@@ -45,6 +46,7 @@
         field?.focus()
     }}
 >
+    <ModalHeader>Generate a client key</ModalHeader>
     <Form
         {validated}
         on:submit={e => {
@@ -78,7 +80,7 @@
                 Save
             </Button>
 
-            <Button class="modal-button" color="danger" on:click={_cancel}>
+            <Button class="modal-button" color="secondary" on:click={_cancel}>
                 Cancel
             </Button>
         </ModalFooter>

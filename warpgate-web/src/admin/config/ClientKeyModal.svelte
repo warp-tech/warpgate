@@ -7,6 +7,7 @@
         Modal,
         ModalBody,
         ModalFooter,
+        ModalHeader,
     } from '@sveltestrap/sveltestrap'
 
     import type { SSHClientKey } from 'admin/lib/api'
@@ -19,6 +20,8 @@
     }
 
     let { isOpen = $bindable(true), instance, save }: Props = $props()
+
+    const title = $derived(instance ? 'Edit client key' : 'Import a client key')
 
     let field: HTMLInputElement | undefined = $state()
     let label = $state('')
@@ -56,6 +59,7 @@
         field?.focus()
     }}
 >
+    <ModalHeader>{title}</ModalHeader>
     <Form
         {validated}
         on:submit={e => {
@@ -123,7 +127,7 @@
                 Save
             </Button>
 
-            <Button class="modal-button" color="danger" on:click={_cancel}>
+            <Button class="modal-button" color="secondary" on:click={_cancel}>
                 Cancel
             </Button>
         </ModalFooter>
