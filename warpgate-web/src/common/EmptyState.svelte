@@ -20,11 +20,11 @@
         min-width: 200px;
         text-align: center;
         margin: 4rem auto;
-        opacity: .5;
     }
 
     h2 {
         font-family: 'Poppins';
+        color: var(--bs-secondary-color);
     }
 
     p {
