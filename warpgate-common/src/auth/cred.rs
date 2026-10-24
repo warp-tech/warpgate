@@ -81,6 +81,8 @@ pub enum AuthCredential {
     Sso {
         provider: String,
         email: String,
+        /// The IdP's subject (`sub`) from the verified ID token, when present.
+        subject: Option<String>,
     },
     WebUserApproval,
 }
