@@ -310,6 +310,7 @@ impl Api {
         let cred = AuthCredential::Sso {
             provider: context.provider.clone(),
             email: email.clone(),
+            subject: Some(response.subject.clone()),
         };
 
         let username = services

@@ -24,6 +24,7 @@ pub async fn resolve_and_map_sso_user<C: ConfigProvider + Send + ?Sized>(
     let cred = AuthCredential::Sso {
         provider: provider_config.name.clone(),
         email,
+        subject: Some(response.subject.clone()),
     };
 
     let Some(username) = cp
