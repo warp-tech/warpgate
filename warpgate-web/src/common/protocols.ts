@@ -267,7 +267,9 @@ export function makeOidcKubeconfig(opt: ConnectionOptions): string {
     for (const s of scopes) {
         args.push(`--oidc-extra-scope=${s}`)
     }
-    const argsYaml = args.map(a => `          - ${JSON.stringify(a)}`).join('\n')
+    const argsYaml = args
+        .map(a => `          - ${JSON.stringify(a)}`)
+        .join('\n')
     return `apiVersion: v1
 kind: Config
 clusters:
