@@ -44,11 +44,21 @@ fn merge_secret(
     mut incoming: RecordingsStorageConfig,
     current: &RecordingsStorageConfig,
 ) -> RecordingsStorageConfig {
-    if let RecordingsStorageConfig::S3(s3) = &mut incoming
+    let endpoint_unchanged = match (&incoming, current) {
+        (RecordingsStorageConfig::S3(s3), RecordingsStorageConfig::S3(current_s3)) => {
+            s3.endpoint == current_s3.endpoint
+                && s3.bucket == current_s3.bucket
+                && s3.region == current_s3.region
+        }
+        _ => false,
+    };
+    if endpoint_unchanged
+        && let RecordingsStorageConfig::S3(s3) = &mut incoming
         && let S3Credentials::Static(creds) = &mut s3.credentials
         && creds.secret_access_key.is_none()
         && let RecordingsStorageConfig::S3(current_s3) = current
         && let S3Credentials::Static(current_creds) = &current_s3.credentials
+        && creds.access_key_id == current_creds.access_key_id
     {
         creds
             .secret_access_key
