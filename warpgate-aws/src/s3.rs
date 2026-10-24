@@ -26,12 +26,24 @@ pub enum S3Credentials {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Object, Default)]
 pub struct AutoCredentials {}
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Object)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Object)]
 pub struct StaticCredentials {
     pub access_key_id: String,
     /// `None` on the admin API means "keep the stored secret" (it's never sent
     /// out); always `Some` in a stored config.
     pub secret_access_key: Option<String>,
+}
+
+impl std::fmt::Debug for StaticCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StaticCredentials")
+            .field("access_key_id", &self.access_key_id)
+            .field(
+                "secret_access_key",
+                &self.secret_access_key.as_ref().map(|_| "***"),
+            )
+            .finish()
+    }
 }
 
 impl S3Credentials {
