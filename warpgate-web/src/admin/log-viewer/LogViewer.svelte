@@ -1106,7 +1106,7 @@
         white-space: nowrap;
 
         .timestamp {
-            opacity: .75;
+            color: var(--bs-secondary-color);
         }
 
         .content {
@@ -1126,7 +1126,7 @@
                 gap: .75rem;
 
                 .key {
-                    opacity: .5;
+                    color: var(--bs-secondary-color);
                     font-style: italic;
                 }
 

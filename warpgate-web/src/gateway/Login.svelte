@@ -400,7 +400,7 @@
         margin: 1.5rem 0;
         font-style: italic;
         font-size: 0.75rem;
-        opacity: 0.5;
+        color: var(--bs-secondary-color);
 
         &::before {
             content: '';
