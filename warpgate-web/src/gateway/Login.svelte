@@ -377,7 +377,7 @@
 
 <style lang="scss">
     h1 {
-        font-size: 3rem;
+        font-size: clamp(2rem, 1.25rem + 3vw, 3rem);
     }
 
     .sso-buttons {
