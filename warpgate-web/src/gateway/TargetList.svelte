@@ -231,9 +231,10 @@
     {#snippet item(
         target,
     )}
+        {@const url = urlForTarget(target)}
         <a
             class="list-group-item list-group-item-action target-item gap-3"
-            href={urlForTarget(target)}
+            href={url}
             target={target.kind === TargetKind.Http && $openTargetsInNewTab
                 ? '_blank'
                 : undefined}
@@ -245,15 +246,15 @@
                 e.stopPropagation()
                 selectTarget(target)
             }}
-            role={urlForTarget(target) ? undefined : 'button'}
-            tabindex={urlForTarget(target) ? undefined : 0}
+            role={url ? undefined : 'button'}
+            tabindex={url ? undefined : 0}
             onkeydown={e => {
-                // Targets without a URL (databases, Kubernetes) are not links,
-                // so Enter and Space have to be handled here
-                if (
-                    !urlForTarget(target) &&
-                    (e.key === 'Enter' || e.key === ' ')
-                ) {
+                // Without an href there is no native activation. Keys from the
+                // nested menu toggle and items bubble here and must be left alone.
+                if (e.target !== e.currentTarget) {
+                    return
+                }
+                if (!url && (e.key === 'Enter' || e.key === ' ')) {
                     e.preventDefault()
                     selectTarget(target)
                 }
