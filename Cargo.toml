@@ -34,7 +34,6 @@ members = [
 # so Cranky's deny lints don't apply to their upstream code. Each carries a PATCHES.md
 # describing the fork and a warpgate.patch reproducing it.
 exclude = [
-    "vendor/vnc-rs",
     "vendor/ironrdp-async",
     "vendor/ironrdp-connector",
     "vendor/ironrdp-dvc",
