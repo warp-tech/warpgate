@@ -89,7 +89,7 @@
 <Loadable promise={init()}>
     {#if authState}
         <div class="page-summary-bar">
-            <h1>authorization request</h1>
+            <h1>Authorization request</h1>
         </div>
 
         <div class="mb-5">

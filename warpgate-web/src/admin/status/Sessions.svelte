@@ -112,7 +112,7 @@
         <div class="page-summary-bar">
             {#if activeSessionCount}
                 <h1>
-                    <span>active sessions:</span>
+                    <span>active sessions</span>
                     <span class="counter">{activeSessionCount}</span>
                 </h1>
                 <div class="ms-auto">

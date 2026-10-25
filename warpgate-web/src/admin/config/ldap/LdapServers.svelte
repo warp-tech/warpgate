@@ -39,7 +39,7 @@
 
 <div class="container-max-md">
     <div class="page-summary-bar">
-        <h1>LDAP Servers</h1>
+        <h1>LDAP servers</h1>
         <a
             class="btn btn-primary ms-auto"
             href="/config/ldap-servers/create"
