@@ -220,7 +220,10 @@
         {/if}
     {/snippet}
     {#snippet empty()}
-        <EmptyState title="You don't have access to any targets yet" />
+        <EmptyState
+            title="You don't have access to any targets yet"
+            hint={`Ask an administrator to give ${$serverInfo?.username ?? 'your account'} a role with the targets you need.`}
+        />
     {/snippet}
     {#snippet groupHeader(
         group,
