@@ -100,27 +100,50 @@ pub trait Sheddable {
 /// outbound queue and latest phase
 struct Outbox<M> {
     buffer: VecDeque<M>,
+    /// Max retained *droppable* messages; non-droppable ones are never counted or shed.
+    shed_cap: usize,
     phase: SessionPhase,
     /// The latest phase is still in `buffer`, not yet delivered
     phase_queued: bool,
 }
 
 impl<M: Sheddable + From<SessionPhase>> Outbox<M> {
-    fn transition(&mut self, phase: SessionPhase, shed_cap: usize) {
+    fn new(initial_capacity: usize, shed_cap: usize) -> Self {
+        Self {
+            buffer: VecDeque::with_capacity(initial_capacity),
+            shed_cap,
+            phase: SessionPhase::Connecting,
+            phase_queued: false,
+        }
+    }
+
+    /// Queue a message, shedding the oldest droppable messages beyond `shed_cap` (never a
+    /// structural one). The buffer stays small, so the scan is over a handful of items.
+    fn enqueue(&mut self, msg: M) {
+        let droppable = msg.is_droppable();
+        self.buffer.push_back(msg);
+        if droppable {
+            while self.buffer.iter().filter(|m| m.is_droppable()).count() > self.shed_cap {
+                let Some(idx) = self.buffer.iter().position(Sheddable::is_droppable) else {
+                    break;
+                };
+                self.buffer.remove(idx);
+            }
+        }
+    }
+
+    fn transition(&mut self, phase: SessionPhase) {
         self.phase = phase.clone();
         self.phase_queued = true;
-        WebSession::<M>::enqueue(&mut self.buffer, M::from(phase), shed_cap);
+        self.enqueue(M::from(phase));
     }
 
     /// Re-send the current phase to a newly attached client, unless it is already
     /// queued: a duplicate `connected` makes the web SSH client open a second channel.
-    fn replay_phase(&mut self, shed_cap: usize) {
-        if self.phase_queued {
-            return;
+    fn replay_phase(&mut self) {
+        if !self.phase_queued {
+            self.transition(self.phase.clone());
         }
-        self.phase_queued = true;
-        let phase = self.phase.clone();
-        WebSession::<M>::enqueue(&mut self.buffer, M::from(phase), shed_cap);
     }
 
     fn drain(&mut self) -> Vec<M> {
@@ -146,8 +169,6 @@ pub struct WebSession<M> {
 
     outbox: Mutex<Outbox<M>>,
     output_notify: Notify,
-    /// Max retained *droppable* messages; non-droppable ones are never counted or shed.
-    shed_cap: usize,
 
     is_dead: AtomicBool,
     disconnect_timer: Mutex<Option<JoinHandle<()>>>,
@@ -172,38 +193,17 @@ impl<M: Sheddable + From<SessionPhase>> WebSession<M> {
             target_kind,
             server_handle,
             cancel,
-            outbox: Mutex::new(Outbox {
-                buffer: VecDeque::with_capacity(initial_capacity),
-                phase: SessionPhase::Connecting,
-                phase_queued: false,
-            }),
+            outbox: Mutex::new(Outbox::new(initial_capacity, shed_cap)),
             output_notify: Notify::new(),
-            shed_cap,
             is_dead: AtomicBool::new(false),
             disconnect_timer: Mutex::new(None),
         }
     }
 
-    /// Queue an outbound message, shedding the oldest droppable messages beyond [`Self::shed_cap`]
-    /// (never a structural one), then wake any waiting sender. The buffer stays small, so the scan
-    /// is over a handful of items.
+    /// Queue an outbound message and wake any waiting sender.
     pub async fn push(&self, msg: M) {
-        let mut outbox = self.outbox.lock().await;
-        Self::enqueue(&mut outbox.buffer, msg, self.shed_cap);
+        self.outbox.lock().await.enqueue(msg);
         self.output_notify.notify_waiters();
-    }
-
-    fn enqueue(buf: &mut VecDeque<M>, msg: M, shed_cap: usize) {
-        let droppable = msg.is_droppable();
-        buf.push_back(msg);
-        if droppable {
-            while buf.iter().filter(|m| m.is_droppable()).count() > shed_cap {
-                let Some(idx) = buf.iter().position(Sheddable::is_droppable) else {
-                    break;
-                };
-                buf.remove(idx);
-            }
-        }
     }
 
     pub async fn set_phase(&self, phase: LiveSessionPhase) {
@@ -211,7 +211,7 @@ impl<M: Sheddable + From<SessionPhase>> WebSession<M> {
     }
 
     async fn transition(&self, phase: SessionPhase) {
-        self.outbox.lock().await.transition(phase, self.shed_cap);
+        self.outbox.lock().await.transition(phase);
         self.output_notify.notify_waiters();
     }
 
@@ -223,7 +223,7 @@ impl<M: Sheddable + From<SessionPhase>> WebSession<M> {
     }
 
     pub async fn replay_phase(&self) {
-        self.outbox.lock().await.replay_phase(self.shed_cap);
+        self.outbox.lock().await.replay_phase();
         self.output_notify.notify_waiters();
     }
 
@@ -533,21 +533,17 @@ mod tests {
     }
 
     fn outbox() -> Outbox<TestMessage> {
-        Outbox {
-            buffer: VecDeque::new(),
-            phase: SessionPhase::Connecting,
-            phase_queued: false,
-        }
+        Outbox::new(0, 16)
     }
 
     #[test]
     fn replay_does_not_repeat_an_undelivered_phase() {
         let mut outbox = outbox();
-        outbox.transition(SessionPhase::Connecting, 16);
-        outbox.transition(SessionPhase::Connected, 16);
+        outbox.transition(SessionPhase::Connecting);
+        outbox.transition(SessionPhase::Connected);
 
         // the first WebSocket attaches before anything was delivered
-        outbox.replay_phase(16);
+        outbox.replay_phase();
 
         assert_eq!(
             outbox.drain(),
@@ -561,12 +557,12 @@ mod tests {
     #[test]
     fn replay_resends_the_phase_after_delivery() {
         let mut outbox = outbox();
-        outbox.transition(SessionPhase::Connected, 16);
+        outbox.transition(SessionPhase::Connected);
         outbox.drain();
 
         // a reconnecting WebSocket needs the current phase again
-        outbox.replay_phase(16);
-        outbox.replay_phase(16);
+        outbox.replay_phase();
+        outbox.replay_phase();
 
         assert_eq!(outbox.drain(), vec![TestMessage(SessionPhase::Connected)]);
     }
