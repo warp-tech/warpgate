@@ -74,11 +74,6 @@ ignore = [
     "RUSTSEC-2026-0194", # quick-xml quadratic time - see above
     "RUSTSEC-2021-0141", # dotenv is unmaintaned - only used for dev
     "RUSTSEC-2024-0449", # unsafe-libyaml is unmaintained - serde_yaml (config) and poem still depend on it
-    "RUSTSEC-2026-0381", # webpki-roots: emSign intermediate trust (upstream patch pending)
-    "RUSTSEC-2026-0382", # rustls-webpki: emSign intermediate trust (upstream patch pending)
-    "RUSTSEC-2026-0385", # ctutils: non-constant-time mask generation (upstream patch pending)
-    "RUSTSEC-2026-0386", # tokio: AsyncFd constructors I/O safety (upstream patch pending)
-    "RUSTSEC-2026-0387", # crypto-bigint: timing variability (upstream patch pending)
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
