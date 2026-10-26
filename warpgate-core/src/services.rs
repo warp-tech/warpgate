@@ -1,3 +1,5 @@
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -129,20 +131,26 @@ impl Services {
             .into_tuple()
             .all(&self.db)
             .await?;
-        let mut lost: Vec<UserSessionId> = Vec::new();
+        let mut allowed: HashMap<Uuid, HashSet<Uuid>> = HashMap::new();
+        let mut lost: HashSet<UserSessionId> = HashSet::new();
         for (session, target, user) in open {
             // Sessions without a user (e.g. the admin token) are not role-admitted.
             let Some(user) = user else { continue };
-            if !lost.contains(&session)
-                && !self
-                    .config_provider
-                    .authorize_target_by_id(user, target)
-                    .await?
-            {
-                lost.push(session);
+            if lost.contains(&session) {
+                continue;
+            }
+            let targets = match allowed.entry(user) {
+                Entry::Occupied(entry) => entry.into_mut(),
+                Entry::Vacant(entry) => {
+                    entry.insert(self.config_provider.authorized_target_ids(user).await?)
+                }
+            };
+            if !targets.contains(&target) {
+                lost.insert(session);
             }
         }
-        self.close_admitted_sessions(AdmittedSessions(lost)).await
+        self.close_admitted_sessions(AdmittedSessions(lost.into_iter().collect()))
+            .await
     }
 
     pub async fn new(
