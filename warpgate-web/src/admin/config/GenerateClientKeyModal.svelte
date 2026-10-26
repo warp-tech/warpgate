@@ -7,7 +7,6 @@
         Modal,
         ModalBody,
         ModalFooter,
-        ModalHeader,
     } from '@sveltestrap/sveltestrap'
 
     import { SSHClientKeyKind } from 'admin/lib/api'
@@ -46,7 +45,6 @@
         field?.focus()
     }}
 >
-    <ModalHeader>Generate a client key</ModalHeader>
     <Form
         {validated}
         on:submit={e => {

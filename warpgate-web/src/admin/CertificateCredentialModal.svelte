@@ -8,7 +8,6 @@
         Modal,
         ModalBody,
         ModalFooter,
-        ModalHeader,
     } from '@sveltestrap/sveltestrap'
     import type { IssuedCertificateCredential } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
@@ -160,7 +159,6 @@
 </script>
 
 <Modal {isOpen} toggle={close}>
-    <ModalHeader>Issue a certificate</ModalHeader>
     <ModalBody>
         {#if generatedCertificatePem}
             <div class="text-center mb-3">
@@ -237,7 +235,7 @@
                 label="Copy both as kubeconfig"
             />
         {/if}
-        <Button color="danger" on:click={close} class="modal-button">
+        <Button color="secondary" on:click={close} class="modal-button">
             Close
         </Button>
     </ModalFooter>

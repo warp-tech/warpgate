@@ -8,7 +8,6 @@
         Modal,
         ModalBody,
         ModalFooter,
-        ModalHeader,
     } from '@sveltestrap/sveltestrap'
     import Loadable from 'common/Loadable.svelte'
     import { api } from 'gateway/lib/api'
@@ -21,10 +20,6 @@
     }
 
     let { isOpen = $bindable(true), instance, save }: Props = $props()
-
-    const title = $derived(
-        instance ? 'Edit SSO identity' : 'Add an SSO identity',
-    )
 
     let provider: string | null = $state(null)
     let email: string = $state('')
@@ -53,7 +48,6 @@
         }
     }}
 >
-    <ModalHeader>{title}</ModalHeader>
     <Form
         {validated}
         on:submit={e => {
