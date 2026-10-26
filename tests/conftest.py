@@ -1,4 +1,5 @@
 import logging
+import oracledb
 import os
 import time
 import psutil
@@ -206,6 +207,7 @@ class WarpgateProcess:
     ssh_port: int
     mysql_port: int
     postgres_port: int
+    oracle_port: int
     kubernetes_port: int
     vnc_port: int
     rdp_port: int
@@ -1023,6 +1025,7 @@ class ProcessManager:
             http_port = alloc_port()
             mysql_port = alloc_port()
             postgres_port = alloc_port()
+            oracle_port = alloc_port()
             kubernetes_port = alloc_port()
             vnc_port = alloc_port()
             rdp_port = alloc_port()
@@ -1033,6 +1036,7 @@ class ProcessManager:
                 ("http", http_port),
                 ("mysql", mysql_port),
                 ("postgres", postgres_port),
+                ("oracle", oracle_port),
                 ("kubernetes", kubernetes_port),
                 ("vnc", vnc_port),
                 ("rdp", rdp_port),
@@ -1050,6 +1054,7 @@ class ProcessManager:
             http_port = http_port or alloc_port()
             mysql_port = alloc_port()
             postgres_port = alloc_port()
+            oracle_port = alloc_port()
             kubernetes_port = alloc_port()
             vnc_port = alloc_port()
             rdp_port = alloc_port()
@@ -1099,6 +1104,8 @@ class ProcessManager:
                 str(mysql_port),
                 "--postgres-port",
                 str(postgres_port),
+                "--oracle-port",
+                str(oracle_port),
                 "--kubernetes-port",
                 str(kubernetes_port),
                 "--data-path",
@@ -1176,6 +1183,7 @@ class ProcessManager:
             http_port,
             mysql_port,
             postgres_port,
+            oracle_port,
             kubernetes_port,
             vnc_port,
             rdp_port,
@@ -1188,6 +1196,7 @@ class ProcessManager:
             http_port=http_port,
             mysql_port=mysql_port,
             postgres_port=postgres_port,
+            oracle_port=oracle_port,
             kubernetes_port=kubernetes_port,
             vnc_port=vnc_port,
             rdp_port=rdp_port,
