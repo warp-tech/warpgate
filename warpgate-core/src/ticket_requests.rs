@@ -402,7 +402,10 @@ pub async fn activate_ticket_request(
     .await?;
 
     let update_res = TicketRequest::Entity::update_many()
-        .col_expr(TicketRequest::Column::TicketId, Expr::value(Some(ticket_id)))
+        .col_expr(
+            TicketRequest::Column::TicketId,
+            Expr::value(Some(ticket_id)),
+        )
         .filter(TicketRequest::Column::Id.eq(request_id))
         .filter(TicketRequest::Column::Status.eq(TicketRequestStatus::Approved))
         .filter(TicketRequest::Column::TicketId.is_null())
