@@ -20,6 +20,7 @@ use warpgate_common::auth::{AuthResult, AuthState, AuthStateUserInfo, Credential
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Protocol, UserSessionId, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
+pub use warpgate_common_http::auth::is_localhost_host;
 use warpgate_common_http::ext::{construct_external_url, is_navigation_request};
 use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_common_http::{
@@ -88,11 +89,6 @@ impl SessionRotation {
     }
 }
 
-/// Check if a host is localhost or 127.x.x.x (for development/testing scenarios)
-pub fn is_localhost_host(host: &str) -> bool {
-    host == "localhost" || host == "127.0.0.1" || host.starts_with("127.")
-}
-
 pub fn host_is_subdomain_of_or_equal(host: &str, base_domain: &str) -> bool {
     let base = base_domain.trim_start_matches('.');
     host == base || host.ends_with(&format!(".{base}"))
@@ -107,7 +103,7 @@ fn session_host_is_authorized(request_host: Option<&str>, base_host: &str) -> bo
         return false;
     };
     host_is_subdomain_of_or_equal(host, base_host)
-        || (is_localhost_host(host) && base_host != "localhost" && base_host != "127.0.0.1")
+        || (is_localhost_host(host) && !is_localhost_host(base_host))
 }
 
 /// Whether a state-changing (or WebSocket) request to Warpgate's own endpoints

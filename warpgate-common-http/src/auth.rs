@@ -271,13 +271,44 @@ impl RequestAuthorization {
     }
 }
 
-/// Check if a host is localhost or 127.x.x.x (for development/testing scenarios)
+/// Whether `host` is `localhost` or a loopback IP literal (for development/testing
+/// scenarios). Parsed rather than prefix-matched: `127.example.org` is a DNS name
+/// anyone can register.
 pub fn is_localhost_host(host: &str) -> bool {
-    host == "localhost" || host == "127.0.0.1" || host.starts_with("127.")
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn localhost_hosts_are_loopback_only() {
+        use super::is_localhost_host;
+        for host in [
+            "localhost",
+            "LocalHost",
+            "127.0.0.1",
+            "127.1.2.3",
+            "[::1]",
+            "::1",
+        ] {
+            assert!(is_localhost_host(host), "{host}");
+        }
+        for host in [
+            "127.example.org",
+            "127.0.0.1.nip.io",
+            "localhost.example.org",
+            "10.0.0.1",
+            "[::2]",
+        ] {
+            assert!(!is_localhost_host(host), "{host}");
+        }
+    }
+
     use uuid::Uuid;
 
     use super::{RequestAuthorization, SessionAuthorization};
