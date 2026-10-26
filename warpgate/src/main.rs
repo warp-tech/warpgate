@@ -83,6 +83,10 @@ pub(crate) struct UnattendedSetupArgs {
     #[clap(long)]
     pub(crate) postgres_port: Option<u16>,
 
+    /// Enable Oracle and set port
+    #[clap(long)]
+    pub(crate) oracle_port: Option<u16>,
+
     /// Enable Kubernetes and set port
     #[clap(long)]
     pub(crate) kubernetes_port: Option<u16>,

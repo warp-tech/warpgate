@@ -8,6 +8,7 @@ use warpgate_common::{
     validate_password,
 };
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
+use warpgate_core::oracle_verifier::{delete_oracle_verifier, sync_oracle_verifier_from_password};
 use warpgate_db_entities::{PasswordCredential, User};
 
 use super::AdminContext;
@@ -111,6 +112,11 @@ impl ListApi {
             return Ok(CreatePasswordCredentialResponse::NotFound);
         };
 
+        // Keep the user's Oracle O5LOGON verifier in step with this password so
+        // they reach Oracle targets with the same credential (no separate secret).
+        let oracle_enabled = admin.services().config.lock().await.store.oracle.enable;
+        sync_oracle_verifier_from_password(db, *user_id, &body.password, oracle_enabled).await?;
+
         AuditEvent::CredentialCreated {
             credential_type: "password".to_string(),
             credential_name: None,
@@ -163,6 +169,9 @@ impl DetailApi {
         };
 
         model.delete(db).await?;
+
+        // The Oracle verifier is derived from a password; drop it with one.
+        delete_oracle_verifier(db, *user_id).await?;
 
         let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
             return Ok(DeleteCredentialResponse::NotFound);

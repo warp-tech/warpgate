@@ -502,6 +502,43 @@ class ProcessManager:
         logging.debug(f"Postgres {container_name} is up")
         return port
 
+    def start_oracle_server(self):
+        # Oracle Database Free (images/oracle-server). The default PDB service is
+        # FREEPDB1; the app user is `wguser`:`123`.
+        port = alloc_port()
+        container_name = f"warpgate-e2e-oracle-server-{uuid.uuid4()}"
+        self.start(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--name",
+                container_name,
+                "-p",
+                f"{port}:1521",
+                "warpgate-e2e-oracle-server",
+            ]
+        )
+
+        def wait_oracle():
+            # The listener comes up well before the PDB and the init scripts are
+            # done, so only a real login tells that the database is ready.
+            while True:
+                try:
+                    oracledb.connect(
+                        user="wguser",
+                        password="123",
+                        dsn=f"localhost:{port}/FREEPDB1",
+                        tcp_connect_timeout=5,
+                    ).close()
+                    break
+                except oracledb.Error:
+                    time.sleep(1)
+
+        _wait_timeout(wait_oracle, "Oracle is not ready", timeout=max(self.timeout, 180))
+        logging.debug(f"Oracle {container_name} is up")
+        return port
+
     def shared_k3s(self) -> K3sInstance:
         """
         A privileged k3s container shared by every caller until `stop_k3s`,

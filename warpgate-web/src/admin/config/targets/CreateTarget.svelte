@@ -76,6 +76,21 @@
                         password: '',
                     },
                 },
+                Oracle: {
+                    kind: TargetKind.Oracle,
+                    host: '192.168.0.1',
+                    port: 1521,
+                    tls: {
+                        mode: TlsMode.Disabled,
+                        verify: true,
+                    },
+                    username: 'system',
+                    serviceName: '',
+                    auth: {
+                        kind: 'Password' as const,
+                        password: '',
+                    },
+                },
                 Kubernetes: {
                     kind: TargetKind.Kubernetes,
                     clusterUrl: 'https://kubernetes.example.com:6443',

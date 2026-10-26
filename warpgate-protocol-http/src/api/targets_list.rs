@@ -33,6 +33,7 @@ pub struct TargetSnapshot {
     pub external_host: Option<String>,
     pub group: Option<GroupInfo>,
     pub default_database_name: Option<String>,
+    pub tls_enabled: bool,
 }
 
 #[derive(ApiResponse)]
@@ -101,6 +102,7 @@ impl Api {
                         .options
                         .default_database_name()
                         .map(ToString::to_string),
+                    tls_enabled: t.options.tls_enabled(),
                     group,
                 }
             })

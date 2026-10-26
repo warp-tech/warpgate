@@ -70,6 +70,9 @@
         if (target.options.kind === 'Postgres') {
             address = `${target.options.host}:${target.options?.port}`
         }
+        if (target.options.kind === 'Oracle') {
+            address = `${target.options.host}:${target.options?.port}`
+        }
         if (target.options.kind === 'Http') {
             address = target.options.url
         }

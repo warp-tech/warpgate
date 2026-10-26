@@ -3,6 +3,7 @@ use tracing::info;
 use uuid::Uuid;
 use warpgate_common::{GlobalParams, Secret, UserPasswordCredential, WarpgateError};
 use warpgate_core::Services;
+use warpgate_core::oracle_verifier::sync_oracle_verifier_from_password;
 use warpgate_db_entities::{
     AdminRole, Parameters, PasswordCredential, Role, User, UserAdminRoleAssignment,
     UserRoleAssignment,
@@ -53,6 +54,16 @@ pub async fn command(
                     ..UserPasswordCredential::from_password(password).into()
                 }
                 .insert(db)
+                .await?;
+                // Derive the matching Oracle O5LOGON verifier (if Oracle is
+                // enabled) so the new user can reach Oracle targets with this
+                // same password.
+                sync_oracle_verifier_from_password(
+                    db,
+                    user.id,
+                    password,
+                    config.store.oracle.enable,
+                )
                 .await?;
                 (user, true)
             }

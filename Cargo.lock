@@ -5039,6 +5039,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ed6a7761f76e3b9f92dfb0a60a6a6477c61024b775147ff0973a02653abaf2"
 dependencies = [
  "digest 0.10.7",
+ "hmac 0.12.1",
 ]
 
 [[package]]
@@ -8947,6 +8948,7 @@ dependencies = [
  "warpgate-protocol-http",
  "warpgate-protocol-kubernetes",
  "warpgate-protocol-mysql",
+ "warpgate-protocol-oracle",
  "warpgate-protocol-postgres",
  "warpgate-protocol-rdp",
  "warpgate-protocol-ssh",
@@ -8993,6 +8995,7 @@ dependencies = [
  "warpgate-db-migrations",
  "warpgate-ldap",
  "warpgate-protocol-kubernetes",
+ "warpgate-protocol-oracle",
  "warpgate-protocol-ssh",
  "warpgate-tls",
 ]
@@ -9147,6 +9150,7 @@ dependencies = [
  "enum_dispatch",
  "futures",
  "governor",
+ "hex",
  "humantime-serde",
  "ipnet",
  "ldap3",
@@ -9182,6 +9186,7 @@ dependencies = [
  "warpgate-db-entities",
  "warpgate-db-migrations",
  "warpgate-ldap",
+ "warpgate-oracle-tns",
  "warpgate-secrets-vault",
  "warpgate-sso",
  "warpgate-tls",
@@ -9284,6 +9289,16 @@ dependencies = [
  "tracing",
  "uuid",
  "warpgate-tls",
+]
+
+[[package]]
+name = "warpgate-oracle-tns"
+version = "0.30.2"
+dependencies = [
+ "aes 0.8.4",
+ "hex",
+ "pbkdf2 0.12.2",
+ "sha2 0.10.9",
 ]
 
 [[package]]
@@ -9405,6 +9420,31 @@ dependencies = [
  "warpgate-database-protocols",
  "warpgate-tls",
  "webpki",
+]
+
+[[package]]
+name = "warpgate-protocol-oracle"
+version = "0.30.2"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "futures",
+ "hex",
+ "humantime",
+ "rand 0.10.2",
+ "rustls",
+ "sea-orm",
+ "socket2",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+ "warpgate-common",
+ "warpgate-core",
+ "warpgate-db-entities",
+ "warpgate-oracle-tns",
+ "warpgate-tls",
 ]
 
 [[package]]
