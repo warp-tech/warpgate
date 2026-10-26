@@ -285,6 +285,23 @@ fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> R
     Ok(target)
 }
 
+fn target_accept_encoding(req: &Request) -> HeaderValue {
+    let identity = HeaderValue::from_static("identity");
+    let wants_html = req
+        .headers()
+        .get_all(http::header::ACCEPT)
+        .iter()
+        .any(|v| v.to_str().is_ok_and(|v| v.contains("text/html")));
+    if wants_html {
+        // we need a parseable body for manipulation
+        return identity;
+    }
+    req.headers()
+        .get(http::header::ACCEPT_ENCODING)
+        .cloned()
+        .unwrap_or(identity)
+}
+
 fn inject_forwarding_headers<B: SomeRequestBuilder>(
     req: &Request,
     ctx: &AuthenticatedRequestContext,
@@ -311,6 +328,7 @@ async fn inject_own_headers<B: SomeRequestBuilder>(req: &Request, mut target: B)
             },
         );
     }
+    target = target.header(http::header::ACCEPT_ENCODING, target_accept_encoding(req));
     Ok(target)
 }
 
@@ -370,8 +388,11 @@ pub async fn proxy_normal_request(
 
     // The embedded UI can go in if the response is a usable HTML page - we for example
     // don't want to embed into a 404 page or a JS file - and it has something to show:
-    // the session menu, the login banner, or both.
+    // the session menu, the login banner, or both. An encoded body can't be edited.
     let embed_ui = response.status() == StatusCode::OK
+        && !response
+            .headers()
+            .contains_key(http::header::CONTENT_ENCODING)
         && response
             .content_type()
             .is_some_and(|content_type| content_type.starts_with("text/html"))
@@ -671,6 +692,25 @@ mod tests {
             request = request.header(http::header::COOKIE, *value);
         }
         cookie_header_for_target(&request.finish()).unwrap()
+    }
+
+    #[test]
+    fn accept_encoding_passes_through_except_for_pages() {
+        let req = |accept: &str| {
+            Request::builder()
+                .header(http::header::ACCEPT, accept)
+                .header(http::header::ACCEPT_ENCODING, "br, gzip")
+                .finish()
+        };
+        assert_eq!(target_accept_encoding(&req("*/*")), "br, gzip");
+        assert_eq!(
+            target_accept_encoding(&req("text/html,application/xhtml+xml,*/*;q=0.8")),
+            "identity"
+        );
+        assert_eq!(
+            target_accept_encoding(&Request::builder().finish()),
+            "identity"
+        );
     }
 
     #[test]
