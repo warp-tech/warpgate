@@ -13,7 +13,8 @@ use warpgate_common::{Protocol, WarpgateError};
 use warpgate_core::AuthorizedIdentity;
 use warpgate_db_entities::Parameters;
 
-use crate::request::{trusted_host_header, trusted_proto};
+use crate::logging::raw_remote_ip;
+use crate::request::{trusted_client_ip, trusted_host_header, trusted_proto};
 
 /// Used to enforce the re-authentication policy (web_auth_max_age_seconds)
 const AUTH_TIME_SESSION_KEY: &str = "auth_time";
@@ -167,6 +168,10 @@ impl UnauthenticatedRequestContext {
 
     pub fn trusted_host_header(&self, req: &Request) -> Option<String> {
         trusted_host_header(self.should_trust_x_forwarded, req)
+    }
+
+    pub fn trusted_client_ip(&self, req: &Request) -> Option<String> {
+        trusted_client_ip(req, raw_remote_ip(req), self.should_trust_x_forwarded)
     }
 
     /// Returns the trusted hostname only (port stripped),
