@@ -35,7 +35,7 @@ use subject::*;
 pub use wait::*;
 
 #[cfg(all(test, feature = "sqlite"))]
-mod tests;
+pub(crate) mod tests;
 
 /// A decision delivered to the waiting side
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -80,6 +80,15 @@ pub(crate) async fn approval_is_remembered(
     Ok(rows
         .into_iter()
         .any(|row| row.match_digest.as_deref() == Some(digest.as_str())))
+}
+
+pub(crate) async fn web_approval_grace_period(
+    db: &DatabaseConnection,
+) -> Result<Option<Duration>, WarpgateError> {
+    Ok(Parameters::Entity::get(db)
+        .await?
+        .web_approval_grace_period_seconds
+        .and_then(i64_seconds_to_duration))
 }
 
 pub(crate) async fn admin_approval_timeout(

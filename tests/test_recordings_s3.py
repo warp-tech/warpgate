@@ -13,25 +13,26 @@ from .conftest import ProcessManager
 from .test_ssh_proto import common_args, setup_user_and_target
 from .util import read_until, wait_port
 
-MINIO_USER = "minioadmin"
-MINIO_PASSWORD = "minioadmin"
+S3_ACCESS_KEY = "warpgate"
+S3_SECRET_KEY = "warpgate-secret"
 BUCKET = "warpgate-recordings"
 
 
 @pytest.fixture(scope="session")
-def minio(processes: ProcessManager):
-    port = processes.start_minio(MINIO_USER, MINIO_PASSWORD)
+def s3_server(processes: ProcessManager):
+    port = processes.start_s3(S3_ACCESS_KEY, S3_SECRET_KEY)
     wait_port(port, recv=False)
     endpoint = f"http://localhost:{port}"
     s3 = boto3.client(
         "s3",
         endpoint_url=endpoint,
-        aws_access_key_id=MINIO_USER,
-        aws_secret_access_key=MINIO_PASSWORD,
+        aws_access_key_id=S3_ACCESS_KEY,
+        aws_secret_access_key=S3_SECRET_KEY,
         region_name="us-east-1",
     )
-    # MinIO needs a moment after the port opens before it serves the S3 API.
-    deadline = time.monotonic() + 30
+    # The S3 gateway opens its port before the master/volume/filer behind it
+    # are ready, which takes a while on a cold container.
+    deadline = time.monotonic() + 90
     while True:
         try:
             s3.create_bucket(Bucket=BUCKET)
@@ -59,8 +60,8 @@ def _configure_s3(url, endpoint):
                         credentials=sdk.S3Credentials(
                             sdk.S3CredentialsStaticCredentials(
                                 mode="Static",
-                                access_key_id=MINIO_USER,
-                                secret_access_key=MINIO_PASSWORD,
+                                access_key_id=S3_ACCESS_KEY,
+                                secret_access_key=S3_SECRET_KEY,
                             )
                         ),
                     )
@@ -97,9 +98,9 @@ class Test:
         processes: ProcessManager,
         timeout,
         wg_c_ed25519_pubkey,
-        minio,
+        s3_server,
     ):
-        endpoint, s3 = minio
+        endpoint, s3 = s3_server
 
         wg = processes.start_wg(config_patch={"recordings": {"enable": True}})
         wait_port(wg.http_port, recv=False)
@@ -165,9 +166,9 @@ class Test:
         processes: ProcessManager,
         timeout,
         wg_c_ed25519_pubkey,
-        minio,
+        s3_server,
     ):
-        endpoint, s3 = minio
+        endpoint, s3 = s3_server
 
         wg = processes.start_wg(config_patch={"recordings": {"enable": True}})
         wait_port(wg.http_port, recv=False)

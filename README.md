@@ -58,6 +58,9 @@ Full documentation is available at [warpgate.null.page](https://warpgate.null.pa
 * [SSO](https://warpgate.null.page/sso/) - Single Sign-On with OpenID Connect
 * [Tickets](https://warpgate.null.page/tickets/) - Temporary access credentials
 
+For `warpgate.yaml` file options, see the [configuration schema](config-schema.json).
+Setup-generated config files include a `yaml-language-server` schema reference for editor completion and validation.
+
 ## How is Warpgate different from a jump host / VPN / Teleport?
 
 | Warpgate | SSH jump host | VPN | Teleport |
@@ -206,6 +209,15 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/EdMcBane"><img src="https://avatars.githubusercontent.com/u/8511142?v=4?s=100" width="100px;" alt="Francesco Degrassi"/><br /><sub><b>Francesco Degrassi</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=EdMcBane" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="http://betterspace.top"><img src="https://avatars.githubusercontent.com/u/141388234?v=4?s=100" width="100px;" alt="Yuzhong Zhang"/><br /><sub><b>Yuzhong Zhang</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=BetterAndBetterII" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://fergusean.com"><img src="https://avatars.githubusercontent.com/u/1029297?v=4?s=100" width="100px;" alt="Sean Ferguson"/><br /><sub><b>Sean Ferguson</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=fergusean" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/sthalbert"><img src="https://avatars.githubusercontent.com/u/79840652?v=4?s=100" width="100px;" alt="Steve ALBERT"/><br /><sub><b>Steve ALBERT</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=sthalbert" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/megative"><img src="https://avatars.githubusercontent.com/u/29413909?v=4?s=100" width="100px;" alt="Pavel K"/><br /><sub><b>Pavel K</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=megative" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/vitaly-sinev"><img src="https://avatars.githubusercontent.com/u/48276666?v=4?s=100" width="100px;" alt="vitaly-sinev"/><br /><sub><b>vitaly-sinev</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=vitaly-sinev" title="Code">💻</a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="http://perdu.com"><img src="https://avatars.githubusercontent.com/u/854038?v=4?s=100" width="100px;" alt="Max:"/><br /><sub><b>Max:</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=askz" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Mac898"><img src="https://avatars.githubusercontent.com/u/9291773?v=4?s=100" width="100px;" alt="Mac Lim"/><br /><sub><b>Mac Lim</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=Mac898" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/impuls42"><img src="https://avatars.githubusercontent.com/u/74369328?v=4?s=100" width="100px;" alt="Alex K"/><br /><sub><b>Alex K</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=impuls42" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://unsungmoments.bearblog.dev"><img src="https://avatars.githubusercontent.com/u/65853605?v=4?s=100" width="100px;" alt="Boen"/><br /><sub><b>Boen</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=boenshao" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>

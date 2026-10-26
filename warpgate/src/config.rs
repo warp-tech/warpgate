@@ -13,7 +13,7 @@ use warpgate_common::{
 pub fn load_config(params: &GlobalParams, secure: bool) -> Result<WarpgateConfig> {
     clear_config_warnings();
 
-    let mut store: serde_yaml::Value = Config::builder()
+    let mut store: yaml_serde::Value = Config::builder()
         .add_source(File::new(
             params
                 .config_path()
@@ -60,19 +60,19 @@ pub fn load_config(params: &GlobalParams, secure: bool) -> Result<WarpgateConfig
 /// structs have no `deny_unknown_fields`, such keys are otherwise silently
 /// dropped; we record them so the caller can warn instead.
 fn deserialize_store_collecting_ignored(
-    value: serde_yaml::Value,
-) -> Result<(WarpgateConfigStore, Vec<String>), serde_yaml::Error> {
+    value: yaml_serde::Value,
+) -> Result<(WarpgateConfigStore, Vec<String>), yaml_serde::Error> {
     use serde::de::IntoDeserializer;
     let mut ignored = vec![];
     let store = serde_ignored::deserialize(
-        IntoDeserializer::<serde_yaml::Error>::into_deserializer(value),
+        IntoDeserializer::<yaml_serde::Error>::into_deserializer(value),
         |path| ignored.push(path.to_string()),
     )?;
     Ok((store, ignored))
 }
 
-fn check_and_migrate_config(store: &mut serde_yaml::Value) {
-    use serde_yaml::Value;
+fn check_and_migrate_config(store: &mut yaml_serde::Value) {
+    use yaml_serde::Value;
     if let Some(map) = store.as_mapping_mut() {
         if let Some(web_admin) = map.remove(Value::String("web_admin".into())) {
             emit_config_warning(
@@ -202,13 +202,13 @@ mod tests {
     use super::*;
 
     fn parse(yaml: &str) -> (WarpgateConfigStore, Vec<String>) {
-        let value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        let value: yaml_serde::Value = yaml_serde::from_str(yaml).unwrap();
         deserialize_store_collecting_ignored(value).unwrap()
     }
 
     #[test]
     fn migrates_legacy_keepalive_interval() {
-        let mut value: serde_yaml::Value = serde_yaml::from_str(
+        let mut value: yaml_serde::Value = yaml_serde::from_str(
             "ssh:\n  keepalive_interval:\n    secs: 90\n    nanos: 0\n  inactivity_timeout: 5m\n",
         )
         .unwrap();
@@ -222,8 +222,8 @@ mod tests {
 
     #[test]
     fn keeps_humantime_keepalive_interval() {
-        let mut value: serde_yaml::Value =
-            serde_yaml::from_str("ssh:\n  keepalive_interval: 1m\n").unwrap();
+        let mut value: yaml_serde::Value =
+            yaml_serde::from_str("ssh:\n  keepalive_interval: 1m\n").unwrap();
         check_and_migrate_config(&mut value);
 
         let (store, _) = deserialize_store_collecting_ignored(value).unwrap();

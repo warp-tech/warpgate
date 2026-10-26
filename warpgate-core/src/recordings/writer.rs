@@ -1,25 +1,22 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait};
+use sea_orm::{ActiveModelTrait, DatabaseConnection, DbErr, EntityTrait};
 use serde::Serialize;
 use time::OffsetDateTime;
-use tokio::sync::{RwLock, broadcast, mpsc};
+use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::error;
+use uuid::Uuid;
 use warpgate_common::try_block;
 use warpgate_db_entities::Recording;
 
 use super::storage::RecordingSink;
 use super::{Error, LiveMap, Result};
-
-pub struct WriterShutdown {
-    pub token: CancellationToken,
-    pub tracker: TaskTracker,
-}
 
 /// Capacity of both the disk-write queue and the live broadcast ring. They must
 /// stay equal: the live-stream lag heal relies on any item dropped from the
@@ -57,11 +54,11 @@ pub struct RawRecordingWriter {
 impl RawRecordingWriter {
     pub(crate) async fn new(
         mut sink: RecordingSink,
-        model: Recording::Model,
-        db: DatabaseConnection,
         live: Option<LiveMap>,
         shutdown: WriterShutdown,
+        ticket: WriterTicket,
     ) -> Result<Self> {
+        let recording_id = ticket.recording_id();
         let (sender, mut receiver) = mpsc::channel::<Bytes>(RECORDING_QUEUE_CAPACITY);
         let (drop_signal, mut drop_receiver) = mpsc::channel(1);
         let WriterShutdown { token, tracker } = shutdown;
@@ -73,10 +70,10 @@ impl RawRecordingWriter {
         if let Some(live) = live {
             {
                 let mut live = live.lock().await;
-                live.insert(model.id, live_sender.clone());
+                live.insert(recording_id, live_sender.clone());
             }
             tokio::spawn({
-                let id = model.id;
+                let id = recording_id;
                 async move {
                     let _ = drop_receiver.recv().await;
                     let mut live = live.lock().await;
@@ -86,6 +83,7 @@ impl RawRecordingWriter {
         }
 
         tracker.spawn(async move {
+            let mut written = true;
             try_block!(async {
                 let mut last_flush = Instant::now();
                 loop {
@@ -111,33 +109,19 @@ impl RawRecordingWriter {
                 }
                 Ok::<(), anyhow::Error>(())
             } catch (error: anyhow::Error) {
+                written = false;
                 error!(%error, "Failed to write recording");
             });
 
-            // Complete the S3 object before the recording is marked ended, so a
-            // reader that switches to S3 on `ended` always finds the object. On
-            // failure the local scratch is kept (the recording is at least not lost).
-
+            // Crashed writer leaves the recording scratch as-is
             try_block!(async {
-                use sea_orm::ActiveValue::Set;
-
-                let cleanup_guard = sink.finalize().await?;
-
-                let id = model.id;
-                let db = &db;
-                let recording = Recording::Entity::find_by_id(id)
-                    .one(db)
-                    .await?
-                    .ok_or_else(|| anyhow::anyhow!("Recording not found"))?;
-                let mut model: Recording::ActiveModel = recording.into();
-                model.ended = Set(Some(OffsetDateTime::now_utc()));
-                model.update(db).await?;
-
-                drop(cleanup_guard);
-
-                Ok::<(), anyhow::Error>(())
-            } catch (error: anyhow::Error) {
-                error!(%error, "Failed to write recording");
+                let scratch = sink.finalize().await?;
+                if written {
+                    ticket.finished(scratch).await?;
+                }
+                Ok::<(), Error>(())
+            } catch (error: Error) {
+                error!(%error, "Failed to finalize recording");
             });
         });
 
@@ -192,3 +176,93 @@ impl NDJsonRecordingWriter {
         Ok(buf.len())
     }
 }
+
+mod completion {
+    use super::*;
+
+    pub struct WriterShutdown {
+        pub token: CancellationToken,
+        pub tracker: TaskTracker,
+    }
+
+    /// One completion struct shared by multiple writers (index, data) of one recording
+    /// Writers get completion tickets via register_writer and the last ticket to close finalizes the DB entry
+    pub struct RecordingCompletion {
+        db: DatabaseConnection,
+        recording_id: Uuid,
+        state: Mutex<CompletionState>,
+    }
+
+    #[derive(Default)]
+    struct CompletionState {
+        open_writers: usize,
+        /// Scratch files of the finished writers to be removed on completion
+        scratch_paths: Vec<PathBuf>,
+    }
+
+    impl RecordingCompletion {
+        pub fn new(db: DatabaseConnection, recording_id: Uuid) -> Arc<Self> {
+            Arc::new(Self {
+                db,
+                recording_id,
+                state: Mutex::default(),
+            })
+        }
+
+        pub async fn register_writer(self: &Arc<Self>) -> WriterTicket {
+            self.state.lock().await.open_writers += 1;
+            WriterTicket {
+                completion: self.clone(),
+            }
+        }
+    }
+
+    /// A ticket dropped without [`Self::finished`] keeps its recording from ever ending.
+    #[must_use]
+    pub struct WriterTicket {
+        completion: Arc<RecordingCompletion>,
+    }
+
+    impl WriterTicket {
+        pub fn recording_id(&self) -> Uuid {
+            self.completion.recording_id
+        }
+
+        /// Hands over the writer's scratch path. The last ticket to finish marks the
+        /// recording ended and only then removes every scratch, so a failure before
+        /// that point leaves them all in place.
+        pub async fn finished(self, scratch: Option<PathBuf>) -> Result<()> {
+            use sea_orm::ActiveValue::Set;
+
+            let completion = &self.completion;
+            {
+                let mut state = completion.state.lock().await;
+                state.scratch_paths.extend(scratch);
+                state.open_writers = state.open_writers.saturating_sub(1);
+                if state.open_writers > 0 {
+                    return Ok(());
+                }
+            }
+
+            let recording = Recording::Entity::find_by_id(completion.recording_id)
+                .one(&completion.db)
+                .await?
+                .ok_or_else(|| {
+                    DbErr::RecordNotFound(format!("recording {}", completion.recording_id))
+                })?;
+            let mut model: Recording::ActiveModel = recording.into();
+            model.ended = Set(Some(OffsetDateTime::now_utc()));
+            model.update(&completion.db).await?;
+
+            let scratch_paths = std::mem::take(&mut completion.state.lock().await.scratch_paths);
+            for path in scratch_paths {
+                if let Err(error) = tokio::fs::remove_file(&path).await {
+                    error!(%error, ?path, "Failed to remove local recording scratch");
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+pub use completion::{RecordingCompletion, WriterShutdown, WriterTicket};

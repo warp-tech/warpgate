@@ -3,7 +3,10 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter,
+};
+use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, broadcast};
@@ -181,20 +184,18 @@ impl State {
         )))
     }
 
-    pub async fn close_local_sessions(
-        this: &Arc<Mutex<Self>>,
-        matches: impl Fn(&UserSessionState) -> bool,
-    ) {
+    // close matching live sessions
+    pub async fn close_local_sessions(this: &Arc<Mutex<Self>>, scope: &SessionsFilter) {
         let user_states = this
             .lock()
             .await
             .user_sessions
-            .values()
-            .cloned()
+            .iter()
+            .map(|(id, state)| (*id, state.clone()))
             .collect::<Vec<_>>();
-        for state in user_states {
+        for (id, state) in user_states {
             let state = state.lock().await;
-            if matches(&state) {
+            if scope.includes(id, state.user_info.as_ref().map(|user| user.id)) {
                 state.handle.close();
             }
         }
@@ -259,8 +260,6 @@ impl State {
             error!(%error, %id, "Could not end user session in the DB");
         }
 
-        self.abandon_session_approvals(id).await;
-
         let _ = self.change_sender.send(());
     }
 }
@@ -295,6 +294,41 @@ pub struct UserSessionState {
     pub target: Option<Target>,
     change_sender: broadcast::Sender<()>,
     pub rate_limiter_handles: Vec<RateLimiterStackHandle>,
+}
+
+// not Condition because it matches both against DB and active session list
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SessionsFilter {
+    Sessions { ids: Vec<UserSessionId> },
+    User { user_id: Uuid },
+    All,
+}
+
+impl SessionsFilter {
+    fn includes(&self, id: UserSessionId, user_id: Option<Uuid>) -> bool {
+        match self {
+            Self::Sessions { ids } => ids.contains(&id),
+            Self::User { user_id: target } => user_id == Some(*target),
+            Self::All => true,
+        }
+    }
+
+    fn condition(&self) -> Condition {
+        match self {
+            Self::Sessions { ids } => {
+                Condition::all().add(UserSession::Column::Id.is_in(ids.iter().copied()))
+            }
+            Self::User { user_id } => {
+                Condition::all().add(UserSession::Column::UserId.eq(*user_id))
+            }
+            Self::All => Condition::all(),
+        }
+    }
+
+    pub async fn revoke(&self, db: &DatabaseConnection) -> Result<(), WarpgateError> {
+        UserSession::revoke_open_matching(db, self.condition()).await
+    }
 }
 
 pub struct UserSessionStateInit {

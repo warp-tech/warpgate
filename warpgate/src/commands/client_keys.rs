@@ -17,7 +17,12 @@ pub async fn command(params: &GlobalParams) -> Result<()> {
     println!();
     for key in keys {
         let default = if key.is_default { " (default)" } else { "" };
-        println!("{} {}{default}", key.public_key, key.label);
+        let backend = key
+            .secret_key
+            .as_reference()
+            .map(|r| format!(" (from secret backend '{}')", r.backend))
+            .unwrap_or_default();
+        println!("{} {}{default}{backend}", key.public_key, key.label);
     }
     Ok(())
 }

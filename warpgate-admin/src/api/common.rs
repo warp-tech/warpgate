@@ -1,22 +1,16 @@
 use sea_orm::prelude::Expr;
 use sea_orm::sea_query::{Alias, Func, IntoCondition, SimpleExpr};
-use sea_orm::{ColumnTrait, Condition, DbBackend, DbErr, EntityTrait, ModelTrait, SqlErr};
+use sea_orm::{ColumnTrait, Condition, DbBackend, EntityTrait, ModelTrait};
 use warpgate_common::{AdminPermission, AdminPermissionSet, WarpgateError};
 pub use warpgate_common_http::RequestAuthorization;
+pub use warpgate_core::db::is_unique_violation;
 use warpgate_db_entities::{AdminRole, User};
-
-/// Lets a handler answer a unique-name collision with a 409 instead of a 500. What counts
-/// as a duplicate is whatever the index's collation says, which is also what the queries
-/// looking a row up by that name will see.
-pub fn is_unique_violation(err: &DbErr) -> bool {
-    matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_)))
-}
 
 /// The admin permissions the request's principal holds — the single place that resolves the
 /// permission model from the DB. `has_admin_permission`, `is_user_admin` and the `/info` UI
 /// serialization all read the result instead of re-deriving it three different ways.
 ///
-/// An admin token holds every permission; a ticket, a cluster token, or an unauthenticated
+/// An admin token holds every permission; a ticket, a bare cluster peer, or an unauthenticated
 /// caller holds none (a ticket is scoped to one target and must never confer admin rights).
 pub async fn admin_permission_set(
     ctx: &warpgate_common_http::AuthenticatedRequestContext,
@@ -65,8 +59,8 @@ pub async fn require_admin_permission(
 }
 
 /// Gate for endpoints that might have to be forwarded between nodes - so they
-/// accept a cluster token as auth (the origin node has already authorized the
-/// admin before forwarding)
+/// accept an authenticated cluster peer (the origin node has already authorized
+/// the admin before forwarding)
 pub async fn require_cluster_or_admin_permission(
     ctx: &warpgate_common_http::AuthenticatedRequestContext,
     permission: AdminPermission,

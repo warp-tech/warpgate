@@ -23,19 +23,14 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tracing::{Instrument as _, Span, debug, warn};
 use warpgate_core::{DesktopInput, Scancode};
+#[cfg(test)]
 use warpgate_desktop_ui::DEFAULT_SIZE;
 
 use super::clipboard::ViewerClipboard;
 use super::protocol::{AuthVerdict, Event, Input};
-
-/// Upper bound on a single framebuffer update, and so on the desktop size we will accept
-/// from a viewer: a full-screen BGRA frame has to stay a sane allocation.
-const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
-/// Smallest desktop MS-RDPBCGR allows a client to ask for; also keeps the hold screen from
-/// being asked to render into a degenerate framebuffer.
-const MIN_DESKTOP_DIM: u16 = 200;
-/// Largest desktop dimension we will honour.
-const MAX_DESKTOP_DIM: u16 = 8192;
+use crate::desktop_size::bound_desktop_size;
+#[cfg(test)]
+use crate::desktop_size::{MAX_DESKTOP_DIM, MAX_FRAME_BYTES, MIN_DESKTOP_DIM};
 
 /// Run the RDP server on a dedicated thread, resolving to its result.
 ///
@@ -257,29 +252,11 @@ fn frame_to_update(x: u16, y: u16, width: u16, height: u16, data: Bytes) -> Opti
     }))
 }
 
-/// Bound a viewer-supplied desktop size. This arrives during the capability exchange,
-/// before the credential validator has run, and drives full-screen framebuffer
-/// allocations of `width * height * 4`, so it is untrusted input. Sizes whose full-screen
-/// frame would exceed [`MAX_FRAME_BYTES`] fall back to the default rather than being
-/// silently squashed to a different aspect ratio.
+/// Bound a viewer-supplied desktop size with [`bound_desktop_size`]. On this path it arrives
+/// during the capability exchange, before the credential validator has run.
 fn clamp_desktop_size(requested: DesktopSize) -> DesktopSize {
-    let size = DesktopSize {
-        width: requested.width.clamp(MIN_DESKTOP_DIM, MAX_DESKTOP_DIM),
-        height: requested.height.clamp(MIN_DESKTOP_DIM, MAX_DESKTOP_DIM),
-    };
-    let frame_len = usize::from(size.width) * usize::from(size.height) * 4;
-    if frame_len > MAX_FRAME_BYTES {
-        warn!(
-            width = size.width,
-            height = size.height,
-            "viewer requested a desktop too large to frame; using the default"
-        );
-        return DesktopSize {
-            width: DEFAULT_SIZE.0,
-            height: DEFAULT_SIZE.1,
-        };
-    }
-    size
+    let (width, height) = bound_desktop_size(requested.width, requested.height);
+    DesktopSize { width, height }
 }
 
 fn primary_monitor_size(layout: &DisplayControlMonitorLayout) -> Option<DesktopSize> {

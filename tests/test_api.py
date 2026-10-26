@@ -282,10 +282,97 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         expected_statuses={200},
     ),
     AdminApiTestCase(
+        id="import_ssh_own_key_reference",
+        permission="config_edit",
+        call=lambda api, r: api.import_ssh_own_key_reference_with_http_info(
+            sdk.ImportSshClientKeyReferenceRequest(
+                label=f"key-{uuid4()}",
+                reference="secret://not-configured/secret/key#private_key",
+                is_default=False,
+            )
+        ),
+        expected_statuses={400},
+    ),
+    AdminApiTestCase(
+        id="get_secret_backends",
+        permission="config_edit",
+        call=lambda api, r: api.get_secret_backends_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_secret_backends_summary",
+        permission=None,
+        call=lambda api, r: api.get_secret_backends_summary_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_secret_reference_usage",
+        permission="targets_edit",
+        call=lambda api, r: api.get_secret_reference_usage_with_http_info(str(uuid4())),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="create_secret_backend",
+        permission="config_edit",
+        call=lambda api, r: api.create_secret_backend_with_http_info(
+            sdk.SecretBackendRequest(
+                name=f"vault-{uuid4().hex[:8]}",
+                backend_type="vault",
+                address="https://vault.invalid:8200",
+                auth=sdk.SecretBackendAuth(
+                    sdk.SecretBackendAuthVaultTokenAuth(method="Token", token="test")
+                ),
+            )
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="get_secret_backend",
+        permission=None,
+        call=lambda api, r: api.get_secret_backend_with_http_info(str(uuid4())),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="update_secret_backend",
+        permission="config_edit",
+        call=lambda api, r: api.update_secret_backend_with_http_info(
+            str(uuid4()),
+            sdk.SecretBackendRequest(
+                name="vault-missing",
+                backend_type="vault",
+                address="https://vault.invalid:8200",
+                auth=sdk.SecretBackendAuth(sdk.SecretBackendAuthVaultTokenAuth(method="Token", token="")),
+            ),
+        ),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="delete_secret_backend",
+        permission="config_edit",
+        call=lambda api, r: api.delete_secret_backend_with_http_info(str(uuid4())),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="check_secret_backend_health",
+        permission="config_edit",
+        call=lambda api, r: api.check_secret_backend_health_with_http_info(str(uuid4())),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="test_secret_resolve",
+        permission="targets_edit",
+        call=lambda api, r: api.test_secret_resolve_with_http_info(
+            sdk.TestResolveRequest(
+                reference="secret://not-configured/secret/x#password"
+            )
+        ),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
         id="import_ssh_own_key",
         permission="config_edit",
         call=lambda api, r: api.import_ssh_own_key_with_http_info(
-            sdk.ImportSSHClientKeyRequest(
+            sdk.ImportSshClientKeyRequest(
                 label=f"key-{uuid4()}",
                 secret_key=open("ssh-keys/id_ed25519").read(),
                 is_default=False,
@@ -1225,3 +1312,83 @@ def test_update_target_rejects_empty_name(admin_client: sdk.DefaultApi):
         admin_client.update_target(target.id, _ssh_target_request(""))
     assert err.value.status == 400
     assert admin_client.get_target(target.id).name == target.name
+
+
+HTTP_HEADER_SECRET = "Bearer s3cr3t-upstream"
+HTTP_URL_PASSWORD = "p4ss"
+
+
+def _http_target_request(name: str) -> sdk.TargetDataRequest:
+    return sdk.TargetDataRequest(
+        name=name,
+        require_approval=False,
+        ticket_requests_disabled=False,
+        ticket_require_approval=False,
+        options=sdk.TargetOptions(
+            sdk.TargetOptionsTargetHTTPOptions(
+                kind="Http",
+                headers={"Authorization": HTTP_HEADER_SECRET},
+                url=f"https://u:{HTTP_URL_PASSWORD}@upstream.example/",
+                tls=sdk.Tls(mode=sdk.TlsMode.PREFERRED, verify=True),
+            )
+        ),
+    )
+
+
+def test_http_target_credentials_are_redacted_for_admins_without_targets_edit(
+    pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
+):
+    url = f"https://localhost:{pg_wg.http_port}"
+    target = admin_client.create_target(_http_target_request(f"http-{uuid4()}"))
+    role = admin_client.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
+    admin_client.add_target_role(target.id, role.id)
+
+    lesser_role = _create_admin_role(
+        admin_client, make_limited_admin_role_payload(recordings_view=True)
+    )
+    lesser = _create_user_with_role(admin_client, lesser_role.id)
+    token = _create_user_api_token(url, lesser.username, "123")
+
+    s = requests.Session()
+    s.verify = False
+    s.headers["X-Warpgate-Token"] = token
+    api = f"{url}/@warpgate/admin/api"
+    bodies = {}
+    for path in ["/targets", f"/targets/{target.id}", f"/role/{role.id}/targets"]:
+        resp = s.get(f"{api}{path}")
+        assert resp.status_code == 200, (path, resp.status_code)
+        # The target must be in the response, or the absence checks prove nothing.
+        assert "upstream.example" in resp.text, path
+        bodies[path] = resp.text
+    leaks = {
+        path: [v for v in (HTTP_HEADER_SECRET, HTTP_URL_PASSWORD) if v in body]
+        for path, body in bodies.items()
+    }
+    assert not any(leaks.values()), f"credentials visible to a RecordingsView admin: {leaks}"
+
+    # Redacted values must not be writable back through this admin.
+    resp = s.put(
+        f"{api}/targets/{target.id}",
+        json=s.get(f"{api}/targets/{target.id}").json()
+        | {"ticket_requests_disabled": False, "ticket_require_approval": False},
+    )
+    assert resp.status_code in {401, 403}, resp.status_code
+
+    # A TargetsEdit admin still sees the values and an edit round-trips them.
+    full = admin_client.get_target(target.id)
+    http = full.options.actual_instance
+    assert http.headers == {"Authorization": HTTP_HEADER_SECRET}
+    assert http.url == f"https://u:{HTTP_URL_PASSWORD}@upstream.example/"
+    admin_client.update_target(
+        target.id,
+        sdk.TargetDataRequest(
+            name=full.name,
+            options=full.options,
+            require_approval=False,
+            ticket_requests_disabled=False,
+            ticket_require_approval=False,
+        ),
+    )
+    after = admin_client.get_target(target.id).options.actual_instance
+    assert after.headers == http.headers
+    assert after.url == http.url

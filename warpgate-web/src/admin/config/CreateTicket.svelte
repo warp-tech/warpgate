@@ -81,10 +81,15 @@
                 targetName={selectedTarget.name}
                 targetKind={selectedTarget.options.kind}
                 username={selectedUser.username}
-                targetExternalHost={selectedTarget.options.kind === 'Http' ? selectedTarget.options.externalHost : undefined}
+                targetExternalHost={selectedTarget.options.kind === 'Http'
+                    ? selectedTarget.options.externalHost
+                    : undefined}
                 ticketSecret={result.secret}
-                targetDefaultDatabaseName={(selectedTarget.options.kind === TargetKind.MySql || selectedTarget.options.kind === TargetKind.Postgres)
-                    ? selectedTarget.options.defaultDatabaseName : undefined}
+                targetDefaultDatabaseName={selectedTarget.options.kind ===
+                    TargetKind.MySql ||
+                selectedTarget.options.kind === TargetKind.Postgres
+                    ? selectedTarget.options.defaultDatabaseName
+                    : undefined}
             />
         {/if}
 

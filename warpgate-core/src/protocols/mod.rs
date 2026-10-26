@@ -1,4 +1,3 @@
-use std::fmt::Debug;
 use std::future::Future;
 
 use anyhow::Result;
@@ -12,29 +11,16 @@ mod handle;
 mod terminal_screen;
 
 pub use desktop::{
-    DESKTOP_INPUT_CHANNEL_CAPACITY, DesktopClientHandles, DesktopEvent, DesktopInput, DesktopRect,
-    DesktopState, LogonState, MAX_CLIPBOARD_BYTES, Scancode, truncate_clipboard_contents,
-    truncate_clipboard_contents_in_place,
+    DESKTOP_CONNECT_TIMEOUT, DESKTOP_HANDSHAKE_TIMEOUT, DESKTOP_INPUT_CHANNEL_CAPACITY,
+    DesktopClientHandles, DesktopConnectionError, DesktopEvent, DesktopInput, DesktopRect,
+    DesktopState, LogonState, MAX_CLIPBOARD_BYTES, MAX_DESKTOP_DIM, Scancode, check_desktop_size,
+    truncate_clipboard_contents, truncate_clipboard_contents_in_place, within_deadline,
 };
 pub use framebuffer::{Framebuffer, PngEncodeError, Rect, decode_png_rgba};
 pub use handle::{AdmittedTarget, SessionHandle, TargetSessionStart, WarpgateServerHandle};
-pub use terminal_screen::{TerminalScreen, sane_terminal_size};
-
-#[derive(Debug, thiserror::Error)]
-pub enum TargetTestError {
-    #[error("unreachable")]
-    Unreachable,
-    #[error("authentication failed")]
-    AuthenticationError,
-    #[error("connection error: {0}")]
-    ConnectionError(String),
-    #[error("misconfigured: {0}")]
-    Misconfigured(String),
-    #[error("I/O: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("dialoguer: {0}")]
-    Dialoguer(#[from] dialoguer::Error),
-}
+pub use terminal_screen::{
+    MAX_TERMINAL_COLS, MAX_TERMINAL_ROWS, TerminalScreen, sane_terminal_size,
+};
 
 pub trait ProtocolServer {
     fn name(&self) -> &'static str;

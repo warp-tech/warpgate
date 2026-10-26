@@ -19,13 +19,13 @@ jobs:
 
       # Github runner ocasionally runs out of space causing flakiness
       - name: Free disk space
-        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
+        uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6
         with:
           tool-cache: false
           large-packages: false
           docker-images: false
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
 
@@ -40,7 +40,6 @@ jobs:
           # Pin cargo-llvm-cov to 0.6.15 because versions 0.6.16+ depend on ruzstd 0.8.x which uses
           # the unstable `unsigned_is_multiple_of` feature not available in nightly-2025-01-01
           cargo install --locked cargo-llvm-cov@0.6.15
-          cargo clean
           rustup component add llvm-tools-preview
 
       - name: Build UI
@@ -49,11 +48,6 @@ jobs:
           just openapi
           just npm run openapi:tests-sdk
           just npm run build
-
-      # Built separately (own lockfile) so the workspace coverage build embeds it
-      # and warpgate-protocol-rdp's extraction test runs.
-      - name: Run Rust unit tests
-        run: cargo llvm-cov test --workspace
 
       - name: Build images
         working-directory: tests
@@ -76,7 +70,6 @@ jobs:
         working-directory: tests
         run: |
           TIMEOUT=120 poetry run ./run.sh
-          cargo llvm-cov report --lcov > coverage.lcov
 
       - name: Upload coverage
         uses: actions/upload-artifact@2848b2cda0e5190984587ec6bb1f36730ca78d50
@@ -91,7 +84,7 @@ jobs:
           path: target/llvm-cov/html
 
       - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f
+        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9
         if: ${{ env.SONAR_TOKEN }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any

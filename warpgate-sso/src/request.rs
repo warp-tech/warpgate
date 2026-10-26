@@ -116,6 +116,14 @@ pub async fn map_sso_result(
         access_roles: access_groups,
         admin_roles: admin_groups,
         id_token: result.token.clone(),
+        subject: result.claims.subject().to_string(),
+        sid: result
+            .claims
+            .additional_claims()
+            .0
+            .get("sid")
+            .and_then(|sid| sid.as_str())
+            .map(ToString::to_string),
     }
 }
 

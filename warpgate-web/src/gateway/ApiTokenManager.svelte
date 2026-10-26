@@ -22,9 +22,11 @@
     const paramLabel = urlParams.get('label') ?? ''
     const paramExpiry = urlParams.get('expiry')
 
-    const initialExpiryMs = paramExpiry
+    const paramExpirySeconds = paramExpiry
         ? parseHumantimeDuration(paramExpiry)
         : undefined
+    const initialExpiryMs =
+        paramExpirySeconds !== undefined ? paramExpirySeconds * 1000 : undefined
 
     if (autoCreate) {
         creatingToken = true
@@ -56,9 +58,9 @@
         color="primary"
         class="ms-auto"
         onclick={e => {
-        creatingToken = true
-        e.preventDefault()
-    }}
+            creatingToken = true
+            e.preventDefault()
+        }}
     >
         Create token
     </Button>
@@ -77,7 +79,9 @@
 {/if}
 
 <Loadable promise={api.getMyApiTokens()}>
-    {#snippet children(tokens)}
+    {#snippet children(
+        tokens,
+    )}
         {#if tokens.length === 0}
             <EmptyState
                 title="No tokens yet"
@@ -102,9 +106,9 @@
                         color="link"
                         class="ms-2"
                         onclick={e => {
-                    deleteToken(token)
-                    e.preventDefault()
-                }}
+                            deleteToken(token)
+                            e.preventDefault()
+                        }}
                     >
                         Delete
                     </Button>

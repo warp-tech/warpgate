@@ -69,15 +69,11 @@ feature-depth = 1
 ignore = [
     "RUSTSEC-2023-0071", # Marvin Attack: potential key recovery through timing sidechannels
     "RUSTSEC-2025-0134", # rustls-pemfile is deprecated but poem is still using it
-    "RUSTSEC-2026-0099", # rustls: Name constraints were accepted for certificates asserting a wildcard name
-    "RUSTSEC-2026-0098", # rustls: Name constraints for URI names were incorrectly accepted
-    "RUSTSEC-2026-0104", # an older pinned version of rustls-webpki used by AWS SDK
     "RUSTSEC-2026-0173", # proc-macro-error2 is unmaintained - waiting for a sea-orm update
     "RUSTSEC-2026-0195", # quick-xml memory exhaustion - we don't parse untrusted XML
-    "RUSTSEC-2026-0253", # lru: unsound LruCache::pop - an old version pinned by aws-sdk-s3
     "RUSTSEC-2026-0194", # quick-xml quadratic time - see above
     "RUSTSEC-2021-0141", # dotenv is unmaintaned - only used for dev
-    "RUSTSEC-2026-0258", # h2 empty data frame leak - only used by old hyper-rustls via aws sdk
+    "RUSTSEC-2024-0449", # unsafe-libyaml is unmaintained - serde_yaml (config) and poem still depend on it
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
@@ -116,7 +112,9 @@ allow = [
 ]
 # List of crates to deny
 deny = [
-    { crate = "openssl-sys", wrappers = ["openssl", "tokio-openssl"], reason = "RDP legacy TLS compatibility uses vendored OpenSSL for older Windows Schannel targets" }
+    { crate = "openssl-sys", wrappers = ["openssl", "tokio-openssl"], reason = "RDP legacy TLS compatibility uses vendored OpenSSL for older Windows Schannel targets" },
+    { crate = "webpki-roots@0.26", wrappers = ["sqlx-core"], reason = "Outbound TLS must verify against the OS certificate store, not a bundled root list. sqlx is the only exception: its native-roots feature forces the ring crypto provider for the database handshake" },
+    { crate = "webpki-roots@1", wrappers = ["webpki-roots"], reason = "Only reachable through the 0.26 compatibility shim that sqlx-core uses (see above)" },
     #"ansi_term@0.11.0",
     #{ crate = "ansi_term@0.11.0", reason = "you can specify a reason it is banned" },
     # Wrapper crates can optionally be specified to allow the crate when it

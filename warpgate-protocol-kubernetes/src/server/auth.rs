@@ -441,8 +441,7 @@ async fn user_for_username(services: &Services, username: &str) -> poem::Result<
 
 pub async fn create_authenticated_client(
     k8s_options: &TargetKubernetesOptions,
-    _auth_user: Option<&String>,
-    _services: &Services,
+    services: &Services,
 ) -> anyhow::Result<reqwest::ClientBuilder> {
     debug!(
         server_url = ?k8s_options.cluster_url,
@@ -451,8 +450,7 @@ pub async fn create_authenticated_client(
         "Creating authenticated Kubernetes client"
     );
 
-    // Create HTTP client with the configuration
-    let mut client_builder = reqwest::Client::builder();
+    let mut client_builder = upstream_client_builder(&k8s_options.cluster_url);
 
     if !k8s_options.tls.verify {
         client_builder = client_builder.danger_accept_invalid_certs(true);
@@ -465,7 +463,10 @@ pub async fn create_authenticated_client(
                 reqwest::header::AUTHORIZATION,
                 reqwest::header::HeaderValue::from_str(&format!(
                     "Bearer {}",
-                    auth.token.reveal()?.expose_secret()
+                    auth.token
+                        .resolve(&*services.secret_backends)
+                        .await?
+                        .expose_secret()
                 ))
                 .context("setting Authorization header")?,
             );
@@ -475,7 +476,7 @@ pub async fn create_authenticated_client(
             // Expect PEM certificate and PEM private key in the auth config
             // Combine into a single PEM bundle for reqwest::Identity
             let cert_pem = auth.certificate.expose_secret();
-            let key_pem = auth.private_key.reveal()?;
+            let key_pem = auth.private_key.resolve(&*services.secret_backends).await?;
             let pem_bundle = format!(
                 "{}\n{}\n",
                 cert_pem.trim_end_matches('\n'),
@@ -508,6 +509,57 @@ pub async fn create_authenticated_client(
     }
 
     Ok(client_builder)
+}
+
+/// Retry policy for requests to the Kubernetes API server.
+///
+/// Keeps reqwest's default (resend after a graceful GOAWAY or REFUSED_STREAM)
+/// and adds connections that failed to come up: TCP connect or TLS handshake.
+/// Nothing has been sent at that point, so resending is safe for any method.
+/// Connect timeouts are not resent: each attempt would wait out the full
+/// timeout again against an unreachable server.
+/// SNI-routing front ends can miss a ClientHello that spans two TCP segments
+/// and answer with their default certificate (kubernetes/ingress-nginx#11491),
+/// and a ClientHello with a post-quantum key share is big enough to do that.
+fn upstream_client_builder(cluster_url: &str) -> reqwest::ClientBuilder {
+    // never follow untrusted redirects
+    let builder = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none());
+    match url::Url::parse(cluster_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned))
+    {
+        Some(host) => builder.retry(upstream_retry_policy(host)),
+        None => builder,
+    }
+}
+
+fn upstream_retry_policy(host: String) -> reqwest::retry::Builder {
+    reqwest::retry::for_host(host).classify_fn(|req_rep| match req_rep.error() {
+        Some(error) if is_safe_to_resend(error) => {
+            debug!(url = %req_rep.uri(), %error, "Resending Kubernetes upstream request");
+            req_rep.retryable()
+        }
+        _ => req_rep.success(),
+    })
+}
+
+fn is_safe_to_resend(error: &(dyn std::error::Error + 'static)) -> bool {
+    if error
+        .downcast_ref::<reqwest::Error>()
+        .is_some_and(|error| error.is_connect() && !error.is_timeout())
+    {
+        return true;
+    }
+    let mut source = error.source();
+    while let Some(cause) = source {
+        if let Some(error) = cause.downcast_ref::<h2::Error>() {
+            return error.is_remote()
+                && ((error.is_go_away() && error.reason() == Some(h2::Reason::NO_ERROR))
+                    || (error.is_reset() && error.reason() == Some(h2::Reason::REFUSED_STREAM)));
+        }
+        source = cause.source();
+    }
+    false
 }
 
 /// True if `now` falls within the certificate's `[not_before, not_after]`
@@ -610,4 +662,153 @@ fn normalize_certificate_pem(pem: &str) -> String {
         .chars()
         .filter(|c| !c.is_whitespace())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    use super::{upstream_client_builder, upstream_retry_policy};
+
+    fn client_builder() -> reqwest::ClientBuilder {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        reqwest::Client::builder()
+    }
+
+    /// Accepts connections and either closes them straight away or holds them
+    /// open without answering, so every TLS handshake fails or stalls.
+    /// Returns a URL on it and a count of accepted connections.
+    async fn tls_failing_server(stall: bool) -> (String, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("https://{}/version", listener.local_addr().unwrap());
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let counter = accepted.clone();
+        tokio::spawn(async move {
+            let mut held = vec![];
+            while let Ok((stream, _)) = listener.accept().await {
+                counter.fetch_add(1, Ordering::SeqCst);
+                if stall {
+                    held.push(stream);
+                }
+            }
+        });
+        (url, accepted)
+    }
+
+    /// Plaintext HTTP/2 server that resets every stream with REFUSED_STREAM.
+    /// Returns a URL on it and a count of requests seen.
+    async fn refusing_server() -> (String, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/version", listener.local_addr().unwrap());
+        let requests = Arc::new(AtomicUsize::new(0));
+        let counter = requests.clone();
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                let counter = counter.clone();
+                tokio::spawn(async move {
+                    let Ok(mut connection) = h2::server::handshake(stream).await else {
+                        return;
+                    };
+                    while let Some(Ok((_, mut respond))) = connection.accept().await {
+                        counter.fetch_add(1, Ordering::SeqCst);
+                        respond.send_reset(h2::Reason::REFUSED_STREAM);
+                    }
+                });
+            }
+        });
+        (url, requests)
+    }
+
+    async fn attempts(client: reqwest::Client, stall: bool) -> usize {
+        let (url, accepted) = tls_failing_server(stall).await;
+        let error = client.get(&url).send().await.unwrap_err();
+        assert!(error.is_connect(), "{error:?}");
+        accepted.load(Ordering::SeqCst)
+    }
+
+    #[tokio::test]
+    async fn failed_handshakes_are_resent() {
+        let client = client_builder()
+            .retry(upstream_retry_policy("127.0.0.1".into()))
+            .build()
+            .unwrap();
+        // The first attempt and two resends.
+        assert_eq!(attempts(client, false).await, 3);
+
+        let client = client_builder().build().unwrap();
+        assert_eq!(attempts(client, false).await, 1);
+    }
+
+    #[tokio::test]
+    async fn connect_timeouts_are_not_resent() {
+        let client = client_builder()
+            .connect_timeout(Duration::from_millis(100))
+            .retry(upstream_retry_policy("127.0.0.1".into()))
+            .build()
+            .unwrap();
+        assert_eq!(attempts(client, true).await, 1);
+    }
+
+    #[tokio::test]
+    async fn refused_streams_are_still_resent() {
+        // Setting a classifier replaces reqwest's default protocol-NACK
+        // retries, so this checks the h2 branch of is_safe_to_resend keeps them.
+        let requests = async |policy| {
+            let (url, requests) = refusing_server().await;
+            let client = client_builder()
+                .http2_prior_knowledge()
+                .retry(policy)
+                .build()
+                .unwrap();
+            client.get(&url).send().await.unwrap_err();
+            requests.load(Ordering::SeqCst)
+        };
+        assert_eq!(requests(upstream_retry_policy("127.0.0.1".into())).await, 3);
+        assert_eq!(requests(reqwest::retry::never()).await, 1);
+    }
+
+    /// Answers every HTTP/1.1 request with `response` and counts requests.
+    async fn canned_server(response: String) -> (String, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let requests = Arc::new(AtomicUsize::new(0));
+        let counter = requests.clone();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                counter.fetch_add(1, Ordering::SeqCst);
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf).await;
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
+        });
+        (url, requests)
+    }
+
+    #[tokio::test]
+    async fn redirects_are_passed_through() {
+        let (internal, internal_hits) = canned_server(
+            "HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\nsecret".into(),
+        )
+        .await;
+        let (api, _) = canned_server(format!(
+            "HTTP/1.1 307 Temporary Redirect\r\nLocation: {internal}/secret\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        ))
+        .await;
+
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let client = upstream_client_builder(&api).build().unwrap();
+        let response = client
+            .get(format!("{api}/api/v1/namespaces/default/services/x/proxy/"))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), reqwest::StatusCode::TEMPORARY_REDIRECT);
+        assert_eq!(internal_hits.load(Ordering::SeqCst), 0);
+    }
 }

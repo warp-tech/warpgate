@@ -397,13 +397,18 @@ impl Api {
             return Ok(CreatePublicKeyCredentialResponse::Unauthorized);
         };
 
+        let mut key = russh::keys::PublicKey::from_openssh(&body.openssh_public_key)
+            .map_err(russh::keys::Error::from)?;
+        key.set_comment("");
+        let openssh_public_key = key.to_openssh().map_err(russh::keys::Error::from)?;
+
         let object = PublicKeyCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(user.id),
             date_added: Set(Some(OffsetDateTime::now_utc())),
             last_used: Set(None),
             label: Set(body.label.clone()),
-            openssh_public_key: Set(body.openssh_public_key.clone()),
+            openssh_public_key: Set(openssh_public_key),
         }
         .insert(db)
         .await
@@ -505,7 +510,6 @@ impl Api {
 
         let user_id = user.id;
         let username = user.username.clone();
-        let mut user_cfg: User = user.clone().try_into()?;
 
         let object = entities::OtpCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -516,16 +520,7 @@ impl Api {
         .await
         .map_err(WarpgateError::from)?;
 
-        let details = user.load_details(db).await?;
-        user_cfg.credential_policy = Some(
-            user_cfg
-                .credential_policy
-                .unwrap_or_default()
-                .upgrade_to_otp(details.credentials.as_slice()),
-        );
-
-        let user = entities::User::ActiveModel::try_from(user_cfg)?;
-        user.update(db).await?;
+        user.require_otp_in_policy(db).await?;
 
         AuditEvent::CredentialCreated {
             credential_type: "otp".to_string(),

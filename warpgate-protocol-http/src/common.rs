@@ -1,8 +1,9 @@
 use core::str;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::Context;
-use http::{HeaderName, StatusCode};
+use http::StatusCode;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use poem::error::InternalServerError;
 use poem::session::{CookieConfig, Session};
@@ -13,22 +14,24 @@ use sea_orm::EntityTrait;
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
+use tracing::Instrument;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthResult, AuthState, AuthStateUserInfo, CredentialKind};
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Protocol, UserSessionId, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
+pub use warpgate_common_http::auth::is_localhost_host;
 use warpgate_common_http::ext::{construct_external_url, is_navigation_request};
 use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
-    X_WARPGATE_CLUSTER_IDENTITY, is_cluster_peer_request,
+    X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_TOKEN, is_cluster_peer_request,
 };
 use warpgate_core::{ConfigProvider, vet_credential_bearer};
 use warpgate_db_entities::User;
 use warpgate_sso::WarpgateIdToken;
 
-use crate::middleware::assert_mfa_setup_gate;
+use crate::middleware::{assert_mfa_setup_gate, is_session_bootstrap_path, warpgate_surface_path};
 use crate::session::SessionStore;
 use crate::session_storage::SharedSessionStorage;
 
@@ -37,7 +40,6 @@ static TARGET_SESSION_KEY: &str = "target_name";
 static AUTH_SESSION_KEY: &str = "auth";
 static AUTH_SSO_LOGIN_STATE: &str = "auth_sso_login_state";
 pub static SESSION_COOKIE_NAME: &str = "warpgate-http-session";
-pub static X_WARPGATE_TOKEN: HeaderName = HeaderName::from_static("x-warpgate-token");
 
 /// The session cookie's shape — name and (absence of) signing — defined once:
 /// the `ServerSession` middleware writes the cookie through this config, and
@@ -55,9 +57,36 @@ pub fn storage_session_id(jar: &CookieJar) -> Option<String> {
     session_cookie_config().get_cookie_value(jar)
 }
 
-/// Check if a host is localhost or 127.x.x.x (for development/testing scenarios)
-pub fn is_localhost_host(host: &str) -> bool {
-    host == "localhost" || host == "127.0.0.1" || host.starts_with("127.")
+/// Deferred rekey after authorization
+pub struct SessionRotation {
+    storage: SharedSessionStorage,
+    stored_id: Option<String>,
+}
+
+impl SessionRotation {
+    /// None if rotation not needed
+    pub async fn for_request(req: &Request) -> Result<Option<Self>, WarpgateError> {
+        // don't try to rotate forwarded reqs
+        if is_cluster_peer_request(req) {
+            return Ok(None);
+        }
+        let jar = <&CookieJar>::from_request_without_body(req)
+            .await
+            .context("CookieJar not in request")?;
+        let storage = Data::<&SharedSessionStorage>::from_request_without_body(req)
+            .await
+            .context("SharedSessionStorage not in request")?;
+        Ok(Some(Self {
+            storage: (*storage).clone(),
+            stored_id: storage_session_id(jar),
+        }))
+    }
+
+    pub async fn apply(self, session: &Session) -> Result<(), WarpgateError> {
+        self.storage
+            .rotate_session_id(self.stored_id, session)
+            .await
+    }
 }
 
 pub fn host_is_subdomain_of_or_equal(host: &str, base_domain: &str) -> bool {
@@ -74,7 +103,67 @@ fn session_host_is_authorized(request_host: Option<&str>, base_host: &str) -> bo
         return false;
     };
     host_is_subdomain_of_or_equal(host, base_host)
-        || (is_localhost_host(host) && base_host != "localhost" && base_host != "127.0.0.1")
+        || (is_localhost_host(host) && !is_localhost_host(base_host))
+}
+
+/// Whether a state-changing (or WebSocket) request to Warpgate's own endpoints
+/// came from a page on any other origin, so the session cookie it carries must
+/// not count. The cookie is `SameSite=None` on HTTPS and shared with every
+/// target subdomain, so the browser attaches it to requests from other sites
+/// and from target pages alike - hence `same-site` is no better than
+/// `cross-site`. Target traffic is left alone; targets do their own CSRF
+/// checks. A request without `Origin`, `Referer` or `Sec-Fetch-Site` did not
+/// come from a browser page.
+///
+/// Only the host is compared. The listener speaks TLS only, so the scheme
+/// adds nothing, and the port is routinely stripped or rewritten by reverse
+/// proxies while Warpgate serves nothing on another port of the same host.
+fn is_cross_origin_api_request(req: &Request, request_host: Option<&str>) -> bool {
+    let headers = req.headers();
+
+    if warpgate_surface_path(req.uri().path()).is_none() {
+        return false;
+    }
+
+    let is_websocket = headers
+        .get(http::header::UPGRADE)
+        .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"websocket"));
+
+    if req.method().is_safe() && !is_websocket {
+        return false;
+    }
+
+    if headers
+        .get("sec-fetch-site")
+        .is_some_and(|v| v.as_bytes() == b"cross-site" || v.as_bytes() == b"same-site")
+    {
+        return true;
+    }
+
+    let Some(source) = headers
+        .get(http::header::ORIGIN)
+        .or_else(|| headers.get(http::header::REFERER))
+    else {
+        return false;
+    };
+
+    // An opaque ("null") or unparsable origin is never ours.
+    let source = source
+        .to_str()
+        .ok()
+        .and_then(|s| url::Url::parse(s).ok())
+        .and_then(|url| url.host_str().map(str::to_owned));
+    match (source, request_host) {
+        (Some(host), Some(request_host)) => !host.eq_ignore_ascii_case(request_host),
+        _ => true,
+    }
+}
+
+/// restricted sessions are only allowed to access the API parts needed for login/logout and captive MFA flow
+fn is_session_restricted_on_host(request_host: Option<&str>, control_plane_host: &str) -> bool {
+    request_host.is_none_or(|host| {
+        !host.eq_ignore_ascii_case(control_plane_host) && !is_localhost_host(host)
+    })
 }
 
 #[derive(Serialize, Deserialize)]
@@ -82,6 +171,21 @@ pub struct SsoLoginState {
     pub token: WarpgateIdToken,
     pub provider: String,
     pub supports_single_logout: bool,
+    #[serde(default)]
+    pub subject: Option<String>,
+    #[serde(default)]
+    pub sid: Option<String>,
+}
+
+impl SsoLoginState {
+    fn parse(json: &str) -> Option<Self> {
+        serde_json::from_str(json).ok()
+    }
+
+    // HACK: for getting the session state out of an already serialized session
+    pub fn from_session_entries(entries: &BTreeMap<String, serde_json::Value>) -> Option<Self> {
+        Self::parse(entries.get(AUTH_SSO_LOGIN_STATE)?.as_str()?)
+    }
 }
 
 pub trait SessionExt {
@@ -120,8 +224,7 @@ impl SessionExt for Session {
     }
 
     fn get_sso_login_state(&self) -> Option<SsoLoginState> {
-        self.get::<String>(AUTH_SSO_LOGIN_STATE)
-            .and_then(|x| serde_json::from_str(&x).ok())
+        SsoLoginState::parse(&self.get::<String>(AUTH_SSO_LOGIN_STATE)?)
     }
 
     fn set_sso_login_state(&self, state: SsoLoginState) {
@@ -340,19 +443,8 @@ pub async fn authorize_session(
         Err(error) => return Err(error),
     }
 
-    // when auth is completed, we must rotate the cookie *on the first hop*
-    // since cookies set by a forwarded request are not passed back to the client
-    if !warpgate_common_http::is_cluster_peer_request(req, &ctx.services().cluster.cluster_token) {
-        // we are the first hop
-
-        let jar = <&CookieJar>::from_request_without_body(req)
-            .await
-            .context("CookieJar not in request")?;
-        Data::<&SharedSessionStorage>::from_request_without_body(req)
-            .await
-            .context("SharedSessionStorage not in request")?
-            .rotate_session_id(storage_session_id(jar), session)
-            .await?;
+    if let Some(rotation) = SessionRotation::for_request(req).await? {
+        rotation.apply(session).await?;
     }
 
     session.set_auth(SessionAuthorization::User {
@@ -364,7 +456,7 @@ pub async fn authorize_session(
     Ok(())
 }
 
-/// Authorization for a request authenticated by the cluster token. The proxying
+/// Authorization for a request from an authenticated cluster peer. The proxying
 /// node forwards the acting user's id in `x-warpgate-cluster-identity` (see
 /// `cluster_proxy::proxy_or_serve`), so the request runs here as that user;
 /// without the header the peer acts as a bare cluster peer. An id that no
@@ -374,7 +466,7 @@ async fn cluster_request_authorization(
     req: &Request,
 ) -> poem::Result<Option<RequestAuthorization>> {
     let Some(header) = req.headers().get(&X_WARPGATE_CLUSTER_IDENTITY) else {
-        return Ok(Some(RequestAuthorization::ClusterToken));
+        return Ok(Some(RequestAuthorization::ClusterPeer));
     };
     let Some(user_id) = header.to_str().ok().and_then(|s| s.parse::<Uuid>().ok()) else {
         return Ok(None);
@@ -436,7 +528,7 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
         .await?
         .for_request();
     let session = <&Session>::from_request_without_body(&req).await?;
-    let is_cluster_peer = is_cluster_peer_request(&req, &ctx.services().cluster.cluster_token);
+    let is_cluster_peer = is_cluster_peer_request(&req);
 
     let mut session_auth = session.get_auth();
     // A forwarded request's Host is the cluster SNI name by construction, so the
@@ -444,24 +536,46 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
     if session_auth.is_some() && !is_cluster_peer {
         // Host binding only means something when `external_host` pins an
         // origin. Without it the external URL is derived from Host header
-        let base_host = {
+        let (base_host, control_plane_host) = {
             let config = ctx.services().config.lock().await;
-            construct_external_url(None, &config, None)
+            let base_host = construct_external_url(None, &config, None)
                 .await
                 .ok()
-                .and_then(|url| url.host_str().map(str::to_owned))
+                .and_then(|url| url.host_str().map(str::to_owned));
+            (base_host, config.control_plane_host())
         };
-        if let Some(base_host) = base_host {
-            let request_host = ctx.trusted_hostname(&req);
-            if !session_host_is_authorized(request_host.as_deref(), &base_host) {
-                tracing::warn!(
-                    "Session cookie rejected: request host {:?} is not authorized (base host: '{}'). Clearing session.",
-                    request_host,
-                    base_host
-                );
-                session.clear();
-                session_auth = None;
-            }
+        let request_host = ctx.trusted_hostname(&req);
+        if let Some(base_host) = &base_host
+            && !session_host_is_authorized(request_host.as_deref(), base_host)
+        {
+            tracing::warn!(
+                "Session cookie rejected: request host {:?} is not authorized (base host: '{}'). Clearing session.",
+                request_host,
+                base_host
+            );
+            session.clear();
+            session_auth = None;
+        } else if control_plane_host
+            .as_deref()
+            .is_some_and(|control_plane_host| {
+                is_session_restricted_on_host(request_host.as_deref(), control_plane_host)
+            })
+            && warpgate_surface_path(req.uri().path()).is_some()
+            && !is_session_bootstrap_path(req.method(), req.uri().path())
+        {
+            tracing::debug!(
+                "Session cookie ignored for {} {} on non-control-plane host {request_host:?}",
+                req.method(),
+                req.uri().path(),
+            );
+            session_auth = None;
+        } else if is_cross_origin_api_request(&req, request_host.as_deref()) {
+            tracing::warn!(
+                "Session cookie ignored for cross-origin {} {}",
+                req.method(),
+                req.uri().path()
+            );
+            session_auth = None;
         }
     }
 
@@ -498,10 +612,17 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
     };
 
     if let Some(auth) = auth {
+        // additional span to include the session_username for token requests
+        let span = match &auth {
+            RequestAuthorization::UserToken { username, .. } => {
+                tracing::info_span!("API token", session_username = %username)
+            }
+            _ => tracing::Span::none(),
+        };
         // build context and attach it instead of raw authorization
         let actx = ctx.to_authenticated(auth);
         assert_mfa_setup_gate(&actx, &req, session).await?;
-        Ok(ep.data(actx).data(ctx).call(req).await?)
+        Ok(ep.data(actx).data(ctx).call(req).instrument(span).await?)
     } else {
         Ok(ep.data(ctx).call(req).await?)
     }
@@ -584,6 +705,100 @@ mod tests {
         assert!(!session_host_is_authorized(Some("127.0.0.5"), "localhost"));
         // A host that cannot be determined proves nothing.
         assert!(!session_host_is_authorized(None, "example.com"));
+    }
+
+    #[test]
+    fn cross_origin_warpgate_requests() {
+        use http::Method;
+
+        use super::is_cross_origin_api_request;
+
+        let check = |method: Method, path: &str, headers: &[(&str, &str)]| {
+            let mut req = poem::Request::builder().method(method).uri_str(path);
+            for (k, v) in headers {
+                req = req.header(*k, *v);
+            }
+            is_cross_origin_api_request(&req.finish(), Some("example.com"))
+        };
+        let api = "/@warpgate/admin/api/sessions/x/close";
+        let evil = [("origin", "https://evil.example")];
+
+        assert!(check(Method::POST, api, &evil));
+        assert!(check(Method::POST, "/_warpgate/api/x", &evil));
+        assert!(check(Method::POST, api, &[("origin", "null")]));
+        assert!(check(
+            Method::POST,
+            api,
+            &[("sec-fetch-site", "cross-site")]
+        ));
+        assert!(check(
+            Method::GET,
+            "/@warpgate/api/x/stream",
+            &[("upgrade", "websocket"), ("origin", "https://evil.example")]
+        ));
+        // Target pages on subdomains share the cookie but not the trust.
+        assert!(check(
+            Method::POST,
+            api,
+            &[
+                ("origin", "https://app.example.com"),
+                ("sec-fetch-site", "same-site")
+            ]
+        ));
+        assert!(check(Method::POST, api, &[("sec-fetch-site", "same-site")]));
+        assert!(check(
+            Method::POST,
+            api,
+            &[("referer", "https://evil.example/page")]
+        ));
+        assert!(!check(
+            Method::POST,
+            api,
+            &[("origin", "https://example.com")]
+        ));
+        // Proxies strip or rewrite the port, so only the host counts.
+        assert!(!check(
+            Method::POST,
+            api,
+            &[
+                ("origin", "https://Example.com:8443"),
+                ("sec-fetch-site", "same-origin")
+            ]
+        ));
+        assert!(!check(
+            Method::POST,
+            api,
+            &[("referer", "https://example.com/@warpgate")]
+        ));
+        // Non-browser clients send none of the headers.
+        assert!(!check(Method::POST, api, &[]));
+        // Navigations and reads are not state changes.
+        assert!(!check(Method::GET, api, &evil));
+        // Target traffic is the target's business.
+        assert!(!check(Method::POST, "/some/form", &evil));
+    }
+
+    #[test]
+    fn session_restricted_off_the_control_plane() {
+        use super::is_session_restricted_on_host;
+
+        assert!(!is_session_restricted_on_host(
+            Some("example.com"),
+            "example.com"
+        ));
+        assert!(!is_session_restricted_on_host(
+            Some("EXAMPLE.com"),
+            "example.com"
+        ));
+        assert!(is_session_restricted_on_host(
+            Some("t.example.com"),
+            "example.com"
+        ));
+        assert!(!is_session_restricted_on_host(
+            Some("localhost"),
+            "example.com"
+        ));
+        assert!(is_session_restricted_on_host(None, "example.com"));
     }
 
     #[test]

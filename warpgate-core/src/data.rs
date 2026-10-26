@@ -2,7 +2,7 @@ use poem_openapi::Object;
 use serde::Serialize;
 use time::OffsetDateTime;
 use uuid::Uuid;
-use warpgate_common::{NodeId, Target, TargetSessionId, UserSessionId, redact_target_secrets};
+use warpgate_common::{NodeId, StoredSecrets, Target, TargetSessionId, UserSessionId};
 use warpgate_db_entities::{SessionApprovalRequest, TargetSession, UserSession};
 
 #[derive(Serialize, Object)]
@@ -87,12 +87,9 @@ impl From<TargetSession::Model> for TargetSessionSnapshot {
             // Redacted on read as well as on write: rows predating snapshot
             // redaction (m00073 handled them, but defense in depth) must never
             // surface a secret through the API.
-            target: serde_json::from_str(&model.target_snapshot)
+            target: serde_json::from_str::<Target>(&model.target_snapshot)
                 .ok()
-                .and_then(|mut value| {
-                    redact_target_secrets(&mut value);
-                    serde_json::from_value::<Target>(value).ok()
-                }),
+                .map(|target| target.redacted()),
             target_id: model.target_id,
             started: model.started,
             ended: model.ended,
@@ -100,5 +97,42 @@ impl From<TargetSession::Model> for TargetSessionSnapshot {
             node_id: model.node_id,
             node_hostname: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use time::OffsetDateTime;
+    use uuid::Uuid;
+    use warpgate_common::{TargetSessionId, UserSessionId};
+    use warpgate_db_entities::TargetSession;
+
+    use super::TargetSessionSnapshot;
+
+    #[test]
+    fn snapshot_redacts_a_malformed_reference_on_read() {
+        let malformed = "secret://not a valid ref";
+        let target = serde_json::json!({
+            "name": "t",
+            "description": "",
+            "mysql": {"host": "db", "auth": {"kind": "password", "password": malformed}},
+            "ticket_requests_disabled": false,
+            "ticket_require_approval": false,
+            "require_approval": false,
+        });
+
+        let snapshot = TargetSessionSnapshot::from(TargetSession::Model {
+            id: TargetSessionId(Uuid::nil()),
+            user_session_id: UserSessionId(Uuid::nil()),
+            target_snapshot: target.to_string(),
+            target_id: Uuid::nil(),
+            started: OffsetDateTime::UNIX_EPOCH,
+            ended: None,
+            ticket_id: None,
+            node_id: None,
+        });
+
+        let rendered = serde_json::to_string(&snapshot.target.unwrap()).unwrap();
+        assert!(!rendered.contains(malformed), "{rendered}");
     }
 }

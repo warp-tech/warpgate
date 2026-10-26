@@ -8,7 +8,7 @@ mod input;
 mod logon;
 mod tls;
 
-use std::time::Duration;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
@@ -17,6 +17,7 @@ use ironrdp::cliprdr::backend::ClipboardMessage;
 use ironrdp::connector::connection_activation::{
     ConnectionActivationFactory, ConnectionActivationState,
 };
+use ironrdp::connector::credssp::KerberosConfig;
 use ironrdp::connector::{self, ConnectionResult, Credentials};
 use ironrdp::core::WriteBuf;
 use ironrdp::displaycontrol::client::DisplayControlClient;
@@ -31,23 +32,22 @@ use ironrdp::pdu::rdp::headers::ShareDataPdu;
 use ironrdp::pdu::rdp::refresh_rectangle::RefreshRectanglePdu;
 use ironrdp::session::image::DecodedImage;
 use ironrdp::session::{ActiveStage, ActiveStageBuilder, ActiveStageOutput};
+use ironrdp_egfx::client::{GraphicsPipelineClient, GraphicsPipelineHandler};
+use ironrdp_egfx::pdu::{Codec1Type, GfxPdu};
 use ironrdp_tokio::reqwest::ReqwestNetworkClient;
 use ironrdp_tokio::{FramedWrite as _, TokioFramed};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tracing::{debug, warn};
-use warpgate_common::{RdpTargetAuth, RdpTargetCompression, TargetRdpOptions};
-use warpgate_core::{DesktopEvent, DesktopInput, DesktopRect, DesktopState};
+use warpgate_common::{RdpTargetAuth, RdpTargetCompression, SecretResolver, TargetRdpOptions};
+use warpgate_core::{
+    DESKTOP_CONNECT_TIMEOUT, DESKTOP_HANDSHAKE_TIMEOUT, DesktopConnectionError, DesktopEvent,
+    DesktopInput, DesktopRect, DesktopState, check_desktop_size, within_deadline,
+};
 
 pub(crate) use self::logon::LogonWatcher;
 use crate::clipboard::{Clipboard, ClipboardSink, TextClipboard};
-
-/// Deadline for the TCP connect to the target.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-/// Deadline for the RDP handshake (X.224, TLS, CredSSP — the last of which may reach out
-/// to a KDC). Without it a target that accepts the TCP connection but stalls mid-handshake
-/// would wedge the session forever with no event to report.
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+use crate::desktop_size::bound_desktop_size;
 
 type Framed = TokioFramed<tls::TargetTlsStream>;
 
@@ -82,18 +82,20 @@ pub async fn run(
     input_rx: Receiver<DesktopInput>,
     mut abort_rx: UnboundedReceiver<()>,
     logon: LogonWatcher,
-) -> Result<()> {
+    secrets: Arc<dyn SecretResolver>,
+) -> Result<(), DesktopConnectionError> {
     event_tx
         .send(DesktopEvent::State(DesktopState::Connecting))
         .await
         .ok();
 
     let RdpTargetAuth::Password(auth) = &options.auth;
-    // The viewer-supplied size may be odd or out of range; keep the initial desktop within
-    // the same bounds the Display Control resize path enforces.
+    // The viewer-supplied size is untrusted; bound it the same way the native viewer's is,
+    // then make it a size the layout PDU accepts (even width), as the resize path does.
+    let (width, height) = bound_desktop_size(width, height);
     let (width, height) =
         MonitorLayoutEntry::adjust_display_size(u32::from(width), u32::from(height));
-    let password = auth.password.reveal()?;
+    let password = auth.password.resolve(&*secrets).await?;
     let config = build_config(
         &options,
         password.expose_secret(),
@@ -104,33 +106,31 @@ pub async fn run(
     let (clipboard_tx, clipboard_rx) = unbounded_channel();
     let clipboard = Clipboard::deferred(ClientClipboardSink(clipboard_tx));
 
-    let (connection_result, framed) = tokio::time::timeout(
-        HANDSHAKE_TIMEOUT,
+    let (connection_result, framed) = within_deadline(
+        DESKTOP_HANDSHAKE_TIMEOUT,
         connect(
             config,
             options.host.clone(),
             options.port,
             options.verify_tls,
             options.tls_security,
+            options.kdc_url.clone().filter(|url| !url.is_empty()),
             clipboard.backend(),
         ),
     )
-    .await
-    .context("RDP handshake timed out")?
-    .context("RDP connection")?;
+    .await?;
 
-    let width = connection_result.desktop_size.width;
-    let height = connection_result.desktop_size.height;
     event_tx
         .send(DesktopEvent::State(DesktopState::Connected))
         .await
         .ok();
-    event_tx
-        .send(DesktopEvent::Resize { width, height })
-        .await
-        .ok();
 
-    let mut image = DecodedImage::new(PixelFormat::RgbA32, width, height);
+    let connected_size = connection_result.desktop_size;
+    let mut image = DecodedImage::new(
+        PixelFormat::RgbA32,
+        connected_size.width,
+        connected_size.height,
+    );
     // `active_loop` reports an abort or a closed channel as a clean end, so anything it
     // returns as an error is a genuine session failure.
     active_loop(
@@ -145,6 +145,7 @@ pub async fn run(
         &logon,
     )
     .await
+    .map_err(DesktopConnectionError::Session)
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -176,12 +177,24 @@ async fn active_loop(
     // sent its capabilities, which happens after the connection is already active. A
     // resize requested before then (notably the viewer's initial size) is held here and
     // retried each iteration until `encode_resize` accepts it.
-    let mut pending_resize: Option<(u16, u16)> = None;
+    let mut pending_resize: Option<(u32, u32)> = None;
+    // The size the target was last asked for, starting with the one it connected at. Asking
+    // for it again is dropped: the target would still answer with a reactivation or a
+    // graphics reset, and the viewer re-sends its size right after connecting.
+    let mut requested_size = (u32::from(image.width()), u32::from(image.height()));
+    let mut reported_size = None;
+    if report_size(image, &mut reported_size, None, event_tx, abort_rx)
+        .await
+        .is_err()
+    {
+        return Ok(());
+    }
 
     loop {
         if let Some((width, height)) = pending_resize
             && send_resize(&mut framed, &mut active_stage, width, height).await?
         {
+            requested_size = (width, height);
             pending_resize = None;
         }
 
@@ -195,8 +208,8 @@ async fn active_loop(
                 // Coalesce whatever else is already queued so a burst of pointer moves
                 // becomes one fastpath batch rather than one round trip each. Resizes are
                 // pulled out and only the latest is kept — each one costs the target a
-                // deactivation-reactivation, so intermediate sizes from a window drag are
-                // wasted work.
+                // deactivation-reactivation or a graphics reset, so intermediate sizes from a
+                // window drag are wasted work.
                 let mut ops = Vec::new();
                 let mut resize = None;
                 for input in std::iter::once(first)
@@ -219,8 +232,14 @@ async fn active_loop(
                         return Ok(());
                     }
                 }
-                if resize.is_some() {
-                    pending_resize = resize;
+                if let Some((width, height)) = resize {
+                    // The layout PDU rejects odd widths and sizes outside 200..=8192.
+                    let (width, height) = bound_desktop_size(width, height);
+                    let size = MonitorLayoutEntry::adjust_display_size(
+                        u32::from(width),
+                        u32::from(height),
+                    );
+                    pending_resize = (size != requested_size).then_some(size);
                 }
                 if ops.is_empty() {
                     continue;
@@ -261,41 +280,54 @@ async fn active_loop(
             }
         }
 
-        match process_outputs(&mut framed, image, outputs, event_tx, abort_rx).await {
+        match process_outputs(
+            &mut framed,
+            image,
+            &mut reported_size,
+            outputs,
+            event_tx,
+            abort_rx,
+        )
+        .await
+        {
             Ok(true) | Err(Aborted) => return Ok(()),
             Ok(false) => {}
         }
 
         if should_reactivate
-            && let Some(size) = reactivate(
-                &mut framed,
-                &mut active_stage,
-                &activation_factory,
-                image,
-                event_tx,
-            )
-            .await
-            .context("RDP deactivation-reactivation sequence")?
+            && let Some(size) =
+                reactivate(&mut framed, &mut active_stage, &activation_factory, image)
+                    .await
+                    .context("RDP deactivation-reactivation sequence")?
         {
+            // Reactivation resets the viewer's surface; re-seed it with the pre-resize content
+            // (overlap kept, new margin black) so it isn't blank until the full refresh lands.
+            let keyframe = encode_resized_keyframe(image, size);
+            *image = DecodedImage::new(PixelFormat::RgbA32, size.width, size.height);
+            if report_size(image, &mut reported_size, keyframe, event_tx, abort_rx)
+                .await
+                .is_err()
+            {
+                return Ok(());
+            }
             send_refresh_request(&mut framed, &mut active_stage, size).await?;
         }
     }
 }
 
 /// Ask the target to resize its desktop over the Display Control DVC. The target replies
-/// with a deactivation-reactivation, which `active_loop` funnels through [`reactivate`].
+/// with a deactivation-reactivation, which `active_loop` funnels through [`reactivate`], or,
+/// on the Graphics Pipeline, with a `ResetGraphics` that the session applies to the image
+/// itself.
 ///
 /// Returns `false` when the DVC has not finished negotiating yet; the caller keeps the
 /// request pending and retries.
 async fn send_resize(
     framed: &mut Framed,
     active_stage: &mut ActiveStage,
-    width: u16,
-    height: u16,
+    width: u32,
+    height: u32,
 ) -> Result<bool> {
-    // The layout PDU rejects odd widths and sizes outside 200..=8192.
-    let (width, height) =
-        MonitorLayoutEntry::adjust_display_size(u32::from(width), u32::from(height));
     match active_stage.encode_resize(width, height, None, None) {
         Some(frame) => {
             let frame = frame.context("encoding resize request")?;
@@ -371,13 +403,12 @@ async fn send_clipboard(
 }
 
 /// Drive the deactivation-reactivation sequence. Returns the new desktop size if the target
-/// came back at a different one.
+/// came back at a different one than `image`.
 async fn reactivate(
     framed: &mut Framed,
     active_stage: &mut ActiveStage,
     activation_factory: &ConnectionActivationFactory,
-    image: &mut DecodedImage,
-    event_tx: &Sender<DesktopEvent>,
+    image: &DecodedImage,
 ) -> Result<Option<connector::DesktopSize>> {
     let mut activation = activation_factory.create();
     let mut output = WriteBuf::new();
@@ -399,6 +430,7 @@ async fn reactivate(
 
         active_stage.set_share_id(share_id);
         active_stage.set_enable_server_pointer(enable_server_pointer);
+        check_desktop_size(desktop_size.width, desktop_size.height)?;
 
         if image.width() != desktop_size.width || image.height() != desktop_size.height {
             debug!(
@@ -406,24 +438,6 @@ async fn reactivate(
                 to = ?(desktop_size.width, desktop_size.height),
                 "target reactivated at a new desktop size"
             );
-            // Reactivation resets the viewer's surface; re-seed it with the pre-resize content
-            // (overlap kept, new margin black) so it isn't blank until the full refresh lands.
-            let keyframe = encode_resized_keyframe(image, desktop_size);
-            *image =
-                DecodedImage::new(PixelFormat::RgbA32, desktop_size.width, desktop_size.height);
-            event_tx
-                .send(DesktopEvent::Resize {
-                    width: desktop_size.width,
-                    height: desktop_size.height,
-                })
-                .await
-                .context("reporting reactivated desktop size")?;
-            if let Some(keyframe) = keyframe {
-                event_tx
-                    .send(keyframe)
-                    .await
-                    .context("sending resized keyframe")?;
-            }
             return Ok(Some(desktop_size));
         }
 
@@ -477,6 +491,7 @@ async fn send_refresh_request(
 async fn process_outputs(
     framed: &mut Framed,
     image: &DecodedImage,
+    reported_size: &mut Option<(u16, u16)>,
     outputs: Vec<ActiveStageOutput>,
     event_tx: &Sender<DesktopEvent>,
     abort_rx: &mut UnboundedReceiver<()>,
@@ -494,6 +509,10 @@ async fn process_outputs(
         }
     }
 
+    // A Graphics Pipeline `ResetGraphics` resizes `image` in place, and the next update
+    // covers the whole new surface, so the viewer only needs the new size first.
+    report_size(image, reported_size, None, event_tx, abort_rx).await?;
+
     for out in outputs {
         if let ActiveStageOutput::GraphicsUpdate(region) = out
             && let Some(event) = encode_region(image, &region)
@@ -502,6 +521,38 @@ async fn process_outputs(
         }
     }
     Ok(terminate)
+}
+
+/// Tell the viewer the size of `image` if it changed since the viewer was last told, then
+/// send `keyframe` if there is one.
+///
+/// Every size report goes through here, so the viewer, the recording and the shared
+/// framebuffer follow the desktop whichever path resized `image`: the initial connection,
+/// a deactivation-reactivation, or a Graphics Pipeline `ResetGraphics`.
+async fn report_size(
+    image: &DecodedImage,
+    reported_size: &mut Option<(u16, u16)>,
+    keyframe: Option<DesktopEvent>,
+    event_tx: &Sender<DesktopEvent>,
+    abort_rx: &mut UnboundedReceiver<()>,
+) -> Result<(), Aborted> {
+    let size = (image.width(), image.height());
+    if *reported_size != Some(size) {
+        *reported_size = Some(size);
+        send_event(
+            event_tx,
+            abort_rx,
+            DesktopEvent::Resize {
+                width: size.0,
+                height: size.1,
+            },
+        )
+        .await?;
+    }
+    if let Some(keyframe) = keyframe {
+        send_event(event_tx, abort_rx, keyframe).await?;
+    }
+    Ok(())
 }
 
 /// Send one event, racing the (possibly blocking) send against abort so a slow consumer
@@ -620,7 +671,7 @@ fn build_config(
     height: u16,
 ) -> connector::Config {
     let codec_overrides: &[&str] = match options.compression {
-        RdpTargetCompression::RemoteFX => &[],
+        RdpTargetCompression::RemoteFX | RdpTargetCompression::GraphicsPipeline => &[],
         RdpTargetCompression::Lossless => &["remotefx:off"],
     };
     connector::Config {
@@ -631,16 +682,18 @@ fn build_config(
         domain: options.domain.clone(),
         enable_tls: true,
         enable_credssp: true,
-        keyboard_type: KeyboardType::IbmEnhanced,
+        keyboard_type: KeyboardType::IBM_ENHANCED,
         keyboard_subtype: 0,
         keyboard_layout: 0,
         keyboard_functional_keys_count: 12,
         ime_file_name: String::new(),
         dig_product_id: String::new(),
         desktop_size: connector::DesktopSize { width, height },
-        // The compression mode only controls the codec advertisement: the default set
+        // The bitmap codec advertisement covers the legacy bitmap path: the default set
         // includes RemoteFX, while a `lossless` target advertises no codecs so it sends
-        // losslessly-compressed 32bpp bitmap updates instead. `lossy_compression` stays
+        // losslessly-compressed 32bpp bitmap updates instead. A server that accepts the
+        // Graphics Pipeline moves all output onto it and picks its own codecs, so the
+        // advertisement then only matters as the fallback. `lossy_compression` stays
         // off in every mode — it would advertise the dynamic-color-fidelity / subsampling
         // drawing flags, inviting the target to dither legacy bitmap updates down to
         // 16bpp. (`client_codecs_capabilities` never fails for these inputs; `None` would
@@ -676,6 +729,40 @@ fn build_config(
         pointer_software_rendering: true,
         desktop_scale_factor: 0,
         multitransport_flags: None,
+        // `connect` registers the Graphics Pipeline channel from this flag: advertising
+        // it without a processor leaves the desktop blank.
+        support_dyn_vc_gfx_protocol: options.compression == RdpTargetCompression::GraphicsPipeline,
+    }
+}
+
+/// Graphics Pipeline event sink. Decoded surfaces reach the framebuffer through the
+/// session's compositor drain rather than these callbacks, so only PDUs the client leaves
+/// unhandled are acted on: the regions they carry are never painted, which is otherwise
+/// invisible, so each kind is warned about once per session.
+#[derive(Default)]
+struct GraphicsPipelineOutput {
+    warned: Vec<(std::mem::Discriminant<GfxPdu>, Option<Codec1Type>)>,
+}
+
+impl GraphicsPipelineHandler for GraphicsPipelineOutput {
+    fn on_unhandled_pdu(&mut self, pdu: &GfxPdu) {
+        let codec = match pdu {
+            GfxPdu::WireToSurface1(update) => Some(update.codec_id),
+            _ => None,
+        };
+        let kind = (std::mem::discriminant(pdu), codec);
+        if self.warned.contains(&kind) {
+            return;
+        }
+        self.warned.push(kind);
+        match pdu {
+            GfxPdu::WireToSurface1(update) => warn!(
+                codec = ?update.codec_id,
+                surface_id = update.surface_id,
+                "target sent graphics in a codec the client cannot decode; those regions stay unpainted"
+            ),
+            other => warn!(pdu = ?other, "ignoring an unhandled graphics pipeline PDU"),
+        }
     }
 }
 
@@ -685,32 +772,47 @@ async fn connect(
     port: u16,
     verify_tls: bool,
     tls_security: warpgate_common::RdpTlsSecurity,
+    kdc_url: Option<String>,
     clipboard: TextClipboard<ClientClipboardSink>,
-) -> Result<(ConnectionResult, Framed)> {
-    let tcp_stream = tokio::time::timeout(
-        CONNECT_TIMEOUT,
-        TcpStream::connect((server_name.as_str(), port)),
-    )
-    .await
-    .context("TCP connect timed out")?
-    .context("TCP connect")?;
+) -> Result<(ConnectionResult, Framed), DesktopConnectionError> {
+    // Without a Kerberos config IronRDP runs CredSSP over NTLM only.
+    let kerberos_config = kdc_url
+        .map(|url| KerberosConfig::new(Some(url), config.client_name.clone()))
+        .transpose()
+        .map_err(|error| connector_error("kerberos_config", error))?;
+
+    let tcp_stream = within_deadline(DESKTOP_CONNECT_TIMEOUT, async {
+        TcpStream::connect((server_name.as_str(), port))
+            .await
+            .map_err(DesktopConnectionError::Io)
+    })
+    .await?;
     tcp_stream.set_nodelay(true).ok();
-    let client_addr = tcp_stream.local_addr().context("local addr")?;
+    let client_addr = tcp_stream
+        .local_addr()
+        .map_err(DesktopConnectionError::Io)?;
 
     let mut framed = TokioFramed::new(tcp_stream);
     // Advertise the Display Control DVC so viewer-driven resolution changes can be pushed
     // to the target mid-session (MS-RDPEDISP). The capabilities callback has nothing to
     // reply with; `ActiveStage::encode_resize` drives the channel once it is ready.
+    let mut drdynvc = DrdynvcClient::new()
+        .with_dynamic_channel(DisplayControlClient::new(|_caps| Ok(Vec::new())));
+    if config.support_dyn_vc_gfx_protocol {
+        // With no H.264 decoder the client advertises only the non-AVC capability sets it
+        // can actually decode.
+        drdynvc = drdynvc.with_dynamic_channel(GraphicsPipelineClient::new(
+            Box::new(GraphicsPipelineOutput::default()),
+            None,
+        ));
+    }
     let mut connector = connector::ClientConnector::new(config, client_addr)
-        .with_static_channel(
-            DrdynvcClient::new()
-                .with_dynamic_channel(DisplayControlClient::new(|_caps| Ok(Vec::new()))),
-        )
+        .with_static_channel(drdynvc)
         .with_static_channel(CliprdrClient::new(Box::new(clipboard)));
 
     let should_upgrade = ironrdp_tokio::connect_begin(&mut framed, &mut connector)
         .await
-        .context("connect_begin")?;
+        .map_err(|error| connector_error("connect_begin", error))?;
 
     let initial_stream = framed.into_inner_no_leftover();
     let (upgraded_stream, server_public_key) = tls::upgrade(
@@ -720,7 +822,7 @@ async fn connect(
         tls_security,
     )
     .await
-    .context("TLS upgrade")?;
+    .map_err(DesktopConnectionError::Tls)?;
 
     let upgraded = ironrdp_tokio::mark_as_upgraded(should_upgrade, &mut connector);
     let mut upgraded_framed = TokioFramed::new(upgraded_stream);
@@ -733,16 +835,33 @@ async fn connect(
         &mut network_client,
         server_name.into(),
         server_public_key,
-        None,
+        kerberos_config,
     )
     .await
-    .context("connect_finalize")?;
+    .map_err(|error| connector_error("connect_finalize", error))?;
 
     if connection_result.desktop_size.width == 0 || connection_result.desktop_size.height == 0 {
         warn!("target reported a zero desktop size");
     }
+    check_desktop_size(
+        connection_result.desktop_size.width,
+        connection_result.desktop_size.height,
+    )?;
 
     Ok((connection_result, upgraded_framed))
+}
+
+fn connector_error(step: &'static str, error: connector::ConnectorError) -> DesktopConnectionError {
+    let rejected = matches!(
+        error.kind(),
+        connector::ConnectorErrorKind::Credssp(_) | connector::ConnectorErrorKind::AccessDenied
+    );
+    let chain = anyhow::Error::from(error).context(step);
+    if rejected {
+        DesktopConnectionError::TargetRejectedCredentials(chain)
+    } else {
+        DesktopConnectionError::Handshake(chain)
+    }
 }
 
 #[cfg(test)]
@@ -751,7 +870,34 @@ mod tests {
     use ironrdp::session::image::DecodedImage;
     use warpgate_core::{DesktopEvent, DesktopRect};
 
-    use super::{connector, encode_resized_keyframe};
+    use super::{GraphicsPipelineOutput, connector, encode_resized_keyframe};
+
+    #[test]
+    fn unhandled_graphics_are_reported_once_per_codec() {
+        use ironrdp::pdu::geometry::ExclusiveRectangle;
+        use ironrdp_egfx::client::GraphicsPipelineHandler as _;
+        use ironrdp_egfx::pdu::{Codec1Type, GfxPdu, PixelFormat, WireToSurface1Pdu};
+
+        let update = |codec_id| {
+            GfxPdu::WireToSurface1(WireToSurface1Pdu {
+                surface_id: 0,
+                codec_id,
+                pixel_format: PixelFormat::XRgb,
+                destination_rectangle: ExclusiveRectangle {
+                    left: 0,
+                    top: 0,
+                    right: 64,
+                    bottom: 64,
+                },
+                bitmap_data: Vec::new(),
+            })
+        };
+        let mut output = GraphicsPipelineOutput::default();
+        output.on_unhandled_pdu(&update(Codec1Type::RemoteFx));
+        output.on_unhandled_pdu(&update(Codec1Type::RemoteFx));
+        output.on_unhandled_pdu(&update(Codec1Type::Alpha));
+        assert_eq!(output.warned.len(), 2);
+    }
 
     #[test]
     fn resized_keyframe_covers_the_new_desktop() {

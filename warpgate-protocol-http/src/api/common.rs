@@ -5,13 +5,14 @@ use sea_orm::{DatabaseConnection, EntityTrait};
 use tracing::info;
 use uuid::Uuid;
 use warpgate_admin::api::cluster_proxy::{Owner, forward_websocket};
-use warpgate_common::{Protocol, TargetOptions, UserSessionId, WarpgateError};
+use warpgate_common::{Protocol, TargetOptions, UserSessionId, WarpgateConfig, WarpgateError};
 use warpgate_common_http::auth::{
     AuthenticatedRequestContext, FullUserAuthorization, web_reauth_required,
 };
 use warpgate_core::{ConfigProvider, TargetAuthorization, authorize_for_target};
 use warpgate_db_entities as entities;
 
+use crate::common::SessionExt;
 use crate::session::SessionStore;
 
 pub fn emit_unknown_authentication_failed_event(
@@ -33,6 +34,17 @@ pub fn emit_unknown_authentication_failed_event(
         reason = %reason,
         "Authentication failed",
     );
+}
+
+pub fn local_logout_disabled(session: &Session, config: &WarpgateConfig) -> bool {
+    session.get_sso_login_state().is_some_and(|state| {
+        state.supports_single_logout
+            && config
+                .store
+                .sso_providers
+                .iter()
+                .any(|p| p.name == state.provider && p.disable_local_logout)
+    })
 }
 
 pub fn logout(session: &Session, session_middleware: &mut SessionStore) {

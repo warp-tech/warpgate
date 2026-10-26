@@ -6,12 +6,15 @@
         type TargetOptionsTargetRdpOptions,
     } from 'admin/lib/api'
     import HelpText from 'admin/lib/HelpText.svelte'
+    import SecretRefInput from 'common/SecretRefInput.svelte'
 
     interface Props {
+        id: string
+        name: string
         options: TargetOptionsTargetRdpOptions
     }
 
-    let { options = $bindable() }: Props = $props()
+    let { id, name, options = $bindable() }: Props = $props()
 </script>
 
 <h4 class="mt-4">Connection</h4>
@@ -46,14 +49,33 @@
     <input class="form-control" bind:value={options.domain}>
 </FormGroup>
 
+<FormGroup floating label="Kerberos KDC URL (optional)">
+    <input
+        class="form-control"
+        bind:value={options.kdcUrl}
+        placeholder="tcp://dc.example.com:88"
+        pattern="(tcp|udp|https?)://.+"
+        maxlength="2048"
+    >
+</FormGroup>
+<HelpText>
+    Enables Kerberos authentication (required for Protected Users).
+    <code>tcp://</code>, <code>udp://</code> or a KDC proxy
+    <code>https://</code>
+    URL. Kerberos authentication requires that you use a DNS name for the target
+    address.
+</HelpText>
+
 {#if options.auth.kind === 'Password'}
-    <FormGroup floating label="Password">
-        <input
-            class="form-control"
-            type="password"
-            bind:value={options.auth.password}
-        >
-    </FormGroup>
+    <SecretRefInput
+        bind:value={options.auth.password}
+        inlineLabel="Password"
+        intendedUsage={{
+            kind: 'Target',
+            id,
+            name,
+        }}
+    />
 {/if}
 
 <Input
@@ -97,10 +119,13 @@
     <Input type="select" bind:value={options.compression}>
         <option value={RdpTargetCompression.Lossless}>Lossless</option>
         <option value={RdpTargetCompression.Remotefx}>RemoteFX</option>
+        <option value={RdpTargetCompression.GraphicsPipeline}>
+            Graphics pipeline (experimental)
+        </option>
     </Input>
 </FormGroup>
 <HelpText>
     If Warpgate and the RDP server are in the same network, lossless compression
     will significantly improve image quality, even if the client is connecting
-    remotely.
+    remotely. GNOME Remote Desktop and KDE KRDP require the graphics pipeline.
 </HelpText>

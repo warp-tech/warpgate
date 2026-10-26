@@ -9,7 +9,9 @@
 </script>
 
 <Badge
-    href={$adminPermissions.usersEdit && id ? `#/config/users/${id}` : undefined}
+    href={$adminPermissions.usersEdit && id
+        ? `#/config/users/${id}`
+        : undefined}
     color="success"
     class="d-flex align-items-center"
 >

@@ -30,23 +30,8 @@ pub enum FileAccess {
     S3 { s3: S3Storage, key: String },
 }
 
-#[must_use]
-pub struct RecordingSinkCleanupGuard {
-    scratch_path: Option<PathBuf>,
-}
-
-impl Drop for RecordingSinkCleanupGuard {
-    fn drop(&mut self) {
-        if let Some(path) = self.scratch_path.take()
-            && let Err(error) = std::fs::remove_file(&path)
-        {
-            error!(%error, ?path, "Failed to remove local recording scratch");
-        }
-    }
-}
-
 /// The destination for a RawRecordingWriter
-/// For S3, the scratch file is cleaned up after upload
+/// On S3, the scratch file is removed once the recording is marked ended
 pub enum RecordingSink {
     Disk(File),
     S3 {
@@ -82,7 +67,8 @@ impl RecordingSink {
         Ok(())
     }
 
-    pub async fn finalize(mut self) -> Result<RecordingSinkCleanupGuard> {
+    /// Completes the upload and returns the scratch path, if any, for the caller to remove once the recording is marked complete
+    pub async fn finalize(mut self) -> Result<Option<PathBuf>> {
         self.flush().await?;
 
         if let Self::S3 {
@@ -93,12 +79,10 @@ impl RecordingSink {
             && let Some(upload) = upload
         {
             upload.finish().await?;
-            return Ok(RecordingSinkCleanupGuard {
-                scratch_path: Some(scratch_path),
-            });
+            return Ok(Some(scratch_path));
         }
 
-        Ok(RecordingSinkCleanupGuard { scratch_path: None })
+        Ok(None)
     }
 }
 
@@ -146,7 +130,7 @@ impl Storage {
                 Backend::Disk
             }
             RecordingsStorageConfig::S3(s3) => {
-                local_root.push(S3_SCRATCH_SUBDIR);
+                local_root.push(s3.scratch_path.as_deref().unwrap_or(S3_SCRATCH_SUBDIR));
                 Backend::S3(S3Storage::new(&s3).await?)
             }
         };

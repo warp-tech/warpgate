@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { Alert, Badge, Button } from '@sveltestrap/sveltestrap'
+    import { Alert, Badge, Button, Tooltip } from '@sveltestrap/sveltestrap'
     import {
         api,
         type SSHClientKey,
@@ -10,6 +10,7 @@
     import CopyableTextArea from 'common/CopyableTextArea.svelte'
     import { stringifyError } from 'common/errors'
     import InfoBox from 'common/InfoBox.svelte'
+    import { isSecretRef } from 'common/SecretRefInput.svelte'
     import ClientKeyModal from './ClientKeyModal.svelte'
     import GenerateClientKeyModal from './GenerateClientKeyModal.svelte'
 
@@ -61,8 +62,18 @@
                 })
                 return
             }
+            if (isSecretRef(secretKey)) {
+                await api.importSshOwnKeyReference({
+                    importSshClientKeyReferenceRequest: {
+                        label,
+                        reference: secretKey,
+                        isDefault,
+                    },
+                })
+                return
+            }
             await api.importSshOwnKey({
-                importSSHClientKeyRequest: { label, secretKey, isDefault },
+                importSshClientKeyRequest: { label, secretKey, isDefault },
             })
         })
     }
@@ -114,6 +125,15 @@
                     <strong>{key.label}</strong>
                     {#if key.isDefault}
                         <Badge color="primary">Default</Badge>
+                    {/if}
+                    {#if key.secretBackend}
+                        <Tooltip target="keyRow-{key.id}">
+                            Private key will be loaded from the secret backend
+                            on use
+                        </Tooltip>
+                        <Badge color="info" id="keyRow-{key.id}">
+                            {key.secretBackend}
+                        </Badge>
                     {/if}
                     {#if $adminPermissions.configEdit}
                         <Button

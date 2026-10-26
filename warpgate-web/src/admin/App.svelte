@@ -118,7 +118,7 @@
             {#if $serverInfo?.username}
                 <a
                     use:link
-                    use:active={{path: /^\/status\//}}
+                    use:active={{ path: /^\/status\// }}
                     href="/status/sessions"
                 >
                     Status
@@ -126,7 +126,7 @@
                 <a
                     use:link
                     use:active
-                    use:active={{path: /^\/config\//}}
+                    use:active={{ path: /^\/config\// }}
                     href="/config"
                 >
                     Config
@@ -141,11 +141,11 @@
         </header>
         <main>
             {#if $serverInfo?.configWarnings?.length}
-                <Alert color="warning" fade={false}>
+                <Alert color="warning" fade={false} class="mb-3">
                     <strong>Issues found:</strong>
                     <ul class="mb-0 mt-2">
                         {#each $serverInfo.configWarnings as warning (warning)}
-                            <li>{@html warning}</li>
+                            <li>{warning}</li>
                         {/each}
                     </ul>
                 </Alert>

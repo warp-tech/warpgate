@@ -900,11 +900,16 @@ impl ConfigProvider for DatabaseConfigProvider {
         };
 
         for role_name in managed_admin_role_names {
-            let role = entities::AdminRole::Entity::find()
+            let Some(role) = entities::AdminRole::Entity::find()
                 .filter(entities::AdminRole::Column::Name.eq(role_name.clone()))
                 .one(db)
                 .await?
-                .ok_or_else(|| WarpgateError::RoleNotFound(role_name.clone()))?;
+            else {
+                warn!(
+                    "SSO admin role mapping references non-existent admin role {role_name:?}, skipping"
+                );
+                continue;
+            };
 
             let assignment = entities::UserAdminRoleAssignment::Entity::find()
                 .filter(entities::UserAdminRoleAssignment::Column::UserId.eq(user.id))

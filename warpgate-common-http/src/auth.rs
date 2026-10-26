@@ -13,7 +13,8 @@ use warpgate_common::{Protocol, WarpgateError};
 use warpgate_core::AuthorizedIdentity;
 use warpgate_db_entities::Parameters;
 
-use crate::request::{trusted_host_header, trusted_proto};
+use crate::logging::raw_remote_ip;
+use crate::request::{trusted_client_ip, trusted_host_header, trusted_proto};
 
 /// Used to enforce the re-authentication policy (web_auth_max_age_seconds)
 const AUTH_TIME_SESSION_KEY: &str = "auth_time";
@@ -94,7 +95,7 @@ pub enum RequestAuthorization {
     },
     AdminToken,
     /// Auth between cluster peers
-    ClusterToken,
+    ClusterPeer,
 }
 
 #[derive(Clone)]
@@ -169,6 +170,10 @@ impl UnauthenticatedRequestContext {
         trusted_host_header(self.should_trust_x_forwarded, req)
     }
 
+    pub fn trusted_client_ip(&self, req: &Request) -> Option<String> {
+        trusted_client_ip(req, raw_remote_ip(req), self.should_trust_x_forwarded)
+    }
+
     /// Returns the trusted hostname only (port stripped),
     /// preferring X-Forwarded-Host if trust_x_forwarded_headers is enabled in config.
     pub fn trusted_hostname(&self, req: &Request) -> Option<String> {
@@ -227,7 +232,7 @@ impl FullUserAuthorization {
 
 impl RequestAuthorization {
     pub const fn is_cluster_peer(&self) -> bool {
-        matches!(self, Self::ClusterToken)
+        matches!(self, Self::ClusterPeer)
     }
 
     /// Returns a username if one is present (admin token has none)
@@ -235,7 +240,7 @@ impl RequestAuthorization {
         match self {
             Self::Session(auth) => Some(auth.username()),
             Self::UserToken { username, .. } => Some(username),
-            Self::AdminToken | Self::ClusterToken => None,
+            Self::AdminToken | Self::ClusterPeer => None,
         }
     }
 
@@ -244,7 +249,7 @@ impl RequestAuthorization {
         match self {
             Self::Session(auth) => auth.user_id(),
             Self::UserToken { user_id, .. } => *user_id,
-            Self::AdminToken | Self::ClusterToken => Uuid::nil(),
+            Self::AdminToken | Self::ClusterPeer => Uuid::nil(),
         }
     }
 
@@ -261,18 +266,49 @@ impl RequestAuthorization {
             }
             Self::Session(SessionAuthorization::Ticket { .. })
             | Self::AdminToken
-            | Self::ClusterToken => None,
+            | Self::ClusterPeer => None,
         }
     }
 }
 
-/// Check if a host is localhost or 127.x.x.x (for development/testing scenarios)
+/// Whether `host` is `localhost` or a loopback IP literal (for development/testing
+/// scenarios). Parsed rather than prefix-matched: `127.example.org` is a DNS name
+/// anyone can register.
 pub fn is_localhost_host(host: &str) -> bool {
-    host == "localhost" || host == "127.0.0.1" || host.starts_with("127.")
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn localhost_hosts_are_loopback_only() {
+        use super::is_localhost_host;
+        for host in [
+            "localhost",
+            "LocalHost",
+            "127.0.0.1",
+            "127.1.2.3",
+            "[::1]",
+            "::1",
+        ] {
+            assert!(is_localhost_host(host), "{host}");
+        }
+        for host in [
+            "127.example.org",
+            "127.0.0.1.nip.io",
+            "localhost.example.org",
+            "10.0.0.1",
+            "[::2]",
+        ] {
+            assert!(!is_localhost_host(host), "{host}");
+        }
+    }
+
     use uuid::Uuid;
 
     use super::{RequestAuthorization, SessionAuthorization};
@@ -305,6 +341,6 @@ mod tests {
 
         // Machine tokens carry no user identity.
         assert!(RequestAuthorization::AdminToken.as_full_user().is_none());
-        assert!(RequestAuthorization::ClusterToken.as_full_user().is_none());
+        assert!(RequestAuthorization::ClusterPeer.as_full_user().is_none());
     }
 }

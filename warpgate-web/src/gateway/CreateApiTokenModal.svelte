@@ -10,6 +10,8 @@
         ModalHeader,
     } from '@sveltestrap/sveltestrap'
 
+    import { formatDurationAsHumantime } from 'common/duration'
+    import { toLocalISO } from 'common/helpers'
     import { serverInfo } from 'gateway/lib/store'
 
     interface Props {
@@ -42,16 +44,21 @@
 
     // svelte-ignore state_referenced_locally
     let label = $state(initialLabel)
+    // To the minute: a seconds part would fail the input's default 60 s step.
+    function toInputValue(date: Date): string {
+        return toLocalISO(date).slice(0, 16)
+    }
+
     // svelte-ignore state_referenced_locally
     let expiry = $state(
-        new Date(Date.now() + validatedInitialExpiryMs)
-            .toISOString()
-            .slice(0, 16),
+        toInputValue(new Date(Date.now() + validatedInitialExpiryMs)),
     )
     let maxExpiryDate = $derived(
         maxDurationMs ? new Date(Date.now() + maxDurationMs) : undefined,
     )
-    let maxExpiry = $derived(maxExpiryDate?.toISOString().slice(0, 16))
+    let maxExpiry = $derived(
+        maxExpiryDate ? toInputValue(maxExpiryDate) : undefined,
+    )
     let field: HTMLInputElement | undefined = $state()
     let validated = $state(false)
 
@@ -70,9 +77,9 @@
     <Form
         {validated}
         on:submit={e => {
-        _save()
-        e.preventDefault()
-    }}
+            _save()
+            e.preventDefault()
+        }}
     >
         <ModalHeader> New API token </ModalHeader>
         <ModalBody>
@@ -88,7 +95,8 @@
                 />
                 {#if maxDurationMs !== null}
                     <small class="text-muted">
-                        Maximum: {Math.floor(maxDurationMs / 86400 / 1000)} days
+                        Maximum:
+                        {formatDurationAsHumantime(maxDurationMs / 1000)}
                     </small>
                 {/if}
             </FormGroup>
@@ -97,7 +105,7 @@
             <Button
                 color="primary"
                 class="modal-button"
-                on:click={() => validated = true}
+                on:click={() => (validated = true)}
             >
                 Create
             </Button>

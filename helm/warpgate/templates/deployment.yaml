@@ -1,10 +1,9 @@
-{{- if gt (int .Values.replicaCount) 1 }}
-{{- if not (include "warpgate.databaseUrl" .) }}
+{{- $tag := .Values.image.tag | default .Chart.AppVersion }}
+{{- if and (regexMatch "^v?[0-9]+(\\.[0-9]+)+" $tag) (semverCompare "< 0.30.0-0" $tag) }}
+{{- fail (printf "image.tag %q is too old: the setup init container needs Warpgate 0.30 or newer" $tag) }}
+{{- end }}
+{{- if and (gt (int .Values.replicaCount) 1) (not (include "warpgate.databaseUrl" .)) }}
 {{- fail "replicaCount > 1 needs a shared database: set postgresql.enabled=true or setup.databaseUrl" }}
-{{- end }}
-{{- if eq .Values.setup.type "podinit" }}
-{{- fail "replicaCount > 1 needs setup.type=job: podinit re-runs setup against the shared database on every pod start" }}
-{{- end }}
 {{- end }}
 apiVersion: apps/v1
 kind: Deployment
@@ -21,6 +20,11 @@ metadata:
   {{- end }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  {{- if .Values.data.pvc.enabled }}
+  # A ReadWriteOnce volume can't attach to the new pod while the old one holds it
+  strategy:
+    type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       {{- include "warpgate.selectorLabels" . | nindent 6 }}
@@ -51,83 +55,44 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- $seed := include "warpgate.seedSources" . }}
+      {{- if or $seed .Values.setup.enabled }}
       initContainers:
-        - name: {{ .Chart.Name }}-setup
-          {{- with .Values.securityContext }}
-          securityContext:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
-          {{- with include "warpgate.setupEnv" . }}
-          env:
-            {{- . | trim | nindent 12 }}
-          {{- end }}
-          command:
-            - /bin/sh
-            - -c
-            - |
-              set -e
-
-              # For legacy installs that include SSH key files on disk - current version generates and stores keys in the DB
-              if [ -d /ssh-keys ]; then
-                mkdir -p /data/ssh-keys
-                cp /ssh-keys/client-ed25519 /ssh-keys/client-rsa /ssh-keys/host-ed25519 /ssh-keys/host-rsa /data/ssh-keys/
-                chmod -R 600 /data/ssh-keys/*
-              fi
-
-              {{- if .Values.setup.enabled }}
-              {{- if eq .Values.setup.type "podinit" }}
-              if [ ! -f /data/warpgate.yaml ]; then
-                warpgate -c /data/warpgate.yaml  unattended-setup --data-path /data
-                  {{- if .Values.ssh_keys_secret }} --import-ssh-host-keys /ssh-keys --import-ssh-client-keys /ssh-keys {{- end }}{{ include "warpgate.unattendedSetupArgs" . }}
-
-                {{- if .Values.setup.disableIpV6 }}
-                sed -i 's/\[::\]:\([0-9]\+\)/0.0.0.0:\1/g' /data/warpgate.yaml
-                {{- end }}
-              fi
-              {{- end }}
-              {{- end }}
-
-              # After setup: unattended-setup writes a self-signed cert unconditionally,
-              # so the provided cert must be copied in afterwards to take effect.
-              if [ -d /tls-cert ]; then
-                cp /tls-cert/tls.crt /data/tls.certificate.pem
-                cp /tls-cert/tls.key /data/tls.key.pem
-                chmod 600 /data/tls.certificate.pem
-                chmod 600 /data/tls.key.pem
-              fi
-
-              if [ -d /override ]; then
-                cp /override/warpgate.yaml /data/warpgate.yaml
-                {{- with include "warpgate.configEnvVarReplace" . }}
-                VARS="{{ . }}"
-                for VAR in $VARS; do
-                 VAL=$(printenv "$VAR")
-                 ESCAPED=$(printf '%s' "$VAL" | sed -e 's/[\/&]/\\&/g')
-                 FVAR=$(printf '$%s' "$VAR")
-                 sed -i "s/$FVAR/$ESCAPED/g" /data/warpgate.yaml
-                done
-                {{- end }}
-                chmod 600 /data/warpgate.yaml
-              fi
+        {{- if $seed }}
+        - name: {{ .Chart.Name }}-install-files
+          {{- include "warpgate.setupContainer" . | trim | nindent 10 }}
+          args:
+            - internal-install-files
+            {{- with include "warpgate.configEnvVarReplace" . }}
+            - {{ printf "--substitute-env=%s" . | quote }}
+            {{- end }}
+            - /seed
+            - /data
           volumeMounts:
-            - name: data
-              mountPath: /data
-            {{- if .Values.ssh_keys_secret  }}
-            - name: ssh-keys
-              mountPath: /ssh-keys
+            {{- include "warpgate.initVolumeMounts" . | nindent 12 }}
+        {{- end }}
+        {{- if .Values.setup.enabled }}
+        # Generates the config unless one was seeded above, and in both cases
+        # initialises an empty database (admin user, defaults, SSH keys).
+        - name: {{ .Chart.Name }}-setup
+          {{- include "warpgate.setupContainer" . | trim | nindent 10 }}
+          args:
+            - --config=/data/warpgate.yaml
+            - unattended-setup
+            - --if-config-exists=bootstrap
+            {{- if .Values.ssh_keys_secret }}
+            - --import-ssh-host-keys=/seed/ssh-keys
+            - --import-ssh-client-keys=/seed/ssh-keys
             {{- end }}
             {{- if include "warpgate.tlsSecretName" . }}
-            - name: tls-cert
-              mountPath: /tls-cert
+            - --tls-certificate=/seed/tls.certificate.pem
+            - --tls-key=/seed/tls.key.pem
             {{- end }}
-            {{- if include "warpgate.configMapName" . }}
-            - name: override-config
-              mountPath: /override
-            {{- end }}
-          {{- if .Values.volume_mounts }}
-            {{- toYaml .Values.volume_mounts | nindent 12 }}
-          {{- end }}
+            {{- include "warpgate.unattendedSetupArgs" . | nindent 12 }}
+          volumeMounts:
+            {{- include "warpgate.initVolumeMounts" . | nindent 12 }}
+        {{- end }}
+      {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           {{- with .Values.securityContext }}
@@ -153,6 +118,13 @@ spec:
             - -c
             - /data/warpgate.yaml
             - run
+          readinessProbe:
+            exec:
+              command:
+                - warpgate
+                - --config=/data/warpgate.yaml
+                - healthcheck
+            timeoutSeconds: 10
           ports:
             {{- if .Values.setup.ssh }}
             - name: ssh
@@ -193,20 +165,11 @@ spec:
         {{- with .Values.volumes }}
           {{- toYaml . | nindent 8 }}
         {{- end }}
-        {{- with .Values.ssh_keys_secret }}
-        - name: ssh-keys
-          secret:
-            secretName: {{ . }}
-        {{- end }}
-        {{- with include "warpgate.tlsSecretName" . }}
-        - name: tls-cert
-          secret:
-            secretName: {{ . }}
-        {{- end }}
-        {{- with include "warpgate.configMapName" . }}
-        - name: override-config
-          configMap:
-            name: {{ . }}
+        {{- with include "warpgate.seedSources" . }}
+        - name: seed
+          projected:
+            sources:
+              {{- . | trim | nindent 14 }}
         {{- end }}
         {{- if .Values.data.pvc.enabled }}
         - name: data

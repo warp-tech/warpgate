@@ -4,16 +4,21 @@ use std::time::Duration;
 
 use anyhow::Result;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter};
+use sea_orm::{
+    ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait,
+};
+use time::OffsetDateTime;
 use tokio::sync::{Mutex, broadcast};
 use tracing::warn;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthResult, AuthState, CredentialKind};
+use warpgate_common::auth::{AuthState, CredentialKind};
 use warpgate_common::{
     GlobalParams, Protocol, Secret, UserSessionId, WarpgateConfig, WarpgateError,
 };
 use warpgate_db_entities::Parameters::MfaEnforcement;
-use warpgate_db_entities::{OtpCredential, Parameters, SsoCredential, UserSession};
+use warpgate_db_entities::{
+    OtpCredential, Parameters, SsoCredential, TargetSession, Ticket, TicketRequest, UserSession,
+};
 
 use crate::auth_state_store::ApprovalRequestSink;
 use crate::cluster::{Cluster, ClusterNotification};
@@ -22,8 +27,10 @@ use crate::helpers::i64_seconds_to_duration;
 use crate::login_protection::LoginProtectionService;
 use crate::rate_limiting::RateLimiterRegistry;
 use crate::recordings::SessionRecordings;
+use crate::resources::AdmittedSessions;
 use crate::{
-    AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, ListenerStatusRegistry, State,
+    AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, ListenerStatusRegistry,
+    SecretBackendRegistry, SessionsFilter, State,
 };
 
 #[derive(Clone)]
@@ -40,6 +47,7 @@ pub struct Services {
     pub login_protection: Arc<LoginProtectionService>,
     pub global_params: Arc<GlobalParams>,
     pub listener_status: ListenerStatusRegistry,
+    pub secret_backends: Arc<SecretBackendRegistry>,
 }
 
 /// How often a node picks up self approvals decided elsewhere. One query per
@@ -50,7 +58,58 @@ const APPROVAL_SWEEP_INTERVAL: Duration = Duration::from_secs(1);
 /// close); everything within this window becomes one cluster notification.
 const SESSION_CHANGE_COALESCE_WINDOW: Duration = Duration::from_millis(100);
 
+const TICKET_EXPIRY_SWEEP_INTERVAL: Duration = Duration::from_secs(5);
+
 impl Services {
+    pub async fn close_sessions(&self, scope: SessionsFilter) -> Result<(), WarpgateError> {
+        scope.revoke(&self.db).await?;
+        State::close_local_sessions(&self.state, &scope).await;
+        self.cluster.close_sessions_on_peers(&scope).await;
+        Ok(())
+    }
+
+    pub async fn close_admitted_sessions(
+        &self,
+        sessions: AdmittedSessions,
+    ) -> Result<(), WarpgateError> {
+        if sessions.0.is_empty() {
+            return Ok(());
+        }
+        self.close_sessions(SessionsFilter::Sessions { ids: sessions.0 })
+            .await
+    }
+
+    pub async fn delete_ticket_closing_sessions(
+        &self,
+        ticket_id: Uuid,
+    ) -> Result<(), WarpgateError> {
+        let admitted = TargetSession::open_user_sessions_admitted_by_tickets(
+            &self.db,
+            Ticket::Column::Id.eq(ticket_id),
+        )
+        .await?;
+
+        let txn = self.db.begin().await?;
+        TicketRequest::Entity::delete_many()
+            .filter(TicketRequest::Column::TicketId.eq(Some(ticket_id)))
+            .exec(&txn)
+            .await?;
+        Ticket::Entity::delete_by_id(ticket_id).exec(&txn).await?;
+        txn.commit().await?;
+
+        self.close_admitted_sessions(AdmittedSessions(admitted))
+            .await
+    }
+
+    pub async fn close_sessions_of_expired_tickets(&self) -> Result<(), WarpgateError> {
+        let ids = TargetSession::open_user_sessions_admitted_by_tickets(
+            &self.db,
+            Ticket::Column::Expiry.lt(OffsetDateTime::now_utc()),
+        )
+        .await?;
+        self.close_admitted_sessions(AdmittedSessions(ids)).await
+    }
+
     pub async fn new(
         config: WarpgateConfig,
         admin_token: Option<String>,
@@ -113,6 +172,8 @@ impl Services {
             });
         }
 
+        let secret_backends = Arc::new(SecretBackendRegistry::new(db.clone()));
+
         let services = Self {
             db: db.clone(),
             recordings,
@@ -126,6 +187,7 @@ impl Services {
             login_protection,
             global_params: Arc::new(params),
             listener_status: Arc::default(),
+            secret_backends,
         };
 
         {
@@ -141,6 +203,19 @@ impl Services {
                             | broadcast::error::TryRecvError::Closed)
                     ) {}
                     cluster.notify_global(ClusterNotification::SessionsChanged);
+                }
+            });
+        }
+
+        {
+            let services = services.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(TICKET_EXPIRY_SWEEP_INTERVAL);
+                loop {
+                    interval.tick().await;
+                    if let Err(error) = services.close_sessions_of_expired_tickets().await {
+                        warn!("Failed to close sessions of expired tickets: {error}");
+                    }
                 }
             });
         }
@@ -274,10 +349,7 @@ impl Services {
 
     /// Configured web-approval caching window, or `None` if caching is disabled.
     pub async fn web_approval_grace_period(&self) -> Result<Option<Duration>, WarpgateError> {
-        Ok(Parameters::Entity::get(&self.db)
-            .await?
-            .web_approval_grace_period_seconds
-            .and_then(i64_seconds_to_duration))
+        crate::approvals::web_approval_grace_period(&self.db).await
     }
 
     /// If a matching web approval is still within the grace period, satisfies the
@@ -286,26 +358,6 @@ impl Services {
         &self,
         state_arc: &Arc<Mutex<AuthState>>,
     ) -> Result<bool, WarpgateError> {
-        let Some(grace) = self.web_approval_grace_period().await? else {
-            return Ok(false);
-        };
-        let Some(key) = state_arc.lock().await.web_approval_match_key() else {
-            return Ok(false);
-        };
-        if !crate::approvals::approval_is_remembered(&self.db, &key, grace).await? {
-            return Ok(false);
-        }
-
-        let mut state = state_arc.lock().await;
-
-        // check that we are still waiting for an approval
-        if !matches!(state.verify(), AuthResult::Need(ref kinds) if kinds.contains(&CredentialKind::WebUserApproval))
-        {
-            return Ok(false);
-        }
-
-        state.add_web_user_approval();
-        state.emit_web_approval_bypassed_event();
-        Ok(true)
+        crate::approvals::try_web_approval_bypass(&self.db, &self.cluster, state_arc).await
     }
 }

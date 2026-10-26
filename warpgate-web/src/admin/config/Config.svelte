@@ -71,6 +71,10 @@
         '/ldap-servers/:id/users': wrap({
             asyncComponent: () => import('./ldap/LdapUserBrowser.svelte'),
         }),
+        '/secret-backends': wrap({
+            asyncComponent: () =>
+                import('./secret-backends/SecretBackends.svelte'),
+        }),
         '/target-groups/create': wrap({
             asyncComponent: () =>
                 import('./target-groups/CreateTargetGroup.svelte'),
@@ -85,7 +89,9 @@
 </script>
 
 <SidebarNavContainer {routes} prefix="/config">
-    {#snippet navItems(sidebarMode)}
+    {#snippet navItems(
+        sidebarMode,
+    )}
         <NavListItem
             class="mb-2"
             title="Targets"
@@ -130,8 +136,8 @@
             class="mb-2"
             title="Tickets"
             description={$serverInfo?.ticketSelfServiceEnabled
-            ? 'Access credentials — users can request tickets from their profile'
-            : 'Temporary access credentials'}
+                ? 'Access credentials — users can request tickets from their profile'
+                : 'Temporary access credentials'}
             href="/config/tickets"
             small={sidebarMode}
         />
@@ -154,6 +160,14 @@
 
         <NavListItem
             class="mb-2"
+            title="Global parameters"
+            description="Change instance-wide settings"
+            href="/config/parameters"
+            small={sidebarMode}
+        />
+
+        <NavListItem
+            class="mb-2"
             title="LDAP servers"
             description="Connect to directory services"
             href="/config/ldap-servers"
@@ -162,9 +176,9 @@
 
         <NavListItem
             class="mb-2"
-            title="Global parameters"
-            description="Change instance-wide settings"
-            href="/config/parameters"
+            title="Secret backends"
+            description="Vault / OpenBao connections"
+            href="/config/secret-backends"
             small={sidebarMode}
         />
     {/snippet}

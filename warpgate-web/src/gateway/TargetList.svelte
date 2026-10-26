@@ -1,4 +1,6 @@
 <script lang="ts">
+    import 'core-js/actual/map/group-by'
+
     import {
         faArrowRight,
         faEllipsisV,
@@ -22,7 +24,7 @@
     import EmptyState from 'common/EmptyState.svelte'
     import { stringifyError } from 'common/errors'
     import GettingStarted from 'common/GettingStarted.svelte'
-    import { resolveGroup } from 'common/groups'
+    import { orderForGroupedList, resolveGroup } from 'common/groups'
     import ItemList, {
         type LoadOptions,
         type PaginatedResponse,
@@ -34,11 +36,9 @@
         TargetKind,
         type TargetSnapshot,
     } from 'gateway/lib/api'
-    import { compare as naturalCompareFactory } from 'natural-orderby'
     import { from, map, type Observable } from 'rxjs'
     import { get } from 'svelte/store'
     import Fa from 'svelte-fa'
-    import { firstBy } from 'thenby'
     import {
         collapsedTargetGroups,
         openTargetsInNewTab,
@@ -65,33 +65,12 @@
     ): Observable<PaginatedResponse<TargetSnapshot>> {
         return from(api.getTargets({ search: options.search })).pipe(
             map(result => {
-                const naturalCompare = naturalCompareFactory()
-
-                result = result.sort(
-                    firstBy<TargetSnapshot, boolean>(
-                        (x: TargetSnapshot) => !x.group,
-                    )
-                        // Natural sort between groups
-                        .thenBy((a: TargetSnapshot, b: TargetSnapshot) =>
-                            naturalCompare(
-                                (a.group?.name ?? '').toLowerCase(),
-                                (b.group?.name ?? '').toLowerCase(),
-                            ),
-                        )
-                        // Natural sort within a group
-                        .thenBy((a: TargetSnapshot, b: TargetSnapshot) =>
-                            naturalCompare(
-                                a.name.toLowerCase(),
-                                b.name.toLowerCase(),
-                            ),
-                        ),
-                )
-
-                return {
-                    items: result,
-                    offset: 0,
-                    total: result.length,
-                }
+                const items = orderForGroupedList(result, options.search, {
+                    groupId: t => t.group?.id,
+                    groupName: t => t.group?.name ?? '',
+                    name: t => t.name,
+                })
+                return { items, offset: 0, total: items.length }
             }),
         )
     }
@@ -102,7 +81,7 @@
                 const port = location.port ? `:${location.port}` : ''
                 return `${location.protocol}//${target.externalHost}${port}`
             } else {
-                return `/?warpgate-target=${target.name}`
+                return `/?warpgate-target=${encodeURIComponent(target.name)}`
             }
         } else if (target.kind === TargetKind.Ssh) {
             return `/@warpgate/#/web-ssh/start/${target.id}`
@@ -201,8 +180,12 @@
     groupObject={groupInfoFromTarget}
     groupKey={group => group.id}
     bind:collapsedGroups={$collapsedTargetGroups}
+    virtual
 >
-    {#snippet header(items, groupControls)}
+    {#snippet header(
+        items,
+        groupControls,
+    )}
         {#if items?.length}
             <ListOverflowMenu {groupControls}>
                 <div class="dropdown-header">Preferences</div>
@@ -217,7 +200,8 @@
                             label="Open targets in a new tab"
                             onchange={e =>
                                 setOpenTargetsInNewTab(
-                                    (e.currentTarget as HTMLInputElement).checked,
+                                    (e.currentTarget as HTMLInputElement)
+                                        .checked,
                                 )}
                             onmousedown={e => e.stopPropagation()}
                         />
@@ -236,15 +220,24 @@
         {/if}
     {/snippet}
     {#snippet empty()}
-        <EmptyState title="You don't have access to any targets yet" />
+        <EmptyState
+            title="You don't have access to any targets yet"
+            hint={`Ask an administrator to give ${$serverInfo?.username ?? 'your account'} a role with the targets you need.`}
+        />
     {/snippet}
-    {#snippet groupHeader(group, state)}
+    {#snippet groupHeader(
+        group,
+        state,
+    )}
         <CollapsibleGroupHeader {group} {state} />
     {/snippet}
-    {#snippet item(target)}
+    {#snippet item(
+        target,
+    )}
+        {@const url = urlForTarget(target)}
         <a
             class="list-group-item list-group-item-action target-item gap-3"
-            href={urlForTarget(target)}
+            href={url}
             target={target.kind === TargetKind.Http && $openTargetsInNewTab
                 ? '_blank'
                 : undefined}
@@ -255,6 +248,19 @@
                 e.preventDefault()
                 e.stopPropagation()
                 selectTarget(target)
+            }}
+            role={url ? undefined : 'button'}
+            tabindex={url ? undefined : 0}
+            onkeydown={e => {
+                // Without an href there is no native activation. Keys from the
+                // nested menu toggle and items bubble here and must be left alone.
+                if (e.target !== e.currentTarget) {
+                    return
+                }
+                if (!url && (e.key === 'Enter' || e.key === ' ')) {
+                    e.preventDefault()
+                    selectTarget(target)
+                }
             }}
         >
             <span class="me-auto">
@@ -296,10 +302,11 @@
                 <DropdownToggle
                     color="link"
                     size="sm"
+                    aria-label={`More actions for ${target.name}`}
                     onclick={e => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                }}
+                        e.preventDefault()
+                        e.stopPropagation()
+                    }}
                 >
                     <Fa icon={faEllipsisV} fw />
                 </DropdownToggle>
@@ -307,32 +314,35 @@
                     {#if target.kind === TargetKind.Ssh && webClientsEnabled}
                         <DropdownItem
                             onclick={e => {
-                            void openInBrowser(target, () =>
-                                openWebSshSession(target.id))
-                            e.preventDefault()
-                            e.stopPropagation()
-                        }}
+                                void openInBrowser(target, () =>
+                                    openWebSshSession(target.id),
+                                )
+                                e.preventDefault()
+                                e.stopPropagation()
+                            }}
                         >
                             Web terminal
                         </DropdownItem>
                     {/if}
-                    {#if (target.kind === TargetKind.Vnc || target.kind === TargetKind.Rdp) && webClientsEnabled}
+                    {#if (target.kind === TargetKind.Vnc ||
+                        target.kind === TargetKind.Rdp) &&
+                        webClientsEnabled}
                         <DropdownItem
                             onclick={e => {
-                            openWebDesktopSession(target.id)
-                            e.preventDefault()
-                            e.stopPropagation()
-                        }}
+                                openWebDesktopSession(target.id)
+                                e.preventDefault()
+                                e.stopPropagation()
+                            }}
                         >
                             Web desktop
                         </DropdownItem>
                     {/if}
                     <DropdownItem
                         onclick={e => {
-                        showInstructions(target)
-                        e.preventDefault()
-                        e.stopPropagation()
-                    }}
+                            showInstructions(target)
+                            e.preventDefault()
+                            e.stopPropagation()
+                        }}
                     >
                         Connection instructions
                     </DropdownItem>
@@ -359,7 +369,7 @@
 
 <Modal
     isOpen={!!instructionsTarget}
-    toggle={() => instructionsTarget = undefined}
+    toggle={() => (instructionsTarget = undefined)}
     size="lg"
 >
     <ModalBody>
@@ -368,8 +378,11 @@
                 targetName={instructionsTarget.name}
                 username={$serverInfo?.username}
                 targetKind={instructionsTarget.kind ?? TargetKind.Ssh}
-                targetDefaultDatabaseName={(instructionsTarget.kind === TargetKind.MySql || instructionsTarget.kind === TargetKind.Postgres)
-                    ? instructionsTarget.defaultDatabaseName : undefined}
+                targetDefaultDatabaseName={instructionsTarget.kind ===
+                    TargetKind.MySql ||
+                instructionsTarget.kind === TargetKind.Postgres
+                    ? instructionsTarget.defaultDatabaseName
+                    : undefined}
             />
         {/if}
     </ModalBody>
@@ -379,8 +392,10 @@
             <Button
                 color="primary"
                 class="d-flex align-items-center justify-content-center gap-2 modal-button"
-                onclick={() => openInBrowser(sshTarget, () =>
-                    openWebSshSession(sshTarget.id))}
+                onclick={() =>
+                    openInBrowser(sshTarget, () =>
+                        openWebSshSession(sshTarget.id),
+                    )}
             >
                 <Fa icon={faTerminal} />
                 Web terminal
@@ -390,7 +405,9 @@
             color="secondary"
             class="modal-button"
             block
-            on:click={() => { instructionsTarget = undefined }}
+            on:click={() => {
+                instructionsTarget = undefined
+            }}
         >
             Close
         </Button>

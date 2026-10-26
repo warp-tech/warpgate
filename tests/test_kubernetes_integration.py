@@ -26,6 +26,12 @@ from .conftest import ProcessManager, WarpgateProcess, K3sInstance
 from .util import alloc_port, wait_port
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _stop_shared_k3s(processes: ProcessManager):
+    yield
+    processes.stop_k3s()
+
+
 def run_kubectl(args, **kwargs):
     return subprocess.run(
         args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs
@@ -49,11 +55,11 @@ KUBECTL_CLIENT_SECRET = "kubectl-client-secret"
 # redirect-uri validator requires an https URL with an explicit port, so we
 # derive it from an allocated port (a real listener is never needed).
 def _provision_kubernetes_target(processes, shared_wg, label):
-    """Create a user, role and Kubernetes target pointing at a fresh k3s.
+    """Create a user, role and Kubernetes target pointing at the shared k3s.
 
     Returns ``(k3s, user, target_name, admin_url)``.
     """
-    k3s: K3sInstance = processes.start_k3s()
+    k3s: K3sInstance = processes.shared_k3s()
     url = f"https://localhost:{shared_wg.http_port}"
 
     with admin_client(url) as api:
@@ -392,7 +398,7 @@ class TestKubernetesIntegration:
         self, processes, shared_wg: WarpgateProcess
     ):
         # start k3s and obtain a service-account token
-        k3s = processes.start_k3s()
+        k3s = processes.shared_k3s()
         k3s_port = k3s.port
         k3s_token = k3s.token
 
@@ -564,7 +570,7 @@ class TestKubernetesIntegration:
         transport auth (the API token) is the identity, and the credential policy
         layers web approval on top — the request must block, surface in the
         pending-approvals list, and only succeed once approved."""
-        k3s = processes.start_k3s()
+        k3s = processes.shared_k3s()
         k3s_port = k3s.port
         k3s_token = k3s.token
 
@@ -783,7 +789,7 @@ class TestKubernetesIntegration:
         so one hold has to cover a command's whole fan-out: a second `kubectl`
         against the same target joins the first's slot instead of raising a
         second question, and one approval releases both."""
-        k3s = processes.start_k3s()
+        k3s = processes.shared_k3s()
         url = f"https://localhost:{shared_wg.http_port}"
         user, target_name = await self._k8s_approval_setup(url, k3s)
 
@@ -851,7 +857,7 @@ class TestKubernetesIntegration:
         the refusal, and the queue refills for as long as it keeps trying. The
         memory is deliberately brief — refusing one command must not lock the
         user out of the target."""
-        k3s = processes.start_k3s()
+        k3s = processes.shared_k3s()
         url = f"https://localhost:{shared_wg.http_port}"
         user, target_name = await self._k8s_approval_setup(url, k3s)
 
@@ -952,13 +958,12 @@ class TestKubernetesIntegration:
     async def test_mtls_upstream_and_token_user(
         self, processes, shared_wg: WarpgateProcess
     ):
-        # k3s already running above? start another instance for isolation
-        k3s: K3sInstance = processes.start_k3s()
+        k3s: K3sInstance = processes.shared_k3s()
         k3s_port = k3s.port
         # client cert/key for warpgate->k8s
         mtls_cert = k3s.client_cert
         mtls_key = k3s.client_key
-        # sanity‑check the values we got from start_k3s -- they must look like PEM
+        # sanity‑check the values we got from shared_k3s -- they must look like PEM
         assert mtls_cert and "BEGIN CERTIFICATE" in mtls_cert, (
             "upstream cert missing or invalid"
         )
@@ -1323,7 +1328,7 @@ class TestKubernetesIntegration:
         is created, granted access to the target, and used as a mapping value
         for the OIDC ``warpgate_roles`` claim per ``role_mappings``.
         """
-        k3s = processes.start_k3s()
+        k3s = processes.shared_k3s()
 
         wg = processes.start_wg(
             config_patch={
@@ -1493,7 +1498,7 @@ class TestKubernetesIntegration:
             )
         )
 
-        k3s = processes.start_k3s()
+        k3s = processes.shared_k3s()
 
         # Warpgate config: client_id = warpgate-test, but kubectl-client is trusted.
         wg = processes.start_wg(

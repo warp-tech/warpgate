@@ -32,6 +32,7 @@
     import { adminPermissions } from 'admin/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
+    import { toLocalISO } from 'common/helpers'
     import Loadable from 'common/Loadable.svelte'
     import PageSummaryBar from 'common/PageSummaryBar.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
@@ -190,14 +191,6 @@
         userRoles = await api.getUserRoles(user)
     }
 
-    function toLocalISO(date: Date): string {
-        const tzOffset = date.getTimezoneOffset() * 60000
-        const localISOTime = new Date(date.getTime() - tzOffset)
-            .toISOString()
-            .slice(0, -5)
-        return localISOTime
-    }
-
     function nowLocalISO(): string {
         return toLocalISO(new Date())
     }
@@ -347,7 +340,9 @@
                         {#if $serverInfo?.hasLdap}
                             <Dropdown class="mb-3">
                                 <DropdownToggle
-                                    color={user.ldapServerId ? 'info' : 'secondary'}
+                                    color={user.ldapServerId
+                                        ? 'info'
+                                        : 'secondary'}
                                     class="d-flex align-items-center gap-2"
                                 >
                                     {#if user.ldapServerId}
@@ -392,14 +387,24 @@
                 <Section id="roles" title="Access roles">
                     <div class="list-group list-group-flush">
                         {#each allRoles as role (role.id)}
-                            {@const activeAssignment = userRoles.find(ur => ur.id === role.id && ur.isActive)}
-                            {@const expiredAssignment = userRoles.find(ur => ur.id === role.id && ur.isExpired)}
+                            {@const activeAssignment = userRoles.find(
+                                ur => ur.id === role.id && ur.isActive,
+                            )}
+                            {@const expiredAssignment = userRoles.find(
+                                ur => ur.id === role.id && ur.isExpired,
+                            )}
                             {@const isActive = !!activeAssignment}
-                            {@const isExpired = !!expiredAssignment && !isActive}
-                            {@const assignment = activeAssignment ?? expiredAssignment}
-                            {@const expiryStatus = assignment ? getExpiryStatus(assignment) : null}
+                            {@const isExpired =
+                                !!expiredAssignment && !isActive}
+                            {@const assignment =
+                                activeAssignment ?? expiredAssignment}
+                            {@const expiryStatus = assignment
+                                ? getExpiryStatus(assignment)
+                                : null}
                             <div
-                                class="list-group-item d-flex align-items-center justify-content-between {isExpired ? 'opacity-75' : ''}"
+                                class="list-group-item d-flex align-items-center justify-content-between {isExpired
+                                    ? 'opacity-75'
+                                    : ''}"
                             >
                                 <div class="d-flex align-items-center gap-3">
                                     <Input
@@ -411,7 +416,9 @@
                                     />
                                     <div>
                                         <div
-                                            class="{isExpired ? 'text-decoration-line-through text-muted' : ''}"
+                                            class="{isExpired
+                                                ? 'text-decoration-line-through text-muted'
+                                                : ''}"
                                         >
                                             {role.name}
                                         </div>
@@ -420,23 +427,29 @@
                                                 class="d-flex gap-2 align-items-center flex-wrap"
                                             >
                                                 <small
-                                                    class={expiryStatus?.class ?? ''}
+                                                    class={expiryStatus?.class ??
+                                                        ''}
                                                 >
                                                     {expiryStatus?.text ?? ''}
                                                 </small>
                                                 {#if activeAssignment.grantedAt}
                                                     <small
                                                         class="text-muted"
-                                                        title={new Date(activeAssignment.grantedAt).toLocaleString()}
+                                                        title={new Date(
+                                                            activeAssignment.grantedAt,
+                                                        ).toLocaleString()}
                                                     >
                                                         &bull;
                                                         <RelativeDate
-                                                            date={new Date(activeAssignment.grantedAt)}
+                                                            date={new Date(
+                                                                activeAssignment.grantedAt,
+                                                            )}
                                                         />
                                                     </small>
                                                 {/if}
                                             </div>
-                                        {:else if isExpired && expiredAssignment}
+                                        {:else if isExpired &&
+                                            expiredAssignment}
                                             <div
                                                 class="d-flex gap-2 align-items-center flex-wrap"
                                             >
@@ -467,7 +480,10 @@
                                         <Button
                                             id="options-button-{role.id}"
                                             color="link"
-                                            on:click={() => openExpiryModal(activeAssignment)}
+                                            on:click={() =>
+                                                openExpiryModal(
+                                                    activeAssignment,
+                                                )}
                                         >
                                             <Fa icon={faWrench} />
                                         </Button>
@@ -575,7 +591,7 @@
 </style>
 
 <!-- Expiry Modal -->
-<Modal isOpen={showExpiryModal} toggle={() => showExpiryModal = false}>
+<Modal isOpen={showExpiryModal} toggle={() => (showExpiryModal = false)}>
     <ModalHeader> Edit assignment: {editingRole?.name} </ModalHeader>
     <ModalBody>
         <!-- Quick expiry presets -->
@@ -597,7 +613,9 @@
                     type="datetime-local"
                     bind:value={expiryDate}
                     min={nowLocalISO()}
-                    on:input={() => { selectedExpiryPreset = 'custom' }}
+                    on:input={() => {
+                        selectedExpiryPreset = 'custom'
+                    }}
                 />
             </FormGroup>
         {/if}
@@ -612,7 +630,7 @@
         <Button
             class="modal-button"
             color="secondary"
-            on:click={() => showExpiryModal = false}
+            on:click={() => (showExpiryModal = false)}
         >
             Cancel
         </Button>

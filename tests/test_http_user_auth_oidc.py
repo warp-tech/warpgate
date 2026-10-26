@@ -44,6 +44,7 @@ def _make_sso_provider_config(
     return_url_domain=None,
     roles_claim=None,
     admin_roles_claim=None,
+    disable_local_logout=None,
 ):
     """Build an ``sso_providers`` entry for warpgate config."""
     scopes = list(DEFAULT_OIDC_SCOPES)
@@ -72,6 +73,8 @@ def _make_sso_provider_config(
     }
     if return_url_domain is not None:
         sso_entry["return_url_domain"] = return_url_domain
+    if disable_local_logout is not None:
+        sso_entry["disable_local_logout"] = disable_local_logout
     return sso_entry
 
 

@@ -9,7 +9,9 @@ use uuid::Uuid;
 use warpgate_common::{UserFacingReason, WarpgateError};
 
 use crate::ext::is_navigation_request;
+use crate::insert_security_headers;
 use crate::internal_page::internal_page;
+use crate::logging::redacted_uri;
 
 // Response-body JSON errors do not hit render_error and need manual logging here
 pub fn bad_request(reason: impl Into<String>) -> Json<String> {
@@ -35,7 +37,7 @@ pub fn render_error(error: poem::Error, method: &Method, uri: &Uri, as_document:
         tracing::error!(
             correlation_id = %correlation_id,
             %method,
-            %uri,
+            uri = %redacted_uri(uri),
             // {:#} for single line format
             error = %format!("{error:#}"),
             "Request failed with an internal error"
@@ -68,7 +70,11 @@ pub async fn render_errors<E: Endpoint + 'static>(
     let uri = req.original_uri().clone();
     Ok(match ep.call(req).await {
         Ok(response) => response.into_response(),
-        Err(error) => render_error(error, &method, &uri, as_document),
+        Err(error) => {
+            let mut response = render_error(error, &method, &uri, as_document);
+            insert_security_headers(response.headers_mut());
+            response
+        }
     })
 }
 
@@ -234,5 +240,6 @@ mod tests {
             .finish();
         let page = app.call(browser).await.unwrap();
         assert_eq!(page.content_type(), Some("text/html; charset=utf-8"));
+        assert_eq!(page.header("x-content-type-options"), Some("nosniff"));
     }
 }

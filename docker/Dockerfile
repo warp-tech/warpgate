@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.3-labs
 # hadolint global ignore=DL3008
-FROM rust:1.97.1-bookworm@sha256:0e2bcaef56d041a486784e54104a81aebe0da44bd03019bd70bc0401e42e4a97 AS build
+FROM rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e AS build
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -26,32 +26,26 @@ RUN just npm ci \
     && just npm run build \
     && cargo build --features mysql,postgres,rdp-openssl-tls --release
 
-FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
-LABEL maintainer=heywoodlh
 ARG USER_ID=1000
+RUN adduser warpgate --disabled-password --gecos "" --uid ${USER_ID} --home /data --shell /usr/sbin/nologin \
+    && mkdir -p /data \
+    && chown -R ${USER_ID}:${USER_ID} /data
 
-ENV DEBIAN_FRONTEND=noninteractive
-RUN <<EOF
-  set -xe
-  apt-get -y update -qq
-  apt-get install --no-install-recommends --no-install-suggests -y \
-    ca-certificates wget sqlite3
-  apt-get clean
-  rm -rf /var/lib/apt/lists/*
-EOF
+FROM gcr.io/distroless/cc-debian13
+LABEL maintainer=heywoodlh
 
-# RUN adduser warpgate --system --home /data
-RUN adduser warpgate --disabled-password --gecos "" --uid ${USER_ID} --home /data --shell /usr/sbin/nologin
-
+COPY --from=build /etc/passwd /etc/passwd
+COPY --from=build /etc/group /etc/group
+COPY --from=build --chown=warpgate:warpgate /data /data
 COPY --from=build /opt/warpgate/target/release/warpgate /usr/local/bin/warpgate
 
 VOLUME /data
 
 ENV WARPGATE_CONFIG=/data/warpgate.yaml
 
-HEALTHCHECK CMD warpgate healthcheck
+HEALTHCHECK CMD ["/usr/local/bin/warpgate", "healthcheck"]
 
 ENV DOCKER=1
 USER warpgate
-ENTRYPOINT ["warpgate"]
+ENTRYPOINT ["/usr/local/bin/warpgate"]
 CMD ["run"]

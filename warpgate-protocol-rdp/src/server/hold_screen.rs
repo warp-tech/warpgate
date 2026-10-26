@@ -345,7 +345,7 @@ mod hold_while_tests {
     ///
     /// The hold here never resolves, which is the case that matters: the drain
     /// has to happen *during* the wait, not after it.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn viewer_input_does_not_pile_up_behind_the_hold() {
         let (tx, mut events) = unbounded_channel();
         let mut screen = screen();

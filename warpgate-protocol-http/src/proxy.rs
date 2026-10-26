@@ -31,7 +31,7 @@ use warpgate_core::AdmittedTarget;
 use warpgate_tls::{TlsMode, configure_tls_connector};
 use warpgate_web::lookup_built_file;
 
-use crate::client_cache::HttpClientCache;
+use crate::client_cache::{HttpClientCache, build_client};
 use crate::common::{SESSION_COOKIE_NAME, SessionExt};
 
 static X_WARPGATE_USERNAME: HeaderName = HeaderName::from_static("x-warpgate-username");
@@ -108,16 +108,18 @@ fn strip_warpgate_internal_query_params(pq: &PathAndQuery) -> Result<PathAndQuer
     let Some(query) = pq.query() else {
         return Ok(pq.clone());
     };
-    let query = form_urlencoded::parse(query.as_bytes())
-        .filter(|(key, _)| key != "warpgate-target" && key != "warpgate-ticket")
-        .fold(
-            form_urlencoded::Serializer::new(String::new()),
-            |mut s, (k, v)| {
-                s.append_pair(&k, &v);
-                s
-            },
-        )
-        .finish();
+    // Keep the other segments verbatim: the query isn't necessarily form-encoded and
+    // re-serialising it would rewrite bytes the upstream expects (e.g. `==` -> `=%3D`)
+    let query = query
+        .split('&')
+        .filter(|segment| {
+            !matches!(
+                form_urlencoded::parse(segment.as_bytes()).next(),
+                Some((key, _)) if key == "warpgate-target" || key == "warpgate-ticket"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("&");
     let path = pq.path();
     let rebuilt = if query.is_empty() {
         path.to_string()
@@ -283,6 +285,23 @@ fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> R
     Ok(target)
 }
 
+fn target_accept_encoding(req: &Request) -> HeaderValue {
+    let identity = HeaderValue::from_static("identity");
+    let wants_html = req
+        .headers()
+        .get_all(http::header::ACCEPT)
+        .iter()
+        .any(|v| v.to_str().is_ok_and(|v| v.contains("text/html")));
+    if wants_html {
+        // we need a parseable body for manipulation
+        return identity;
+    }
+    req.headers()
+        .get(http::header::ACCEPT_ENCODING)
+        .cloned()
+        .unwrap_or(identity)
+}
+
 fn inject_forwarding_headers<B: SomeRequestBuilder>(
     req: &Request,
     ctx: &AuthenticatedRequestContext,
@@ -292,8 +311,8 @@ fn inject_forwarding_headers<B: SomeRequestBuilder>(
         target = target.header(X_FORWARDED_HOST.clone(), host);
     }
     target = target.header(X_FORWARDED_PROTO.clone(), ctx.trusted_proto(req).as_str());
-    if let Some(addr) = req.remote_addr().as_socket_addr() {
-        target = target.header(X_FORWARDED_FOR.clone(), addr.ip().to_string());
+    if let Some(ip) = ctx.trusted_client_ip(req) {
+        target = target.header(X_FORWARDED_FOR.clone(), ip);
     }
     target
 }
@@ -309,6 +328,7 @@ async fn inject_own_headers<B: SomeRequestBuilder>(req: &Request, mut target: B)
             },
         );
     }
+    target = target.header(http::header::ACCEPT_ENCODING, target_accept_encoding(req));
     Ok(target)
 }
 
@@ -328,7 +348,9 @@ pub async fn proxy_normal_request(
     tracing::debug!("URI: {:?}", uri);
 
     let client = client_cache
-        .client_for(&admitted.target().name, &options)
+        .get_or_build(&admitted.target().name, &options, || async {
+            build_client(&options)
+        })
         .await?;
 
     let (authorization_header, uri) = extract_basic_auth(uri)?;
@@ -366,8 +388,11 @@ pub async fn proxy_normal_request(
 
     // The embedded UI can go in if the response is a usable HTML page - we for example
     // don't want to embed into a 404 page or a JS file - and it has something to show:
-    // the session menu, the login banner, or both.
+    // the session menu, the login banner, or both. An encoded body can't be edited.
     let embed_ui = response.status() == StatusCode::OK
+        && !response
+            .headers()
+            .contains_key(http::header::CONTENT_ENCODING)
         && response
             .content_type()
             .is_some_and(|content_type| content_type.starts_with("text/html"))
@@ -670,6 +695,43 @@ mod tests {
     }
 
     #[test]
+    fn accept_encoding_passes_through_except_for_pages() {
+        let req = |accept: &str| {
+            Request::builder()
+                .header(http::header::ACCEPT, accept)
+                .header(http::header::ACCEPT_ENCODING, "br, gzip")
+                .finish()
+        };
+        assert_eq!(target_accept_encoding(&req("*/*")), "br, gzip");
+        assert_eq!(
+            target_accept_encoding(&req("text/html,application/xhtml+xml,*/*;q=0.8")),
+            "identity"
+        );
+        assert_eq!(
+            target_accept_encoding(&Request::builder().finish()),
+            "identity"
+        );
+    }
+
+    #[test]
+    fn client_forwarding_headers_are_not_copied() {
+        let req = Request::builder()
+            .header(&X_FORWARDED_FOR, "203.0.113.10")
+            .header(&X_FORWARDED_HOST, "evil.example")
+            .header(&X_FORWARDED_PROTO, "https")
+            .header(http::header::FORWARDED, "for=203.0.113.10")
+            .header("x-real-ip", "203.0.113.10")
+            .header("x-custom", "kept")
+            .finish();
+        let copied = copy_server_request(&req, http::Request::builder())
+            .unwrap()
+            .body(())
+            .unwrap();
+        let names: Vec<_> = copied.headers().keys().map(HeaderName::as_str).collect();
+        assert_eq!(names, ["x-custom"]);
+    }
+
+    #[test]
     fn request_cookie_header_omits_only_warpgate_session() {
         assert_eq!(
             forwarded_cookie_header(&[
@@ -817,5 +879,15 @@ mod tests {
         assert_eq!(strip("/search?warpgate-target=es&q=x"), "/search?q=x");
         assert_eq!(strip("/?q=x&warpgate-ticket=abc"), "/?q=x");
         assert_eq!(strip("/?warpgate-target=a&warpgate-ticket=b"), "/");
+        assert_eq!(strip("/?warpgate%2Dtarget=a&q=x"), "/?q=x");
+    }
+
+    #[test]
+    fn strip_keeps_other_query_bytes() {
+        assert_eq!(strip("/?eyJhIjoxfQ=="), "/?eyJhIjoxfQ==");
+        assert_eq!(strip("/c?eyJ+/w==&warpgate-ticket=t"), "/c?eyJ+/w==");
+        assert_eq!(strip("/?a=%20b&c=d+e"), "/?a=%20b&c=d+e");
+        assert_eq!(strip("/?flag&x=1"), "/?flag&x=1");
+        assert_eq!(strip("/?a=1&&b=2"), "/?a=1&&b=2");
     }
 }

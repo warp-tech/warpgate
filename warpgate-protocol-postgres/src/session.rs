@@ -15,9 +15,9 @@ use tokio::sync::Mutex;
 use tokio::time;
 use tracing::{debug, error, info, info_span, warn};
 use url::Url;
-use warpgate_common::auth::AuthSelector;
+use warpgate_common::auth::{AuthSelector, redacted_selector};
 use warpgate_common::{
-    PostgresProtocolVersion, Protocol, Secret, TargetPostgresOptions, UserSessionId,
+    PostgresProtocolVersion, Protocol, Secret, TargetPostgresOptions, UserSessionId, WarpgateError,
 };
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::{
@@ -266,7 +266,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
 
         let username = startup.parameters.get("user").cloned();
         self.decode_context.protocol_version = protocol_version;
-        self.username = username.clone();
+        self.username = username.as_deref().map(|u| redacted_selector(u).to_owned());
         self.database = startup.parameters.get("database").cloned();
 
         self.run_authorization(startup, &username.unwrap_or_else(|| "".into()))
@@ -299,7 +299,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
     ) -> Result<(), PostgresError> {
         if let Some(banner) = warpgate_db_entities::Parameters::Entity::get(&self.services.db)
             .await
-            .map_err(PostgresError::other)?
+            .map_err(WarpgateError::from)?
             .banner_text()
         {
             self.stream
@@ -366,6 +366,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                 protocol_version: target_protocol_version,
                 parameters: startup.parameters,
             },
+            &*self.services.secret_backends,
         )
         .await
         {

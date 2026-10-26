@@ -15,32 +15,34 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use common::inject_request_authorization;
 pub use common::{PROTOCOL_NAME, SsoLoginState};
+use futures::FutureExt;
 use futures::future::BoxFuture;
-use futures::{FutureExt, future, stream};
 use http::HeaderValue;
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
-use poem::listener::{AcceptorExt, Listener, RustlsConfig};
 use poem::middleware::SetHeader;
 use poem::session::ServerSession;
 use poem::web::Data;
 use poem::{Endpoint, EndpointExt, FromRequest, IntoEndpoint, IntoResponse, Route, Server};
 use poem_openapi::OpenApiService;
 use tokio::sync::Mutex;
-use tracing::{Instrument, debug, warn};
+use tracing::{Instrument, warn};
 use warpgate_admin::admin_api_app;
 use warpgate_common::ListenEndpoint;
 use warpgate_common::helpers::proxy_protocol::MaybeProxyProtocolAcceptor;
 use warpgate_common::version::warpgate_version;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_common_http::cluster_tls::{ClusterTlsConfigs, cluster_aware_tls_acceptor};
 use warpgate_common_http::errors::render_errors;
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
-use warpgate_common_http::warpgate_csp_with_connect_src;
+use warpgate_common_http::{
+    WARPGATE_PLAYGROUND_CSP, cluster_peer_extension, warpgate_csp_with_connect_src,
+};
 use warpgate_core::{ProtocolServer, Services};
 use warpgate_db_entities::Parameters::RecordingsStorageConfig;
-use warpgate_tls::{TlsCertificateAndPrivateKey, TlsCertificateBundle, TlsPrivateKey};
+use warpgate_tls::TlsCertificateAndPrivateKey;
 use warpgate_web::Assets;
 use warpgate_web_desktop::WebDesktopClientManager;
 use warpgate_web_desktop::api::ws_handler as desktop_web_client_ws_handler;
@@ -48,12 +50,9 @@ use warpgate_web_ssh::WebSshClientManager;
 use warpgate_web_ssh::api::ws_handler as ssh_web_client_ws_handler;
 
 use crate::api::common::forward_ws_to_session_owner;
-use crate::client_cache::{HTTP_CLIENT_CACHE_VACUUM_INTERVAL, HttpClientCache};
+use crate::client_cache::HttpClientCache;
 use crate::common::{endpoint_auth, page_auth};
-use crate::middleware::{
-    ContentSecurityPolicyMiddleware, CookieHostMiddleware, TicketMiddleware,
-    WARPGATE_PLAYGROUND_CSP,
-};
+use crate::middleware::{CookieHostMiddleware, SecurityHeadersMiddleware, TicketMiddleware};
 use crate::session::SessionStore;
 use crate::session_handle::warpgate_server_handle_for_request;
 use crate::session_storage::SharedSessionStorage;
@@ -86,46 +85,24 @@ async fn recordings_s3_browser_origin(ctx: &UnauthenticatedRequestContext) -> Op
     }
 }
 
-fn make_rustls_config(tls: Vec<TlsCertificateAndPrivateKey>) -> Result<RustlsConfig> {
-    let mut certificates = tls.into_iter();
-    let primary = certificates
-        .next()
-        .context("HTTP requires a TLS certificate and key")?;
-
-    let mut cfg = RustlsConfig::new().fallback(primary.into());
-    for certificate_and_key in certificates {
-        for name in certificate_and_key.certificate.sni_names()? {
-            debug!(?name, "Adding SNI certificate");
-            cfg = cfg.certificate(name, certificate_and_key.clone().into());
-        }
-    }
-    Ok(cfg)
-}
-
 impl ProtocolServer for HTTPProtocolServer {
     async fn bind(
         self,
         address: ListenEndpoint,
         proxy_protocol: bool,
-        mut tls: Vec<TlsCertificateAndPrivateKey>,
+        tls: Vec<TlsCertificateAndPrivateKey>,
     ) -> Result<BoxFuture<'static, Result<()>>> {
-        // Present the cluster identity certificate along other SNI certs
-        if !tls.is_empty() {
-            // catch the weird case of no cert at all
-            let identity = &self.services.cluster.tls_identity;
-            tls.push(TlsCertificateAndPrivateKey {
-                certificate: TlsCertificateBundle::from_bytes(
-                    identity.certificate_pem.clone().into_bytes(),
-                )?,
-                private_key: TlsPrivateKey::from_bytes(
-                    identity.private_key_pem.clone().into_bytes(),
-                )?,
-            });
+        if tls.is_empty() {
+            anyhow::bail!("HTTP requires a TLS certificate and key");
         }
+        // Public certificates by SNI; the cluster identity (with mandatory
+        // client auth) under its own SNI name
+        let tls_configs = ClusterTlsConfigs::new(tls, &self.services.cluster.tls_identity)
+            .context("rustls setup")?;
 
         let session_storage = SharedSessionStorage::new(self.services.db.clone());
         let session_store = SessionStore::new();
-        let http_client_cache = HttpClientCache::default();
+        let http_client_cache = HttpClientCache::new(std::time::Duration::MAX);
 
         let cache_bust = || {
             SetHeader::new().overriding(
@@ -248,6 +225,7 @@ impl ProtocolServer for HTTPProtocolServer {
                             Ok(resp)
                         }),
                 )
+                .at("/api/logo", poem::get(api::logo::api_get_logo))
                 .at(
                     "/api/auth/web-auth-requests/stream",
                     endpoint_auth(api::auth::api_get_web_auth_requests_stream),
@@ -290,7 +268,7 @@ impl ProtocolServer for HTTPProtocolServer {
                 })
                 .data(web_ssh_manager)
                 .data(web_desktop_manager)
-                .with(ContentSecurityPolicyMiddleware)
+                .with(SecurityHeadersMiddleware)
         };
 
         let app = Route::new()
@@ -331,6 +309,7 @@ impl ProtocolServer for HTTPProtocolServer {
                 session_storage.clone(),
             ))
             .with(CookieHostMiddleware::new(base_cookie_domain))
+            .with(cluster_peer_extension())
             .data(UnauthenticatedRequestContext::new(self.services.clone()).await)
             .data(http_client_cache.clone())
             .data(session_store.clone())
@@ -354,18 +333,18 @@ impl ProtocolServer for HTTPProtocolServer {
                 if let Err(error) = session_storage.gc(cookie_max_age).await {
                     warn!(%error, "Failed to expire stored HTTP sessions");
                 }
-                http_client_cache.vacuum().await;
-                tokio::time::sleep(HTTP_CLIENT_CACHE_VACUUM_INTERVAL).await;
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
             }
         });
 
-        let rustls_config = make_rustls_config(tls).context("rustls setup")?;
-
         // Bind the socket now (errors here are non-fatal to the supervisor); the
         // returned future drives the accept loop (errors there restart the listener).
-        let acceptor = address.poem_listener()?.into_acceptor().await?;
-        let acceptor = MaybeProxyProtocolAcceptor::new(acceptor, proxy_protocol)
-            .rustls(stream::once(future::ready(rustls_config)));
+        let acceptor = address.poem_acceptor().await?;
+        let acceptor = cluster_aware_tls_acceptor(
+            MaybeProxyProtocolAcceptor::new(acceptor, proxy_protocol),
+            tls_configs,
+            self.services.cluster.clone(),
+        );
 
         Ok(async move {
             Server::new_with_acceptor(acceptor).run(app).await?;

@@ -17,6 +17,7 @@
 ) {
     $real-background: if($color == $color-contrast-dark, shade-color($background, $btn-bg-shade-amount), tint-color($background, $btn-bg-tint-amount));
     $real-color: if($color == $color-contrast-light, shade-color($background, $btn-color-shade-amount), tint-color($background, $btn-color-tint-amount));
+    --color-rgb: #{to-rgb($real-color)};
     --#{$prefix}btn-color: #{$real-color};
     --#{$prefix}btn-bg: #{$real-background};
     --#{$prefix}btn-border-color: #{if($color == $color-contrast-dark, shade-color($background, $btn-border-shade-amount), tint-color($background, $btn-border-tint-amount))};
@@ -30,6 +31,8 @@
     --#{$prefix}btn-active-shadow: #{$btn-active-box-shadow};
     --#{$prefix}btn-disabled-color: #{$disabled-color};
     --#{$prefix}btn-disabled-bg: #{$real-background};
+        text-decoration-line: underline;
+        text-decoration-color: rgba(var(--color-rgb), 0.5);
 }
 
 // Layout & components
@@ -84,6 +87,7 @@ $font-family-os: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
 
 .page-summary-bar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     margin: 0.25rem 0 1.5rem;
     gap: 1rem;
@@ -91,8 +95,11 @@ $font-family-os: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
     h1 {
         font-family: 'Poppins';
         font-weight: 700;
-        font-size: 2.5rem;
+        // 1.75rem on phones up to the original 2.5rem on desktop
+        font-size: clamp(1.75rem, 1.25rem + 2vw, 2.5rem);
+        line-height: 1.15;
         margin: 0;
+        overflow-wrap: anywhere;
     }
 
     .counter {
@@ -137,11 +144,6 @@ input:-webkit-autofill:focus {
 
 .badge {
     font-family: $font-family-os;
-}
-
-.btn {
-    text-decoration: underline;
-    text-decoration-color: var(--#{$prefix}btn-active-bg);
 }
 
 .page-item.active .page-link {

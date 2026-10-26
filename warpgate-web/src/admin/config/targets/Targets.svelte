@@ -12,17 +12,16 @@
     import EmptyState from 'common/EmptyState.svelte'
     import { stringifyError } from 'common/errors'
     import GroupColorIcon from 'common/GroupColorIcon.svelte'
-    import { resolveGroup } from 'common/groups'
+    import { orderForGroupedList, resolveGroup } from 'common/groups'
     import ItemList, {
         type LoadOptions,
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
     import ListOverflowMenu from 'common/ListOverflowMenu.svelte'
-    import { TargetKind } from 'gateway/lib/api'
+    import { TARGET_KIND_LABELS } from 'common/targetKinds'
     import { compare as naturalCompareFactory } from 'natural-orderby'
     import { from, map, type Observable } from 'rxjs'
     import { link } from 'svelte-spa-router'
-    import { firstBy } from 'thenby'
     import { adminPermissions } from '../../lib/store'
 
     let error: string | undefined = $state()
@@ -59,25 +58,14 @@
                 }),
             ]),
         ).pipe(
-            map(([_, targets]) => {
-                const natural = naturalCompareFactory()
-                const groupName = (target: Target) =>
-                    (
-                        groups.find(g => g.id === target.groupId)?.name ?? ''
-                    ).toLowerCase()
-
-                return targets.sort(
-                    firstBy((x: Target) => !x.groupId)
-                        // Natural sort between groups
-                        .thenBy((a: Target, b: Target) =>
-                            natural(groupName(a), groupName(b)),
-                        )
-                        // Natural sort within a group
-                        .thenBy((a, b) =>
-                            natural(a.name.toLowerCase(), b.name.toLowerCase()),
-                        ),
-                )
-            }),
+            map(([_, targets]) =>
+                orderForGroupedList(targets, options.search, {
+                    groupId: t => t.groupId,
+                    groupName: t =>
+                        groups.find(g => g.id === t.groupId)?.name ?? '',
+                    name: t => t.name,
+                }),
+            ),
             map(targets => ({
                 items: targets,
                 offset: 0,
@@ -91,7 +79,7 @@
     }
 </script>
 
-<div class="container-max-md">
+<div>
     <div class="page-summary-bar">
         <h1>targets</h1>
         <div class="d-flex gap-2 ms-auto">
@@ -145,9 +133,13 @@
             showSearch={true}
             groupObject={groupInfoFromTarget}
             groupKey={group => group.id}
+            virtual
             bind:collapsedGroups={$collapsedGroups}
         >
-            {#snippet header(_items, groupControls)}
+            {#snippet header(
+                _items,
+                groupControls,
+            )}
                 <ListOverflowMenu {groupControls} />
             {/snippet}
             {#snippet empty()}
@@ -156,10 +148,15 @@
                     hint="Targets are destinations on the internal network that your users will connect to"
                 />
             {/snippet}
-            {#snippet groupHeader(group, state)}
+            {#snippet groupHeader(
+                group,
+                state,
+            )}
                 <CollapsibleGroupHeader {group} {state} />
             {/snippet}
-            {#snippet item(target)}
+            {#snippet item(
+                target,
+            )}
                 <a
                     class="list-group-item list-group-item-action"
                     href="/config/targets/{target.id}"
@@ -178,27 +175,7 @@
                         {/if}
                     </div>
                     <small class="text-muted ms-auto">
-                        {#if target.options.kind === TargetKind.Http}
-                            HTTP
-                        {/if}
-                        {#if target.options.kind === TargetKind.MySql}
-                            MySQL
-                        {/if}
-                        {#if target.options.kind === TargetKind.Postgres}
-                            PostgreSQL
-                        {/if}
-                        {#if target.options.kind === TargetKind.Ssh}
-                            SSH
-                        {/if}
-                        {#if target.options.kind === TargetKind.Kubernetes}
-                            Kubernetes
-                        {/if}
-                        {#if target.options.kind === TargetKind.Vnc}
-                            VNC
-                        {/if}
-                        {#if target.options.kind === TargetKind.Rdp}
-                            RDP
-                        {/if}
+                        {TARGET_KIND_LABELS[target.options.kind]}
                     </small>
                 </a>
             {/snippet}

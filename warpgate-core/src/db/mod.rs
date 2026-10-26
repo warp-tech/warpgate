@@ -3,8 +3,8 @@ use std::time::Duration;
 use anyhow::Result;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ColumnTrait, ConnectOptions, Database, DatabaseConnection, EntityOrSelect, EntityTrait,
-    QueryFilter, QuerySelect,
+    ColumnTrait, ConnectOptions, Database, DatabaseConnection, DbErr, EntityOrSelect, EntityTrait,
+    QueryFilter, QuerySelect, SqlErr,
 };
 use time::OffsetDateTime;
 use tracing::error;
@@ -15,6 +15,10 @@ use warpgate_db_entities::{TargetSession, UserSession};
 use warpgate_db_migrations::{migrate_database, migrate_database_down, migrate_database_up};
 
 use crate::recordings::SessionRecordings;
+
+pub fn is_unique_violation(err: &DbErr) -> bool {
+    matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_)))
+}
 
 /// Open a connection to the configured database without running migrations.
 pub async fn connect_to_db(
@@ -301,12 +305,13 @@ mod tests {
             data: Set("{}".into()),
             updated: Set(OffsetDateTime::now_utc()),
             user_session_id: Set(Some(warpgate_common::UserSessionId(detached_http))),
+            ..Default::default()
         })
         .exec_without_returning(&db)
         .await
         .unwrap();
 
-        UserSession::revoke_all(&db).await.unwrap();
+        crate::SessionsFilter::All.revoke(&db).await.unwrap();
 
         for id in [direct, detached_http] {
             assert!(

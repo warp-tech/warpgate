@@ -151,6 +151,17 @@ impl Entity {
     }
 }
 
+/// Parse a user's allowed source ranges.
+///
+/// The column is read on every login (through `list_users`), so one entry that does not parse
+/// fails authentication for everyone. Every writer has to validate through this before storing.
+pub fn parse_allowed_ip_ranges(ranges: Vec<String>) -> Result<Vec<IpNet>, WarpgateError> {
+    ranges
+        .into_iter()
+        .map(|x| IpNet::from_str(&x).map_err(|_| WarpgateError::InvalidNetworkAddress(x)))
+        .collect()
+}
+
 impl TryFrom<Model> for User {
     type Error = WarpgateError;
 
@@ -159,14 +170,7 @@ impl TryFrom<Model> for User {
             None
         } else {
             let ranges: Vec<String> = serde_json::from_value(model.allowed_ip_ranges)?;
-            Some(
-                ranges
-                    .into_iter()
-                    .map(|x| {
-                        IpNet::from_str(&x).map_err(|_| WarpgateError::InvalidNetworkAddress(x))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            )
+            Some(parse_allowed_ip_ranges(ranges)?)
         };
 
         Ok(Self {
@@ -236,29 +240,21 @@ impl Model {
             credentials,
         })
     }
-}
 
-impl TryFrom<User> for ActiveModel {
-    type Error = WarpgateError;
-
-    fn try_from(user: User) -> Result<Self, Self::Error> {
-        Ok(Self {
-            id: Set(user.id),
-            username: Set(user.username),
-            credential_policy: Set(serde_json::to_value(&user.credential_policy)?),
-            description: Set(user.description),
-            rate_limit_bytes_per_second: Set(user.rate_limit_bytes_per_second),
-            ldap_server_id: Set(None),
-            ldap_object_uuid: Set(None),
-            allowed_ip_ranges: Set(match user.allowed_ip_ranges {
-                Some(ranges) => serde_json::to_value(
-                    ranges
-                        .into_iter()
-                        .map(|x| x.to_string())
-                        .collect::<Vec<_>>(),
-                )?,
-                None => serde_json::Value::Null,
-            }),
-        })
+    pub async fn require_otp_in_policy(self, db: &DatabaseConnection) -> Result<(), WarpgateError> {
+        let details = self.load_details(db).await?;
+        let credential_policy = details
+            .inner
+            .credential_policy
+            .unwrap_or_default()
+            .upgrade_to_otp(&details.credentials);
+        ActiveModel {
+            id: Set(details.inner.id),
+            credential_policy: Set(serde_json::to_value(Some(credential_policy))?),
+            ..Default::default()
+        }
+        .update(db)
+        .await?;
+        Ok(())
     }
 }

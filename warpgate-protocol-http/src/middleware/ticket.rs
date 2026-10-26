@@ -1,9 +1,10 @@
 use std::net::IpAddr;
 
-use poem::session::Session;
+use poem::session::{Session, SessionStatus};
 use poem::web::{Data, FromRequest};
 use poem::{Endpoint, Middleware, Request};
 use serde::Deserialize;
+use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::Secret;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
@@ -12,7 +13,7 @@ use warpgate_common_http::{SessionAuthorization, authorization_token};
 use warpgate_core::authorize_and_spend_ticket;
 use warpgate_db_entities::Ticket;
 
-use crate::common::SessionExt;
+use crate::common::{SessionExt, SessionRotation};
 
 /// Request-data marker for a header-borne ticket: the request runs on a
 /// detached session that is never stored, so the user session registered for
@@ -91,6 +92,7 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
             req.set_data(TemporaryTicketSession);
         }
         let session = <&Session>::from_request_without_body(&req).await?.clone();
+        let mut rotation = None;
 
         if let Some(ticket) = ticket_value {
             let ticket_secret = Secret::new(ticket);
@@ -127,11 +129,29 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
                         target_id: authorization.target().id,
                         ticket_id: authorization.ticket_id(),
                     });
+                    if !session_is_temporary {
+                        rotation = SessionRotation::for_request(&req).await?;
+                    }
                 }
             }
         }
 
-        self.inner.call(req).await
+        let result = self.inner.call(req).await;
+
+        // Rotating deletes the stored row until the session middleware writes
+        // the new one, so doing it before the inner call would leave the user
+        // session unbacked (and reapable) for the length of a proxied request.
+        // It runs on error too: the ticket is spent and its grant is in the
+        // session either way.
+        if let Some(rotation) = rotation
+            && session.status() != SessionStatus::Purged
+            && let Err(error) = rotation.apply(&session).await
+        {
+            warn!(%error, "Could not rotate the session id after ticket auth");
+            session.purge();
+        }
+
+        result
     }
 }
 

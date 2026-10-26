@@ -1,11 +1,13 @@
 use sea_orm::entity::prelude::*;
-use sea_orm::sea_query::OnConflict;
-use sea_orm::TransactionTrait;
+use sea_orm::sea_query::{IntoCondition, OnConflict};
+use sea_orm::{QuerySelect, TransactionTrait};
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::audit::AuditEvent;
 use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_common::{NodeId, Target, TargetSessionId, UserSessionId, WarpgateError};
+use warpgate_common::{
+    NodeId, StoredSecrets, Target, TargetSessionId, UserSessionId, WarpgateError,
+};
 
 use crate::TargetSession;
 
@@ -97,8 +99,7 @@ pub async fn open_or_lookup(
         return Err(WarpgateError::UserSessionEnded);
     }
 
-    let mut snapshot = serde_json::to_value(target)?;
-    warpgate_common::redact_target_secrets(&mut snapshot);
+    let snapshot = serde_json::to_value(target.redacted())?;
     let model = TargetSession::ActiveModel {
         id: Set(preferred_id),
         user_session_id: Set(user_session_id),
@@ -165,6 +166,22 @@ pub async fn is_open(
         .one(db)
         .await?
         .is_some())
+}
+
+pub async fn open_user_sessions_admitted_by_tickets<C: ConnectionTrait>(
+    db: &C,
+    tickets: impl IntoCondition,
+) -> Result<Vec<UserSessionId>, WarpgateError> {
+    Ok(Entity::find()
+        .inner_join(super::Ticket::Entity)
+        .filter(Column::Ended.is_null())
+        .filter(tickets)
+        .select_only()
+        .column(Column::UserSessionId)
+        .distinct()
+        .into_tuple()
+        .all(db)
+        .await?)
 }
 
 pub fn emit_ended_audit_event(session: &TargetSession::Model, user_id: Uuid, username: &str) {

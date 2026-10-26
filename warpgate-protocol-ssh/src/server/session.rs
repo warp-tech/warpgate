@@ -27,7 +27,8 @@ use warpgate_common::auth::{
 use warpgate_common::eventhub::{EventHub, EventSender};
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{
-    Secret, TargetOptions, TargetSSHOptions, TargetSessionId, UserSessionId, WarpgateError,
+    Secret, TargetOptions, TargetSSHOptions, TargetSessionId, UserFacingReason, UserSessionId,
+    WarpgateError,
 };
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::approvals::{GateOutcome, GatedConnection};
@@ -60,9 +61,13 @@ use crate::{
 const EVENT_QUEUE_CAPACITY: usize = 128;
 
 /// How long a teardown waits for the channel writer's own queue to drain —
-/// i.e. for `Handle::close`/`Handle::disconnect` to have been *sent* — before
-/// giving up on them.
+/// i.e. for `Handle::close` to have been *sent* — before giving up on it, and
+/// how long a reading client then gets to receive what was sent.
 const DISCONNECT_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long the session's last message gets ahead of the connection-level
+/// disconnect. A client that reads both in one batch acts on the disconnect
+/// and exits without printing the message.
+const DISCONNECT_NOTICE_GAP: Duration = Duration::from_secs(1);
 
 #[allow(clippy::large_enum_variant)]
 enum TargetSelection {
@@ -771,7 +776,7 @@ impl ServerSession {
                 self.request_disconnect();
                 self.disconnect_server().await;
             }
-            MenuEvent::Selected(target) => {
+            MenuEvent::Selected(target_id) => {
                 // The proof stored when the login's auth state was accepted;
                 // absent for ticket sessions, which never reach the menu.
                 let identity =
@@ -780,26 +785,22 @@ impl ServerSession {
                         .ok_or(WarpgateError::InconsistentState(
                             "No authorized identity".into(),
                         ))?;
-                // The menu list was authorized when it was built; permissions
-                // may have changed while it was open, so re-check on selection.
-                let target_name = target.name.clone();
-                let Some(authorization) =
-                    authorize_for_target(self.services.config_provider.as_ref(), &identity, target)
+                // The menu may have been open for a long time: role, approval
+                // requirement, connection options or the target's very
+                // existence may have changed since, so authorize the current row.
+                let config_provider = self.services.config_provider.as_ref();
+                let authorization = match config_provider.get_target_by_id(target_id).await? {
+                    Some(target) => authorize_for_target(config_provider, &identity, target)
                         .await?
-                else {
+                        .and_then(|a| a.narrow::<TargetSSHOptions>().ok()),
+                    None => None,
+                };
+                let Some(authorization) = authorization else {
                     warn!(
                         "Target {} not authorized for user {}",
-                        target_name, identity.username
+                        target_id, identity.username
                     );
-                    self.emit_service_message(&format!("Access to {target_name} denied"))?;
-                    self.request_disconnect();
-                    self.disconnect_server().await;
-                    return Ok(());
-                };
-                // The menu only lists SSH targets, so this can't refuse a
-                // selection it offered.
-                let Ok(authorization) = authorization.narrow::<TargetSSHOptions>() else {
-                    self.emit_service_message(&format!("Access to {target_name} denied"))?;
+                    self.emit_service_message("Access denied")?;
                     self.request_disconnect();
                     self.disconnect_server().await;
                     return Ok(());
@@ -1023,7 +1024,7 @@ impl ServerSession {
             .channels
             .get(&channel_id)
             .and_then(|c| c.pty_size.as_ref())
-            .map_or((220, 24), |r| (r.col_width as u16, r.row_height as u16));
+            .map_or((220, 24), PtyRequest::screen_size);
 
         spawn_target_menu_loop(
             self.id,
@@ -1311,13 +1312,16 @@ impl ServerSession {
                         );
                     }
                     error => {
-                        let _ = self.emit_pty_error(&format!("Target connection failed: {error}"));
+                        let _ = self.emit_pty_error(&format!(
+                            "Target connection failed: {}",
+                            error.user_facing_reason()
+                        ));
                     }
                 }
             }
             RCEvent::Error(e) => {
                 self.service_output.stop_progress();
-                let _ = self.emit_pty_error(&format!("Error: {e}"));
+                let _ = self.emit_pty_error(&format!("Error: {}", e.user_facing_reason()));
                 self.disconnect_server().await;
             }
             RCEvent::Output(channel, data) => {
@@ -1701,12 +1705,10 @@ impl ServerSession {
         channel_state.audit.on_resize(&request).await;
 
         if matches!(self.target, TargetSelection::Menu) {
+            let (cols, rows) = request.screen_size();
             let _ = self
                 .event_sender
-                .try_send_once(Event::MenuRedraw(
-                    request.col_width as u16,
-                    request.row_height as u16,
-                ))
+                .try_send_once(Event::MenuRedraw(cols, rows))
                 .await;
         }
 
@@ -1765,6 +1767,7 @@ impl ServerSession {
                 },
             )
             .await;
+            self.maybe_start_command_detector(channel_id);
         }
         Ok(())
     }
@@ -1779,11 +1782,14 @@ impl ServerSession {
             return;
         };
         let recorder = async {
-            let recorder = self
+            let Some(recorder) = self
                 .services
                 .recordings
                 .start::<TerminalRecorder, _>(&target_session_id, None, metadata)
-                .await?;
+                .await?
+            else {
+                return Ok(None);
+            };
             if let Some(request) = self
                 .channels
                 .get(&channel_id)
@@ -1793,11 +1799,11 @@ impl ServerSession {
                     .write_pty_resize(request.col_width, request.row_height)
                     .await?;
             }
-            Ok::<_, recordings::Error>(recorder)
+            Ok::<_, recordings::Error>(Some(recorder))
         }
         .await;
         match recorder {
-            Ok(recorder) => {
+            Ok(Some(recorder)) => {
                 // Starting the recording awaits, so the channel can be gone by
                 // now — e.g. target selection failed and tore the session down.
                 if let Some(channel_state) = self.channels.get_mut(&channel_id) {
@@ -1806,10 +1812,8 @@ impl ServerSession {
                     debug!(channel=%channel_id, "Recording started for a channel that is already gone");
                 }
             }
-            Err(error) => match error {
-                recordings::Error::Disabled => (),
-                error => error!(channel=%channel_id, ?error, "Failed to start recording"),
-            },
+            Ok(None) => (),
+            Err(error) => error!(channel=%channel_id, ?error, "Failed to start recording"),
         }
     }
 
@@ -1887,10 +1891,10 @@ impl ServerSession {
                 .start(&target_session_id, None, metadata)
                 .await
             {
-                Ok(recorder) => {
+                Ok(Some(recorder)) => {
                     e.insert(recorder);
                 }
-                Err(recordings::Error::Disabled) => (),
+                Ok(None) => (),
                 Err(error) => {
                     error!(?key, ?error, "Failed to start recording");
                 }
@@ -1918,12 +1922,18 @@ impl ServerSession {
     async fn _data(&mut self, server_channel_id: ServerChannelId, data: Bytes) -> Result<()> {
         let channel_id = self.map_channel(server_channel_id)?;
         debug!(channel=%server_channel_id.0, ?data, "Data");
-        if (
-            // aborting connection
-            self.rc_state == RCState::Connecting
-            // aborting admin approval wait
-            || matches!(self.target, TargetSelection::AwaitingApproval)
-        ) && data.first() == Some(&3)
+        let has_pty = self.channels.get(&channel_id).is_some_and(Channel::has_pty);
+        // Only a terminal turns Ctrl-C into a 0x03 byte. On a forwarded
+        // connection it's payload — RDP's first packet starts with 0x03, and
+        // with `ssh -N` it arrives while the target is still connecting (#2658).
+        if has_pty
+            && (
+                // aborting connection
+                self.rc_state == RCState::Connecting
+                // aborting admin approval wait
+                || matches!(self.target, TargetSelection::AwaitingApproval)
+            )
+            && data.first() == Some(&3)
         {
             info!(channel=%channel_id, "User requested connection abort (Ctrl-C)");
             let was_held = matches!(self.target, TargetSelection::AwaitingApproval);
@@ -1950,7 +1960,7 @@ impl ServerSession {
             }
         }
 
-        if self.channels.get(&channel_id).is_some_and(Channel::has_pty) {
+        if has_pty {
             let _ = self
                 .event_sender
                 .try_send_once(Event::ConsoleInput(data.clone()))
@@ -2672,15 +2682,6 @@ impl ServerSession {
             for ch in channels {
                 let _ = self.channel_writer.close(handle.clone(), ch.0);
             }
-            // A channel close says nothing about the connection, so a dead
-            // target never gives the client a reason to let go of the socket
-            // (#2520). Queued behind the closes so the ordering holds.
-            let _ = self.channel_writer.disconnect(
-                handle,
-                russh::Disconnect::ByApplication,
-                String::new(),
-                String::new(),
-            );
         }
 
         // Bounded: a client whose window is full never lets the queue
@@ -2701,8 +2702,25 @@ impl ServerSession {
                 warn!("Client is not reading; closing its connection");
                 Duration::ZERO
             };
+            // A channel close says nothing about the connection, so a dead
+            // target never gives the client a reason to let go of the socket
+            // (#2520). It goes only to a client that is still reading, and
+            // only after `DISCONNECT_NOTICE_GAP`.
+            let handle = flushed.then(|| self.session_handle.clone()).flatten();
             tokio::spawn(async move {
-                tokio::time::sleep(delay).await;
+                if let Some(handle) = handle {
+                    tokio::time::sleep(DISCONNECT_NOTICE_GAP).await;
+                    let _ = tokio::time::timeout(
+                        DISCONNECT_FLUSH_TIMEOUT,
+                        handle.disconnect(
+                            russh::Disconnect::ByApplication,
+                            String::new(),
+                            String::new(),
+                        ),
+                    )
+                    .await;
+                }
+                tokio::time::sleep(delay.saturating_sub(DISCONNECT_NOTICE_GAP)).await;
                 let _ = socket.shutdown(std::net::Shutdown::Both);
             });
         }

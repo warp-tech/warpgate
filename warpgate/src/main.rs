@@ -3,6 +3,7 @@ mod config;
 mod listener_supervisor;
 mod logging;
 
+use std::net::IpAddr;
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -42,83 +43,104 @@ impl Cli {
     }
 }
 
+#[derive(clap::Args)]
+pub(crate) struct SetupArgs {
+    /// Database URL
+    #[clap(long)]
+    pub(crate) database_url: Option<String>,
+
+    /// Import SSH host key files (host-ed25519, host-rsa) from this dir
+    #[clap(long)]
+    pub(crate) import_ssh_host_keys: Option<PathBuf>,
+
+    /// Import SSH client key files (client-ed25519, client-rsa) from this dir
+    #[clap(long)]
+    pub(crate) import_ssh_client_keys: Option<PathBuf>,
+}
+
+#[derive(clap::Args)]
+pub(crate) struct UnattendedSetupArgs {
+    #[clap(flatten)]
+    pub(crate) common: SetupArgs,
+
+    /// Directory to store data in
+    #[clap(long)]
+    pub(crate) data_path: String,
+
+    /// HTTP port
+    #[clap(long)]
+    pub(crate) http_port: u16,
+
+    /// Enable SSH and set port
+    #[clap(long)]
+    pub(crate) ssh_port: Option<u16>,
+
+    /// Enable MySQL and set port
+    #[clap(long)]
+    pub(crate) mysql_port: Option<u16>,
+
+    /// Enable PostgreSQL and set port
+    #[clap(long)]
+    pub(crate) postgres_port: Option<u16>,
+
+    /// Enable Kubernetes and set port
+    #[clap(long)]
+    pub(crate) kubernetes_port: Option<u16>,
+
+    /// Enable VNC and set port
+    #[clap(long)]
+    pub(crate) vnc_port: Option<u16>,
+
+    /// Enable RDP and set port
+    #[clap(long)]
+    pub(crate) rdp_port: Option<u16>,
+
+    /// Enable session recording
+    #[clap(long)]
+    pub(crate) record_sessions: bool,
+
+    /// How to handle unknown SSH host keys of the targets
+    #[clap(long, value_enum, default_value_t)]
+    pub(crate) host_key_verification: warpgate_common::SshHostKeyVerificationMode,
+
+    /// Password for the initial user (required if WARPGATE_ADMIN_PASSWORD env var is not set)
+    #[clap(long)]
+    pub(crate) admin_password: Option<String>,
+
+    /// External host used to construct URLs (without a port or scheme)
+    #[clap(long)]
+    pub(crate) external_host: Option<String>,
+
+    /// What to do when the config file already exists
+    #[clap(long, value_enum, default_value_t)]
+    pub(crate) if_config_exists: crate::commands::setup::IfConfigExists,
+
+    /// Address all listeners bind to
+    #[clap(long, default_value = "::")]
+    pub(crate) listen_address: IpAddr,
+
+    /// Install this TLS certificate instead of generating a self-signed one
+    #[clap(long, requires = "tls_key")]
+    pub(crate) tls_certificate: Option<PathBuf>,
+
+    /// Private key of --tls-certificate
+    #[clap(long, requires = "tls_certificate")]
+    pub(crate) tls_key: Option<PathBuf>,
+}
+
 #[derive(clap::Subcommand)]
 pub(crate) enum Commands {
     /// Run first-time setup and generate a config file
-    Setup {
-        /// Database URL
-        #[clap(long)]
-        database_url: Option<String>,
-
-        /// Import SSH host key files (host-ed25519, host-rsa) from this dir
-        #[clap(long)]
-        import_ssh_host_keys: Option<PathBuf>,
-
-        /// Import SSH client key files (client-ed25519, client-rsa) from this dir
-        #[clap(long)]
-        import_ssh_client_keys: Option<PathBuf>,
-    },
+    Setup(SetupArgs),
     /// Run first-time setup non-interactively
-    UnattendedSetup {
-        /// Database URL
-        #[clap(long)]
-        database_url: Option<String>,
-
-        /// Directory to store data in
-        #[clap(long)]
-        data_path: String,
-
-        /// HTTP port
-        #[clap(long)]
-        http_port: u16,
-
-        /// Enable SSH and set port
-        #[clap(long)]
-        ssh_port: Option<u16>,
-
-        /// Enable MySQL and set port
-        #[clap(long)]
-        mysql_port: Option<u16>,
-
-        /// Enable PostgreSQL and set port
-        #[clap(long)]
-        postgres_port: Option<u16>,
-
-        /// Enable Kubernetes and set port
-        #[clap(long)]
-        kubernetes_port: Option<u16>,
-
-        /// Enable VNC and set port
-        #[clap(long)]
-        vnc_port: Option<u16>,
-
-        /// Enable RDP and set port
-        #[clap(long)]
-        rdp_port: Option<u16>,
-
-        /// Enable session recording
-        #[clap(long)]
-        record_sessions: bool,
-
-        /// How to handle unknown SSH host keys of the targets
-        #[clap(long, value_enum, default_value_t)]
-        host_key_verification: warpgate_common::SshHostKeyVerificationMode,
-
-        /// Password for the initial user (required if WARPGATE_ADMIN_PASSWORD env var is not set)
-        #[clap(long)]
-        admin_password: Option<String>,
-
-        /// External host used to construct URLs (without a port or scheme)
-        #[clap(long)]
-        external_host: Option<String>,
-
-        /// Import SSH host key files (host-ed25519, host-rsa) from this dir
-        #[clap(long)]
-        import_ssh_host_keys: Option<PathBuf>,
-
-        /// Import SSH client key files (client-ed25519, client-rsa) from this dir
-        #[clap(long)]
-        import_ssh_client_keys: Option<PathBuf>,
+    UnattendedSetup(UnattendedSetupArgs),
+    #[command(hide = true)]
+    InternalInstallFiles {
+        /// Replace `$NAME` with the value of these environment variables (space-separated)
+        #[clap(long, value_delimiter = ' ')]
+        substitute_env: Vec<String>,
+        source: PathBuf,
+        destination: PathBuf,
     },
     /// Show Warpgate's SSH client keys
     ClientKeys,
@@ -216,10 +238,22 @@ async fn _main() -> Result<()> {
                 role.as_ref(),
             )
             .await
+            .map(|_| ())
         }
-        Commands::Setup { .. } | Commands::UnattendedSetup { .. } => {
-            crate::commands::setup::command(&cli, &params).await
+        Commands::Setup(args) => crate::commands::setup::command(&params, args, None).await,
+        Commands::UnattendedSetup(args) => {
+            crate::commands::setup::command(&params, &args.common, Some(args)).await
         }
+        Commands::InternalInstallFiles {
+            substitute_env,
+            source,
+            destination,
+        } => crate::commands::internal_install_files::command(
+            &params,
+            substitute_env,
+            source,
+            destination,
+        ),
         Commands::ClientKeys => crate::commands::client_keys::command(&params).await,
         Commands::RecoverAccess { username } => {
             crate::commands::recover_access::command(&params, username.as_ref()).await

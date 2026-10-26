@@ -8,8 +8,9 @@
 //! after auth. If the resource is on another node, it forwards the request there,
 //! otherwise it runs the local serve logic.
 //!
-//! Cross-node proxy requests are authenticated with the cluster token (see
-//! `require_cluster_or_admin_permission`).
+//! Cross-node proxy requests are authenticated by the sending node's pinned TLS
+//! client certificate (see `warpgate_common_http::cluster_tls`); the receiving
+//! side then trusts the identity headers stamped here.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -26,12 +27,12 @@ use tokio_tungstenite::{Connector, client_async_tls_with_config, tungstenite};
 use uuid::Uuid;
 use warpgate_ca::CLUSTER_TLS_SNI_NAME;
 use warpgate_common::helpers::websocket::pump_websocket;
-use warpgate_common::http_headers::may_forward_header;
+use warpgate_common::http_headers::{is_forwarding_header, may_forward_header};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::get_client_ip;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, X_WARPGATE_CLUSTER_CLIENT_IP,
-    X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_TOKEN, is_cluster_peer_request,
+    X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_NODE, is_cluster_peer_request,
 };
 use warpgate_core::Services;
 use warpgate_core::cluster::PeerConnection;
@@ -41,7 +42,8 @@ pub use warpgate_core::cluster::{Owner, RemoteNode};
 enum ForwardIdentity<'a> {
     /// An authenticated request: the peer runs it as this user and re-checks
     /// ownership of whatever the path names. The browser session cookie is
-    /// dropped — peer hops authenticate via the cluster token, not the cookie.
+    /// dropped — peer hops authenticate via the node's TLS identity, not the
+    /// cookie.
     User(&'a RequestAuthorization),
     /// An in-progress, not-yet-authenticated login: there is no identity to
     /// stamp, and the session cookie is forwarded instead so the peer resolves
@@ -159,41 +161,8 @@ where
     }
 }
 
-/// [fan_out_to_peers] but expect a specific HTTP response code
-/// and return a list of (hostname, code) of responses that did not match
-pub async fn fan_out_to_peers_expecting(
-    ctx: &AuthenticatedRequestContext,
-    req: &Request,
-    expected: StatusCode,
-) -> Vec<(String, StatusCode)> {
-    fan_out_to_peers(ctx, req, req.original_uri().path())
-        .await
-        .into_iter()
-        .map(|(hostname, response)| (hostname, response.status()))
-        .filter(|(_, status)| *status != expected)
-        .collect()
-}
-
-/// Forwards `req` as `path` to every other registered node and collects what
-/// they answer, paired with the node's hostname for logging.
-///
-/// Best effort: a node can be registered but already gone (a crashed node stays
-/// in the registry until the reaper drops it), so an unreachable peer is logged,
-/// not raised. Callers must not fan out a request that arrived from a peer -
-/// see [`reject_second_hop`].
-pub async fn fan_out_to_peers(
-    ctx: &AuthenticatedRequestContext,
-    req: &Request,
-    path: &str,
-) -> Vec<(String, Response)> {
-    ctx.services()
-        .cluster
-        .for_each_peer(|peer| forward_http_to(ctx, req, path, peer.into()))
-        .await
-}
-
-fn reject_second_hop(req: &Request, services: &Services) -> poem::Result<()> {
-    if is_cluster_peer_request(req, &services.cluster.cluster_token) {
+fn reject_second_hop(req: &Request) -> poem::Result<()> {
+    if is_cluster_peer_request(req) {
         return Err(poem::Error::from_string(
             "Refusing to forward an already-forwarded cluster request",
             StatusCode::BAD_GATEWAY,
@@ -216,25 +185,6 @@ async fn connect_any(
     Err(last_error)
 }
 
-/// Forwards `req` to `path` on the peer rather than the request's own path - for
-/// when the peer's copy of the request needs different parameters.
-pub(crate) async fn forward_http_to(
-    ctx: &AuthenticatedRequestContext,
-    req: &Request,
-    path: &str,
-    owner: RemoteNode,
-) -> poem::Result<Response> {
-    forward_http_inner(
-        ctx.services(),
-        req,
-        path,
-        owner,
-        ForwardIdentity::User(&ctx.auth),
-        None,
-    )
-    .await
-}
-
 /// Forwards `req` to `owner` as `identity`.
 async fn forward_http_inner(
     services: &Services,
@@ -244,7 +194,7 @@ async fn forward_http_inner(
     identity: ForwardIdentity<'_>,
     body: Option<Vec<u8>>,
 ) -> poem::Result<Response> {
-    reject_second_hop(req, services)?;
+    reject_second_hop(req)?;
 
     let mut headers = poem::http::HeaderMap::new();
     for (name, value) in req.headers() {
@@ -287,9 +237,9 @@ pub async fn forward_websocket(
     ws: WebSocket,
     owner: RemoteNode,
 ) -> poem::Result<Response> {
-    reject_second_hop(req, ctx.services())?;
-    let PeerConnection { tls, addrs, port } =
-        ctx.services().cluster.peer_connection(&owner).await?;
+    reject_second_hop(req)?;
+    let cluster = &ctx.services().cluster;
+    let PeerConnection { tls, addrs, port } = cluster.peer_connection(&owner).await?;
     let host = format!("{CLUSTER_TLS_SNI_NAME}:{port}");
     let url = format!("wss://{host}{}", path_and_query(req));
 
@@ -303,10 +253,7 @@ pub async fn forward_websocket(
             tungstenite::handshake::client::generate_key(),
         )
         .header(HOST, host)
-        .header(
-            X_WARPGATE_CLUSTER_TOKEN.clone(),
-            ctx.services().cluster.cluster_token.expose_secret(),
-        );
+        .header(X_WARPGATE_CLUSTER_NODE.clone(), cluster.node_id.to_string());
     if let Some(user_id) = ctx.auth.as_full_user().map(|x| x.user_id()) {
         builder = builder.header(X_WARPGATE_CLUSTER_IDENTITY.clone(), user_id.to_string());
     }
@@ -350,10 +297,11 @@ fn path_and_query(req: &Request) -> String {
 /// Cluster-hop header filter: everything the general proxy deny-list blocks
 /// (connection management plus any `x-warpgate-*` credential), plus message
 /// framing — the body is re-streamed, so the original framing headers don't
-/// apply — and the client's cookies: the peer hop is authorized by the cluster
-/// token alone.
+/// apply — and the client's cookies: the peer hop is authorized by the node's
+/// TLS identity alone. Forwarding headers pass through so the peer resolves
+/// the same external host and scheme as this node would.
 fn should_forward(name: &HeaderName) -> bool {
-    may_forward_header(name)
+    (may_forward_header(name) || is_forwarding_header(name))
         && name != CONTENT_LENGTH
         && name != TRANSFER_ENCODING
         && name != COOKIE

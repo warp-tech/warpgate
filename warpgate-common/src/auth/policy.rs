@@ -42,15 +42,19 @@ impl CredentialPolicy for AnySingleCredentialPolicy {
         _protocol: Protocol,
         valid_credentials: &HashSet<CredentialKind>,
     ) -> CredentialPolicyResponse {
-        if valid_credentials.is_empty() {
+        // Never treat OTP alone as sufficient
+        let sufficient = valid_credentials
+            .iter()
+            .any(|kind| *kind != CredentialKind::Totp);
+        if sufficient {
+            CredentialPolicyResponse::Ok
+        } else {
             CredentialPolicyResponse::Need(
                 self.supported_credential_types
-                    .clone()
-                    .into_iter()
+                    .difference(valid_credentials)
+                    .copied()
                     .collect(),
             )
-        } else {
-            CredentialPolicyResponse::Ok
         }
     }
 }
@@ -167,6 +171,64 @@ mod tests {
             ),
             CredentialPolicyResponse::Ok
         ));
+    }
+
+    fn any_single(supported: &[CredentialKind]) -> AnySingleCredentialPolicy {
+        AnySingleCredentialPolicy {
+            supported_credential_types: kinds(supported),
+        }
+    }
+
+    #[test]
+    fn any_single_rejects_lone_otp_when_user_has_first_factor() {
+        let policy = any_single(&[CredentialKind::Password, CredentialKind::Totp]);
+        let CredentialPolicyResponse::Need(needed) =
+            policy.is_sufficient(Protocol::Http, &kinds(&[CredentialKind::Totp]))
+        else {
+            panic!("expected Need");
+        };
+        assert_eq!(needed, kinds(&[CredentialKind::Password]));
+        assert!(matches!(
+            policy.is_sufficient(
+                Protocol::Http,
+                &kinds(&[CredentialKind::Password, CredentialKind::Totp])
+            ),
+            CredentialPolicyResponse::Ok
+        ));
+        assert!(matches!(
+            policy.is_sufficient(Protocol::Http, &kinds(&[CredentialKind::Password])),
+            CredentialPolicyResponse::Ok
+        ));
+    }
+
+    #[test]
+    fn any_single_never_accepts_lone_otp() {
+        let policy = any_single(&[CredentialKind::Totp]);
+        assert!(matches!(
+            policy.is_sufficient(Protocol::Ssh, &kinds(&[CredentialKind::Totp])),
+            CredentialPolicyResponse::Need(_)
+        ));
+    }
+
+    #[test]
+    fn mfa_require_does_not_accept_lone_otp() {
+        let policy = wrapper(
+            Box::new(any_single(&[
+                CredentialKind::Password,
+                CredentialKind::PublicKey,
+                CredentialKind::Totp,
+            ])),
+            &[(Protocol::Ssh, CredentialKind::Totp)],
+        );
+        let CredentialPolicyResponse::Need(needed) =
+            policy.is_sufficient(Protocol::Ssh, &kinds(&[CredentialKind::Totp]))
+        else {
+            panic!("expected Need");
+        };
+        assert_eq!(
+            needed,
+            kinds(&[CredentialKind::Password, CredentialKind::PublicKey])
+        );
     }
 
     #[test]

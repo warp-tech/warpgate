@@ -35,7 +35,16 @@ impl DirectTCPIPChannel {
         }
     }
 
+    /// Exactly one `RCEvent::Close` is delivered for the channel however the pump ends —
+    /// the target closing it, Warpgate closing it, or an error — so the client side of a
+    /// forwarded connection is never left open.
     pub async fn run(mut self) -> Result<(), SshClientError> {
+        let result = self.pump().await;
+        let _ = self.events_tx.send(RCEvent::Close(self.channel_id)).await;
+        result
+    }
+
+    async fn pump(&mut self) -> Result<(), SshClientError> {
         loop {
             tokio::select! {
                 incoming_data = self.ops_rx.recv() => {
@@ -61,19 +70,13 @@ impl DirectTCPIPChannel {
                                 Bytes::from(bytes.to_vec()),
                             )).await.map_err(|_| SshClientError::MpscError)?;
                         }
-                        Some(russh::ChannelMsg::Close) => {
-                            self.events_tx.send(RCEvent::Close(self.channel_id)).await.map_err(|_| SshClientError::MpscError)?;
-                        },
+                        Some(russh::ChannelMsg::Close) | None => break,
                         Some(russh::ChannelMsg::Success) => {
                             self.events_tx.send(RCEvent::Success(self.channel_id)).await.map_err(|_| SshClientError::MpscError)?;
                         },
                         Some(russh::ChannelMsg::Eof) => {
                             self.events_tx.send(RCEvent::Eof(self.channel_id)).await.map_err(|_| SshClientError::MpscError)?;
                         }
-                        None => {
-                            self.events_tx.send(RCEvent::Close(self.channel_id)).await.map_err(|_| SshClientError::MpscError)?;
-                            break
-                        },
                         Some(operation) => {
                             warn!(client_channel=%self.channel_id, ?operation, session=%self.session_id, "unexpected client_channel operation");
                         }

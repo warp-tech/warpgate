@@ -16,6 +16,7 @@ use warpgate_common_http::{
 use warpgate_core::ConfigProvider;
 use warpgate_db_entities::{LdapServer, Parameters};
 
+use crate::api::common::local_logout_disabled;
 use crate::common::{SessionExt, is_user_admin};
 
 pub struct Api;
@@ -117,10 +118,12 @@ pub struct Info {
     selected_target: Option<String>,
     external_host: Option<String>,
     external_hosts: Option<ExternalHostsInfo>,
+    control_plane_host: Option<String>,
     ports: PortsInfo,
     password_login_mode: Parameters::PasswordLoginMode,
     authorized_via_ticket: bool,
     authorized_via_sso_with_single_logout: bool,
+    local_logout_disabled: bool,
     own_credential_management_allowed: bool,
     ticket_self_service_enabled: bool,
     ticket_max_duration_seconds: Option<i64>,
@@ -141,6 +144,7 @@ pub struct Info {
     /// Login banner, shown to unauthenticated visitors too. Empty when unset.
     banner: String,
     show_session_menu: bool,
+    logo_etag: Option<String>,
     config_warnings: Option<Vec<String>>,
 }
 
@@ -318,6 +322,7 @@ impl Api {
             authorized_via_sso_with_single_logout: session
                 .get_sso_login_state()
                 .is_some_and(|state| state.supports_single_logout),
+            local_logout_disabled: local_logout_disabled(session, &config),
             external_hosts: protocol_external_hosts,
             ports: if auth_ctx.is_some() {
                 PortsInfo {
@@ -364,6 +369,9 @@ impl Api {
                     rdp: None,
                 }
             },
+            control_plane_host: config
+                .control_plane_host()
+                .or_else(|| fallback_host.clone()),
             own_credential_management_allowed: parameters.allow_own_credential_management,
             ticket_self_service_enabled: parameters.ticket_self_service_enabled,
             ticket_max_duration_seconds: parameters.ticket_max_duration_seconds,
@@ -386,6 +394,7 @@ impl Api {
             },
             should_prompt_analytics,
             banner: parameters.banner.clone(),
+            logo_etag: parameters.logo_etag(),
             show_session_menu: parameters.show_session_menu,
             config_warnings: can_edit_config.then(warnings),
         })))
