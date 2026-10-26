@@ -81,7 +81,7 @@
                 const port = location.port ? `:${location.port}` : ''
                 return `${location.protocol}//${target.externalHost}${port}`
             } else {
-                return `/?warpgate-target=${target.name}`
+                return `/?warpgate-target=${encodeURIComponent(target.name)}`
             }
         } else if (target.kind === TargetKind.Ssh) {
             return `/@warpgate/#/web-ssh/start/${target.id}`
