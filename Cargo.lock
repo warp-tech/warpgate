@@ -9540,6 +9540,7 @@ dependencies = [
  "async-trait",
  "reqwest 0.12.28",
  "rustify",
+ "rustls",
  "serde",
  "serde_json",
  "thiserror 2.0.20",

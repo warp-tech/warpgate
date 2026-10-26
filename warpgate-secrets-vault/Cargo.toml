@@ -19,3 +19,6 @@ tokio = { workspace = true, features = ["fs", "time"] }
 tracing.workspace = true
 vaultrs = { version = "0.7", default-features = false }
 warpgate-common = { path = "../warpgate-common" }
+
+[dev-dependencies]
+rustls = { workspace = true, features = ["aws-lc-rs"] }
