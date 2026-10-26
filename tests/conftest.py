@@ -1240,6 +1240,11 @@ def shared_wg(processes: ProcessManager):
     wait_port(wg.http_port, for_process=wg.process, recv=False)
     wait_port(wg.ssh_port, for_process=wg.process)
     wait_port(wg.kubernetes_port, for_process=wg.process, recv=False)
+    # Fresh installs enable login protection, and failed logins from every test
+    # on this worker would add up until ::1 is blocked. Tests that exercise it
+    # start their own instance.
+    with _admin_client_context(f"https://localhost:{wg.http_port}") as api:
+        api.update_parameters(sdk.ParameterUpdate(login_protection_enabled=False))
     yield wg
 
 
@@ -1247,7 +1252,7 @@ def shared_wg(processes: ProcessManager):
 # endpoint.  previously everyone called ``admin_client(url)`` directly;
 # a fixture lets us compute the URL from ``shared_wg`` once and removes
 # boilerplate from individual tests.
-from .api_client import admin_client as _admin_client_context  # noqa: E402
+from .api_client import admin_client as _admin_client_context, sdk  # noqa: E402
 
 
 @pytest.fixture
