@@ -38,6 +38,9 @@
         '/parameters': wrap({
             asyncComponent: () => import('./Parameters.svelte'),
         }),
+        '/slack': wrap({
+            asyncComponent: () => import('./Slack.svelte'),
+        }),
         '/policies': wrap({
             asyncComponent: () => import('./Policies.svelte'),
         }),
@@ -163,6 +166,14 @@
             title="Global parameters"
             description="Change instance-wide settings"
             href="/config/parameters"
+            small={sidebarMode}
+        />
+
+        <NavListItem
+            class="mb-2"
+            title="Slack"
+            description="Approve session requests from Slack"
+            href="/config/slack"
             small={sidebarMode}
         />
 

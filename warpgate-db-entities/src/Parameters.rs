@@ -286,6 +286,18 @@ pub struct Model {
     pub ssh_host_key_rsa: StoredSecret,
     #[sea_orm(column_type = "Text")]
     pub logo: Option<String>, // data URI
+    /// Slack integration for admin session approvals, see `warpgate_core::slack`
+    pub slack_enabled: bool,
+    /// Empty when unset
+    #[sea_orm(column_type = "Text")]
+    pub slack_bot_token: StoredSecret,
+    /// Empty when unset
+    #[sea_orm(column_type = "Text")]
+    pub slack_signing_secret: StoredSecret,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub slack_sso_provider: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub slack_channel: Option<String>,
 }
 
 impl Model {
@@ -505,6 +517,11 @@ mod tests {
             ssh_host_key_ed25519: StoredSecret::default(),
             ssh_host_key_rsa: StoredSecret::default(),
             logo: None,
+            slack_enabled: false,
+            slack_bot_token: StoredSecret::default(),
+            slack_signing_secret: StoredSecret::default(),
+            slack_sso_provider: None,
+            slack_channel: None,
         }
     }
 

@@ -7,6 +7,7 @@ pub(crate) mod common;
 mod credentials;
 pub mod info;
 pub mod logo;
+pub mod slack;
 pub mod sso_backchannel_logout;
 pub mod sso_provider_detail;
 pub mod sso_provider_list;

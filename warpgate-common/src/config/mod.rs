@@ -12,7 +12,7 @@ use defaults::{
     _default_http_listen, _default_kubernetes_listen, _default_mysql_advertised_version,
     _default_mysql_listen, _default_postgres_listen, _default_rdp_listen, _default_recordings_path,
     _default_retention, _default_session_max_age, _default_ssh_inactivity_timeout,
-    _default_ssh_listen, _default_ssh_target_handshake_timeout, _default_vnc_listen,
+    _default_ssh_listen, _default_ssh_target_handshake_timeout, _default_true, _default_vnc_listen,
 };
 use poem::http::uri::Authority;
 use poem_openapi::{Object, Union};
@@ -899,6 +899,38 @@ impl Default for LogConfig {
     }
 }
 
+/// Slack integration for just-in-time session approvals.
+///
+/// Pending admin approval requests are sent as direct messages to every
+/// Warpgate user holding the "approve sessions" admin permission, matched to
+/// a Slack account by the e-mail of their SSO credential. Admins approve or
+/// reject straight from Slack; the clicking Slack user is mapped back to a
+/// Warpgate user the same way and must hold the permission themselves.
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
+pub struct SlackConfig {
+    #[serde(default = "_default_true")]
+    pub enable: bool,
+
+    /// Bot User OAuth Token (`xoxb-...`). Scopes: `chat:write`,
+    /// `users:read`, `users:read.email`.
+    #[schemars(with = "String")]
+    pub bot_token: Secret<String>,
+
+    /// Signing secret from the Slack app's "Basic Information" page, used to
+    /// verify interactivity callbacks.
+    #[schemars(with = "String")]
+    pub signing_secret: Secret<String>,
+
+    /// Only consider SSO credentials of this provider (the `name` of an
+    /// `sso_providers` entry, e.g. `google`) when mapping users to Slack.
+    #[serde(default)]
+    pub sso_provider: Option<String>,
+
+    /// Channel ID to additionally post every request to.
+    #[serde(default)]
+    pub channel: Option<String>,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
 pub struct WarpgateConfigStore {
     #[serde(default)]
@@ -937,6 +969,9 @@ pub struct WarpgateConfigStore {
 
     #[serde(default)]
     pub log: LogConfig,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slack: Option<SlackConfig>,
 }
 
 impl Default for WarpgateConfigStore {
@@ -954,6 +989,7 @@ impl Default for WarpgateConfigStore {
             vnc: <_>::default(),
             rdp: <_>::default(),
             log: <_>::default(),
+            slack: None,
         }
     }
 }

@@ -4400,6 +4400,93 @@
         "operationId": "reject_session"
       }
     },
+    "/slack": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlackSettings"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_slack_settings"
+      },
+      "put": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/SlackSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "update_slack_settings"
+      }
+    },
+    "/slack/test": {
+      "post": {
+        "summary": "Sends a test DM to the calling admin with the given (unsaved) settings",
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/SlackSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlackTestResult"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "test_slack_settings"
+      }
+    },
     "/users/{user_id}/credentials/certificates": {
       "get": {
         "parameters": [
@@ -7702,6 +7789,104 @@
           },
           "status": {
             "$ref": "#/components/schemas/ApprovalRequestStatus"
+          }
+        }
+      },
+      "SlackSettings": {
+        "type": "object",
+        "title": "SlackSettings",
+        "description": "The stored secrets are never sent to the browser",
+        "required": [
+          "enabled",
+          "bot_token_set",
+          "signing_secret_set",
+          "sso_providers",
+          "active_source"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "bot_token_set": {
+            "type": "boolean"
+          },
+          "signing_secret_set": {
+            "type": "boolean"
+          },
+          "sso_provider": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "sso_providers": {
+            "type": "array",
+            "description": "Names of the configured SSO providers",
+            "items": {
+              "type": "string"
+            }
+          },
+          "active_source": {
+            "description": "Which settings are currently in effect",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SlackSettingsSource"
+              },
+              {
+                "description": "Which settings are currently in effect"
+              }
+            ]
+          }
+        }
+      },
+      "SlackSettingsSource": {
+        "type": "string",
+        "enum": [
+          "database",
+          "config_file",
+          "none"
+        ]
+      },
+      "SlackSettingsUpdate": {
+        "type": "object",
+        "title": "SlackSettingsUpdate",
+        "description": "Empty or omitted secrets keep the stored ones",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "bot_token": {
+            "type": "string"
+          },
+          "signing_secret": {
+            "type": "string"
+          },
+          "sso_provider": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          }
+        }
+      },
+      "SlackTestResult": {
+        "type": "object",
+        "title": "SlackTestResult",
+        "required": [
+          "success"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "workspace": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
           }
         }
       },

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connect to Warpgate</title>
+  <link rel="stylesheet" href="setup.css">
+</head>
+<body>
+  <main>
+    <img src="logo.svg" alt="" class="logo" width="72" height="72">
+    <h1>Connect to Warpgate</h1>
+    <p class="hint">Enter the address of your Warpgate server. You can change it later from <strong>Server → Change Server…</strong></p>
+    <form id="form">
+      <input id="url" type="text" inputmode="url" autocomplete="url" spellcheck="false"
+             autocapitalize="off" placeholder="warpgate.example.com" required autofocus>
+      <button type="submit" id="submit">Connect</button>
+    </form>
+    <p id="error" class="error" role="alert" hidden></p>
+  </main>
+  <script src="setup.js"></script>
+</body>
+</html>

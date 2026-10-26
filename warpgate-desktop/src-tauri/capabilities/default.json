@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "setup-page",
+  "description": "Lets the bundled server-setup page save the Warpgate URL. Not granted to remote pages.",
+  "windows": ["main"],
+  "permissions": ["allow-connect", "allow-current-server"]
+}

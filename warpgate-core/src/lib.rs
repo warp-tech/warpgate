@@ -21,6 +21,7 @@ pub mod recordings;
 pub mod resources;
 mod secret_backend_registry;
 mod services;
+pub mod slack;
 mod state;
 pub mod ticket_requests;
 pub use auth_state_store::*;

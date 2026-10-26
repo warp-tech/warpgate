@@ -1,0 +1,3 @@
+# The server workspace pins a nightly; the desktop app builds on stable.
+[toolchain]
+channel = "stable"

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-current-server"
+description = "Enables the current_server command without any pre-configured scope."
+commands.allow = ["current_server"]
+
+[[permission]]
+identifier = "deny-current-server"
+description = "Denies the current_server command without any pre-configured scope."
+commands.deny = ["current_server"]

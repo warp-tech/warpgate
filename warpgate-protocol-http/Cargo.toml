@@ -8,6 +8,7 @@ publish = false
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+bytes.workspace = true
 cookie = { version = "0.18", default-features = false }
 data-encoding.workspace = true
 delegate.workspace = true

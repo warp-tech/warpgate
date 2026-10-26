@@ -29,6 +29,7 @@ mod roles;
 pub mod session_approvals;
 mod sessions_detail;
 pub mod sessions_list;
+mod slack;
 mod ssh_connection_test;
 mod ssh_keys;
 mod sso_credentials;
@@ -85,7 +86,7 @@ pub fn get() -> impl OpenApi {
                 login_protection::Api,
                 network_status::Api,
             ),
-            session_approvals::Api,
+            (session_approvals::Api, slack::Api),
         ),
         (
             certificate_credentials::ListApi,

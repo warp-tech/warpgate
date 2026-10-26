@@ -1,0 +1,16 @@
+{
+  "name": "warpgate-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "macOS app wrapper for the Warpgate web UI",
+  "scripts": {
+    "//": "CARGO_ENCODED_RUSTFLAGS= drops the nightly-only rustflags inherited from ../.cargo/config.toml",
+    "dev": "CARGO_ENCODED_RUSTFLAGS= tauri dev",
+    "icon": "tauri icon ../warpgate-web/public/assets/favicon.svg",
+    "dmg": "CARGO_ENCODED_RUSTFLAGS= tauri build --bundles dmg",
+    "dmg:universal": "CARGO_ENCODED_RUSTFLAGS= tauri build --bundles dmg --target universal-apple-darwin"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.5.0"
+  }
+}

@@ -25,6 +25,7 @@ macro_rules! with_every_entity {
             Role,
             SecretBackend,
             SessionApprovalRequest,
+            SlackApprovalMessage,
             SshClientKey,
             SsoCredential,
             Target,

@@ -203,6 +203,14 @@ async fn probe_undecryptable(db: &DatabaseConnection) -> Result<Vec<String>, War
             undecryptable.push(format!("SSH host key ({kind:?})"));
         }
     }
+    for (name, secret) in [
+        ("Slack bot token", &parameters.slack_bot_token),
+        ("Slack signing secret", &parameters.slack_signing_secret),
+    ] {
+        if secret.reveal().is_err() {
+            undecryptable.push(name.to_owned());
+        }
+    }
 
     Ok(undecryptable)
 }
@@ -269,6 +277,11 @@ async fn rewrite_all(db: &DatabaseConnection) -> Result<usize, WarpgateError> {
             &mut model.ssh_host_key_ed25519,
         ),
         (&parameters.ssh_host_key_rsa, &mut model.ssh_host_key_rsa),
+        (&parameters.slack_bot_token, &mut model.slack_bot_token),
+        (
+            &parameters.slack_signing_secret,
+            &mut model.slack_signing_secret,
+        ),
     ] {
         let mut key = key.clone();
         if matches!(key.reencrypt_all(), Ok(true)) {

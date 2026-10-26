@@ -98,6 +98,16 @@
         }
       ]
     },
+    "slack": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SlackConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "ssh": {
       "$ref": "#/$defs/SshConfig",
       "default": {
@@ -432,6 +442,44 @@
             "type": "string"
           }
         }
+      ]
+    },
+    "SlackConfig": {
+      "description": "Slack integration for just-in-time session approvals.\n\nPending admin approval requests are sent as direct messages to every\nWarpgate user holding the \"approve sessions\" admin permission, matched to\na Slack account by the e-mail of their SSO credential. Admins approve or\nreject straight from Slack; the clicking Slack user is mapped back to a\nWarpgate user the same way and must hold the permission themselves.",
+      "type": "object",
+      "properties": {
+        "bot_token": {
+          "description": "Bot User OAuth Token (`xoxb-...`). Scopes: `chat:write`,\n`users:read`, `users:read.email`.",
+          "type": "string"
+        },
+        "channel": {
+          "description": "Channel ID to additionally post every request to.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "enable": {
+          "type": "boolean",
+          "default": true
+        },
+        "signing_secret": {
+          "description": "Signing secret from the Slack app's \"Basic Information\" page, used to\nverify interactivity callbacks.",
+          "type": "string"
+        },
+        "sso_provider": {
+          "description": "Only consider SSO credentials of this provider (the `name` of an\n`sso_providers` entry, e.g. `google`) when mapping users to Slack.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "bot_token",
+        "signing_secret"
       ]
     },
     "SniCertificateConfig": {

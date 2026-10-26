@@ -224,6 +224,7 @@ impl Services {
             subject.emit_requested_event();
             self.cluster
                 .notify_global(ClusterNotification::SessionApprovalsChanged);
+            crate::slack::announce_request(self, subject.session_id, subject.target_name.clone());
         }
         Ok(advertised)
     }
