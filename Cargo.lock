@@ -9616,6 +9616,7 @@ dependencies = [
  "tracing",
  "uuid",
  "warpgate-common",
+ "warpgate-common-http",
  "warpgate-core",
  "warpgate-db-entities",
 ]

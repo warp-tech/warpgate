@@ -28,6 +28,7 @@ use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::auth::RememberApprovalBy;
 use warpgate_common::{Protocol, UserFacingReason, UserSessionId, WarpgateError};
+use warpgate_common_http::auth::FullUserAuthorization;
 use warpgate_core::approvals::{Admission, GatedConnection, admit_target_session};
 use warpgate_core::{
     AdmittedTarget, Services, SessionHandle, State, TargetAuthorization, UserSessionStateInit,
@@ -419,12 +420,16 @@ impl<S: ManagedSession> ClientManager<S> {
         Self::default()
     }
 
-    pub async fn lookup_user_session(&self, id: UserSessionId, user_id: Uuid) -> Option<Arc<S>> {
+    pub async fn lookup_user_session(
+        &self,
+        id: UserSessionId,
+        user: &FullUserAuthorization,
+    ) -> Option<Arc<S>> {
         self.sessions
             .lock()
             .await
             .get(&id)
-            .filter(|session| session.user_id() == user_id)
+            .filter(|session| session.user_id() == user.user_id())
             .cloned()
     }
 
