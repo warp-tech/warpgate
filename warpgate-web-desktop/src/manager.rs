@@ -222,6 +222,7 @@ async fn emit(
         }
         event => {
             if let Some(msg) = ServerMessage::from_event(event) {
+                session.remember_cursor(&msg).await;
                 session.push(msg).await;
             }
             Ok(())

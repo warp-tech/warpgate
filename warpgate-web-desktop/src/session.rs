@@ -41,6 +41,9 @@ pub struct WebDesktopSession {
     /// Separate from the recorder's: that one must only see events it actually wrote.
     /// Holds the refinement scratch too, so encoding one region needs a single lock.
     framebuffer: Mutex<(Framebuffer, RefineScratch)>,
+    /// The cursor shape in effect, replayed to a viewer that attaches later. `None` is the
+    /// viewer's own default arrow.
+    cursor: Mutex<Option<ServerMessage>>,
 }
 
 /// Buffers reused across refinement encodes. A settling screen refines many regions back to
@@ -74,7 +77,23 @@ impl WebDesktopSession {
             ),
             backend: OnceLock::new(),
             framebuffer: Mutex::new((Framebuffer::default(), RefineScratch::default())),
+            cursor: Mutex::new(None),
         }
+    }
+
+    /// Note a cursor change so [`Self::cursor`] can replay it; other messages are ignored.
+    pub async fn remember_cursor(&self, msg: &ServerMessage) {
+        match msg {
+            ServerMessage::Cursor { .. } | ServerMessage::CursorHidden => {
+                *self.cursor.lock().await = Some(msg.clone());
+            }
+            ServerMessage::CursorDefault => *self.cursor.lock().await = None,
+            _ => {}
+        }
+    }
+
+    pub async fn cursor(&self) -> Option<ServerMessage> {
+        self.cursor.lock().await.clone()
     }
 
     pub fn bind_backend(&self, backend: DesktopBackend) {

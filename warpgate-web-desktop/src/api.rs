@@ -45,6 +45,9 @@ pub async fn ws_handler(
         if let Some(keyframe) = session.keyframe().await {
             session.push(keyframe).await;
         }
+        if let Some(cursor) = session.cursor().await {
+            session.push(cursor).await;
+        }
         session.replay_phase().await;
 
         let input_session = session.clone();

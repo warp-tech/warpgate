@@ -30,7 +30,10 @@ export type DesktopFrame =
       }
     | { type: 'jpeg_image'; rect: Rect; data: FrameImageData }
     | { type: 'copy_rect'; dst: Rect; src_x: number; src_y: number }
+    // `rect.x`/`rect.y` are the hotspot; empty `data` hides the cursor.
     | { type: 'cursor'; rect: Rect; data: FrameImageData }
+    | { type: 'cursor_default' }
+    | { type: 'cursor_hidden' }
 
 /** A frame whose image decode, if it has one, is already running. */
 export type PreparedFrame = DesktopFrame & {
@@ -46,6 +49,8 @@ const FRAME_TYPES: Record<DesktopFrame['type'], true> = {
     jpeg_image: true,
     copy_rect: true,
     cursor: true,
+    cursor_default: true,
+    cursor_hidden: true,
 }
 
 /** Whether a stream item type is a framebuffer frame, as opposed to a viewer-input item. */
@@ -67,6 +72,8 @@ export function isIncrementalFrame(msg: DesktopFrame): boolean {
         case 'png_image':
             return !msg.keyframe
         case 'resize':
+        case 'cursor_default':
+        case 'cursor_hidden':
             return false
     }
 }
@@ -104,26 +111,55 @@ function ensureForRect(canvas: HTMLCanvasElement, rect: Rect): void {
     )
 }
 
+// The server sends BGRA, the canvas wants RGBA. Framebuffer tiles are opaque; only a
+// cursor sprite carries a meaningful alpha channel.
+function bgraToImageData(
+    bgra: Uint8Array,
+    width: number,
+    height: number,
+    keepAlpha: boolean,
+): ImageData {
+    const count = width * height
+    const rgba = new Uint8ClampedArray(count * 4)
+    for (let i = 0; i < count; i++) {
+        const s = i * 4
+        rgba[s] = bgra[s + 2] ?? 0
+        rgba[s + 1] = bgra[s + 1] ?? 0
+        rgba[s + 2] = bgra[s] ?? 0
+        rgba[s + 3] = keepAlpha ? (bgra[s + 3] ?? 0) : 255
+    }
+    return new ImageData(rgba, width, height)
+}
+
 function drawRaw(
     ctx: CanvasRenderingContext2D,
     rect: Rect,
     bgra: Uint8Array,
 ): void {
-    const count = rect.width * rect.height
-    const rgba = new Uint8ClampedArray(count * 4)
-    for (let i = 0; i < count; i++) {
-        const s = i * 4
-        // server sends BGRA, canvas wants RGBA
-        rgba[s] = bgra[s + 2] ?? 0
-        rgba[s + 1] = bgra[s + 1] ?? 0
-        rgba[s + 2] = bgra[s] ?? 0
-        rgba[s + 3] = 255
-    }
     ctx.putImageData(
-        new ImageData(rgba, rect.width, rect.height),
+        bgraToImageData(bgra, rect.width, rect.height, false),
         rect.x,
         rect.y,
     )
+}
+
+// A cursor sprite as a CSS `cursor` value. Browsers cap custom cursors (128px in Chromium,
+// less elsewhere) and silently fall back to the keyword after the comma.
+function cursorCss(rect: Rect, bgra: Uint8Array): string {
+    if (rect.width === 0 || rect.height === 0 || bgra.length === 0) {
+        return 'none'
+    }
+    const sprite = document.createElement('canvas')
+    sprite.width = rect.width
+    sprite.height = rect.height
+    sprite
+        .getContext('2d')
+        ?.putImageData(
+            bgraToImageData(bgra, rect.width, rect.height, true),
+            0,
+            0,
+        )
+    return `url(${sprite.toDataURL()}) ${rect.x} ${rect.y}, auto`
 }
 
 function decodeBlob(
@@ -225,6 +261,13 @@ async function paintFrame(
             )
             break
         case 'cursor':
+            canvas.style.cursor = cursorCss(msg.rect, toBytes(msg.data))
+            break
+        case 'cursor_default':
+            canvas.style.cursor = ''
+            break
+        case 'cursor_hidden':
+            canvas.style.cursor = 'none'
             break
         default:
             // Compile-time exhaustiveness: a new frame kind must be handled above.

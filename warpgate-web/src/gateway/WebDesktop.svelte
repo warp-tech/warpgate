@@ -38,6 +38,8 @@
         | { type: 'jpeg_image'; rect: Rect; data: string }
         | { type: 'copy_rect'; dst: Rect; src_x: number; src_y: number }
         | { type: 'cursor'; rect: Rect; data: string }
+        | { type: 'cursor_default' }
+        | { type: 'cursor_hidden' }
         | { type: 'clipboard'; text: string }
         | { type: 'bell' }
         | { type: 'error'; message: string }
@@ -134,7 +136,8 @@
         .subscribe(sendResize)
 
     // Pixel frames arrive as binary (see the backend's `ws_payload`); control messages
-    // (connection state, resize, copy-rect, clipboard, error) arrive as JSON text.
+    // (connection state, resize, copy-rect, cursor reset/hide, clipboard, error) arrive as
+    // JSON text.
     function onWsMessage(data: string | ArrayBuffer) {
         if (!ws) {
             return
@@ -192,8 +195,7 @@
             case 2:
                 return { type: 'jpeg_image', rect, data }
             case 3:
-                // Cursor sprites aren't composited onto the canvas.
-                return null
+                return { type: 'cursor', rect, data }
             case 4:
                 // Full-canvas base image sent on attach; never shed from the queue.
                 return { type: 'png_image', rect, data, keyframe: true }

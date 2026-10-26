@@ -134,11 +134,14 @@ pub enum ServerMessage {
         src_x: u16,
         src_y: u16,
     },
+    /// `rect.x`/`rect.y` are the hotspot; an empty `data` hides the cursor.
     Cursor {
         rect: WsRect,
         #[serde(with = "warpgate_common::helpers::serde_base64")]
         data: Bytes,
     },
+    CursorDefault,
+    CursorHidden,
     Clipboard {
         text: String,
     },
@@ -218,11 +221,9 @@ impl ServerMessage {
     /// `None` for state changes, which are reported as a session phase instead.
     pub fn from_event(event: DesktopEvent) -> Option<Self> {
         Some(match event {
-            // The browser client doesn't draw the target's cursor shape, so there is nothing
-            // to tell it when the cursor reverts or hides.
-            DesktopEvent::State(_) | DesktopEvent::CursorDefault | DesktopEvent::CursorHidden => {
-                return None;
-            }
+            DesktopEvent::State(_) => return None,
+            DesktopEvent::CursorDefault => Self::CursorDefault,
+            DesktopEvent::CursorHidden => Self::CursorHidden,
             DesktopEvent::Resize { width, height } => Self::Resize { width, height },
             DesktopEvent::RawImage { rect, data } => Self::RawImage {
                 rect: rect.into(),
