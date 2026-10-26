@@ -112,7 +112,9 @@ allow = [
 ]
 # List of crates to deny
 deny = [
-    { crate = "openssl-sys", wrappers = ["openssl", "tokio-openssl"], reason = "RDP legacy TLS compatibility uses vendored OpenSSL for older Windows Schannel targets" }
+    { crate = "openssl-sys", wrappers = ["openssl", "tokio-openssl"], reason = "RDP legacy TLS compatibility uses vendored OpenSSL for older Windows Schannel targets" },
+    { crate = "webpki-roots@0.26", wrappers = ["sqlx-core"], reason = "Outbound TLS must verify against the OS certificate store, not a bundled root list. sqlx is the only exception: its native-roots feature forces the ring crypto provider for the database handshake" },
+    { crate = "webpki-roots@1", wrappers = ["webpki-roots"], reason = "Only reachable through the 0.26 compatibility shim that sqlx-core uses (see above)" },
     #"ansi_term@0.11.0",
     #{ crate = "ansi_term@0.11.0", reason = "you can specify a reason it is banned" },
     # Wrapper crates can optionally be specified to allow the crate when it

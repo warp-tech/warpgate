@@ -459,11 +459,11 @@ async fn _handle_normal_request_inner(
             .map(|q| url::form_urlencoded::parse(q.as_bytes()).collect())
             .unwrap_or_default();
 
-        // watch=true: used by kubectl to await changes
-        // follow=true: used by kubectl logs
+        // watch: used by kubectl to await changes
+        // follow: used by kubectl logs
         let is_streaming_response = query_pairs
             .iter()
-            .any(|(k, v)| (k == "watch" || k == "follow") && v == "true");
+            .any(|(k, v)| (k == "watch" || k == "follow") && crate::audit::parse_bool(v));
 
         // A write's response is always read in full, even if it is framed as
         // chunked, so a close can't cut off its answer.

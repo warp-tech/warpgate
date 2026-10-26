@@ -98,7 +98,7 @@
 </script>
 
 <div class="page-summary-bar">
-    <h1>Secret backends</h1>
+    <h1>secret backends</h1>
     {#if $adminPermissions.configEdit}
         <Button class="ms-auto" color="primary" onclick={openCreate}>
             Add a secret backend

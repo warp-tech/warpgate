@@ -77,7 +77,7 @@
     {/if}
 
     <div class="page-summary-bar">
-        <h1>Tickets</h1>
+        <h1>tickets</h1>
         <a
             class="btn btn-primary ms-auto"
             href="/config/tickets/create"

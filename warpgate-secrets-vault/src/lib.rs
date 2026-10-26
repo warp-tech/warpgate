@@ -508,6 +508,7 @@ mod tests {
 
     #[tokio::test]
     async fn static_token_is_trimmed_and_must_fit_a_header() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let mut builder = VaultClientSettingsBuilder::default();
         builder.address("https://vault.invalid").token("");
         let mut client = VaultClient::new(builder.build().unwrap()).unwrap();

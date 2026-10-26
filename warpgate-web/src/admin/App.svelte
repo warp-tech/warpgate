@@ -145,7 +145,7 @@
                     <strong>Issues found:</strong>
                     <ul class="mb-0 mt-2">
                         {#each $serverInfo.configWarnings as warning (warning)}
-                            <li>{@html warning}</li>
+                            <li>{warning}</li>
                         {/each}
                     </ul>
                 </Alert>

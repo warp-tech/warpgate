@@ -1,4 +1,6 @@
 use bytes::{Buf, Bytes};
+use warpgate_database_protocols::error::Error as SqlxError;
+use warpgate_database_protocols::io::BufExt;
 use warpgate_database_protocols::mysql::io::{MySqlBufExt, MySqlBufMutExt};
 use warpgate_database_protocols::mysql::protocol::Capabilities;
 
@@ -116,11 +118,11 @@ impl ResponseRelay {
         }
 
         let mut buf = packet.clone();
-        let mut out = vec![take(&mut buf, 1)?.get_u8()];
-        out.put_uint_lenenc(take_uint_lenenc(&mut buf)?);
-        out.put_uint_lenenc(take_uint_lenenc(&mut buf)?);
+        let mut out = vec![buf.try_get_u8().map_err(SqlxError::from)?];
+        out.put_uint_lenenc(buf.get_uint_lenenc()?);
+        out.put_uint_lenenc(buf.get_uint_lenenc()?);
         // Status and warnings, framing-neutral
-        out.extend_from_slice(&take(&mut buf, 4)?);
+        out.extend_from_slice(&buf.get_bytes(4)?);
         out.put_bytes_lenenc(&buf);
         Ok(Relayed::Rewritten(out))
     }
@@ -147,25 +149,6 @@ impl ResponseRelay {
         }
         Ok(Relayed::Rewritten(out))
     }
-}
-
-fn take(buf: &mut Bytes, len: usize) -> Result<Bytes, MySqlError> {
-    if buf.len() < len {
-        return Err(MySqlError::ProtocolError("truncated OK packet".to_owned()));
-    }
-    Ok(buf.split_to(len))
-}
-
-/// Length-checked [`MySqlBufExt::get_uint_lenenc`], which panics on a short
-/// buffer.
-fn take_uint_lenenc(buf: &mut Bytes) -> Result<u64, MySqlError> {
-    let len = match buf.first() {
-        Some(0xfc) => 3,
-        Some(0xfd) => 4,
-        Some(0xfe) => 9,
-        _ => 1,
-    };
-    Ok(take(buf, len)?.get_uint_lenenc())
 }
 
 #[cfg(test)]
