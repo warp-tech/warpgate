@@ -73,3 +73,13 @@ session-side `ResetGraphics` handling from upstream #1874:
 
 Needs `vendor/ironrdp-dvc` (for `DrdynvcClient::get_dvc_mut`) and `vendor/ironrdp-egfx`.
 Drops out on re-vendor from an upstream release that contains #1461 and #1874.
+
+## Pointer decoding
+
+`fast_path.rs` decoded New and Large pointer updates without the session palette, so a
+valid 4bpp or 8bpp cursor failed with `NotSupportedBpp` and ended the session. The fork passes
+`Palette::colors()` to the `_with_palette` decoders in the vendored `ironrdp-graphics`, and
+reports any pointer that still cannot be decoded as `UpdateKind::PointerDefault` instead of
+returning the error. Such a pointer also clears its cache slot (`PointerCache::remove` in
+`pointer.rs`), so a later Cached Pointer Update cannot bring back the shape it replaced. It adds unit tests, which `test = false` in `Cargo.toml` hides from a
+plain `cargo test`: run `cargo test -p ironrdp-session --lib`.
