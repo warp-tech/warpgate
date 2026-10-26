@@ -294,8 +294,8 @@ fn inject_forwarding_headers<B: SomeRequestBuilder>(
         target = target.header(X_FORWARDED_HOST.clone(), host);
     }
     target = target.header(X_FORWARDED_PROTO.clone(), ctx.trusted_proto(req).as_str());
-    if let Some(addr) = req.remote_addr().as_socket_addr() {
-        target = target.header(X_FORWARDED_FOR.clone(), addr.ip().to_string());
+    if let Some(ip) = ctx.trusted_client_ip(req) {
+        target = target.header(X_FORWARDED_FOR.clone(), ip);
     }
     target
 }
@@ -671,6 +671,24 @@ mod tests {
             request = request.header(http::header::COOKIE, *value);
         }
         cookie_header_for_target(&request.finish()).unwrap()
+    }
+
+    #[test]
+    fn client_forwarding_headers_are_not_copied() {
+        let req = Request::builder()
+            .header(&X_FORWARDED_FOR, "203.0.113.10")
+            .header(&X_FORWARDED_HOST, "evil.example")
+            .header(&X_FORWARDED_PROTO, "https")
+            .header(http::header::FORWARDED, "for=203.0.113.10")
+            .header("x-real-ip", "203.0.113.10")
+            .header("x-custom", "kept")
+            .finish();
+        let copied = copy_server_request(&req, http::Request::builder())
+            .unwrap()
+            .body(())
+            .unwrap();
+        let names: Vec<_> = copied.headers().keys().map(HeaderName::as_str).collect();
+        assert_eq!(names, ["x-custom"]);
     }
 
     #[test]

@@ -87,6 +87,7 @@ $font-family-os: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
 
 .page-summary-bar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     margin: 0.25rem 0 1.5rem;
     gap: 1rem;
@@ -94,8 +95,11 @@ $font-family-os: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
     h1 {
         font-family: 'Poppins';
         font-weight: 700;
-        font-size: 2.5rem;
+        // 1.75rem on phones up to the original 2.5rem on desktop
+        font-size: clamp(1.75rem, 1.25rem + 2vw, 2.5rem);
+        line-height: 1.15;
         margin: 0;
+        overflow-wrap: anywhere;
     }
 
     .counter {
