@@ -59,7 +59,11 @@ impl LoginProtectionCache {
         let mut blocked_ips = self.blocked_ips.write().await;
         blocked_ips.clear();
         for block in blocks {
-            if let Ok(ip) = block.ip_address.parse::<IpAddr>() {
+            if let Ok(ip) = block
+                .ip_address
+                .parse::<IpAddr>()
+                .map(|ip| ip.to_canonical())
+            {
                 blocked_ips.insert(
                     ip,
                     IpBlockInfo {
