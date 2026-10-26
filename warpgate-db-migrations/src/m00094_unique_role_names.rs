@@ -33,8 +33,7 @@ mod tests {
     async fn duplicate_role_names_are_renamed_and_then_rejected() {
         set_config_migration_values(ConfigMigrationValues::default());
         let db = Database::connect("sqlite::memory:").await.unwrap();
-        let before = u32::try_from(Migrator::migrations().len() - 1).unwrap();
-        Migrator::up(&db, Some(before)).await.unwrap();
+        Migrator::up(&db, Some(93)).await.unwrap();
 
         let backend = db.get_database_backend();
         let insert = |name: &str| {

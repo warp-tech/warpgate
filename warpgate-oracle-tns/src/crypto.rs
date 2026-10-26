@@ -18,16 +18,14 @@ use sha2::{Digest, Sha512};
 const BLOCK: usize = 16;
 const ZERO_IV: [u8; BLOCK] = [0u8; BLOCK];
 
-/// PBKDF2-HMAC-SHA512, as used for the 12c verifier key and `combo_key`.
-pub fn pbkdf2_hmac_sha512(password: &[u8], salt: &[u8], iterations: u32, dklen: usize) -> Vec<u8> {
-    let mut out = vec![0u8; dklen];
-    pbkdf2_hmac_sha512_into(password, salt, iterations, &mut out);
-    out
-}
-
-/// [`pbkdf2_hmac_sha512`] filling `out` (its length is the derived key length).
-pub fn pbkdf2_hmac_sha512_into(password: &[u8], salt: &[u8], iterations: u32, out: &mut [u8]) {
-    pbkdf2::pbkdf2_hmac::<Sha512>(password, salt, iterations, out);
+/// PBKDF2-HMAC-SHA512 with an `N`-byte derived key, as used for the 12c
+/// verifier key and `combo_key`.
+pub fn pbkdf2_hmac_sha512<const N: usize>(
+    password: &[u8],
+    salt: &[u8],
+    iterations: u32,
+) -> [u8; N] {
+    pbkdf2::pbkdf2_hmac_array::<Sha512, N>(password, salt, iterations)
 }
 
 /// The first 32 bytes of SHA-512 over the concatenation of `parts`: the AES-256
@@ -37,12 +35,12 @@ pub fn sha512_prefix32(parts: &[&[u8]]) -> [u8; 32] {
     for part in parts {
         hasher.update(part);
     }
-    let digest = hasher.finalize();
-    let mut out = [0u8; 32];
-    for (o, d) in out.iter_mut().zip(digest.iter()) {
-        *o = *d;
-    }
-    out
+    // A SHA-512 digest is 64 bytes, so the prefix is always there.
+    hasher
+        .finalize()
+        .get(..32)
+        .and_then(|prefix| prefix.try_into().ok())
+        .unwrap_or_default()
 }
 
 /// AES-256-CBC encrypt with a zero IV and PKCS#7 padding (Oracle's scheme).
@@ -114,30 +112,24 @@ pub fn hex_upper(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::counting_bytes;
 
     #[test]
     fn pbkdf2_hmac_sha512_known_answer() {
         // RFC-style KAT: P="password", S="salt", c=1, dkLen=64.
-        let out = pbkdf2_hmac_sha512(b"password", b"salt", 1, 64);
+        let (password, salt) = (b"password".to_vec(), b"salt".to_vec());
+        let out = pbkdf2_hmac_sha512::<64>(&password, &salt, 1);
         let expected = hex::decode(
             "867f70cf1ade02cff3752599a3a53dc4af34c7a669815ae5d513554e1c8cf252\
              c02d470a285a0501bad999bfe943c08f050235d7d68b1da55e63f73b60a57fce",
         )
         .unwrap();
-        assert_eq!(out, expected);
-    }
-
-    #[test]
-    fn pbkdf2_is_deterministic_and_sized() {
-        let a = pbkdf2_hmac_sha512(b"pw", b"salt", 4096, 32);
-        let b = pbkdf2_hmac_sha512(b"pw", b"salt", 4096, 32);
-        assert_eq!(a, b);
-        assert_eq!(a.len(), 32);
+        assert_eq!(out.as_slice(), expected);
     }
 
     #[test]
     fn aes_cbc_round_trips_with_pkcs7() {
-        let key = [7u8; 32];
+        let key = counting_bytes(7);
         let plain = b"select 1 from dual"; // 18 bytes -> pad = 16 - 2 = 14
         let ct = aes256_cbc_encrypt(&key, plain);
         assert_eq!(ct.len() % 16, 0);
@@ -153,7 +145,7 @@ mod tests {
 
     #[test]
     fn aes_cbc_pads_a_full_block_when_aligned() {
-        let key = [0u8; 32];
+        let key = counting_bytes(0);
         let plain = [0xABu8; 16]; // already block-aligned -> a whole extra block
         let ct = aes256_cbc_encrypt(&key, &plain);
         assert_eq!(ct.len(), 32);

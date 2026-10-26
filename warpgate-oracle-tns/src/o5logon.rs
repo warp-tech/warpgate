@@ -10,7 +10,7 @@
 
 use crate::crypto::{
     aes256_cbc_decrypt_raw, aes256_cbc_encrypt, aes256_cbc_encrypt_raw, hex_upper,
-    pbkdf2_hmac_sha512_into, sha512_prefix32,
+    pbkdf2_hmac_sha512, sha512_prefix32,
 };
 
 /// Literal label Oracle appends to the salt when stretching the password.
@@ -61,10 +61,9 @@ impl Verifier12c {
     pub fn decoy(seed: &[u8; 32], username: &[u8]) -> Self {
         let salts = sha512_prefix32(&[seed, b"salts", username]);
         let (vfr, csk) = salts.split_at(16);
-        let mut vfr_data = [0u8; 16];
-        vfr_data.copy_from_slice(vfr);
-        let mut csk_salt = [0u8; 16];
-        csk_salt.copy_from_slice(csk);
+        // Both halves of the 32-byte hash are exactly 16 bytes.
+        let vfr_data = vfr.try_into().unwrap_or_default();
+        let csk_salt = csk.try_into().unwrap_or_default();
         let mut password_key = [0u8; 64];
         let (head, tail) = password_key.split_at_mut(32);
         head.copy_from_slice(&sha512_prefix32(&[seed, b"key0", username]));
@@ -90,9 +89,7 @@ fn derive_password_key(password: &[u8], vfr_data: &[u8; 16], vgen_count: u32) ->
     let mut salt = Vec::with_capacity(16 + SPEEDY_LABEL.len());
     salt.extend_from_slice(vfr_data);
     salt.extend_from_slice(SPEEDY_LABEL);
-    let mut out = [0u8; 64];
-    pbkdf2_hmac_sha512_into(password, &salt, vgen_count, &mut out);
-    out
+    pbkdf2_hmac_sha512(password, &salt, vgen_count)
 }
 
 /// Phase one: the server picks a 48-byte `part_a` and sends the client the
@@ -130,9 +127,7 @@ pub(crate) fn combo_key(
     temp.extend_from_slice(part_b.get(..32)?);
     temp.extend_from_slice(part_a.get(..32)?);
     let input = hex_upper(&temp).into_bytes();
-    let mut out = [0u8; 32];
-    pbkdf2_hmac_sha512_into(&input, csk_salt, sder_count, &mut out);
-    Some(out)
+    Some(pbkdf2_hmac_sha512(&input, csk_salt, sder_count))
 }
 
 /// Decrypt AUTH_PASSWORD with the combo key and return the plaintext password
@@ -192,6 +187,7 @@ fn ct_eq(a: &[u8; 64], b: &[u8; 64]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::counting_bytes;
 
     /// A minimal stock-client derivation (mirrors auth.pyx `_generate_verifier`
     /// for the 12c branch), used to prove the server leg interoperates.
@@ -231,8 +227,14 @@ mod tests {
 
     fn setup() -> (Vec<u8>, Verifier12c, [u8; 48]) {
         let password = b"Warpgate_User_Pw!".to_vec();
-        let v = Verifier12c::from_password(&password, [0x11; 16], 4096, [0x22; 16], 3);
-        (password, v, [0x33; 48])
+        let v = Verifier12c::from_password(
+            &password,
+            counting_bytes(0x11),
+            4096,
+            counting_bytes(0x22),
+            3,
+        );
+        (password, v, counting_bytes(0x33))
     }
 
     #[test]
@@ -267,11 +269,11 @@ mod tests {
         assert!(verify_password(&v, &recovered), "verifier re-check passes");
 
         // The client accepts the server's response.
-        let resp = server_response(&combo_srv, &[0x66; 16]);
+        let resp = server_response(&combo_srv, &counting_bytes(0x66));
         let dec = aes256_cbc_decrypt_raw(&client.combo_key, &resp).unwrap();
         assert_eq!(&dec[16..32], SERVER_TO_CLIENT);
         assert!(verify_server_response(&client.combo_key, &resp));
-        assert!(!verify_server_response(&[0; 32], &resp));
+        assert!(!verify_server_response(&counting_bytes(0), &resp));
         assert!(!verify_server_response(&client.combo_key, &resp[..16]));
     }
 
@@ -279,9 +281,10 @@ mod tests {
     fn wrong_password_is_rejected() {
         let (_password, v, part_a) = setup();
         let sesskey_srv = server_sesskey(&v, &part_a);
+        let wrong_password = b"WrongPassword123".to_vec();
 
         let client = client_login(
-            b"WrongPassword123",
+            &wrong_password,
             &v.vfr_data,
             v.vgen_count,
             &v.csk_salt,
@@ -302,43 +305,43 @@ mod tests {
 
     #[test]
     fn enrollment_keeps_no_plaintext_and_is_reproducible() {
-        let v1 = Verifier12c::from_password(b"hunter2", [1; 16], 1000, [2; 16], 3);
-        let v2 = Verifier12c::from_password(b"hunter2", [1; 16], 1000, [2; 16], 3);
+        let password = b"hunter2".to_vec();
+        let (vfr_data, csk_salt) = (counting_bytes(1), counting_bytes(2));
+        let v1 = Verifier12c::from_password(&password, vfr_data, 1000, csk_salt, 3);
+        let v2 = Verifier12c::from_password(&password, vfr_data, 1000, csk_salt, 3);
         assert_eq!(v1.password_key, v2.password_key);
         // the stored key is not the password
-        assert_ne!(&v1.password_key[..7], b"hunter2");
+        assert_ne!(&v1.password_key[..password.len()], password.as_slice());
     }
 
     #[test]
     fn decoy_is_stable_per_user_and_rejects_any_password() {
         let seed = [9u8; 32];
-        let a = Verifier12c::decoy(&seed, b"ALICE");
-        let b = Verifier12c::decoy(&seed, b"ALICE");
+        let alice = b"ALICE".to_vec();
+        let a = Verifier12c::decoy(&seed, &alice);
+        let b = Verifier12c::decoy(&seed, &alice);
         let c = Verifier12c::decoy(&seed, b"BOB");
         assert_eq!((a.vfr_data, a.csk_salt), (b.vfr_data, b.csk_salt));
         assert_ne!(a.vfr_data, c.vfr_data);
-        assert!(!verify_password(&a, b""));
-        assert!(!verify_password(&a, b"ALICE"));
+        assert!(!verify_password(&a, &[]));
+        assert!(!verify_password(&a, &alice));
     }
 
     #[test]
     fn malformed_client_material_is_rejected_not_panicking() {
         let (_password, v, part_a) = setup();
+        let key = counting_bytes(0);
         for bad in [&[][..], &[0u8; 15][..], &[0u8; 17][..]] {
             assert!(
                 server_combo_key(&v, &part_a, bad).is_none(),
                 "len {}",
                 bad.len()
             );
-            assert!(
-                recover_password(&[0; 32], bad).is_none(),
-                "len {}",
-                bad.len()
-            );
+            assert!(recover_password(&key, bad).is_none(), "len {}", bad.len());
         }
         // One whole block decrypts, but is too short for a 32-byte half.
         assert!(server_combo_key(&v, &part_a, &[0u8; 16]).is_none());
         // A single block is all nonce, with no password after it.
-        assert!(recover_password(&[0; 32], &[0u8; 16]).is_none());
+        assert!(recover_password(&key, &[0u8; 16]).is_none());
     }
 }

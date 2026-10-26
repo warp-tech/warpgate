@@ -196,6 +196,7 @@ fn substitute(packet: &[u8], svr_response_ct: &[u8], thick: bool) -> Result<Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::counting_bytes;
     use crate::ttc::parse_return_key_values;
 
     fn find<'a>(pairs: &'a [AuthPair], key: &str) -> &'a AuthPair {
@@ -219,7 +220,14 @@ mod tests {
         include_str!("../tests/fixtures/ttc/thick_auth1_resp_19c.hex");
 
     fn verifier() -> Verifier12c {
-        Verifier12c::from_password(b"pw", [0x11; 16], 4096, [0x22; 16], 3)
+        let password = b"pw".to_vec();
+        Verifier12c::from_password(
+            &password,
+            counting_bytes(0x11),
+            4096,
+            counting_bytes(0x22),
+            3,
+        )
     }
 
     /// The rebuilt RETURN must carry our challenge, keep every other DB pair,

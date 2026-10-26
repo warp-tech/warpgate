@@ -20,4 +20,6 @@ pub mod negotiation;
 pub mod o5logon;
 pub mod packet;
 pub mod server_auth;
+#[cfg(test)]
+mod test_support;
 pub mod ttc;

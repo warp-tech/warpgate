@@ -46,7 +46,7 @@ pub fn client_derive(
     let mut key_salt = Vec::with_capacity(vfr_data.len() + SPEEDY_LABEL.len());
     key_salt.extend_from_slice(vfr_data);
     key_salt.extend_from_slice(SPEEDY_LABEL);
-    let password_key = pbkdf2_hmac_sha512(password, &key_salt, vgen_count, 64);
+    let password_key: [u8; 64] = pbkdf2_hmac_sha512(password, &key_salt, vgen_count);
 
     // 2. The AES-256 key that wraps the session-key halves:
     //    SHA512(password_key || vfr_data)[..32].
@@ -96,53 +96,69 @@ pub fn client_derive(
 mod tests {
     use super::*;
     use crate::o5logon;
+    use crate::test_support::counting_bytes;
 
-    // Shared phase-one parameters for the closed-loop tests. `part_a` is the
-    // server's 48-byte half; its AUTH_SESSKEY is the real-Oracle 32-byte form
-    // (part_a[..32] raw-CBC), which decrypts to 32 bytes on the client, so
-    // `part_b` is 32 bytes (a client sizes part_b to the server key length).
-    const VFR_DATA: [u8; 16] = [0x11; 16];
     const VGEN: u32 = 4096;
-    const CSK_SALT: [u8; 16] = [0x22; 16];
     const SDER: u32 = 3;
-    const PART_A: [u8; 48] = [0x33; 48];
-    const PART_B: [u8; 32] = [0x44; 32];
-    const SPEEDY_NONCE: [u8; 16] = [0x55; 16];
-    const AUTH_PW_NONCE: [u8; 16] = [0x66; 16];
+
+    /// The random phase-one inputs shared by the closed-loop tests. `part_a` is
+    /// the server's 48-byte half; its AUTH_SESSKEY is the real-Oracle 32-byte
+    /// form (part_a[..32] raw-CBC), which decrypts to 32 bytes on the client, so
+    /// `part_b` is 32 bytes (a client sizes part_b to the server key length).
+    struct Inputs {
+        vfr_data: [u8; 16],
+        csk_salt: [u8; 16],
+        part_a: [u8; 48],
+        part_b: [u8; 32],
+        speedy_nonce: [u8; 16],
+        auth_pw_nonce: [u8; 16],
+    }
+
+    fn inputs() -> Inputs {
+        Inputs {
+            vfr_data: counting_bytes(0x11),
+            csk_salt: counting_bytes(0x22),
+            part_a: counting_bytes(0x33),
+            part_b: counting_bytes(0x44),
+            speedy_nonce: counting_bytes(0x55),
+            auth_pw_nonce: counting_bytes(0x66),
+        }
+    }
 
     /// Closed loop: the client derivation and the independent server leg agree,
     /// the server recovers the exact plaintext, and the verifier re-check passes.
     #[test]
     fn client_and_server_agree_on_correct_password() {
+        let i = inputs();
         let password = b"Warpgate_User_Pw!".to_vec();
-        let v = o5logon::Verifier12c::from_password(&password, VFR_DATA, VGEN, CSK_SALT, SDER);
-        let server_sesskey = o5logon::server_sesskey(&v, &PART_A);
+        let v = o5logon::Verifier12c::from_password(&password, i.vfr_data, VGEN, i.csk_salt, SDER);
+        let server_sesskey = o5logon::server_sesskey(&v, &i.part_a);
         assert_eq!(
             server_sesskey.len(),
             32,
             "real-Oracle 32-byte AUTH_SESSKEY form"
         );
         assert_eq!(
-            PART_B.len(),
+            i.part_b.len(),
             server_sesskey.len(),
             "part_b matches the session-key ciphertext length"
         );
 
         let client = client_derive(
             &password,
-            &VFR_DATA,
+            &i.vfr_data,
             VGEN,
-            &CSK_SALT,
+            &i.csk_salt,
             SDER,
             &server_sesskey,
-            &PART_B,
-            &SPEEDY_NONCE,
-            &AUTH_PW_NONCE,
+            &i.part_b,
+            &i.speedy_nonce,
+            &i.auth_pw_nonce,
         )
         .unwrap();
 
         // Both legs independently derive the same combo key.
-        let combo_srv = o5logon::server_combo_key(&v, &PART_A, &client.sesskey_ct).unwrap();
+        let combo_srv = o5logon::server_combo_key(&v, &i.part_a, &client.sesskey_ct).unwrap();
         assert_eq!(
             client.combo_key, combo_srv,
             "client and server combo keys agree"
@@ -165,24 +181,27 @@ mod tests {
     /// verifier re-check of the recovered plaintext fails.
     #[test]
     fn wrong_password_diverges_and_fails_verification() {
+        let i = inputs();
         let real_password = b"Warpgate_User_Pw!".to_vec();
-        let v = o5logon::Verifier12c::from_password(&real_password, VFR_DATA, VGEN, CSK_SALT, SDER);
-        let server_sesskey = o5logon::server_sesskey(&v, &PART_A);
+        let wrong_password = b"WrongPassword123".to_vec();
+        let v =
+            o5logon::Verifier12c::from_password(&real_password, i.vfr_data, VGEN, i.csk_salt, SDER);
+        let server_sesskey = o5logon::server_sesskey(&v, &i.part_a);
 
         let client = client_derive(
-            b"WrongPassword123",
-            &VFR_DATA,
+            &wrong_password,
+            &i.vfr_data,
             VGEN,
-            &CSK_SALT,
+            &i.csk_salt,
             SDER,
             &server_sesskey,
-            &PART_B,
-            &SPEEDY_NONCE,
-            &AUTH_PW_NONCE,
+            &i.part_b,
+            &i.speedy_nonce,
+            &i.auth_pw_nonce,
         )
         .unwrap();
 
-        let combo_srv = o5logon::server_combo_key(&v, &PART_A, &client.sesskey_ct).unwrap();
+        let combo_srv = o5logon::server_combo_key(&v, &i.part_a, &client.sesskey_ct).unwrap();
         assert_ne!(
             client.combo_key, combo_srv,
             "combo keys diverge on a wrong password"
