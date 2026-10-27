@@ -50,8 +50,12 @@ def full_connect(host, port, selector, password, timeout, extra_args=()):
     """
     binary = _xfreerdp_bin()
     assert binary is not None, "xfreerdp not installed"
+    # The client never exits on its own, so the timeout SIGKILLs it; without line
+    # buffering its piped stdout log loses whatever was still in the stdio buffer.
+    stdbuf = shutil.which("stdbuf")
     cmd = [
         *_display_prefix(),
+        *([stdbuf, "-oL"] if stdbuf else []),
         binary,
         f"/v:{host}:{port}",
         f"/u:{selector}",
