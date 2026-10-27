@@ -1,12 +1,10 @@
-use std::cmp::Reverse;
 use std::path::Path;
 
 use anyhow::{Context, Result};
 use warpgate_common::GlobalParams;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 
-/// `$NAME` placeholders and their values, longest first so that `$FOO`
-/// can't clobber the start of `$FOOBAR`.
+/// `$NAME` placeholders and their values in the requested order.
 type Substitutions = [(String, Option<String>)];
 
 pub fn command(
@@ -15,12 +13,11 @@ pub fn command(
     source: &Path,
     destination: &Path,
 ) -> Result<()> {
-    let mut substitutions: Vec<_> = substitute_env
+    let substitutions: Vec<_> = substitute_env
         .iter()
         .filter(|name| !name.is_empty())
         .map(|name| (format!("${name}"), std::env::var(name).ok()))
         .collect();
-    substitutions.sort_by_key(|(placeholder, _)| Reverse(placeholder.len()));
     install_dir(
         source,
         destination,
@@ -67,12 +64,23 @@ fn substitute(content: Vec<u8>, substitutions: &Substitutions) -> Result<Vec<u8>
         Err(binary) => return Ok(binary.into_bytes()),
     };
     for (placeholder, value) in substitutions {
-        if text.contains(placeholder.as_str()) {
+        let mut substituted = String::with_capacity(text.len());
+        let mut previous_end = 0;
+        for (start, _) in text.match_indices(placeholder.as_str()) {
+            let end = start + placeholder.len();
+            // Don't replace `$PASS` inside `$PASSWORD`.
+            if text[end..].starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_') {
+                continue;
+            }
             let value = value
                 .as_deref()
                 .with_context(|| format!("{placeholder} is referenced but not set"))?;
-            text = text.replace(placeholder.as_str(), value);
+            substituted.push_str(&text[previous_end..start]);
+            substituted.push_str(value);
+            previous_end = end;
         }
+        substituted.push_str(&text[previous_end..]);
+        text = substituted;
     }
     Ok(text.into_bytes())
 }
@@ -98,8 +106,8 @@ mod tests {
         symlink("..data/ssh-keys", source.path().join("ssh-keys")).unwrap();
 
         let substitutions = [
-            ("$PASSWORD_HOST".to_string(), Some("db".to_string())),
             ("$PASS".to_string(), Some("s&/cret".to_string())),
+            ("$PASSWORD_HOST".to_string(), Some("db".to_string())),
             ("$UNUSED".to_string(), None),
         ];
         install_dir(source.path(), destination.path(), &substitutions, true).unwrap();
