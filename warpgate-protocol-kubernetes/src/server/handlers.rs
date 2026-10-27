@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
+use base64::Engine;
 use futures::{StreamExt, TryStreamExt};
 use poem::web::Data;
 use poem::web::websocket::{WebSocket, WebSocketStream};
@@ -652,6 +653,10 @@ async fn _handle_websocket_request_inner(
         }
     };
 
+    let base64_framing = selected_protocol
+        .as_deref()
+        .is_some_and(is_base64_subprotocol);
+
     // Poem requires a Sync callback; the socket is Send and consumed once.
     let client_socket = std::sync::Mutex::new(client_socket);
 
@@ -669,8 +674,8 @@ async fn _handle_websocket_request_inner(
                 let recorder_tx = recorder_tx.clone();
                 async move {
                     tracing::debug!("Server: {:?}", msg);
-                    if let tungstenite::Message::Binary(data) = &msg {
-                        let _ = recorder_tx.send(data.to_vec()).await;
+                    if let Some(frame) = channel_frame(&msg, base64_framing) {
+                        let _ = recorder_tx.send(frame).await;
                     }
                     anyhow::Ok(msg)
                 }
@@ -681,8 +686,8 @@ async fn _handle_websocket_request_inner(
             let recorder_tx = recorder_tx.clone();
             async move {
                 tracing::debug!("Client: {:?}", msg);
-                if let tungstenite::Message::Binary(data) = &msg {
-                    let _ = recorder_tx.send(data.to_vec()).await;
+                if let Some(frame) = channel_frame(&msg, base64_framing) {
+                    let _ = recorder_tx.send(frame).await;
                 }
                 anyhow::Ok(msg)
             }
@@ -794,7 +799,11 @@ async fn forward_rejected_upstream_response(
     response: reqwest::Response,
 ) -> anyhow::Result<Response> {
     let status = response.status();
-    let headers = response.headers().clone();
+    // The body is re-sent in full, so the upstream framing headers no longer
+    // describe it; Poem sets the length itself.
+    let mut headers = response.headers().clone();
+    headers.remove(http::header::TRANSFER_ENCODING);
+    headers.remove(http::header::CONTENT_LENGTH);
     let body = response
         .bytes()
         .await
@@ -830,6 +839,28 @@ async fn connect_upstream_websocket(
         socket: Box::new(socket),
         protocol,
     })
+}
+
+fn is_base64_subprotocol(protocol: &str) -> bool {
+    protocol.ends_with("base64.channel.k8s.io")
+}
+
+fn channel_frame(msg: &tungstenite::Message, base64_framing: bool) -> Option<Vec<u8>> {
+    match msg {
+        tungstenite::Message::Binary(data) => Some(data.to_vec()),
+        tungstenite::Message::Text(text) if base64_framing => {
+            let (channel, payload) = text.as_str().split_at_checked(1)?;
+            let channel = channel.as_bytes().first()?.checked_sub(b'0')?;
+            let mut frame = vec![channel];
+            frame.extend(
+                base64::engine::general_purpose::STANDARD
+                    .decode(payload)
+                    .ok()?,
+            );
+            Some(frame)
+        }
+        _ => None,
+    }
 }
 
 /// Match Poem's downstream parsing: only the first header, split on commas.
@@ -893,6 +924,35 @@ mod tests {
             requested_websocket_protocols(&headers),
             ["v5.channel.k8s.io", "v4.channel.k8s.io"]
         );
+    }
+
+    #[test]
+    fn base64_frames_are_recorded_as_channel_frames() {
+        use tokio_tungstenite::tungstenite::Message;
+
+        use super::channel_frame;
+
+        // "foo\n\n" on stdin and "\n" on stdout, as the Kubernetes docs spell them.
+        assert_eq!(
+            channel_frame(&Message::text("0Zm9vCgo="), true).as_deref(),
+            Some(&b"\x00foo\n\n"[..])
+        );
+        assert_eq!(
+            channel_frame(&Message::text("1Cg=="), true).as_deref(),
+            Some(&b"\x01\n"[..])
+        );
+        // Binary frames record as-is on either framing.
+        assert_eq!(
+            channel_frame(&Message::binary(vec![1, b'x']), false).as_deref(),
+            Some(&[1, b'x'][..])
+        );
+        // Text is only decoded when a base64 subprotocol was negotiated.
+        assert_eq!(channel_frame(&Message::text("1Cg=="), false), None);
+        // Malformed base64 frames are forwarded but not recorded.
+        assert_eq!(channel_frame(&Message::text(""), true), None);
+        assert_eq!(channel_frame(&Message::text("x!!"), true), None);
+        assert_eq!(channel_frame(&Message::text("1%%%"), true), None);
+        assert_eq!(channel_frame(&Message::Ping(vec![].into()), true), None);
     }
 
     #[tokio::test]
