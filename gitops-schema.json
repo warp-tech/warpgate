@@ -710,6 +710,14 @@
           "type": "boolean",
           "default": false
         },
+        "kdc_url": {
+          "description": "Kerberos KDC for network-level authentication: `tcp://dc:88`, `udp://dc:88`\nor a KDC proxy `https://` URL. When set, CredSSP negotiates Kerberos (falling\nback to NTLM), which accounts barred from NTLM (Protected Users) require.\nThe target host must then be a name matching its `TERMSRV/` SPN, not an IP.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "port": {
           "type": "integer",
           "format": "uint16",

@@ -219,6 +219,7 @@ spec:
       port: 3389
       username: Administrator
       domain: CORP
+      kdc_url: tcp://dc.corp:88
       verify_tls: false
       compression: graphics_pipeline
       interactive_logon: false
