@@ -13,7 +13,7 @@ jobs:
     name: cargo-deny
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@v7.0.1
 
       - name: Install cargo-deny
         run: cargo install --locked cargo-deny@0.18.9
