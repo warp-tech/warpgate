@@ -95,6 +95,8 @@ pub enum AuditEvent {
         grantee_username: String,
         role_id: Uuid,
         role_name: String,
+        /// `None` for a permanent grant
+        expires_at: Option<OffsetDateTime>,
         actor_user_id: Uuid,
         related_access_roles: String,
     },
@@ -447,6 +449,7 @@ impl AuditEvent {
                 grantee_username,
                 role_id,
                 role_name,
+                expires_at,
                 actor_user_id,
                 related_access_roles,
             } => {
@@ -457,6 +460,7 @@ impl AuditEvent {
                     grantee_username = %grantee_username,
                     role_id = %role_id,
                     role_name = %role_name,
+                    ?expires_at,
                         related_users = %format_related_ids(&[*grantee_id, *actor_user_id]),
                     ?related_access_roles,
                     "Granted access role"

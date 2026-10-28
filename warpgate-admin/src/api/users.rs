@@ -145,6 +145,7 @@ pub(crate) async fn on_user_created(
             grantee_username: user.username.clone(),
             role_id: role.id,
             role_name: role.name,
+            expires_at: None,
             actor_user_id,
             related_access_roles: format_related_ids(&[role.id]),
         }
@@ -685,6 +686,8 @@ impl RolesApi {
             grantee_username: grantee.username.clone(),
             role_id: role.id,
             role_name: role.name.clone(),
+            // the stored value: re-granting a still-active assignment keeps its old expiry
+            expires_at: assignment.expires_at,
             actor_user_id: admin.auth.user_id(),
             related_access_roles: format_related_ids(&[role.id]),
         }
