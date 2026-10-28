@@ -64,22 +64,21 @@ fn substitute(content: Vec<u8>, substitutions: &Substitutions) -> Result<Vec<u8>
         Err(binary) => return Ok(binary.into_bytes()),
     };
     for (placeholder, value) in substitutions {
-        let mut substituted = String::with_capacity(text.len());
-        let mut previous_end = 0;
-        for (start, _) in text.match_indices(placeholder.as_str()) {
-            let end = start + placeholder.len();
-            // Don't replace `$PASS` inside `$PASSWORD`.
-            if text[end..].starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_') {
-                continue;
+        let mut parts = text.split(placeholder.as_str());
+        let mut substituted = String::from(parts.next().unwrap_or_default());
+        for part in parts {
+            // `$PASS` followed by a name character is part of a longer name
+            if part.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_') {
+                substituted.push_str(placeholder);
+            } else {
+                substituted.push_str(
+                    value
+                        .as_deref()
+                        .with_context(|| format!("{placeholder} is referenced but not set"))?,
+                );
             }
-            let value = value
-                .as_deref()
-                .with_context(|| format!("{placeholder} is referenced but not set"))?;
-            substituted.push_str(&text[previous_end..start]);
-            substituted.push_str(value);
-            previous_end = end;
+            substituted.push_str(part);
         }
-        substituted.push_str(&text[previous_end..]);
         text = substituted;
     }
     Ok(text.into_bytes())
@@ -124,6 +123,30 @@ mod tests {
         assert!(!destination.path().join("..data").exists());
         let mode = std::fs::metadata(&config).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
+    }
+
+    #[test]
+    fn expands_placeholders_inside_earlier_values() {
+        let substitutions = [
+            (
+                "$DATABASE_URL".to_string(),
+                Some("postgres://user:$DATABASE_PASSWORD@db/warpgate".to_string()),
+            ),
+            ("$DATABASE_PASSWORD".to_string(), Some("secret".to_string())),
+        ];
+        assert_eq!(
+            substitute(b"url: $DATABASE_URL".to_vec(), &substitutions).unwrap(),
+            b"url: postgres://user:secret@db/warpgate"
+        );
+    }
+
+    #[test]
+    fn leaves_longer_names_alone() {
+        let substitutions = [("$PASS".to_string(), Some("x".to_string()))];
+        assert_eq!(
+            substitute(b"$PASS$PASSWORD $PASS_1 $PASS".to_vec(), &substitutions).unwrap(),
+            b"x$PASSWORD $PASS_1 x"
+        );
     }
 
     #[test]
