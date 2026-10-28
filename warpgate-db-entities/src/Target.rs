@@ -5,7 +5,7 @@ use sea_orm::entity::prelude::*;
 use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::fuzzy::fuzzy_rank;
-use warpgate_common::{Target, TargetOptions};
+use warpgate_common::{ProviderId, Target, TargetOptions};
 
 use crate::TargetGroup;
 
@@ -60,6 +60,7 @@ pub struct Model {
     pub ticket_require_approval: bool,
     pub ticket_max_uses: Option<i16>,
     pub require_approval: bool,
+    pub provider: Option<ProviderId>,
 }
 
 impl Related<super::Role::Entity> for Entity {

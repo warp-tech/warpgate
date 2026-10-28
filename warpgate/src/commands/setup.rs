@@ -405,6 +405,7 @@ async fn bootstrap_database(
                 name: Set(BUILTIN_ADMIN_USERNAME.to_string()),
                 description: Set("".to_string()),
                 is_default: Set(false),
+                ..Default::default()
             }
             .insert(db)
             .await?

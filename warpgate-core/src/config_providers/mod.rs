@@ -523,6 +523,7 @@ mod tests {
             ldap_server_id: Set(None),
             ldap_object_uuid: Set(None),
             allowed_ip_ranges: Set(serde_json::Value::Null),
+            ..Default::default()
         }
         .insert(&db)
         .await
@@ -540,6 +541,7 @@ mod tests {
             ticket_require_approval: Set(false),
             ticket_max_uses: Set(None),
             require_approval: Set(require_approval),
+            ..Default::default()
         }
         .insert(&db)
         .await

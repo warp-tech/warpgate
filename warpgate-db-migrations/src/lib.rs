@@ -98,6 +98,7 @@ mod m00091_drop_cluster_token;
 mod m00092_http_session_sso_identity;
 mod m00093_log_session_id_nullable;
 mod m00094_unique_role_names;
+mod m00095_resource_provider;
 
 pub(crate) mod helpers;
 
@@ -201,6 +202,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00092_http_session_sso_identity::Migration),
             Box::new(m00093_log_session_id_nullable::Migration),
             Box::new(m00094_unique_role_names::Migration),
+            Box::new(m00095_resource_provider::Migration),
         ]
     }
 }
@@ -308,6 +310,19 @@ async fn run<'c, C: IntoSchemaManagerConnection<'c>>(
         Direction::Up => Migrator::up(db, steps).await,
         Direction::Down => Migrator::down(db, steps).await,
     }
+}
+
+/// Applies every migration that runs before `name`, so a test can seed the
+/// schema that migration starts from
+#[cfg(all(test, feature = "sqlite"))]
+pub(crate) async fn migrate_up_to(db: &DatabaseConnection, name: &str) {
+    let steps = Migrator::migrations()
+        .iter()
+        .position(|migration| migration.name() == name)
+        .unwrap();
+    Migrator::up(db, Some(steps.try_into().unwrap()))
+        .await
+        .unwrap();
 }
 
 #[cfg(test)]

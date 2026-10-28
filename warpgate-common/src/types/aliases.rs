@@ -80,6 +80,11 @@ macro_rules! uuid_newtype {
 uuid_newtype!(UserSessionId);
 uuid_newtype!(TargetSessionId);
 uuid_newtype!(NodeId);
+uuid_newtype!(ProviderId);
+
+impl ProviderId {
+    pub const GITOPS: Self = Self(Uuid::nil());
+}
 
 /// Identity of a Warpgate protocol. Used wherever code branches on the
 /// protocol (credential policies, auth states) so that a protocol can't be

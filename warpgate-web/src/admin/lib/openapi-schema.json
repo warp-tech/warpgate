@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.30.0-modified"
+    "version": "v0.30.2-7-g7b2e7a472-modified"
   },
   "servers": [
     {
@@ -7926,6 +7926,11 @@
           },
           "color": {
             "$ref": "#/components/schemas/BootstrapThemeColor"
+          },
+          "provider": {
+            "type": "string",
+            "format": "uuid",
+            "title": "The provider that owns a row it reconciles. A row without one is managed by hand."
           }
         }
       },
