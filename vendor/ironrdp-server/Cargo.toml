@@ -164,7 +164,7 @@ version = "0.2"
 optional = true
 
 [dependencies.zstd-safe]
-version = "7.2"
+version = "8.2"
 optional = true
 
 [dev-dependencies.tokio]

@@ -16,7 +16,7 @@ pub type HttpClientCache = Cache<String, TargetHTTPOptions, reqwest::Client>;
 pub fn build_client(options: &TargetHTTPOptions) -> Result<reqwest::Client> {
     let tls_mode = options.tls.mode;
     let mut client = reqwest::Client::builder()
-        .gzip(true)
+        .gzip(false) // do not decode
         .connection_verbose(true)
         .pool_idle_timeout(HTTP_CLIENT_POOL_IDLE_TIMEOUT)
         .pool_max_idle_per_host(HTTP_CLIENT_POOL_MAX_IDLE_PER_HOST)

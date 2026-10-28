@@ -7999,7 +7999,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -8905,7 +8905,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate"
-version = "0.30.1"
+version = "0.30.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8957,7 +8957,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-admin"
-version = "0.30.1"
+version = "0.30.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9026,7 +9026,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-ca"
-version = "0.30.1"
+version = "0.30.2"
 dependencies = [
  "aws-lc-rs",
  "const-oid 0.9.6",
@@ -9045,7 +9045,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common"
-version = "0.30.1"
+version = "0.30.2"
 dependencies = [
  "aes-gcm 0.11.0",
  "anyhow",
@@ -9113,7 +9113,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common-http"
-version = "0.30.1"
+version = "0.30.2"
 dependencies = [
  "anyhow",
  "html-escape",
@@ -9137,7 +9137,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-core"
-version = "0.30.1"
+version = "0.30.2"
 dependencies = [
  "anyhow",
  "argon2 0.5.3",
@@ -9191,7 +9191,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-database-protocols"
-version = "0.30.1"
+version = "0.30.2"
 dependencies = [
  "bitflags 2.13.1",
  "bytes",
@@ -9204,7 +9204,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-entities"
-version = "0.30.1"
+version = "0.30.2"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -9227,7 +9227,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-migrations"
-version = "0.30.1"
+version = "0.30.2"
 dependencies = [
  "data-encoding",
  "regex",
@@ -9272,7 +9272,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-ldap"
-version = "0.30.1"
+version = "0.30.2"
 dependencies = [
  "anyhow",
  "ldap3",
@@ -9288,7 +9288,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-http"
-version = "0.30.1"
+version = "0.30.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9335,7 +9335,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-kubernetes"
-version = "0.30.1"
+version = "0.30.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9379,7 +9379,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-mysql"
-version = "0.30.1"
+version = "0.30.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9409,7 +9409,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-postgres"
-version = "0.30.1"
+version = "0.30.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9469,7 +9469,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-ssh"
-version = "0.30.1"
+version = "0.30.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9535,7 +9535,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-secrets-vault"
-version = "0.30.1"
+version = "0.30.2"
 dependencies = [
  "async-trait",
  "reqwest 0.12.28",
@@ -9552,7 +9552,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-sso"
-version = "0.30.1"
+version = "0.30.2"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -9574,7 +9574,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-tls"
-version = "0.30.1"
+version = "0.30.2"
 dependencies = [
  "bytes",
  "poem",
@@ -9596,7 +9596,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-web"
-version = "0.30.1"
+version = "0.30.2"
 dependencies = [
  "rust-embed",
  "serde",
@@ -10742,18 +10742,18 @@ checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
 
 [[package]]
 name = "zstd-safe"
-version = "7.2.4"
+version = "8.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f49c4d5f0abb602a93fb8736af2a4f4dd9512e36f7f570d66e65ff867ed3b9d"
+checksum = "ded520f16b29e1a9b771c722221b2b0a0398c2316d9bb3c42b458a5414d7434b"
 dependencies = [
  "zstd-sys",
 ]
 
 [[package]]
 name = "zstd-sys"
-version = "2.0.16+zstd.1.5.7"
+version = "2.1.2+zstd.1.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91e19ebc2adc8f83e43039e79776e3fda8ca919132d68a1fed6a5faca2683748"
+checksum = "481ada9c543b2323cbb7bbdbb5249177fbf0188ed959ed2c15e4b22421c84ed3"
 dependencies = [
  "cc",
  "pkg-config",
