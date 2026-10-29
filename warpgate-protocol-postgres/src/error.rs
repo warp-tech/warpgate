@@ -5,6 +5,7 @@ use pgwire::messages::response::ErrorResponse;
 use pgwire::messages::startup::NegotiateProtocolVersion;
 use rsasl::prelude::{SASLError, SessionError};
 use warpgate_common::WarpgateError;
+use warpgate_protocol_ssh::ConnectionError;
 use warpgate_tls::{MaybeTlsStreamError, RustlsSetupError};
 
 use crate::stream::PostgresStreamError;
@@ -41,6 +42,8 @@ pub enum PostgresError {
     SaslSession(#[from] SessionError),
     #[error(transparent)]
     Warpgate(#[from] WarpgateError),
+    #[error("SSH jump host: {0}")]
+    JumpHost(#[from] ConnectionError),
 }
 
 impl From<ErrorResponse> for PostgresError {
