@@ -910,6 +910,10 @@ pub struct WarpgateConfigStore {
     #[serde(default)]
     pub external_host: Option<String>,
 
+    /// For SQLite, `sqlite:<directory>`: the database is
+    /// `<directory>/db.sqlite3`, relative to the config file's directory.
+    /// As in any URL, write `%`, `?` and `#` in the path as `%25`, `%3F` and
+    /// `%23`.
     #[serde(default = "_default_database_url")]
     #[schemars(with = "String")]
     pub database_url: Secret<String>,
