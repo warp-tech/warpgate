@@ -39,7 +39,7 @@ impl TryFrom<&str> for LdapUsernameAttribute {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LdapConfig {
     pub host: String,
     pub port: u16,
@@ -52,6 +52,24 @@ pub struct LdapConfig {
     pub username_attribute: LdapUsernameAttribute,
     pub ssh_key_attribute: String,
     pub uuid_attribute: Option<String>,
+}
+
+impl std::fmt::Debug for LdapConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LdapConfig")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("bind_dn", &self.bind_dn)
+            .field("bind_password", &"***")
+            .field("tls_mode", &self.tls_mode)
+            .field("tls_verify", &self.tls_verify)
+            .field("base_dns", &self.base_dns)
+            .field("user_filter", &self.user_filter)
+            .field("username_attribute", &self.username_attribute)
+            .field("ssh_key_attribute", &self.ssh_key_attribute)
+            .field("uuid_attribute", &self.uuid_attribute)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
