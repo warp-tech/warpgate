@@ -205,7 +205,7 @@
             >
                 Save
             </Button>
-            <Button class="modal-button" color="danger" on:click={_cancel}>
+            <Button class="modal-button" color="secondary" on:click={_cancel}>
                 Cancel
             </Button>
         </ModalFooter>
