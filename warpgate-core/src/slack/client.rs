@@ -124,14 +124,21 @@ impl SlackClient {
 
     /// Validates the token, returns the workspace name
     pub async fn auth_test(&self) -> Result<String, WarpgateError> {
+        // Org-wide (Enterprise Grid) installs come back without a team
         #[derive(Deserialize)]
         struct AuthTest {
-            team: String,
+            team: Option<String>,
+            url: Option<String>,
+            enterprise_id: Option<String>,
         }
-        Ok(self
+        let response = self
             .post::<AuthTest>("auth.test", &serde_json::json!({}))
-            .await?
-            .team)
+            .await?;
+        Ok(response
+            .team
+            .or(response.url)
+            .or(response.enterprise_id)
+            .unwrap_or_else(|| "Slack".into()))
     }
 
     /// Slack user ID of an active account with this e-mail

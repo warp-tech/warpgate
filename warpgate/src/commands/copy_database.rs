@@ -48,6 +48,7 @@ macro_rules! with_every_table_in_order {
             CertificateCredential,
             SessionApprovalRequest,
             SlackApprovalMessage,
+            SlackTicketRequestMessage,
         ];
     };
 }

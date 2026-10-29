@@ -11,20 +11,35 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && rm -rf /var/lib/apt/lists/* \
     && cargo install --locked just@1.4.0
 
+# Install the pinned toolchain in its own layer so it survives source changes
+COPY rust-toolchain.toml /opt/warpgate/
+RUN cd /opt/warpgate && rustup show active-toolchain || rustup toolchain install
+
 COPY . /opt/warpgate
 
-# Needed to correctly embed the version number and the dirty state flag
-COPY .git/ /opt/warpgate/.git/
+# .git is not copied: `az acr build` excludes it from the upload, so the
+# embedded version falls back to "unknown"
 
 # for rust-embed determinism
 ENV SOURCE_DATE_EPOCH=0
 
 WORKDIR /opt/warpgate
 
-RUN just npm ci \
+# The cache mounts keep downloaded crates, npm packages and compiled crates
+# between builds, so a rebuild only recompiles what changed. The target dir
+# lives in the cache, so the binary is copied out of it within this step.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/root/.npm \
+    --mount=type=cache,target=/opt/warpgate/target \
+    just npm ci \
     && just openapi \
     && just npm run build \
-    && cargo build --features mysql,postgres,rdp-openssl-tls --profile release-no-lto
+    && cargo build --features mysql,postgres,rdp-openssl-tls --profile release-no-lto -j 4 \
+        --config 'profile.release-no-lto.package.aws-sdk-ec2.opt-level=1' \
+        --config 'profile.release-no-lto.package.aws-sdk-rds.opt-level=1' \
+        --config 'profile.release-no-lto.package.aws-sdk-eks.opt-level=1' \
+        --config 'profile.release-no-lto.package.aws-sdk-s3.opt-level=1' \
+    && cp target/release-no-lto/warpgate /usr/local/bin/warpgate
 
 ARG USER_ID=1000
 RUN adduser warpgate --disabled-password --gecos "" --uid ${USER_ID} --home /data --shell /usr/sbin/nologin \
@@ -37,7 +52,7 @@ LABEL maintainer=heywoodlh
 COPY --from=build /etc/passwd /etc/passwd
 COPY --from=build /etc/group /etc/group
 COPY --from=build --chown=warpgate:warpgate /data /data
-COPY --from=build /opt/warpgate/target/release-no-lto/warpgate /usr/local/bin/warpgate
+COPY --from=build /usr/local/bin/warpgate /usr/local/bin/warpgate
 
 VOLUME /data
 

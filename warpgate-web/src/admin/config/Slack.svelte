@@ -85,11 +85,12 @@
         message="You have no permission to edit the Slack integration."
     >
         <p class="text-muted">
-            Send session approval requests to admins in Slack and let them
-            approve or reject from there. Every admin with the
-            <em>Approve sessions</em>
-            permission gets a direct message, matched to their Slack account by
-            the e-mail of their SSO credential (for example their Google login).
+            Send session approval requests and ticket requests to admins in
+            Slack and let them approve or reject from there. Admins with the
+            <em>Approve sessions</em> permission get session approvals, and
+            admins with <em>Manage ticket requests</em> get ticket requests, as
+            direct messages matched to their Slack account by the e-mail of
+            their SSO credential (for example their Google login).
         </p>
 
         {#if error}

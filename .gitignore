@@ -40,3 +40,6 @@ node_modules
 
 rustc-ice-*.txt
 .zed
+
+# docker/build-amd64.sh output
+.build-amd64/

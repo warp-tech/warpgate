@@ -1,7 +1,9 @@
-//! Slack integration for admin (just-in-time) session approvals
+//! Slack integration for admin (just-in-time) session approvals and
+//! self-service ticket requests
 //!
 //! * A newly advertised admin approval request is sent as a DM to every
-//!   approver (holders of the `ApproveSessions` admin permission). Approvers
+//!   approver (holders of the `ApproveSessions` admin permission), and a new
+//!   ticket request to every holder of `TicketRequestsManage`. Approvers
 //!   are found in Slack by the e-mail of their SSO credential, so an admin who
 //!   signs in to Warpgate with Google as `alice@corp.com` is messaged as the
 //!   Slack user `alice@corp.com`. Optionally, requests also go to a channel.
@@ -37,18 +39,23 @@ use warpgate_common::{
 use warpgate_db_entities::SessionApprovalRequest::{
     self as SAR, ApprovalActor, ApprovalRequestStatus, UndecidedApprovalRequestStatus,
 };
+use warpgate_db_entities::TicketRequest::{self, TicketRequestStatus};
 use warpgate_db_entities::{
-    AdminRole, Node, Parameters, SlackApprovalMessage, SsoCredential, User, UserAdminRoleAssignment,
+    AdminRole, Node, Parameters, SlackApprovalMessage, SlackTicketRequestMessage, SsoCredential,
+    Target, User, UserAdminRoleAssignment,
 };
 
 pub use self::client::SlackClient;
 use crate::approvals::{ApprovalDecision, record_decision};
 use crate::cluster::ClusterNotification;
 use crate::services::Services;
+use crate::ticket_requests::{approve_ticket_request, deny_ticket_request};
 
 const ACTION_APPROVE_ONCE: &str = "warpgate_approve_once";
 const ACTION_APPROVE_TARGET: &str = "warpgate_approve_target";
 const ACTION_REJECT: &str = "warpgate_reject";
+const ACTION_TICKET_APPROVE: &str = "warpgate_ticket_approve";
+const ACTION_TICKET_DENY: &str = "warpgate_ticket_deny";
 
 /// Catches requests that were closed without a cluster notification (timeouts)
 const SYNC_INTERVAL: Duration = Duration::from_secs(15);
@@ -339,17 +346,18 @@ fn sso_provider_matches(provider: Option<&String>) -> Condition {
     }
 }
 
-/// E-mails of every user holding the approval permission. Users without an
-/// SSO credential are reachable when their username is an e-mail.
+/// E-mails of every user holding `permission`. Users without an SSO
+/// credential are reachable when their username is an e-mail.
 async fn approver_emails(
     db: &DatabaseConnection,
     config: &SlackConfig,
+    permission: AdminPermission,
 ) -> Result<Vec<String>, WarpgateError> {
     let role_ids: Vec<Uuid> = AdminRole::Entity::find()
-        .filter(AdminRole::Column::ApproveSessions.eq(true))
         .all(db)
         .await?
         .into_iter()
+        .filter(|role| warpgate_common::AdminRole::from(role.clone()).has_permission(permission))
         .map(|role| role.id)
         .collect();
     if role_ids.is_empty() {
@@ -381,7 +389,7 @@ async fn approver_emails(
             if user.username.contains('@') {
                 emails.push(user.username);
             } else {
-                debug!(username = %user.username, "Approver has no SSO e-mail to find them in Slack by");
+                warn!(username = %user.username, "Approver has no SSO e-mail to find them in Slack by");
             }
         }
         emails.extend(credentials.into_iter().map(|c| c.email));
@@ -414,6 +422,35 @@ async fn user_by_email(
         .await?)
 }
 
+/// Slack user IDs of the holders of `permission`, plus the configured channel
+async fn slack_recipients(
+    client: &SlackClient,
+    db: &DatabaseConnection,
+    config: &SlackConfig,
+    permission: AdminPermission,
+) -> Result<Vec<String>, WarpgateError> {
+    let emails = approver_emails(db, config, permission).await?;
+    if emails.is_empty() {
+        warn!(
+            ?permission,
+            sso_provider = ?config.sso_provider,
+            "No admin with this permission has an SSO e-mail to find them in Slack by - check the admin roles and the users' SSO credentials"
+        );
+    }
+
+    let mut recipients = vec![];
+    for email in emails {
+        match client.lookup_user_by_email(&email).await {
+            Ok(Some(slack_user)) => recipients.push(slack_user),
+            Ok(None) => warn!(%email, "No Slack user with this approver's e-mail"),
+            Err(error) => warn!(%email, %error, "Failed to look up an approver in Slack"),
+        }
+    }
+    recipients.extend(config.channel.clone());
+    recipients.dedup();
+    Ok(recipients)
+}
+
 /// Posts a freshly advertised admin request. Never fails the request itself.
 pub(crate) fn announce_request(services: &Services, session_id: UserSessionId, target: String) {
     let services = services.clone();
@@ -421,6 +458,7 @@ pub(crate) fn announce_request(services: &Services, session_id: UserSessionId, t
         let Some(config) = slack_config(&services).await else {
             return;
         };
+        debug!(%session_id, %target, "Sending a session approval request to Slack");
         if let Err(error) = post_request(&services, &config, session_id, &target).await {
             warn!(%error, %session_id, "Failed to send a session approval request to Slack");
         }
@@ -443,27 +481,19 @@ async fn post_request(
     };
 
     let client = SlackClient::new(config.bot_token.clone());
-
-    let mut recipients = vec![];
-    for email in approver_emails(db, config).await? {
-        match client.lookup_user_by_email(&email).await {
-            Ok(Some(slack_user)) => recipients.push(slack_user),
-            Ok(None) => debug!(%email, "No Slack user for approver"),
-            Err(error) => warn!(%email, %error, "Failed to look up an approver in Slack"),
-        }
-    }
-    recipients.extend(config.channel.clone());
-    recipients.dedup();
-
+    let recipients =
+        slack_recipients(&client, db, config, AdminPermission::ApproveSessions).await?;
     if recipients.is_empty() {
         warn!(%session_id, "Nobody in Slack to send the session approval request to");
         return Ok(());
     }
 
     let (text, blocks) = pending_message(&row);
+    let mut sent = 0;
     for recipient in recipients {
         match client.post_message(&recipient, &text, &blocks).await {
             Ok(posted) => {
+                sent += 1;
                 SlackApprovalMessage::ActiveModel {
                     id: Set(Uuid::new_v4()),
                     session_id: Set(row.session_id),
@@ -481,10 +511,250 @@ async fn post_request(
             }
         }
     }
+    info!(%session_id, target = %row.target, sent, "Sent a session approval request to Slack");
     // pick up a decision that raced the posting
     services
         .cluster
         .deliver_local(ClusterNotification::SessionApprovalsChanged);
+    Ok(())
+}
+
+fn format_duration(seconds: i64) -> String {
+    let (days, hours, minutes) = (seconds / 86400, seconds % 86400 / 3600, seconds % 3600 / 60);
+    let parts: Vec<String> = [(days, "d"), (hours, "h"), (minutes, "m")]
+        .into_iter()
+        .filter(|(value, _)| *value > 0)
+        .map(|(value, unit)| format!("{value}{unit}"))
+        .collect();
+    if parts.is_empty() {
+        format!("{seconds}s")
+    } else {
+        parts.join(" ")
+    }
+}
+
+/// Names for a ticket request, looked up once per message
+struct TicketRequestNames {
+    username: String,
+    target: String,
+}
+
+impl TicketRequestNames {
+    async fn load(
+        db: &DatabaseConnection,
+        request: &TicketRequest::Model,
+    ) -> Result<Self, WarpgateError> {
+        let username = User::Entity::find_by_id(request.user_id)
+            .one(db)
+            .await?
+            .map_or_else(|| "a deleted user".into(), |u| u.username);
+        let target = Target::Entity::find_by_id(request.target_id)
+            .one(db)
+            .await?
+            .map_or_else(|| "a deleted target".into(), |t| t.name);
+        Ok(Self { username, target })
+    }
+}
+
+fn ticket_request_details(request: &TicketRequest::Model, names: &TicketRequestNames) -> String {
+    let duration = request
+        .requested_duration_seconds
+        .map_or_else(|| "no limit".into(), format_duration);
+    let mut details = format!(
+        "*User:* {}\n*Target:* {}\n*Duration:* {duration}",
+        escape(&names.username),
+        escape(&names.target),
+    );
+    let reason = request.description.trim();
+    if !reason.is_empty() {
+        let reason: String = reason.chars().take(500).collect();
+        details.push_str(&format!(
+            "\n*Reason:*\n>{}",
+            escape(&reason).replace('\n', "\n>")
+        ));
+    }
+    details
+}
+
+fn pending_ticket_message(
+    request: &TicketRequest::Model,
+    names: &TicketRequestNames,
+) -> (String, Value) {
+    let text = format!("{} requests a ticket for {}", names.username, names.target);
+    let value = request.id.to_string();
+    let blocks = json!([
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": format!(":ticket: *Warpgate access request*\n{}", ticket_request_details(request, names)),
+            },
+        },
+        {
+            "type": "actions",
+            "block_id": "warpgate_ticket_request",
+            "elements": [
+                button(ACTION_TICKET_APPROVE, "Approve", &value, Some("primary")),
+                button(ACTION_TICKET_DENY, "Deny", &value, Some("danger")),
+            ],
+        },
+    ]);
+    (text, blocks)
+}
+
+/// `request` is None when the request has been deleted
+async fn settled_ticket_message(
+    db: &DatabaseConnection,
+    request: Option<&TicketRequest::Model>,
+) -> Result<(String, Value), WarpgateError> {
+    let Some(request) = request else {
+        let outcome = ":heavy_minus_sign: The request was deleted";
+        return Ok((
+            format!("Warpgate access request: {outcome}"),
+            json!([{
+                "type": "section",
+                "text": { "type": "mrkdwn", "text": format!(":ticket: *Warpgate access request*\n{outcome}") },
+            }]),
+        ));
+    };
+    let by = match request.resolved_by_user_id {
+        Some(id) => User::Entity::find_by_id(id)
+            .one(db)
+            .await?
+            .map_or_else(|| "an administrator".into(), |u| escape(&u.username)),
+        None => "an administrator".into(),
+    };
+    let outcome = match request.status {
+        TicketRequestStatus::Approved => format!(":white_check_mark: Approved by {by}"),
+        TicketRequestStatus::Denied => match request.deny_reason.as_deref().map(str::trim) {
+            Some(reason) if !reason.is_empty() => {
+                format!(":x: Denied by {by}: {}", escape(reason))
+            }
+            _ => format!(":x: Denied by {by}"),
+        },
+        TicketRequestStatus::Pending => ":hourglass: Pending".into(),
+    };
+    let names = TicketRequestNames::load(db, request).await?;
+    let blocks = json!([
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": format!(":ticket: *Warpgate access request*\n{}", ticket_request_details(request, &names)),
+            },
+        },
+        {
+            "type": "context",
+            "elements": [{ "type": "mrkdwn", "text": outcome }],
+        },
+    ]);
+    Ok((format!("Warpgate access request: {outcome}"), blocks))
+}
+
+/// Posts a newly created, pending ticket request. Never fails the request itself.
+pub fn announce_ticket_request(services: &Services, request_id: Uuid) {
+    let services = services.clone();
+    tokio::spawn(async move {
+        let Some(config) = slack_config(&services).await else {
+            return;
+        };
+        debug!(%request_id, "Sending a ticket request to Slack");
+        if let Err(error) = post_ticket_request(&services, &config, request_id).await {
+            warn!(%error, %request_id, "Failed to send a ticket request to Slack");
+        }
+    });
+}
+
+async fn post_ticket_request(
+    services: &Services,
+    config: &SlackConfig,
+    request_id: Uuid,
+) -> Result<(), WarpgateError> {
+    let db = &services.db;
+    let Some(request) = TicketRequest::Entity::find_by_id(request_id)
+        .one(db)
+        .await?
+        .filter(|r| r.status == TicketRequestStatus::Pending)
+    else {
+        return Ok(());
+    };
+
+    let client = SlackClient::new(config.bot_token.clone());
+    let recipients =
+        slack_recipients(&client, db, config, AdminPermission::TicketRequestsManage).await?;
+    if recipients.is_empty() {
+        warn!(%request_id, "Nobody in Slack to send the ticket request to");
+        return Ok(());
+    }
+
+    let names = TicketRequestNames::load(db, &request).await?;
+    let (text, blocks) = pending_ticket_message(&request, &names);
+    let mut sent = 0;
+    for recipient in recipients {
+        match client.post_message(&recipient, &text, &blocks).await {
+            Ok(posted) => {
+                sent += 1;
+                SlackTicketRequestMessage::ActiveModel {
+                    id: Set(Uuid::new_v4()),
+                    ticket_request_id: Set(request.id),
+                    node_id: Set(services.cluster.node_id),
+                    channel: Set(posted.channel),
+                    ts: Set(posted.ts),
+                }
+                .insert(db)
+                .await?;
+            }
+            Err(error) => {
+                warn!(%recipient, %error, "Failed to post a ticket request to Slack")
+            }
+        }
+    }
+    info!(%request_id, target = %names.target, sent, "Sent a ticket request to Slack");
+    // pick up a decision that raced the posting
+    services
+        .cluster
+        .deliver_local(ClusterNotification::SessionApprovalsChanged);
+    Ok(())
+}
+
+/// Updates this node's ticket request messages once they are decided
+async fn sync_ticket_messages(
+    db: &DatabaseConnection,
+    client: &SlackClient,
+    node_id: NodeId,
+) -> Result<(), WarpgateError> {
+    for message in SlackTicketRequestMessage::Entity::find()
+        .filter(SlackTicketRequestMessage::Column::NodeId.eq(node_id))
+        .all(db)
+        .await?
+    {
+        let request = TicketRequest::Entity::find_by_id(message.ticket_request_id)
+            .one(db)
+            .await?;
+        if request
+            .as_ref()
+            .is_some_and(|r| r.status == TicketRequestStatus::Pending)
+        {
+            continue;
+        }
+        let (text, blocks) = settled_ticket_message(db, request.as_ref()).await?;
+        match client
+            .update_message(&message.channel, &message.ts, &text, &blocks)
+            .await
+        {
+            Ok(()) => {}
+            Err(error)
+                if request.as_ref().is_some_and(|r| {
+                    OffsetDateTime::now_utc() - r.resolved_at.unwrap_or(r.created) < MESSAGE_MAX_AGE
+                }) =>
+            {
+                warn!(%error, "Failed to update a Slack ticket request message, will retry");
+                continue;
+            }
+            Err(error) => warn!(%error, "Giving up on updating a Slack ticket request message"),
+        }
+        message.delete(db).await?;
+    }
     Ok(())
 }
 
@@ -494,14 +764,13 @@ async fn sync_messages(
     config: &SlackConfig,
     node_id: NodeId,
 ) -> Result<(), WarpgateError> {
+    let client = SlackClient::new(config.bot_token.clone());
+    sync_ticket_messages(db, &client, node_id).await?;
+
     let messages = SlackApprovalMessage::Entity::find()
         .filter(SlackApprovalMessage::Column::NodeId.eq(node_id))
         .all(db)
         .await?;
-    if messages.is_empty() {
-        return Ok(());
-    }
-    let client = SlackClient::new(config.bot_token.clone());
 
     for message in messages {
         let row = SAR::Entity::find_by_id((
@@ -619,6 +888,33 @@ pub fn handle_interaction(services: &Services, config: SlackConfig, payload: &st
     });
 }
 
+/// What a clicked button asks for
+enum ButtonAction {
+    Session(ApprovalDecision, ButtonValue),
+    Ticket { approve: bool, request_id: Uuid },
+}
+
+impl ButtonAction {
+    fn parse(action: &InteractionAction) -> Option<Self> {
+        let value = action.value.as_deref()?;
+        let session = |decision| Some(Self::Session(decision, serde_json::from_str(value).ok()?));
+        let ticket = |approve| {
+            Some(Self::Ticket {
+                approve,
+                request_id: value.parse().ok()?,
+            })
+        };
+        match action.action_id.as_str() {
+            ACTION_APPROVE_ONCE => session(ApprovalDecision::Approved(ApprovalScope::Once)),
+            ACTION_APPROVE_TARGET => session(ApprovalDecision::Approved(ApprovalScope::Target)),
+            ACTION_REJECT => session(ApprovalDecision::Rejected),
+            ACTION_TICKET_APPROVE => ticket(true),
+            ACTION_TICKET_DENY => ticket(false),
+            _ => None,
+        }
+    }
+}
+
 /// Returns feedback for the clicking user, if any
 async fn decide(
     services: &Services,
@@ -626,16 +922,7 @@ async fn decide(
     client: &SlackClient,
     payload: &InteractionPayload,
 ) -> Result<Option<String>, WarpgateError> {
-    let Some((action, value)) = payload.actions.iter().find_map(|action| {
-        let decision = match action.action_id.as_str() {
-            ACTION_APPROVE_ONCE => ApprovalDecision::Approved(ApprovalScope::Once),
-            ACTION_APPROVE_TARGET => ApprovalDecision::Approved(ApprovalScope::Target),
-            ACTION_REJECT => ApprovalDecision::Rejected,
-            _ => return None,
-        };
-        let value: ButtonValue = serde_json::from_str(action.value.as_deref()?).ok()?;
-        Some((decision, value))
-    }) else {
+    let Some(action) = payload.actions.iter().find_map(ButtonAction::parse) else {
         return Ok(None);
     };
 
@@ -653,6 +940,54 @@ async fn decide(
     };
     let roles = user.find_related(AdminRole::Entity).all(db).await?;
     let permissions = AdminPermissionSet::from_roles(roles.into_iter().map(Into::into));
+
+    match action {
+        ButtonAction::Session(decision, value) => {
+            decide_session(services, &user, permissions, decision, value).await
+        }
+        ButtonAction::Ticket {
+            approve,
+            request_id,
+        } => decide_ticket(services, &user, permissions, approve, request_id).await,
+    }
+}
+
+async fn decide_ticket(
+    services: &Services,
+    user: &User::Model,
+    permissions: AdminPermissionSet,
+    approve: bool,
+    request_id: Uuid,
+) -> Result<Option<String>, WarpgateError> {
+    if !permissions.contains(AdminPermission::TicketRequestsManage) {
+        info!(username = %user.username, "Refused a Slack ticket request decision from a user without the permission");
+        return Ok(Some(
+            "You are not allowed to manage Warpgate ticket requests.".into(),
+        ));
+    }
+    let db = &services.db;
+    let decided = if approve {
+        approve_ticket_request(db, request_id, Some(user.id)).await?
+    } else {
+        deny_ticket_request(db, request_id, Some(user.id), None).await?
+    };
+    if decided.is_none() {
+        return Ok(Some("This request is no longer pending.".into()));
+    }
+    services
+        .cluster
+        .notify_global(ClusterNotification::SessionApprovalsChanged);
+    Ok(None)
+}
+
+async fn decide_session(
+    services: &Services,
+    user: &User::Model,
+    permissions: AdminPermissionSet,
+    action: ApprovalDecision,
+    value: ButtonValue,
+) -> Result<Option<String>, WarpgateError> {
+    let db = &services.db;
     if !permissions.contains(AdminPermission::ApproveSessions) {
         info!(username = %user.username, "Refused a Slack session approval from a user without the permission");
         return Ok(Some(
@@ -752,6 +1087,13 @@ mod tests {
     }
 
     #[test]
+    fn durations_are_readable() {
+        assert_eq!(format_duration(45), "45s");
+        assert_eq!(format_duration(3600), "1h");
+        assert_eq!(format_duration(90061), "1d 1h 1m");
+    }
+
+    #[test]
     fn mrkdwn_is_escaped() {
         assert_eq!(escape("<!channel> & co"), "&lt;!channel&gt; &amp; co");
     }
@@ -848,11 +1190,15 @@ mod tests {
 
             let google = config(Some("google"));
             assert_eq!(
-                approver_emails(&db, &google).await.unwrap(),
+                approver_emails(&db, &google, AdminPermission::ApproveSessions)
+                    .await
+                    .unwrap(),
                 vec!["bob@ninjacart.com", "gowtham@ninjacart.com"],
             );
             assert_eq!(
-                approver_emails(&db, &config(None)).await.unwrap(),
+                approver_emails(&db, &config(None), AdminPermission::ApproveSessions)
+                    .await
+                    .unwrap(),
                 vec![
                     "bob@ninjacart.com",
                     "carol@ninjacart.com",

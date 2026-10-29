@@ -172,7 +172,7 @@
         <NavListItem
             class="mb-2"
             title="Slack"
-            description="Approve session requests from Slack"
+            description="Approve sessions and ticket requests from Slack"
             href="/config/slack"
             small={sidebarMode}
         />

@@ -1,0 +1,21 @@
+# Runtime image for a binary cross-compiled by docker/build-amd64.sh.
+# Only COPY steps, so building it for another architecture needs no emulation.
+# Build context: the .build-amd64 directory prepared by the script.
+FROM gcr.io/distroless/cc-debian12
+LABEL maintainer=heywoodlh
+
+COPY passwd /etc/passwd
+COPY group /etc/group
+COPY --chown=1000:1000 data/ /data/
+COPY warpgate /usr/local/bin/warpgate
+
+VOLUME /data
+
+ENV WARPGATE_CONFIG=/data/warpgate.yaml
+
+HEALTHCHECK CMD ["/usr/local/bin/warpgate", "healthcheck"]
+
+ENV DOCKER=1
+USER warpgate
+ENTRYPOINT ["/usr/local/bin/warpgate"]
+CMD ["run"]
