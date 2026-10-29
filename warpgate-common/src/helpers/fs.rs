@@ -58,6 +58,10 @@ pub fn secure_file<P: AsRef<Path>>(path: P) -> std::io::Result<()> {
 /// `--skip-securing-files` says that is taken care of. `data_dir` is named in
 /// the error where it is known.
 #[cfg(unix)]
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "same signature as the Windows version"
+)]
 pub fn ensure_files_can_be_secured(
     _params: &GlobalParams,
     _data_dir: Option<&Path>,
@@ -119,12 +123,20 @@ fn warn_not_secured() {
 }
 
 #[cfg(windows)]
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "same signature as the Unix version"
+)]
 pub fn secure_directory<P: AsRef<Path>>(_path: P) -> std::io::Result<()> {
     warn_not_secured();
     Ok(())
 }
 
 #[cfg(windows)]
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "same signature as the Unix version"
+)]
 pub fn secure_file<P: AsRef<Path>>(_path: P) -> std::io::Result<()> {
     warn_not_secured();
     Ok(())
