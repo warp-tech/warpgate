@@ -143,6 +143,8 @@ impl Answers {
             let default_data_path = "/var/lib/warpgate";
             #[cfg(target_os = "macos")]
             let default_data_path = "/usr/local/var/lib/warpgate";
+            #[cfg(windows)]
+            let default_data_path = r"C:\ProgramData\warpgate";
             dialoguer::Input::with_theme(&theme)
                 .default(default_data_path.to_string())
                 .with_prompt("Directory to store app data (up to a few MB) in")

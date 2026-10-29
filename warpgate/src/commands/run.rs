@@ -6,7 +6,6 @@ use futures::FutureExt;
 use futures::stream::{FuturesUnordered, StreamExt};
 #[cfg(target_os = "linux")]
 use sd_notify::NotifyState;
-use tokio::signal::unix::SignalKind;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::WatchStream;
@@ -279,15 +278,11 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
         });
     }
 
-    let mut sigint = tokio::signal::unix::signal(SignalKind::interrupt())?;
-    let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())?;
+    let mut shutdown = ShutdownSignals::new()?;
 
     loop {
         tokio::select! {
-            _ = sigint.recv() => {
-                break
-            }
-            _ = sigterm.recv() => {
+            () = shutdown.recv() => {
                 break
             }
             result = supervisors.next() => {
@@ -311,10 +306,65 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
 
     tokio::select! {
         () = cleanup => {}
-        _ = sigint.recv() => std::process::exit(1),
-        _ = sigterm.recv() => std::process::exit(1),
+        () = shutdown.recv() => std::process::exit(1),
     }
 
     info!("Exiting");
     Ok(())
+}
+
+/// The OS requests that stop the server: SIGINT/SIGTERM on Unix,
+/// Ctrl+C/Ctrl+Break/console close/system shutdown on Windows. Not logoff:
+/// a service receives that whenever any user logs off and must keep running.
+struct ShutdownSignals {
+    #[cfg(unix)]
+    interrupt: tokio::signal::unix::Signal,
+    #[cfg(unix)]
+    terminate: tokio::signal::unix::Signal,
+    #[cfg(windows)]
+    interrupt: tokio::signal::windows::CtrlC,
+    #[cfg(windows)]
+    break_key: tokio::signal::windows::CtrlBreak,
+    #[cfg(windows)]
+    console_close: tokio::signal::windows::CtrlClose,
+    #[cfg(windows)]
+    system_shutdown: tokio::signal::windows::CtrlShutdown,
+}
+
+impl ShutdownSignals {
+    fn new() -> std::io::Result<Self> {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            Ok(Self {
+                interrupt: signal(SignalKind::interrupt())?,
+                terminate: signal(SignalKind::terminate())?,
+            })
+        }
+        #[cfg(windows)]
+        {
+            use tokio::signal::windows::{ctrl_break, ctrl_c, ctrl_close, ctrl_shutdown};
+            Ok(Self {
+                interrupt: ctrl_c()?,
+                break_key: ctrl_break()?,
+                console_close: ctrl_close()?,
+                system_shutdown: ctrl_shutdown()?,
+            })
+        }
+    }
+
+    async fn recv(&mut self) {
+        #[cfg(unix)]
+        tokio::select! {
+            _ = self.interrupt.recv() => {}
+            _ = self.terminate.recv() => {}
+        }
+        #[cfg(windows)]
+        tokio::select! {
+            _ = self.interrupt.recv() => {}
+            _ = self.break_key.recv() => {}
+            _ = self.console_close.recv() => {}
+            _ = self.system_shutdown.recv() => {}
+        }
+    }
 }

@@ -8,7 +8,6 @@ mod session_handle;
 mod target_menu;
 use std::borrow::Cow;
 use std::net::SocketAddr;
-use std::os::fd::AsFd;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -80,7 +79,7 @@ async fn _handle_connection(
     // say to a client goes through russh, which cannot act on any of it while
     // its loop is parked in a write the client never drains; `shutdown(2)`
     // through this descriptor fails that write from underneath.
-    let client_socket = std::net::TcpStream::from(stream.as_fd().try_clone_to_owned()?);
+    let client_socket = duplicate_socket(&stream)?;
 
     let (server_handle, wrapped_stream) = State::register_user_session_with_stream(
         &services.state,
@@ -228,10 +227,25 @@ pub async fn get_allowed_auth_methods(services: &Services) -> Result<MethodSet> 
     Ok(MethodSet::from(&methods_vec[..]))
 }
 
+/// A second OS handle on a connected socket (`dup` on Unix,
+/// `WSADuplicateSocket` on Windows); `shutdown` through it affects the original.
+fn duplicate_socket(stream: &TcpStream) -> std::io::Result<std::net::TcpStream> {
+    #[cfg(unix)]
+    let owned = {
+        use std::os::fd::AsFd;
+        stream.as_fd().try_clone_to_owned()?
+    };
+    #[cfg(windows)]
+    let owned = {
+        use std::os::windows::io::AsSocket;
+        stream.as_socket().try_clone_to_owned()?
+    };
+    Ok(std::net::TcpStream::from(owned))
+}
+
 #[cfg(test)]
 mod tests {
     use std::net::Shutdown;
-    use std::os::fd::AsFd;
 
     use tokio::io::AsyncWriteExt;
     use tokio::net::{TcpListener, TcpStream};
@@ -245,7 +259,7 @@ mod tests {
             .await
             .unwrap();
         let (mut server, _) = listener.accept().await.unwrap();
-        let dup = std::net::TcpStream::from(server.as_fd().try_clone_to_owned().unwrap());
+        let dup = super::duplicate_socket(&server).unwrap();
 
         let writer = tokio::spawn(async move {
             let chunk = vec![0u8; 65536];
