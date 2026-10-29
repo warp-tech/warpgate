@@ -82,17 +82,26 @@
         await api.closeAllSessions()
     }
 
-    function describeSession(session: UserSessionSnapshot): string {
-        let user =
+    function describeUser(session: UserSessionSnapshot): string {
+        return (
             session.username ??
             (session.ended ? '<not logged in>' : '<logging in>')
-        let activeTargets = session.targetSessions.filter(
-            target => !target.ended,
         )
-        if (!activeTargets.length) {
-            return user
-        }
-        return `${user} on ${activeTargets.map(x => x.target?.name).join(', ')}`
+    }
+
+    // The source port changes with every connection and only adds noise
+    function clientIp(address: string): string {
+        return address.replace(/:\d+$/, '').replace(/^\[(.*)\]$/, '$1')
+    }
+
+    // Live sessions list the targets still open; finished ones keep every
+    // target they visited, so the history says where a session went
+    function describeTargets(session: UserSessionSnapshot): string {
+        const visited = session.ended
+            ? session.targetSessions
+            : session.targetSessions.filter(target => !target.ended)
+        const names = visited.map(x => x.target?.name).filter(Boolean)
+        return [...new Set(names)].join(', ')
     }
 
     _reloadSessions()
@@ -150,6 +159,7 @@
         {#snippet item(
             session,
         )}
+            {@const targets = describeTargets(session)}
             <a
                 class="list-group-item list-group-item-action"
                 href="/status/sessions/{session.id}"
@@ -164,20 +174,33 @@
                     <div class="protocol text-muted me-2">
                         {session.protocol}
                     </div>
-                    <strong>
-                        {describeSession(session)}
-                    </strong>
+                    <div class="who">
+                        <strong>
+                            {describeUser(session)}
+                        </strong>
+                        {#if targets}
+                            on {targets}
+                        {/if}
+                    </div>
 
-                    <div class="meta">
+                    <div class="meta address" title={session.remoteAddress}>
+                        {#if session.remoteAddress}
+                            {clientIp(session.remoteAddress)}
+                        {/if}
+                    </div>
+
+                    <div class="meta duration">
                         {#if session.ended}
                             {formatDistance(
                                 new Date(session.started),
                                 new Date(session.ended),
                             )}
+                        {:else}
+                            active
                         {/if}
                     </div>
 
-                    <div class="meta ms-auto">
+                    <div class="meta started">
                         <RelativeDate date={session.started} />
                     </div>
                 </div>
@@ -195,19 +218,46 @@
             width: 20px;
         }
 
+        // Columns line up from row to row: status, protocol, who and where,
+        // client address, duration, start time
         .main {
-            display: flex;
+            display: grid;
+            grid-template-columns: 25px 3.5rem minmax(0, 1fr) 8rem 9rem 10rem;
             align-items: center;
         }
 
-        .protocol {
-            min-width: 3.5rem;
+        .who {
+            min-width: 0;
+            overflow-wrap: anywhere;
         }
 
         .meta {
-            opacity: .75;
-            margin-left: 25px;
-            font-size: .75rem;
+            color: var(--bs-secondary-color);
+            font-size: .8125rem;
+            font-variant-numeric: tabular-nums;
+        }
+
+        // An IPv6 address is wider than its column; the tooltip has it whole
+        .address {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .started {
+            text-align: right;
+        }
+
+        @media (max-width: 767px) {
+            .main {
+                grid-template-columns: 25px 3.5rem minmax(0, 1fr) auto;
+            }
+
+            .address,
+            .duration {
+                display: none;
+            }
         }
     }
 </style>
