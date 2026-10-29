@@ -16,7 +16,7 @@ use ironrdp_server::tokio_rustls::TlsAcceptor;
 use ironrdp_server::tokio_rustls::rustls::ServerConfig as TlsServerConfig;
 use ironrdp_server::{
     BitmapUpdate, CredentialDecision, CredentialValidationError, CredentialValidator, Credentials,
-    DesktopSize, DisplayUpdate, KeyboardEvent, MouseEvent, PixelFormat, RdpServer,
+    DesktopSize, DisplayUpdate, KeyboardEvent, MouseEvent, PixelFormat, RGBAPointer, RdpServer,
     RdpServerDisplay, RdpServerDisplayUpdates, RdpServerInputHandler,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -223,6 +223,28 @@ async fn route_input(
                     height: new.height,
                 });
             }
+            Input::Cursor {
+                hotspot_x,
+                hotspot_y,
+                width,
+                height,
+                data,
+            } => {
+                let update = cursor_to_update(hotspot_x, hotspot_y, width, height, &data);
+                if frame_tx.send(update).await.is_err() {
+                    break;
+                }
+            }
+            Input::CursorDefault => {
+                if frame_tx.send(DisplayUpdate::DefaultPointer).await.is_err() {
+                    break;
+                }
+            }
+            Input::CursorHidden => {
+                if frame_tx.send(DisplayUpdate::HidePointer).await.is_err() {
+                    break;
+                }
+            }
             Input::Clipboard(text) => clipboard.offer(text),
             Input::Shutdown => break,
         }
@@ -250,6 +272,55 @@ fn frame_to_update(x: u16, y: u16, width: u16, height: u16, data: Bytes) -> Opti
         data,
         stride,
     }))
+}
+
+/// Largest cursor, in pixels per side, sent to the viewer. Bigger ones need the large-pointer
+/// capability, which this server doesn't advertise, so a viewer can't be assumed to take them.
+const MAX_CURSOR_DIM: u16 = 32;
+
+/// Convert a BGRA cursor image (top row first) into an IronRDP pointer update. A cursor that
+/// is malformed or too large for the viewer becomes the viewer's default arrow, so the viewer
+/// never keeps showing a shape the target has already left.
+fn cursor_to_update(
+    hotspot_x: u16,
+    hotspot_y: u16,
+    width: u16,
+    height: u16,
+    data: &[u8],
+) -> DisplayUpdate {
+    let row_len = usize::from(width) * 4;
+    if width == 0
+        || height == 0
+        || width > MAX_CURSOR_DIM
+        || height > MAX_CURSOR_DIM
+        || data.len() != row_len * usize::from(height)
+    {
+        warn!(
+            width,
+            height,
+            len = data.len(),
+            "unusable cursor, using the default"
+        );
+        return DisplayUpdate::DefaultPointer;
+    }
+    // The pointer PDU's 32bpp XOR mask is a bottom-up DIB, hence the reversed rows.
+    // `RGBAPointer` is named for its channels, but the mask goes on the wire as given, and
+    // the wire order is BGRA.
+    let data = data
+        .chunks_exact(row_len)
+        .rev()
+        .flatten()
+        .copied()
+        .collect();
+    DisplayUpdate::RGBAPointer(RGBAPointer {
+        // Every update replaces the one slot; the target's own cache isn't mirrored.
+        cache_index: 0,
+        width,
+        height,
+        hot_x: hotspot_x,
+        hot_y: hotspot_y,
+        data,
+    })
 }
 
 /// Bound a viewer-supplied desktop size with [`bound_desktop_size`]. On this path it arrives
@@ -652,6 +723,89 @@ mod desktop_size_tests {
         );
         assert_eq!(display.size().await, size(1920, 1080));
         assert!(events.try_recv().is_err());
+    }
+}
+
+#[cfg(test)]
+mod cursor_tests {
+    use ironrdp::graphics::pointer::{DecodedPointer, PointerBitmapTarget};
+    use ironrdp::pdu::pointer::{ColorPointerAttribute, Point16, PointerAttribute};
+    use ironrdp_server::DisplayUpdate;
+
+    use super::{MAX_CURSOR_DIM, cursor_to_update};
+
+    /// What a viewer decodes from the update: the target's RGBA pixels come back out.
+    #[test]
+    fn viewer_decodes_the_cursor_the_target_sent() {
+        // 2x2, BGRA, top row first: red, green / blue, translucent white.
+        let bgra = [
+            [0, 0, 255, 255],
+            [0, 255, 0, 255],
+            [255, 0, 0, 255],
+            [255, 255, 255, 128],
+        ]
+        .concat();
+        let DisplayUpdate::RGBAPointer(pointer) = cursor_to_update(1, 0, 2, 2, &bgra) else {
+            panic!("expected a pointer update");
+        };
+        assert_eq!((pointer.hot_x, pointer.hot_y), (1, 0));
+
+        let decoded = DecodedPointer::decode_pointer_attribute(
+            &PointerAttribute {
+                xor_bpp: 32,
+                color_pointer: ColorPointerAttribute {
+                    cache_index: pointer.cache_index,
+                    hot_spot: Point16 {
+                        x: pointer.hot_x,
+                        y: pointer.hot_y,
+                    },
+                    width: pointer.width,
+                    height: pointer.height,
+                    xor_mask: &pointer.data,
+                    and_mask: &[],
+                },
+            },
+            PointerBitmapTarget::Accelerated,
+        )
+        .unwrap();
+        let rgba = [
+            [255, 0, 0, 255],
+            [0, 255, 0, 255],
+            [0, 0, 255, 255],
+            [255, 255, 255, 128],
+        ]
+        .concat();
+        assert_eq!(decoded.bitmap_data, rgba);
+    }
+
+    #[test]
+    fn unusable_cursors_fall_back_to_the_default() {
+        let pixels =
+            |width: u16, height: u16| vec![0; usize::from(width) * usize::from(height) * 4];
+
+        assert!(matches!(
+            cursor_to_update(0, 0, 0, 0, &[]),
+            DisplayUpdate::DefaultPointer
+        ));
+        assert!(matches!(
+            cursor_to_update(0, 0, 2, 2, &pixels(2, 1)),
+            DisplayUpdate::DefaultPointer
+        ));
+        let too_big = MAX_CURSOR_DIM + 1;
+        assert!(matches!(
+            cursor_to_update(0, 0, too_big, 1, &pixels(too_big, 1)),
+            DisplayUpdate::DefaultPointer
+        ));
+        assert!(matches!(
+            cursor_to_update(
+                0,
+                0,
+                MAX_CURSOR_DIM,
+                MAX_CURSOR_DIM,
+                &pixels(MAX_CURSOR_DIM, MAX_CURSOR_DIM)
+            ),
+            DisplayUpdate::RGBAPointer(_)
+        ));
     }
 }
 

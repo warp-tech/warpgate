@@ -734,6 +734,12 @@ impl RolesApi {
         }
         .emit();
 
+        // Sessions this role admitted end now rather than at the next sweep.
+        admin
+            .services()
+            .close_sessions_without_role_access()
+            .await?;
+
         Ok(DeleteUserRoleResponse::Deleted)
     }
 

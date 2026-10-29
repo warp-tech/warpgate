@@ -377,7 +377,7 @@
 
 <style lang="scss">
     h1 {
-        font-size: 3rem;
+        font-size: clamp(2rem, 1.25rem + 3vw, 3rem);
     }
 
     .sso-buttons {
@@ -400,7 +400,7 @@
         margin: 1.5rem 0;
         font-style: italic;
         font-size: 0.75rem;
-        opacity: 0.5;
+        color: var(--bs-secondary-color);
 
         &::before {
             content: '';

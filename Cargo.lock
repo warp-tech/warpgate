@@ -1678,9 +1678,9 @@ dependencies = [
 
 [[package]]
 name = "crypto-bigint"
-version = "0.7.5"
+version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a52aa3fcda4e6302a9f48734f234d35d4721b96f8fe07d073f07ce9df4f0271"
+checksum = "d811ea23fdfbcce2e2d5132344d471abdb8f901ac496a0893a3df92e70525e52"
 dependencies = [
  "cpubits",
  "ctutils",
@@ -1731,7 +1731,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "21f41f23de7d24cdbda7f0c4d9c0351f99a4ceb258ef30e5c1927af8987ffe5a"
 dependencies = [
- "crypto-bigint 0.7.5",
+ "crypto-bigint 0.7.9",
  "libm",
  "rand_core 0.10.1",
 ]
@@ -2208,7 +2208,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5c8573b60d07b5b5cecadc1f978c9b71d5504151e703cbb0439ee4ad301338f3"
 dependencies = [
- "crypto-bigint 0.7.5",
+ "crypto-bigint 0.7.9",
  "crypto-common 0.2.2",
  "crypto-primes",
  "der 0.8.2",
@@ -2356,7 +2356,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9d65aa39b3a5c1c9c1b745c9a019234bb7a21b77abcb4f4d266d706e2d577d65"
 dependencies = [
  "base16ct 1.0.0",
- "crypto-bigint 0.7.5",
+ "crypto-bigint 0.7.9",
  "crypto-common 0.2.2",
  "digest 0.11.3",
  "ff 0.14.0",
@@ -3263,7 +3263,6 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
- "webpki-roots 1.0.11",
 ]
 
 [[package]]
@@ -4207,12 +4206,6 @@ checksum = "5d2f2f9b4ba7e6b24d95e7e899329d35be83bcded72c8540cdd5368932d1d90a"
 dependencies = [
  "hashbrown 0.17.1",
 ]
-
-[[package]]
-name = "lru-slab"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "mac_address"
@@ -5274,7 +5267,7 @@ dependencies = [
  "aes-kw",
  "base64 0.22.1",
  "cbc",
- "crypto-bigint 0.7.5",
+ "crypto-bigint 0.7.9",
  "crypto-common 0.2.2",
  "ctr 0.10.1",
  "des",
@@ -5338,7 +5331,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "859d4117bd1b1dc5646359ee7243c50c5000c0920ea2d1fb120335a2f4c684b8"
 dependencies = [
  "base64 0.22.1",
- "crypto-bigint 0.7.5",
+ "crypto-bigint 0.7.9",
  "oid",
  "picky-asn1",
  "picky-asn1-der",
@@ -5358,7 +5351,7 @@ dependencies = [
  "byteorder",
  "cbc",
  "cipher 0.5.2",
- "crypto-bigint 0.7.5",
+ "crypto-bigint 0.7.9",
  "des",
  "hmac 0.13.0",
  "inout 0.2.2",
@@ -5711,7 +5704,7 @@ version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c555a6e4eb7d4e158fcb028c835c3b8642206ddc279b5c6b202ef9a8bdb592f4"
 dependencies = [
- "crypto-bigint 0.7.5",
+ "crypto-bigint 0.7.9",
  "crypto-common 0.2.2",
  "ff 0.14.0",
  "rand_core 0.10.1",
@@ -5890,62 +5883,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "quinn"
-version = "0.11.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c1a41e437b6bbd489372cd4971de128e85c855f56c57f283d20ff016cf7c0a8"
-dependencies = [
- "bytes",
- "cfg_aliases",
- "pin-project-lite",
- "quinn-proto",
- "quinn-udp",
- "rustc-hash",
- "rustls",
- "socket2",
- "thiserror 2.0.20",
- "tokio",
- "tracing",
- "web-time",
-]
-
-[[package]]
-name = "quinn-proto"
-version = "0.11.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04759210543be93709136e28212294a659ef5001836ff4eab4d663e4529bba83"
-dependencies = [
- "bytes",
- "getrandom 0.4.3",
- "lru-slab",
- "rand 0.10.2",
- "rand_pcg",
- "ring",
- "rustc-hash",
- "rustls",
- "rustls-pki-types",
- "slab",
- "thiserror 2.0.20",
- "tinyvec",
- "tracing",
- "web-time",
-]
-
-[[package]]
-name = "quinn-udp"
-version = "0.5.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35a133f956daabe89a61a685c2649f13d82d5aa4bd5d12d1277e1072a21c0694"
-dependencies = [
- "cfg_aliases",
- "libc",
- "once_cell",
- "socket2",
- "tracing",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "quote"
 version = "1.0.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6057,15 +5994,6 @@ name = "rand_core"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
-
-[[package]]
-name = "rand_pcg"
-version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "caa0f4137e1c0a72f4c651489402276c8e8e1cf081f3b0ba156d2cbeef09e86a"
-dependencies = [
- "rand_core 0.10.1",
-]
 
 [[package]]
 name = "ratatui"
@@ -6333,7 +6261,6 @@ dependencies = [
  "log",
  "percent-encoding",
  "pin-project-lite",
- "quinn",
  "rustls",
  "rustls-native-certs",
  "rustls-pki-types",
@@ -6352,7 +6279,6 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams 0.4.2",
  "web-sys",
- "webpki-roots 1.0.11",
 ]
 
 [[package]]
@@ -6429,7 +6355,7 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4a459cddafb3fe76b31fd8f1108007566c40301feb64dc7b54656eb7388172b"
 dependencies = [
- "crypto-bigint 0.7.5",
+ "crypto-bigint 0.7.9",
  "hmac 0.13.0",
 ]
 
@@ -6483,7 +6409,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "30b2aa4ba0d89f73d1e332df05be0eeab8840351c36ca5654341dfdb57bb3caf"
 dependencies = [
  "const-oid 0.10.2",
- "crypto-bigint 0.7.5",
+ "crypto-bigint 0.7.9",
  "crypto-primes",
  "digest 0.11.3",
  "pkcs1 0.8.0-rc.4",
@@ -6514,9 +6440,9 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.63.3"
+version = "0.65.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "036204edbd199552a5b3832f63c60dcdf395dc44c7f06b4af1c0e8139cc11bce"
+checksum = "3bb77a4b259312b2abbc541bca1c13cb4e9b61c560a7fd894068c3b92e0c9dc3"
 dependencies = [
  "aes 0.9.2",
  "aws-lc-rs",
@@ -6526,7 +6452,7 @@ dependencies = [
  "bytes",
  "cbc",
  "cipher 0.5.2",
- "crypto-bigint 0.7.5",
+ "crypto-bigint 0.7.9",
  "ctr 0.10.1",
  "curve25519-dalek 5.0.0",
  "data-encoding",
@@ -6655,12 +6581,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rustc-hash"
-version = "2.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b1e7f9a428571be2dc5bc0505c13fb6bf936822b894ec87abf8a08a4e51742d"
-
-[[package]]
 name = "rustc_version"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6768,7 +6688,6 @@ version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f4925028c7eb5d1fcdaf196971378ed9d2c1c4efc7dc5d011256f76c99c0a96"
 dependencies = [
- "web-time",
  "zeroize",
 ]
 
@@ -7840,7 +7759,7 @@ checksum = "7b54d0ed0498daf3f78d82e00e28c8eec9d75a067c4cfbcc7a0f7d0f4077749e"
 dependencies = [
  "base64ct",
  "bytes",
- "crypto-bigint 0.7.5",
+ "crypto-bigint 0.7.9",
  "ctutils",
  "digest 0.11.3",
  "pem-rfc7468 1.0.0",
@@ -7884,7 +7803,7 @@ dependencies = [
  "bytemuck",
  "byteorder",
  "cfg-if",
- "crypto-bigint 0.7.5",
+ "crypto-bigint 0.7.9",
  "crypto-mac",
  "cryptoki",
  "futures",
@@ -8330,9 +8249,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.54.1"
+version = "1.53.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3"
+checksum = "ce3335fa71841cda333a58d7615b03901380ecf09d59b3296d21f8bbac0dde4e"
 dependencies = [
  "bytes",
  "libc",
@@ -8920,7 +8839,9 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vnc-rs"
-version = "0.5.3"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b757c55558e81e08e60f1a3153ba5bcffe7196719bc885e7e620400b0d81a4d"
 dependencies = [
  "async_io_stream",
  "flate2",
@@ -8990,7 +8911,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate"
-version = "0.30.0"
+version = "0.30.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9042,7 +8963,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-admin"
-version = "0.30.0"
+version = "0.30.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9111,7 +9032,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-ca"
-version = "0.30.0"
+version = "0.30.2"
 dependencies = [
  "aws-lc-rs",
  "const-oid 0.9.6",
@@ -9130,7 +9051,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common"
-version = "0.30.0"
+version = "0.30.2"
 dependencies = [
  "aes-gcm 0.11.0",
  "anyhow",
@@ -9199,7 +9120,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-common-http"
-version = "0.30.0"
+version = "0.30.2"
 dependencies = [
  "anyhow",
  "html-escape",
@@ -9223,7 +9144,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-core"
-version = "0.30.0"
+version = "0.30.2"
 dependencies = [
  "anyhow",
  "argon2 0.5.3",
@@ -9277,7 +9198,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-database-protocols"
-version = "0.30.0"
+version = "0.30.2"
 dependencies = [
  "bitflags 2.13.1",
  "bytes",
@@ -9290,7 +9211,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-entities"
-version = "0.30.0"
+version = "0.30.2"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -9313,7 +9234,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-db-migrations"
-version = "0.30.0"
+version = "0.30.2"
 dependencies = [
  "data-encoding",
  "regex",
@@ -9358,7 +9279,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-ldap"
-version = "0.30.0"
+version = "0.30.2"
 dependencies = [
  "anyhow",
  "ldap3",
@@ -9374,7 +9295,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-http"
-version = "0.30.0"
+version = "0.30.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9421,7 +9342,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-kubernetes"
-version = "0.30.0"
+version = "0.30.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9465,7 +9386,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-mysql"
-version = "0.30.0"
+version = "0.30.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9495,7 +9416,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-postgres"
-version = "0.30.0"
+version = "0.30.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9555,7 +9476,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-protocol-ssh"
-version = "0.30.0"
+version = "0.30.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9621,9 +9542,12 @@ dependencies = [
 
 [[package]]
 name = "warpgate-secrets-vault"
-version = "0.30.0"
+version = "0.30.2"
 dependencies = [
  "async-trait",
+ "reqwest 0.12.28",
+ "rustify",
+ "rustls",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -9635,7 +9559,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-sso"
-version = "0.30.0"
+version = "0.30.2"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -9657,7 +9581,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-tls"
-version = "0.30.0"
+version = "0.30.2"
 dependencies = [
  "bytes",
  "poem",
@@ -9679,7 +9603,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-web"
-version = "0.30.0"
+version = "0.30.2"
 dependencies = [
  "rust-embed",
  "serde",
@@ -9699,6 +9623,7 @@ dependencies = [
  "tracing",
  "uuid",
  "warpgate-common",
+ "warpgate-common-http",
  "warpgate-core",
  "warpgate-db-entities",
 ]
@@ -9966,9 +9891,9 @@ dependencies = [
 
 [[package]]
 name = "webpki-root-certs"
-version = "1.0.7"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f31141ce3fc3e300ae89b78c0dd67f9708061d1d2eda54b8209346fd6be9a92c"
+checksum = "58ec80e73fd8baf57bf0d9615554c75348bda990d6d5bbeab964dd068319fecb"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -9979,14 +9904,14 @@ version = "0.26.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
 dependencies = [
- "webpki-roots 1.0.11",
+ "webpki-roots 1.0.10",
 ]
 
 [[package]]
 name = "webpki-roots"
-version = "1.0.11"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5f280bbb2b287bc8e7de7e3852945a0ff50d1bbcb5ed42b6c7a568c546df171"
+checksum = "1c1c8e20c8a38fc7d65abfe74eb7280e4aa667e8eec8bc84996d2874810748d9"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -10485,7 +10410,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "12dafb3c1468d0a3f5440e21e51614b53d1fdc62c9f82cc861c447906d09c69a"
 dependencies = [
  "bitflags 2.13.1",
- "crypto-bigint 0.7.5",
+ "crypto-bigint 0.7.9",
  "flate2",
  "iso7816",
  "iso7816-tlv",
@@ -10824,18 +10749,18 @@ checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
 
 [[package]]
 name = "zstd-safe"
-version = "7.2.4"
+version = "8.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f49c4d5f0abb602a93fb8736af2a4f4dd9512e36f7f570d66e65ff867ed3b9d"
+checksum = "ded520f16b29e1a9b771c722221b2b0a0398c2316d9bb3c42b458a5414d7434b"
 dependencies = [
  "zstd-sys",
 ]
 
 [[package]]
 name = "zstd-sys"
-version = "2.0.16+zstd.1.5.7"
+version = "2.1.2+zstd.1.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91e19ebc2adc8f83e43039e79776e3fda8ca919132d68a1fed6a5faca2683748"
+checksum = "481ada9c543b2323cbb7bbdbb5249177fbf0188ed959ed2c15e4b22421c84ed3"
 dependencies = [
  "cc",
  "pkg-config",

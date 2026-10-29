@@ -825,7 +825,7 @@ impl ServerSession {
                 self.request_disconnect();
                 self.disconnect_server().await;
             }
-            MenuEvent::Selected(target) => {
+            MenuEvent::Selected(target_id) => {
                 // The proof stored when the login's auth state was accepted;
                 // absent for ticket sessions, which never reach the menu.
                 let identity =
@@ -834,26 +834,22 @@ impl ServerSession {
                         .ok_or(WarpgateError::InconsistentState(
                             "No authorized identity".into(),
                         ))?;
-                // The menu list was authorized when it was built; permissions
-                // may have changed while it was open, so re-check on selection.
-                let target_name = target.name.clone();
-                let Some(authorization) =
-                    authorize_for_target(self.services.config_provider.as_ref(), &identity, target)
+                // The menu may have been open for a long time: role, approval
+                // requirement, connection options or the target's very
+                // existence may have changed since, so authorize the current row.
+                let config_provider = self.services.config_provider.as_ref();
+                let authorization = match config_provider.get_target_by_id(target_id).await? {
+                    Some(target) => authorize_for_target(config_provider, &identity, target)
                         .await?
-                else {
+                        .and_then(|a| a.narrow::<TargetSSHOptions>().ok()),
+                    None => None,
+                };
+                let Some(authorization) = authorization else {
                     warn!(
                         "Target {} not authorized for user {}",
-                        target_name, identity.username
+                        target_id, identity.username
                     );
-                    self.emit_service_message(&format!("Access to {target_name} denied"))?;
-                    self.request_disconnect();
-                    self.disconnect_server().await;
-                    return Ok(());
-                };
-                // The menu only lists SSH targets, so this can't refuse a
-                // selection it offered.
-                let Ok(authorization) = authorization.narrow::<TargetSSHOptions>() else {
-                    self.emit_service_message(&format!("Access to {target_name} denied"))?;
+                    self.emit_service_message("Access denied")?;
                     self.request_disconnect();
                     self.disconnect_server().await;
                     return Ok(());

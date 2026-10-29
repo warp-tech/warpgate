@@ -7,7 +7,7 @@ replicaCount: 1
 image:
   repository: ghcr.io/warp-tech/warpgate
   pullPolicy: IfNotPresent
-  tag: "0.30.0"
+  tag: "0.30.2"
 
 # References to Kubernetes secrets for pulling images (if using a private registry)
 imagePullSecrets: []
@@ -78,6 +78,7 @@ overrides_config: ""
 
 # Space-separated list of environment variable names to substitute in the config
 # Example: "FOO BAR" → replaces $FOO and $BAR from pod environment
+# Substituted in order: a value may reference variables listed after it
 config_env_var_replace: ""
 
 # Environment variables for the main Warpgate container, mapped from Secrets.
