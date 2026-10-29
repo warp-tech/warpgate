@@ -267,6 +267,12 @@ pub async fn migrate_database(connection: &DatabaseConnection) -> Result<(), DbE
     Ok(())
 }
 
+pub async fn has_pending_migrations(connection: &DatabaseConnection) -> Result<bool, DbErr> {
+    Ok(!Migrator::get_pending_migrations(connection)
+        .await?
+        .is_empty())
+}
+
 /// Apply `steps` pending migrations.
 pub async fn migrate_database_up(connection: &DatabaseConnection, steps: u32) -> Result<(), DbErr> {
     run_maybe_in_tx(connection, Direction::Up, Some(steps)).await

@@ -3,7 +3,7 @@
     "column": 3,
     "file": "tests/fixtures/invalid/unknown-fields.yaml",
     "line": 5,
-    "message": "unknown field `label`, expected one of `labels`, `name`",
+    "message": "unknown field `label`, expected one of `annotations`, `labels`, `name`",
     "path": "metadata.label"
   },
   {

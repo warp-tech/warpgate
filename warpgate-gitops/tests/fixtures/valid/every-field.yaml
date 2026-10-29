@@ -23,6 +23,8 @@ metadata:
   name: ssh-password
   labels:
     env: prod
+  annotations:
+    warpgate.dev/adopt-existing: "true"
 spec:
   description: Bastion
   group: prod

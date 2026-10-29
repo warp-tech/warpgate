@@ -223,7 +223,7 @@ async fn _main() -> Result<()> {
             crate::commands::run::command(&params, *enable_admin_token).await
         }
         Commands::Check => crate::commands::check::command(&params).await,
-        Commands::Config { command } => crate::commands::config::command(command),
+        Commands::Config { command } => crate::commands::config::command(command, &params).await,
         Commands::CreateUser {
             username,
             password: explicit_password,

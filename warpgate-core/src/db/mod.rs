@@ -118,6 +118,10 @@ pub async fn migrate_all(connection: &DatabaseConnection) -> Result<()> {
     Ok(())
 }
 
+pub async fn has_pending_migrations(connection: &DatabaseConnection) -> Result<bool> {
+    Ok(warpgate_db_migrations::has_pending_migrations(connection).await?)
+}
+
 /// Apply `steps` pending migrations.
 pub async fn migrate_up(connection: &DatabaseConnection, steps: u32) -> Result<()> {
     migrate_database_up(connection, steps).await?;

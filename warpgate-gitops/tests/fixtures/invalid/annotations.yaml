@@ -1,0 +1,7 @@
+apiVersion: warpgate/v1
+kind: Role
+metadata:
+  name: dba
+  annotations:
+    warpgate.dev/adopt-existing: "yes"
+spec: {}

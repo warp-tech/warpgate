@@ -1,3 +1,4 @@
+pub mod reconcile;
 pub mod roles;
 pub mod target_groups;
 pub mod targets;
@@ -95,7 +96,7 @@ fn name_taken(err: DbErr) -> ResourceError {
 }
 
 #[cfg(all(test, feature = "sqlite"))]
-mod tests {
+pub(crate) mod tests {
     use sea_orm::{Database, DatabaseConnection, EntityTrait};
     use serde_json::json;
     use uuid::Uuid;
@@ -109,7 +110,7 @@ mod tests {
     use super::targets::TargetDataRequest;
     use super::*;
 
-    async fn db() -> DatabaseConnection {
+    pub(crate) async fn db() -> DatabaseConnection {
         set_config_migration_values(ConfigMigrationValues::default());
         let db = Database::connect("sqlite::memory:").await.unwrap();
         migrate_database(&db).await.unwrap();
@@ -290,7 +291,8 @@ mod tests {
         targets::update(&db, gitops, web.id, &ssh("web2"))
             .await
             .unwrap();
-        targets::delete(&db, gitops, web.id).await.unwrap();
+        let admitted = targets::delete(&db, gitops, web.id).await.unwrap();
+        assert!(admitted.0.is_empty());
 
         // A row created by hand is never a provider's to change
         let manual = targets::create(&db, Actor::Admin, &ssh("manual"))

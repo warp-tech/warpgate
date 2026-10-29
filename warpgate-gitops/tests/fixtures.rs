@@ -30,8 +30,9 @@ fn invalid_fixtures() {
 
     for fixture in fixtures {
         let files = read_files(std::slice::from_ref(&fixture)).unwrap();
-        let diagnostics = check_files(&files);
-        assert!(!diagnostics.is_empty(), "{} is valid", fixture.display());
+        let Err(diagnostics) = check_files(&files) else {
+            panic!("{} is valid", fixture.display());
+        };
         assert_golden(
             &fixture.with_extension("expected"),
             &format_text(&diagnostics),
@@ -42,7 +43,8 @@ fn invalid_fixtures() {
 #[test]
 fn json_output() {
     let files = read_files(&["tests/fixtures/invalid/unknown-fields.yaml".into()]).unwrap();
-    let json = serde_json::to_string_pretty(&format_json(&check_files(&files))).unwrap();
+    let json =
+        serde_json::to_string_pretty(&format_json(&check_files(&files).unwrap_err())).unwrap();
     assert_golden(
         Path::new("tests/fixtures/invalid/unknown-fields.json.expected"),
         &format!("{json}\n"),
@@ -53,7 +55,7 @@ fn json_output() {
 fn valid_fixtures() {
     let files = read_files(&["tests/fixtures/valid".into()]).unwrap();
     assert!(!files.is_empty());
-    assert_eq!(format_text(&check_files(&files)), "");
+    assert!(check_files(&files).is_ok());
 }
 
 /// A ConfigMap volume links each file to `..data/`, itself a link to a
@@ -77,5 +79,5 @@ fn configmap_mount_is_read_once() {
     let files = read_files(&[mount.clone()]).unwrap();
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].0, mount.join("every-field.yaml"));
-    assert_eq!(format_text(&check_files(&files)), "");
+    assert!(check_files(&files).is_ok());
 }

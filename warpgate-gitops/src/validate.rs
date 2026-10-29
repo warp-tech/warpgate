@@ -6,10 +6,13 @@ use serde_json::Value;
 
 use crate::diagnostic::{Diagnostic, Location, Path, Segment};
 use crate::parse::{Document, parse};
-use crate::types::{Kind, Resource};
+use crate::types::{ADOPT_EXISTING, Kind, Resource};
 
 /// Checks every document of every file, then the names and references across all of them
-pub fn check_files(files: &[(PathBuf, String)]) -> Vec<(&FilePath, Diagnostic)> {
+/// The resources of a valid fileset, or every problem found in it
+pub fn check_files(
+    files: &[(PathBuf, String)],
+) -> Result<Vec<Resource>, Vec<(&FilePath, Diagnostic)>> {
     let mut diagnostics = Vec::new();
     let mut documents = Vec::new();
     for (file, source) in files {
@@ -33,8 +36,14 @@ pub fn check_files(files: &[(PathBuf, String)]) -> Vec<(&FilePath, Diagnostic)> 
         check_names_and_references(&documents, &mut diagnostics);
     }
 
+    if diagnostics.is_empty() {
+        return Ok(documents
+            .into_iter()
+            .map(|(_, _, resource)| resource)
+            .collect());
+    }
     diagnostics.sort_by(|(a, x), (b, y)| a.cmp(b).then(x.location.cmp(&y.location)));
-    diagnostics
+    Err(diagnostics)
 }
 
 /// Names are compared ignoring case, like MySQL's unique index on them
@@ -138,6 +147,17 @@ pub fn check_document(doc: &Document) -> (Option<Resource>, Vec<Diagnostic>) {
             doc.value_location(&path),
             path,
             "must not be empty",
+        ));
+    }
+    let adopt_path = Path::keys(&["metadata", "annotations", ADOPT_EXISTING]);
+    if get(&canonical, &["metadata", "annotations", ADOPT_EXISTING])
+        .and_then(Value::as_str)
+        .is_some_and(|value| value != "true" && value != "false")
+    {
+        diagnostics.push(Diagnostic::new(
+            doc.value_location(&adopt_path),
+            adopt_path,
+            "must be \"true\" or \"false\"",
         ));
     }
     let ports = get(&canonical, &["spec", "options"])
@@ -362,6 +382,7 @@ mod tests {
             .map(|(file, source)| (PathBuf::from(file), (*source).to_owned()))
             .collect();
         check_files(&files)
+            .unwrap_err()
             .into_iter()
             .map(|(file, d)| {
                 format!(
