@@ -1,2 +1,7 @@
 response-property-one-of-added info
 response-property-enum-value-added info
+request-property-type-changed info
+request-property-enum-value-removed info
+response-property-became-not-enum info
+request-property-type-changed info
+request-property-enum-value-removed info

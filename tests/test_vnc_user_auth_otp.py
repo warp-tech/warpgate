@@ -22,7 +22,7 @@ def _provision(api, vnc_port, otp_key_base64):
         sdk.UserDataRequest(
             username=user.username,
             credential_policy=sdk.UserRequireCredentialsPolicy(
-                vnc=[sdk.CredentialKind.PASSWORD, sdk.CredentialKind.TOTP],
+                vnc=[[sdk.CredentialKind.PASSWORD, sdk.CredentialKind.TOTP]],
             ),
         ),
     )
