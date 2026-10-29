@@ -1736,6 +1736,7 @@ impl ServerSession {
         info!(channel=%channel_id, command=%command, "Exec command");
 
         let is_scp = command == "scp" || command.starts_with("scp ");
+        let is_rsync = super::exec_recording::is_rsync_transfer(command);
         let _ = self.maybe_connect_remote().await;
         self.maybe_start_target_selection_menu(channel_id).await?;
         let _ = self.send_command(RCCommand::Channel(
@@ -1743,14 +1744,14 @@ impl ServerSession {
             ChannelOperation::RequestExec(command.to_string()),
         ));
 
-        let should_record = if is_scp {
+        let should_record = if is_scp || is_rsync {
             let db = &self.services.db;
             let should_record = Parameters::Entity::get(db)
                 .await
-                .map_or(true, |p| p.record_scp);
+                .map_or(true, |p| if is_scp { p.record_scp } else { p.record_rsync });
 
             if !should_record {
-                info!(channel=%channel_id, "Not recording SCP exec session, command was '{command}'");
+                info!(channel=%channel_id, "Not recording file transfer exec session, command was '{command}'");
             }
 
             should_record
