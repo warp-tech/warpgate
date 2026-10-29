@@ -563,10 +563,15 @@ pub async fn command(
         );
     } else {
         info!(
-            "  {} --config {} run",
+            "  {}{} --config {} run",
             std::env::args()
                 .next()
                 .unwrap_or_else(|| "warpgate".to_string()),
+            if params.should_secure_files() {
+                ""
+            } else {
+                " --skip-securing-files"
+            },
             config_path.display()
         );
     }

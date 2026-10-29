@@ -4,14 +4,15 @@ mod listener_supervisor;
 mod logging;
 
 use std::net::IpAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use clap::{ArgAction, Parser};
 use logging::init_logging;
 use tracing::error;
+use warpgate_common::helpers::fs::ensure_files_can_be_secured;
 use warpgate_common::version::warpgate_version;
-use warpgate_common::{GlobalParams, LogFormat, Secret};
+use warpgate_common::{GlobalParams, LogFormat, Secret, WarpgateConfig};
 
 use crate::config::load_config;
 
@@ -31,7 +32,8 @@ pub struct Cli {
     #[clap(long, value_enum)]
     log_format: Option<LogFormat>,
 
-    /// Do not tighten UNIX modes of config and data files
+    /// Do not tighten UNIX modes of config and data files (required on
+    /// Windows, where you restrict access to them yourself)
     #[clap(long)]
     skip_securing_files: bool,
 }
@@ -197,7 +199,16 @@ async fn _main() -> Result<()> {
     #[cfg(debug_assertions)]
     let _ = dotenv::dotenv();
 
-    init_logging(load_config(&params, false).ok().as_ref(), &cli).await?;
+    let config = load_config(&params, false).ok();
+    init_logging(config.as_ref(), &cli).await?;
+
+    // Everything else reads or writes the config and data files
+    if !matches!(cli.command, Commands::Version | Commands::Healthcheck) {
+        ensure_files_can_be_secured(
+            &params,
+            data_dir(&cli.command, &params, config.as_ref()).as_deref(),
+        )?;
+    }
 
     #[allow(clippy::unwrap_used)]
     rustls::crypto::aws_lc_rs::default_provider()
@@ -272,6 +283,22 @@ async fn _main() -> Result<()> {
             crate::commands::copy_database::command(&params, target_url).await
         }
     }
+}
+
+/// The data directory a command works in, where it is known before it runs:
+/// the one unattended setup is told to create, or the one setup put the TLS
+/// key in.
+fn data_dir(
+    command: &Commands,
+    params: &GlobalParams,
+    config: Option<&WarpgateConfig>,
+) -> Option<PathBuf> {
+    let relative = match command {
+        Commands::UnattendedSetup(args) => Path::new(&args.data_path),
+        Commands::Setup(_) => return None,
+        _ => Path::new(&config?.store.http.key).parent()?,
+    };
+    Some(params.paths_relative_to().join(relative))
 }
 
 #[tokio::main]
