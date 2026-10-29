@@ -378,22 +378,19 @@ async def test_admin_close_session_ends_websocket_stalled_on_upstream_rejection(
             "Authorization": f"Bearer ticket-{ticket.secret}",
         }) as session:
             url = f"https://localhost:{shared_wg.kubernetes_port}"
-            # Poem upgrades downstream before the upstream request finishes.
-            async with session.ws_connect(
+            upgrade = asyncio.ensure_future(session.ws_connect(
                 f"{url}/socket", ssl=False, protocols=["v4.channel.k8s.io"],
-            ) as ws:
+            ))
+            try:
                 # Wait until the upstream request stalls before closing.
                 await asyncio.wait_for(received.wait(), timeout=10)
 
                 api.close_session(open_kubernetes_session_id(api, user.username))
 
-                closed = await ws.receive(timeout=15)
-                assert closed.type in (
-                    aiohttp.WSMsgType.CLOSE,
-                    aiohttp.WSMsgType.CLOSED,
-                    aiohttp.WSMsgType.CLOSING,
-                    aiohttp.WSMsgType.ERROR,
-                ), closed
+                with pytest.raises(aiohttp.ClientError):
+                    await asyncio.wait_for(upgrade, timeout=15)
+            finally:
+                upgrade.cancel()
     finally:
         release.set()
         await runner.cleanup()
@@ -585,3 +582,48 @@ def test_admin_close_session_ends_a_web_approval_wait(shared_wg, ticket_setup):
             assert response.status_code == 401
     finally:
         session.close()
+
+
+@pytest.mark.asyncio
+async def test_websocket_without_subprotocol_is_proxied(shared_wg, ticket_setup):
+    """Some clients open exec/attach websockets without offering a
+    subprotocol; the API server then uses the original channel.k8s.io
+    framing, so Warpgate must proxy the upgrade rather than reject it."""
+    import aiohttp
+    from aiohttp import web
+
+    offered = []
+
+    async def upstream(req):
+        if req.path == "/api":
+            return web.json_response({})
+        offered.append(req.headers.get("Sec-WebSocket-Protocol"))
+        ws = web.WebSocketResponse(protocols=["v4.channel.k8s.io"])
+        if offered[-1] is None:
+            # What the API server sends when offered no subprotocol.
+            ws.headers["Sec-WebSocket-Protocol"] = ""
+        await ws.prepare(req)
+        async for message in ws:
+            await ws.send_str(message.data)
+        return ws
+
+    app = web.Application()
+    app.router.add_get("/{path:.*}", upstream)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = alloc_port()
+    await web.TCPSite(runner, "127.0.0.1", port).start()
+    try:
+        api, user, _ = ticket_setup
+        setup = api, user, create_target(api, port)
+        ticket = create_ticket(setup)
+        async with aiohttp.ClientSession(headers={
+            "Authorization": f"Bearer ticket-{ticket.secret}",
+        }) as session:
+            url = f"https://localhost:{shared_wg.kubernetes_port}"
+            async with session.ws_connect(f"{url}/socket", ssl=False) as ws:
+                await ws.send_str("no subprotocol")
+                assert (await ws.receive(timeout=5)).data == "no subprotocol"
+        assert offered == [None]
+    finally:
+        await runner.cleanup()

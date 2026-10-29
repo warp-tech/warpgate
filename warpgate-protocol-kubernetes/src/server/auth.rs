@@ -450,15 +450,7 @@ pub async fn create_authenticated_client(
         "Creating authenticated Kubernetes client"
     );
 
-    // Create HTTP client with the configuration
-    let mut client_builder = reqwest::Client::builder();
-
-    if let Some(host) = url::Url::parse(&k8s_options.cluster_url)
-        .ok()
-        .and_then(|url| url.host_str().map(str::to_owned))
-    {
-        client_builder = client_builder.retry(upstream_retry_policy(host));
-    }
+    let mut client_builder = upstream_client_builder(&k8s_options.cluster_url);
 
     if !k8s_options.tls.verify {
         client_builder = client_builder.danger_accept_invalid_certs(true);
@@ -529,6 +521,18 @@ pub async fn create_authenticated_client(
 /// SNI-routing front ends can miss a ClientHello that spans two TCP segments
 /// and answer with their default certificate (kubernetes/ingress-nginx#11491),
 /// and a ClientHello with a post-quantum key share is big enough to do that.
+fn upstream_client_builder(cluster_url: &str) -> reqwest::ClientBuilder {
+    // never follow untrusted redirects
+    let builder = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none());
+    match url::Url::parse(cluster_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned))
+    {
+        Some(host) => builder.retry(upstream_retry_policy(host)),
+        None => builder,
+    }
+}
+
 fn upstream_retry_policy(host: String) -> reqwest::retry::Builder {
     reqwest::retry::for_host(host).classify_fn(|req_rep| match req_rep.error() {
         Some(error) if is_safe_to_resend(error) => {
@@ -666,9 +670,10 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
-    use super::upstream_retry_policy;
+    use super::{upstream_client_builder, upstream_retry_policy};
 
     fn client_builder() -> reqwest::ClientBuilder {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -765,5 +770,45 @@ mod tests {
         };
         assert_eq!(requests(upstream_retry_policy("127.0.0.1".into())).await, 3);
         assert_eq!(requests(reqwest::retry::never()).await, 1);
+    }
+
+    /// Answers every HTTP/1.1 request with `response` and counts requests.
+    async fn canned_server(response: String) -> (String, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let requests = Arc::new(AtomicUsize::new(0));
+        let counter = requests.clone();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                counter.fetch_add(1, Ordering::SeqCst);
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf).await;
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
+        });
+        (url, requests)
+    }
+
+    #[tokio::test]
+    async fn redirects_are_passed_through() {
+        let (internal, internal_hits) = canned_server(
+            "HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\nsecret".into(),
+        )
+        .await;
+        let (api, _) = canned_server(format!(
+            "HTTP/1.1 307 Temporary Redirect\r\nLocation: {internal}/secret\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        ))
+        .await;
+
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let client = upstream_client_builder(&api).build().unwrap();
+        let response = client
+            .get(format!("{api}/api/v1/namespaces/default/services/x/proxy/"))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), reqwest::StatusCode::TEMPORARY_REDIRECT);
+        assert_eq!(internal_hits.load(Ordering::SeqCst), 0);
     }
 }

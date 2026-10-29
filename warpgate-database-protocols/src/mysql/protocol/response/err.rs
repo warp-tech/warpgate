@@ -18,7 +18,7 @@ pub struct ErrPacket {
 
 impl Decode<'_, Capabilities> for ErrPacket {
     fn decode_with(mut buf: Bytes, capabilities: Capabilities) -> Result<Self, Error> {
-        let header = buf.get_u8();
+        let header = buf.try_get_u8()?;
         if header != 0xff {
             return Err(err_protocol!(
                 "expected 0xff (ERR_Packet) but found 0x{:x}",
@@ -26,13 +26,13 @@ impl Decode<'_, Capabilities> for ErrPacket {
             ));
         }
 
-        let error_code = buf.get_u16_le();
+        let error_code = buf.try_get_u16_le()?;
         let mut sql_state = None;
 
         if capabilities.contains(Capabilities::PROTOCOL_41) {
             // If the next byte is '#' then we have a SQL STATE
             if buf.first() == Some(&0x23) {
-                buf.advance(1);
+                buf.skip(1)?;
                 sql_state = Some(buf.get_str(5)?);
             }
         }

@@ -16,7 +16,7 @@ pub struct AuthSwitchRequest {
 
 impl Decode<'_> for AuthSwitchRequest {
     fn decode_with(mut buf: Bytes, _: ()) -> Result<Self, Error> {
-        let header = buf.get_u8();
+        let header = buf.try_get_u8()?;
         if header != 0xfe {
             return Err(err_protocol!(
                 "expected 0xfe (AUTH_SWITCH) but found 0x{:x}",
