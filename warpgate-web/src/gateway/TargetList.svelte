@@ -280,6 +280,9 @@
                 {#if target.kind === TargetKind.Postgres}
                     PostgreSQL
                 {/if}
+                {#if target.kind === TargetKind.Oracle}
+                    Oracle
+                {/if}
                 {#if target.kind === TargetKind.Kubernetes}
                     Kubernetes
                 {/if}
@@ -383,6 +386,10 @@
                 instructionsTarget.kind === TargetKind.Postgres
                     ? instructionsTarget.defaultDatabaseName
                     : undefined}
+                targetServiceName={instructionsTarget.kind === TargetKind.Oracle
+                    ? instructionsTarget.defaultDatabaseName
+                    : undefined}
+                targetTlsEnabled={instructionsTarget.tlsEnabled}
             />
         {/if}
     </ModalBody>

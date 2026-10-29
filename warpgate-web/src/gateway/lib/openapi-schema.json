@@ -2116,6 +2116,9 @@
           },
           "rdp": {
             "type": "string"
+          },
+          "oracle": {
+            "type": "string"
           }
         }
       },
@@ -2528,6 +2531,10 @@
           "rdp": {
             "type": "integer",
             "format": "uint16"
+          },
+          "oracle": {
+            "type": "integer",
+            "format": "uint16"
           }
         }
       },
@@ -2653,6 +2660,7 @@
           "MySql",
           "Ssh",
           "Postgres",
+          "Oracle",
           "Vnc",
           "Rdp"
         ]
@@ -2664,7 +2672,8 @@
           "id",
           "name",
           "description",
-          "kind"
+          "kind",
+          "tls_enabled"
         ],
         "properties": {
           "id": {
@@ -2688,6 +2697,9 @@
           },
           "default_database_name": {
             "type": "string"
+          },
+          "tls_enabled": {
+            "type": "boolean"
           }
         }
       },
@@ -2891,6 +2903,12 @@
             }
           },
           "postgres": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "oracle": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CredentialKind"

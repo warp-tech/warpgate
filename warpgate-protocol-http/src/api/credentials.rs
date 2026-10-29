@@ -16,6 +16,7 @@ use warpgate_common::{
 };
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
+use warpgate_core::oracle_verifier::sync_oracle_verifier_from_password;
 use warpgate_db_entities::Parameters::MfaEnforcement;
 use warpgate_db_entities::{
     self as entities, CertificateCredential, PasswordCredential, PublicKeyCredential,
@@ -353,6 +354,17 @@ impl Api {
         .insert(db)
         .await
         .map_err(WarpgateError::from)?;
+
+        // Keep the user's Oracle O5LOGON verifier in step with their password so
+        // they reach Oracle targets with the same credential (no separate secret).
+        let oracle_enabled = ctx.services().config.lock().await.store.oracle.enable;
+        sync_oracle_verifier_from_password(
+            db,
+            user.id,
+            &body.password.clone().into(),
+            oracle_enabled,
+        )
+        .await?;
 
         entities::PasswordCredential::Entity::find()
             .filter(

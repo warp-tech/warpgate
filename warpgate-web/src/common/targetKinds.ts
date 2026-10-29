@@ -5,6 +5,7 @@ export const TARGET_KIND_LABELS: Record<TargetKind, string> = {
     [TargetKind.Http]: 'HTTP',
     [TargetKind.MySql]: 'MySQL',
     [TargetKind.Postgres]: 'PostgreSQL',
+    [TargetKind.Oracle]: 'Oracle',
     [TargetKind.Kubernetes]: 'Kubernetes',
     [TargetKind.Vnc]: 'VNC',
     [TargetKind.Rdp]: 'RDP',

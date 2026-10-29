@@ -20,6 +20,7 @@ openapi-client = { path = "./api_sdk", develop = true }
 aiohttp = "^3.11.18"
 boto3 = "^1.35"
 cryptography = ">=46,<51"
+oracledb = ">=3.4,<4"
 
 [tool.poetry.dev-dependencies]
 flake8 = "^7.4.1"

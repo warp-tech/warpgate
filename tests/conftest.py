@@ -1,4 +1,5 @@
 import logging
+import oracledb
 import os
 import time
 import psutil
@@ -206,6 +207,7 @@ class WarpgateProcess:
     ssh_port: int
     mysql_port: int
     postgres_port: int
+    oracle_port: int
     kubernetes_port: int
     vnc_port: int
     rdp_port: int
@@ -500,6 +502,43 @@ class ProcessManager:
 
         _wait_timeout(wait_postgres, "Postgres is not ready", timeout=self.timeout)
         logging.debug(f"Postgres {container_name} is up")
+        return port
+
+    def start_oracle_server(self):
+        # Oracle Database Free (images/oracle-server). The default PDB service is
+        # FREEPDB1; the app user is `wguser`:`123`.
+        port = alloc_port()
+        container_name = f"warpgate-e2e-oracle-server-{uuid.uuid4()}"
+        self.start(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--name",
+                container_name,
+                "-p",
+                f"{port}:1521",
+                "warpgate-e2e-oracle-server",
+            ]
+        )
+
+        def wait_oracle():
+            # The listener comes up well before the PDB and the init scripts are
+            # done, so only a real login tells that the database is ready.
+            while True:
+                try:
+                    oracledb.connect(
+                        user="wguser",
+                        password="123",
+                        dsn=f"localhost:{port}/FREEPDB1",
+                        tcp_connect_timeout=5,
+                    ).close()
+                    break
+                except oracledb.Error:
+                    time.sleep(1)
+
+        _wait_timeout(wait_oracle, "Oracle is not ready", timeout=max(self.timeout, 180))
+        logging.debug(f"Oracle {container_name} is up")
         return port
 
     def shared_k3s(self) -> K3sInstance:
@@ -986,6 +1025,7 @@ class ProcessManager:
             http_port = alloc_port()
             mysql_port = alloc_port()
             postgres_port = alloc_port()
+            oracle_port = alloc_port()
             kubernetes_port = alloc_port()
             vnc_port = alloc_port()
             rdp_port = alloc_port()
@@ -996,6 +1036,7 @@ class ProcessManager:
                 ("http", http_port),
                 ("mysql", mysql_port),
                 ("postgres", postgres_port),
+                ("oracle", oracle_port),
                 ("kubernetes", kubernetes_port),
                 ("vnc", vnc_port),
                 ("rdp", rdp_port),
@@ -1013,6 +1054,7 @@ class ProcessManager:
             http_port = http_port or alloc_port()
             mysql_port = alloc_port()
             postgres_port = alloc_port()
+            oracle_port = alloc_port()
             kubernetes_port = alloc_port()
             vnc_port = alloc_port()
             rdp_port = alloc_port()
@@ -1062,6 +1104,8 @@ class ProcessManager:
                 str(mysql_port),
                 "--postgres-port",
                 str(postgres_port),
+                "--oracle-port",
+                str(oracle_port),
                 "--kubernetes-port",
                 str(kubernetes_port),
                 "--data-path",
@@ -1139,6 +1183,7 @@ class ProcessManager:
             http_port,
             mysql_port,
             postgres_port,
+            oracle_port,
             kubernetes_port,
             vnc_port,
             rdp_port,
@@ -1151,6 +1196,7 @@ class ProcessManager:
             http_port=http_port,
             mysql_port=mysql_port,
             postgres_port=postgres_port,
+            oracle_port=oracle_port,
             kubernetes_port=kubernetes_port,
             vnc_port=vnc_port,
             rdp_port=rdp_port,

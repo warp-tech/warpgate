@@ -26,6 +26,10 @@
             description: 'Expose access to a database server',
         },
         {
+            value: TargetKind.Oracle,
+            description: 'Expose access to a database server',
+        },
+        {
             value: TargetKind.Kubernetes,
             description:
                 'Expose Kubernetes API protocol for tools like kubectl',
