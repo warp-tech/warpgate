@@ -98,7 +98,8 @@ mod m00091_drop_cluster_token;
 mod m00092_http_session_sso_identity;
 mod m00093_log_session_id_nullable;
 mod m00094_unique_role_names;
-mod m00095_ssh_show_qr_code;
+mod m00095_kubernetes_sessions;
+mod m00096_ssh_show_qr_code;
 
 pub(crate) mod helpers;
 
@@ -202,7 +203,8 @@ impl MigratorTrait for Migrator {
             Box::new(m00092_http_session_sso_identity::Migration),
             Box::new(m00093_log_session_id_nullable::Migration),
             Box::new(m00094_unique_role_names::Migration),
-            Box::new(m00095_ssh_show_qr_code::Migration),
+            Box::new(m00095_kubernetes_sessions::Migration),
+            Box::new(m00096_ssh_show_qr_code::Migration),
         ]
     }
 }
