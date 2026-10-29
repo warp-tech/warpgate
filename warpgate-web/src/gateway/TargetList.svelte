@@ -1,8 +1,10 @@
 <script lang="ts">
     import 'core-js/actual/map/group-by'
 
+    import { faClipboard } from '@fortawesome/free-regular-svg-icons'
     import {
         faArrowRight,
+        faDesktop,
         faEllipsisV,
         faTerminal,
     } from '@fortawesome/free-solid-svg-icons'
@@ -17,6 +19,7 @@
         Modal,
         ModalBody,
         ModalFooter,
+        ModalHeader,
         Tooltip,
     } from '@sveltestrap/sveltestrap'
     import CollapsibleGroupHeader from 'common/CollapsibleGroupHeader.svelte'
@@ -30,6 +33,7 @@
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
     import ListOverflowMenu from 'common/ListOverflowMenu.svelte'
+    import { TARGET_KIND_LABELS } from 'common/targetKinds'
     import {
         api,
         TargetClickAction,
@@ -46,7 +50,12 @@
         serverInfo,
         setOpenTargetsInNewTab,
     } from './lib/store'
-    import { openWebDesktopSession, openWebSshSession } from './lib/webSessions'
+    import {
+        openWebDesktopSession,
+        openWebSshSession,
+        webDesktopUrl,
+        webSshUrl,
+    } from './lib/webSessions'
 
     let instructionsTarget: TargetSnapshot | undefined = $state()
     // The target an in-browser session is being opened for. Opening one can
@@ -75,49 +84,61 @@
         )
     }
 
-    function urlForTarget(target: TargetSnapshot): string | undefined {
-        if (target.kind === TargetKind.Http) {
-            if (target.externalHost) {
-                const port = location.port ? `:${location.port}` : ''
-                return `${location.protocol}//${target.externalHost}${port}`
-            } else {
-                return `/?warpgate-target=${encodeURIComponent(target.name)}`
-            }
-        } else if (target.kind === TargetKind.Ssh) {
-            return `/@warpgate/#/web-ssh/start/${target.id}`
-        } else if (
-            target.kind === TargetKind.Vnc ||
-            target.kind === TargetKind.Rdp
-        ) {
-            return `/@warpgate/#/web-desktop/start/${target.id}`
+    function httpTargetUrl(target: TargetSnapshot): string {
+        if (target.externalHost) {
+            const port = location.port ? `:${location.port}` : ''
+            return `${location.protocol}//${target.externalHost}${port}`
         }
+        return `/?warpgate-target=${encodeURIComponent(target.name)}`
     }
 
-    function selectTarget(target: TargetSnapshot) {
+    // What a click on the row does: the row shows the label, links to href
+    // (so middle-click and "open in new tab" go to the same place) and runs
+    // run() on a plain click. Targets without an href open their
+    // connection instructions.
+    function rowAction(target: TargetSnapshot) {
         if (target.kind === TargetKind.Http) {
-            // biome-ignore lint/style/noNonNullAssertion: .
-            loadURL(urlForTarget(target)!)
-        } else if (target.kind === TargetKind.Ssh) {
-            const targetClickAction = $serverInfo?.targetClickAction
-            if (
-                !webClientsEnabled ||
-                targetClickAction === TargetClickAction.ShowInstructions
-            ) {
-                instructionsTarget = target
-            } else {
-                void openInBrowser(target, () => openWebSshSession(target.id))
+            const href = httpTargetUrl(target)
+            return {
+                label: 'Open',
+                icon: faArrowRight,
+                href,
+                run: () => loadURL(href),
             }
-        } else if (
-            target.kind === TargetKind.Vnc ||
-            target.kind === TargetKind.Rdp
+        }
+        if (
+            target.kind === TargetKind.Ssh &&
+            webClientsEnabled &&
+            $serverInfo?.targetClickAction !==
+                TargetClickAction.ShowInstructions
         ) {
-            if (!webClientsEnabled) {
-                instructionsTarget = target
-            } else {
-                openWebDesktopSession(target.id)
+            return {
+                label: 'Open terminal',
+                icon: faTerminal,
+                href: webSshUrl(target.id),
+                run: () =>
+                    void openInBrowser(target, () =>
+                        openWebSshSession(target.id),
+                    ),
             }
-        } else {
-            instructionsTarget = target
+        }
+        if (
+            (target.kind === TargetKind.Vnc ||
+                target.kind === TargetKind.Rdp) &&
+            webClientsEnabled
+        ) {
+            return {
+                label: 'Open desktop',
+                icon: faDesktop,
+                href: webDesktopUrl(target.id),
+                run: () => openWebDesktopSession(target.id),
+            }
+        }
+        return {
+            label: 'Connection info',
+            icon: faClipboard,
+            href: undefined,
+            run: () => showInstructions(target),
         }
     }
 
@@ -234,71 +255,53 @@
     {#snippet item(
         target,
     )}
-        {@const url = urlForTarget(target)}
-        <a
-            class="list-group-item list-group-item-action target-item gap-3"
-            href={url}
-            target={target.kind === TargetKind.Http && $openTargetsInNewTab
-                ? '_blank'
-                : undefined}
-            onclick={e => {
-                if (e.metaKey || e.ctrlKey) {
-                    return
-                }
-                e.preventDefault()
-                e.stopPropagation()
-                selectTarget(target)
-            }}
-            role={url ? undefined : 'button'}
-            tabindex={url ? undefined : 0}
-            onkeydown={e => {
-                // Without an href there is no native activation. Keys from the
-                // nested menu toggle and items bubble here and must be left alone.
-                if (e.target !== e.currentTarget) {
-                    return
-                }
-                if (!url && (e.key === 'Enter' || e.key === ' ')) {
+        {@const action = rowAction(target)}
+        <div class="list-group-item list-group-item-action target-item">
+            <a
+                class="target-main"
+                href={action.href}
+                target={target.kind === TargetKind.Http && $openTargetsInNewTab
+                    ? '_blank'
+                    : undefined}
+                role={action.href ? undefined : 'button'}
+                tabindex={action.href ? undefined : 0}
+                onclick={e => {
+                    // Let the browser handle new-tab and new-window clicks
+                    if (
+                        e.metaKey ||
+                        e.ctrlKey ||
+                        e.shiftKey ||
+                        e.button !== 0
+                    ) {
+                        return
+                    }
                     e.preventDefault()
-                    selectTarget(target)
-                }
-            }}
-        >
-            <span class="me-auto">
-                <div class="d-flex align-items-center gap-2">
-                    {target.name}
-                </div>
+                    action.run()
+                }}
+                onkeydown={e => {
+                    // Rows without an href are not links, so Enter and Space
+                    // have to be handled here
+                    if (!action.href && (e.key === 'Enter' || e.key === ' ')) {
+                        e.preventDefault()
+                        action.run()
+                    }
+                }}
+            >
+                <span class="target-name">{target.name}</span>
                 {#if target.description}
-                    <small class="d-block text-muted"
-                        >{target.description}</small
-                    >
+                    <span class="target-description">{target.description}</span>
                 {/if}
+                <span class="target-kind-inline"
+                    >{TARGET_KIND_LABELS[target.kind]}</span
+                >
+                <span class="visually-hidden">{action.label}</span>
+            </a>
+            <span class="target-kind">{TARGET_KIND_LABELS[target.kind]}</span>
+            <span class="target-action" aria-hidden="true">
+                <Fa icon={action.icon} fw />
+                <span class="target-action-label">{action.label}</span>
             </span>
-            <small class="protocol text-muted ms-auto">
-                {#if target.kind === TargetKind.MySql}
-                    MySQL
-                {/if}
-                {#if target.kind === TargetKind.Postgres}
-                    PostgreSQL
-                {/if}
-                {#if target.kind === TargetKind.Kubernetes}
-                    Kubernetes
-                {/if}
-                {#if target.kind === TargetKind.Ssh}
-                    SSH
-                {/if}
-                {#if target.kind === TargetKind.Vnc}
-                    VNC
-                {/if}
-                {#if target.kind === TargetKind.Rdp}
-                    RDP
-                {/if}
-            </small>
-            {#if target.kind === TargetKind.Http}
-                <Button color="link" size="sm" tabindex={-1}>
-                    <Fa icon={faArrowRight} fw />
-                </Button>
-            {/if}
-            <Dropdown>
+            <Dropdown class="target-menu">
                 <DropdownToggle
                     color="link"
                     size="sm"
@@ -356,7 +359,7 @@
                     {/if}
                 </DropdownMenu>
             </Dropdown>
-        </a>
+        </div>
     {/snippet}
 </ItemList>
 
@@ -372,6 +375,9 @@
     toggle={() => (instructionsTarget = undefined)}
     size="lg"
 >
+    {#if instructionsTarget}
+        <ModalHeader>Connect to {instructionsTarget.name}</ModalHeader>
+    {/if}
     <ModalBody>
         {#if instructionsTarget}
             <ConnectionInstructions
@@ -415,9 +421,132 @@
 </Modal>
 
 <style lang="scss">
+    // One line per target: name, description, kind, the click's action and
+    // a menu. The main link stretches over the row; the rest sits above it.
     .target-item {
+        position: relative;
         display: flex;
         align-items: center;
+        gap: 1rem;
+        padding-top: 0.45rem;
+        padding-bottom: 0.45rem;
+
+        // An open menu must cover the rows below it
+        &:has(:global(.dropdown-menu.show)) {
+            z-index: 3;
+        }
+    }
+
+    .target-main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: baseline;
+        gap: 1.5rem;
+        color: inherit;
+        text-decoration: none;
         cursor: pointer;
+
+        &::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+        }
+
+        &:focus-visible {
+            outline: none;
+
+            &::after {
+                outline: 2px solid var(--bs-primary);
+                outline-offset: -2px;
+            }
+        }
+    }
+
+    .target-name {
+        flex: 0 0 16rem;
+        color: var(--bs-emphasis-color);
+        font-weight: 500;
+        overflow-wrap: anywhere;
+    }
+
+    .target-description {
+        flex: 1;
+        min-width: 0;
+        color: var(--bs-secondary-color);
+        font-size: 0.875rem;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        line-clamp: 2;
+        overflow: hidden;
+    }
+
+    .target-kind,
+    .target-kind-inline {
+        font-size: 0.8125rem;
+        color: var(--bs-secondary-color);
+        white-space: nowrap;
+    }
+
+    .target-kind-inline {
+        display: none;
+    }
+
+    .target-action {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        min-width: 9.5rem;
+        font-size: 0.875rem;
+        color: var(--bs-secondary-color);
+        white-space: nowrap;
+    }
+
+    .target-item:hover .target-action,
+    .target-main:focus-visible ~ .target-action {
+        color: var(--bs-emphasis-color);
+
+        .target-action-label {
+            text-decoration: underline;
+            text-underline-offset: 2px;
+        }
+    }
+
+    // Drawn after the stretched link, so they sit above it without a
+    // z-index of their own; the menu is a .dropdown, already relative
+    .target-kind,
+    .target-action {
+        position: relative;
+        pointer-events: none;
+    }
+
+    @media (max-width: 991px) {
+        .target-main {
+            flex-direction: column;
+            gap: 0;
+        }
+
+        .target-name {
+            flex: none;
+        }
+
+        .target-kind,
+        .target-action-label {
+            display: none;
+        }
+
+        .target-kind-inline {
+            display: block;
+        }
+
+        .target-action {
+            min-width: 0;
+        }
+
+        .target-item :global(.target-menu .btn) {
+            min-width: 44px;
+            min-height: 44px;
+        }
     }
 </style>
