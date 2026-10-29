@@ -3,7 +3,9 @@ pub mod roles;
 pub mod target_groups;
 pub mod targets;
 
-use sea_orm::DbErr;
+use sea_orm::prelude::Expr;
+use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
+use uuid::Uuid;
 use warpgate_common::{ProviderId, UserSessionId, WarpgateError};
 
 use crate::db::is_unique_violation;
@@ -48,7 +50,7 @@ impl From<ResourceError> for WarpgateError {
 /// row created by hand, the owning provider for a reconciled one. HTTP
 /// handlers always write as [`Actor::Admin`], so a provider's rows stay
 /// read-only through the API, and a provider never overwrites a hand-made row
-/// unless an admin hands it over with `warpgate config adopt`.
+/// unless the resource is annotated `warpgate.dev/adopt-existing`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Actor {
     Admin,
@@ -79,6 +81,24 @@ impl Actor {
 #[derive(Debug)]
 #[must_use]
 pub struct AdmittedSessions(pub Vec<UserSessionId>);
+
+/// Hands a hand-made row to `owner`, changing nothing else. The one write
+/// that skips [`Actor::may_write`]: only applying a resource annotated with
+/// `warpgate.dev/adopt-existing` reaches it, never an HTTP handler.
+async fn set_owner<E: EntityTrait, C: ConnectionTrait>(
+    db: &C,
+    provider: E::Column,
+    id_column: E::Column,
+    id: Uuid,
+    owner: ProviderId,
+) -> Result<(), ResourceError> {
+    E::update_many()
+        .col_expr(provider, Expr::value(Some(owner)))
+        .filter(id_column.eq(id))
+        .exec(db)
+        .await?;
+    Ok(())
+}
 
 const fn check_name(name: &str) -> Result<(), ResourceError> {
     if name.is_empty() {

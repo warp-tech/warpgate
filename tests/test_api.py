@@ -4,6 +4,8 @@ DB field type related issues that don't surface on SQLite (e.g. timestamp types)
 """
 
 import contextlib
+import os
+import subprocess
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional, Set
 from json import load
@@ -15,7 +17,7 @@ import pytest
 import requests
 
 from .api_client import sdk, admin_client as new_admin_client
-from .conftest import ProcessManager, WarpgateProcess
+from .conftest import ProcessManager, WarpgateProcess, binary_path, cargo_root
 from .test_http_common import *  # noqa
 from .util import wait_port
 
@@ -1282,6 +1284,88 @@ def test_provider_cannot_be_set_by_clients(admin_client: sdk.DefaultApi, pg_wg):
     )
     assert created.status_code == 201, created.text
     assert admin_client.get_role(created.json()["id"]).provider is None
+
+
+def _config(wg, *args: str) -> subprocess.CompletedProcess:
+    """Runs a `warpgate config` subcommand against a running instance's database."""
+    return subprocess.run(
+        [os.path.join(cargo_root, binary_path), "--config", str(wg.config_path), "config", *args],
+        cwd=cargo_root,
+        env={
+            **os.environ,
+            "LLVM_PROFILE_FILE": f"{cargo_root}/target/llvm-cov-target/warpgate-%m.profraw",
+            "WARPGATE_UNDER_TEST": "1",
+        },
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+
+def test_gitops_rows_are_read_only_through_the_api(
+    admin_client: sdk.DefaultApi, pg_wg, tmp_path
+):
+    name = f"gitops-{uuid4()}"
+    files = tmp_path / "gitops"
+    files.mkdir()
+    resource = files / "resources.yaml"
+
+    def write(port: int):
+        resource.write_text(
+            f"""apiVersion: warpgate/v1
+kind: Role
+metadata:
+  name: {name}
+spec: {{}}
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: {name}
+spec:
+  roles: [{name}]
+  options:
+    ssh:
+      host: 127.0.0.1
+      port: {port}
+      username: user
+      auth:
+        kind: publickey
+"""
+        )
+
+    write(22)
+    planned = _config(pg_wg, "plan", str(files))
+    assert planned.returncode == 3, planned.stdout + planned.stderr
+    applied = _config(pg_wg, "apply", "--yes", str(files))
+    assert applied.returncode == 0, applied.stdout + applied.stderr
+    assert _config(pg_wg, "plan", str(files)).returncode == 0
+
+    target = next(t for t in admin_client.get_targets() if t.name == name)
+    role = next(r for r in admin_client.get_roles() if r.name == name)
+    assert target.provider == "00000000-0000-0000-0000-000000000000"
+    assert role.provider == target.provider
+    other = admin_client.create_role(sdk.RoleDataRequest(name=f"manual-{uuid4()}"))
+
+    for call in [
+        lambda: admin_client.update_target(target.id, _ssh_target_request(name)),
+        lambda: admin_client.delete_target(target.id),
+        lambda: admin_client.add_target_role(target.id, other.id),
+        lambda: admin_client.delete_target_role(target.id, role.id),
+        lambda: admin_client.update_role(role.id, sdk.RoleDataRequest(name=name)),
+        lambda: admin_client.delete_role(role.id),
+    ]:
+        with pytest.raises(sdk.ApiException) as err:
+            call()
+        assert err.value.status == 409, err.value.body
+        assert "managed by GitOps" in err.value.body
+
+    # Edits to the file still go through
+    write(2222)
+    assert _config(pg_wg, "plan", str(files)).returncode == 3
+    applied = _config(pg_wg, "apply", "--yes", str(files))
+    assert applied.returncode == 0, applied.stdout + applied.stderr
+    assert admin_client.get_target(target.id).options.actual_instance.port == 2222
 
 
 def test_approval_parameters_can_be_cleared_and_reject_nonsense(

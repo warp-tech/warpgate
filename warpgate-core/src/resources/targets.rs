@@ -148,6 +148,21 @@ async fn target_owner<C: ConnectionTrait>(
         .provider)
 }
 
+pub async fn set_owner<C: ConnectionTrait>(
+    db: &C,
+    id: Uuid,
+    owner: ProviderId,
+) -> Result<(), ResourceError> {
+    super::set_owner::<Target::Entity, _>(
+        db,
+        Target::Column::Provider,
+        Target::Column::Id,
+        id,
+        owner,
+    )
+    .await
+}
+
 pub async fn add_role<C: ConnectionTrait>(
     db: &C,
     actor: Actor,

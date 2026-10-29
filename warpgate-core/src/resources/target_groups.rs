@@ -5,6 +5,7 @@ use sea_orm::{
     TransactionTrait,
 };
 use uuid::Uuid;
+use warpgate_common::ProviderId;
 use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
 use warpgate_db_entities::{Target, TargetGroup};
 
@@ -54,6 +55,21 @@ pub async fn update<C: ConnectionTrait>(
     let mut model: TargetGroup::ActiveModel = group.into();
     set_data(&mut model, data);
     model.update(db).await.map_err(name_taken)
+}
+
+pub async fn set_owner<C: ConnectionTrait>(
+    db: &C,
+    id: Uuid,
+    owner: ProviderId,
+) -> Result<(), ResourceError> {
+    super::set_owner::<TargetGroup::Entity, _>(
+        db,
+        TargetGroup::Column::Provider,
+        TargetGroup::Column::Id,
+        id,
+        owner,
+    )
+    .await
 }
 
 pub async fn delete<C: ConnectionTrait + TransactionTrait>(

@@ -2,15 +2,18 @@ use std::path::{Path, PathBuf};
 use std::process::exit;
 
 use anyhow::Result;
+use sea_orm::DatabaseConnection;
 use warpgate_common::encryption::{EncryptionError, validate_encryption_config};
 use warpgate_common::{GlobalParams, ProviderId, WarpgateError, warnings};
 use warpgate_core::db::{connect_to_db, has_pending_migrations};
-use warpgate_core::resources::reconcile::load_current;
+use warpgate_core::resources::reconcile::{ApplyError, apply, load_current};
 use warpgate_gitops::diagnostic::Diagnostic;
-use warpgate_gitops::plan::{format_plan, format_plan_json, plan};
+use warpgate_gitops::plan::{Plan, format_plan, format_plan_json, plan};
+use warpgate_gitops::types::Resource;
 use warpgate_gitops::validate::check_files;
 use warpgate_gitops::{format_json, format_text, json_schema, read_files};
 
+use super::common::assert_interactive_terminal;
 use crate::config::load_config;
 
 #[derive(clap::Subcommand)]
@@ -34,6 +37,17 @@ pub enum ConfigCommand {
         #[clap(long, value_enum, default_value_t)]
         format: OutputFormat,
     },
+    /// Apply resource files to the database in one transaction, after showing
+    /// the plan and asking for confirmation. Exits with 1 if nothing was applied
+    /// because of an error.
+    Apply {
+        /// Files, and directories to search for *.yaml and *.yml
+        #[clap(required = true)]
+        paths: Vec<PathBuf>,
+        /// Apply without asking
+        #[clap(long)]
+        yes: bool,
+    },
     /// Print the JSON schema of resource files
     Schema,
 }
@@ -53,6 +67,7 @@ pub async fn command(command: &ConfigCommand, params: &GlobalParams) -> Result<(
         }
         ConfigCommand::Validate { paths, format } => validate(paths, *format),
         ConfigCommand::Plan { paths, format } => plan_command(params, paths, *format).await,
+        ConfigCommand::Apply { paths, yes } => apply_command(params, paths, *yes).await,
     }
 }
 
@@ -91,11 +106,13 @@ fn validate(paths: &[PathBuf], format: OutputFormat) -> Result<()> {
     Ok(())
 }
 
-async fn plan_command(
+/// Everything a plan needs: the validated files, the database they apply to,
+/// and the plan itself. Exits on anything that leaves no plan to show.
+async fn prepare(
     params: &GlobalParams,
     paths: &[PathBuf],
     format: OutputFormat,
-) -> Result<()> {
+) -> Result<(DatabaseConnection, Vec<Resource>, Plan)> {
     let files = read_or_exit(paths);
     let resources = match check_files(&files) {
         Ok(resources) => resources,
@@ -114,7 +131,7 @@ async fn plan_command(
     let db = connect_to_db(&config, params).await?;
     if has_pending_migrations(&db).await? {
         eprintln!(
-            "The database schema is older than this binary; start Warpgate once to migrate it, then plan again"
+            "The database schema is older than this binary; start Warpgate once to migrate it, then try again"
         );
         exit(1);
     }
@@ -130,6 +147,15 @@ async fn plan_command(
     };
 
     let plan = plan(ProviderId::GITOPS, &resources, &current);
+    Ok((db, resources, plan))
+}
+
+async fn plan_command(
+    params: &GlobalParams,
+    paths: &[PathBuf],
+    format: OutputFormat,
+) -> Result<()> {
+    let (_, _, plan) = prepare(params, paths, format).await?;
     match format {
         OutputFormat::Text => print!("{}", format_plan(&plan)),
         OutputFormat::Json => println!(
@@ -144,4 +170,40 @@ async fn plan_command(
         exit(3);
     }
     Ok(())
+}
+
+async fn apply_command(params: &GlobalParams, paths: &[PathBuf], yes: bool) -> Result<()> {
+    let (db, resources, plan) = prepare(params, paths, OutputFormat::Text).await?;
+    print!("{}", format_plan(&plan));
+    if plan.has_errors() {
+        eprintln!("Nothing applied: resolve the errors above first");
+        exit(1);
+    }
+    if !plan.has_pending() {
+        println!("Nothing to apply");
+        return Ok(());
+    }
+    if !yes {
+        assert_interactive_terminal();
+        if !dialoguer::Confirm::new()
+            .with_prompt("Apply these changes?")
+            .default(false)
+            .interact()?
+        {
+            println!("Nothing applied");
+            return Ok(());
+        }
+    }
+
+    match apply(&db, ProviderId::GITOPS, &resources, &plan).await {
+        Ok(()) => {
+            println!("Applied");
+            Ok(())
+        }
+        Err(error @ (ApplyError::Stale | ApplyError::Resource { .. })) => {
+            eprintln!("Nothing applied: {error}");
+            exit(1);
+        }
+        Err(error) => Err(error.into()),
+    }
 }

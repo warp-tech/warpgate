@@ -1,13 +1,18 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use sea_orm::{ConnectionTrait, EntityTrait};
+use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, TransactionTrait};
 use uuid::Uuid;
 use warpgate_common::{
-    MaybeSecretRef, StoredSecret, Target as TargetConfig, TargetSecrets, WarpgateError,
+    MaybeSecretRef, ProviderId, StoredSecret, Target as TargetConfig, TargetSecrets, WarpgateError,
 };
 use warpgate_db_entities::{Role, Target, TargetGroup, TargetRoleAssignment};
-use warpgate_gitops::plan::{Current, Row};
-use warpgate_gitops::types::{RoleSpec, TargetGroupSpec, TargetSpec};
+use warpgate_gitops::plan::{Change, Current, Plan, Row, plan};
+use warpgate_gitops::types::{Kind, Manifest, Resource, RoleSpec, TargetGroupSpec, TargetSpec};
+
+use super::roles::{self, RoleDataRequest};
+use super::target_groups::{self, TargetGroupDataRequest};
+use super::targets::{self, TargetDataRequest};
+use super::{Actor, ResourceError};
 
 /// The rows a plan is computed against, with references by name. Inline
 /// credentials come back decrypted so they compare with a file's literals:
@@ -85,6 +90,248 @@ pub async fn load_current<C: ConnectionTrait>(db: &C) -> Result<Current, Warpgat
             .collect(),
         targets,
     })
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ApplyError {
+    #[error("the plan has collisions or blocked changes")]
+    PlanHasErrors,
+    #[error("the database changed since the plan was made; plan again")]
+    Stale,
+    #[error("{kind:?} {name}: {source}")]
+    Resource {
+        kind: Kind,
+        name: String,
+        #[source]
+        source: ResourceError,
+    },
+    #[error(transparent)]
+    Other(#[from] WarpgateError),
+}
+
+impl From<DbErr> for ApplyError {
+    fn from(err: DbErr) -> Self {
+        Self::Other(err.into())
+    }
+}
+
+/// Writes `confirmed` in one transaction, as `provider`. The plan is computed
+/// again inside the transaction and must still be the one that was confirmed,
+/// so exactly what was shown gets written; a change made after that still
+/// rolls everything back, through the unique names and the ownership checks.
+pub async fn apply<C: ConnectionTrait + TransactionTrait>(
+    db: &C,
+    provider: ProviderId,
+    desired: &[Resource],
+    confirmed: &Plan,
+) -> Result<(), ApplyError> {
+    if confirmed.has_errors() {
+        return Err(ApplyError::PlanHasErrors);
+    }
+    let txn = db.begin().await?;
+    if plan(provider, desired, &load_current(&txn).await?) != *confirmed {
+        return Err(ApplyError::Stale);
+    }
+
+    let actor = Actor::Provider(provider);
+    // Plans list groups and roles before the targets that refer to them by
+    // name, so the names are read once every group and role is in place
+    let mut names = None;
+    for change in &confirmed.changes {
+        let (id, adopt, desired) = match change {
+            Change::Create(desired) => (None, false, desired),
+            Change::Update { id, desired, .. } => (Some(*id), false, desired),
+            Change::Adopt { id, desired, .. } => (Some(*id), true, desired),
+            Change::Unchanged { .. }
+            | Change::WouldPrune { .. }
+            | Change::Collision { .. }
+            | Change::Blocked { .. } => continue,
+        };
+        let write = Write {
+            db: &txn,
+            actor,
+            provider,
+            id,
+            adopt,
+        };
+        let result = match desired {
+            Resource::TargetGroup(manifest) => write.group(manifest).await,
+            Resource::Role(manifest) => write.role(manifest).await,
+            Resource::Target(manifest) => {
+                let names = match &names {
+                    Some(names) => names,
+                    None => names.insert(Names::load(&txn).await?),
+                };
+                write.target(manifest, names).await
+            }
+        };
+        result.map_err(|source| ApplyError::Resource {
+            kind: change.kind(),
+            name: change.name().to_owned(),
+            source,
+        })?;
+    }
+
+    txn.commit().await?;
+    Ok(())
+}
+
+/// One create, update or adoption. `id` is the row an update or adoption
+/// targets, `None` for a create.
+struct Write<'a, C> {
+    db: &'a C,
+    actor: Actor,
+    provider: ProviderId,
+    id: Option<Uuid>,
+    adopt: bool,
+}
+
+impl<C: ConnectionTrait> Write<'_, C> {
+    async fn group(&self, manifest: &Manifest<TargetGroupSpec>) -> Result<(), ResourceError> {
+        let TargetGroupSpec { description, color } = &manifest.spec;
+        let data = TargetGroupDataRequest {
+            name: manifest.metadata.name.clone(),
+            description: Some(description.clone()),
+            color: color.clone(),
+        };
+        match self.id {
+            None => {
+                target_groups::create(self.db, self.actor, &data).await?;
+            }
+            Some(id) => {
+                if self.adopt {
+                    target_groups::set_owner(self.db, id, self.provider).await?;
+                }
+                target_groups::update(self.db, self.actor, id, &data).await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn role(&self, manifest: &Manifest<RoleSpec>) -> Result<(), ResourceError> {
+        let RoleSpec {
+            description,
+            is_default,
+        } = &manifest.spec;
+        let data = RoleDataRequest {
+            name: manifest.metadata.name.clone(),
+            description: Some(description.clone()),
+            is_default: Some(*is_default),
+        };
+        match self.id {
+            None => {
+                roles::create(self.db, self.actor, &data).await?;
+            }
+            Some(id) => {
+                if self.adopt {
+                    roles::set_owner(self.db, id, self.provider).await?;
+                }
+                roles::update(self.db, self.actor, id, &data).await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn target(
+        &self,
+        manifest: &Manifest<TargetSpec>,
+        names: &Names,
+    ) -> Result<(), ResourceError> {
+        let TargetSpec {
+            description,
+            group,
+            roles,
+            options,
+            rate_limit_bytes_per_second,
+            ticket_max_duration_seconds,
+            ticket_requests_disabled,
+            ticket_require_approval,
+            require_approval,
+            ticket_max_uses,
+        } = &manifest.spec;
+        let data = TargetDataRequest {
+            name: manifest.metadata.name.clone(),
+            description: Some(description.clone()),
+            options: options.clone(),
+            rate_limit_bytes_per_second: *rate_limit_bytes_per_second,
+            group_id: group
+                .as_deref()
+                .map(|group| names.group(group))
+                .transpose()?,
+            ticket_max_duration_seconds: *ticket_max_duration_seconds,
+            ticket_requests_disabled: *ticket_requests_disabled,
+            ticket_require_approval: *ticket_require_approval,
+            require_approval: *require_approval,
+            ticket_max_uses: *ticket_max_uses,
+        };
+        let id = match self.id {
+            None => targets::create(self.db, self.actor, &data).await?.id,
+            Some(id) => {
+                if self.adopt {
+                    targets::set_owner(self.db, id, self.provider).await?;
+                }
+                targets::update(self.db, self.actor, id, &data).await?;
+                id
+            }
+        };
+
+        let wanted = roles
+            .iter()
+            .map(|role| names.role(role))
+            .collect::<Result<HashSet<_>, _>>()?;
+        let assigned: HashSet<Uuid> = TargetRoleAssignment::Entity::find()
+            .filter(TargetRoleAssignment::Column::TargetId.eq(id))
+            .all(self.db)
+            .await?
+            .into_iter()
+            .map(|assignment| assignment.role_id)
+            .collect();
+        for role in wanted.difference(&assigned) {
+            targets::add_role(self.db, self.actor, id, *role).await?;
+        }
+        for role in assigned.difference(&wanted) {
+            targets::remove_role(self.db, self.actor, id, *role).await?;
+        }
+        Ok(())
+    }
+}
+
+/// Resolves a target's references the way the plan matches rows: ignoring case,
+/// unless a backend with case-sensitive names holds an exact match
+struct Names {
+    groups: HashMap<String, Uuid>,
+    roles: HashMap<String, Uuid>,
+}
+
+impl Names {
+    async fn load<C: ConnectionTrait>(db: &C) -> Result<Self, DbErr> {
+        let mut groups = HashMap::new();
+        for group in TargetGroup::Entity::find().all(db).await? {
+            groups.entry(group.name.to_lowercase()).or_insert(group.id);
+            groups.insert(group.name, group.id);
+        }
+        let mut roles = HashMap::new();
+        for role in Role::Entity::find().all(db).await? {
+            roles.entry(role.name.to_lowercase()).or_insert(role.id);
+            roles.insert(role.name, role.id);
+        }
+        Ok(Self { groups, roles })
+    }
+
+    fn group(&self, name: &str) -> Result<Uuid, ResourceError> {
+        Self::find(&self.groups, name)
+    }
+
+    fn role(&self, name: &str) -> Result<Uuid, ResourceError> {
+        Self::find(&self.roles, name)
+    }
+
+    fn find(ids: &HashMap<String, Uuid>, name: &str) -> Result<Uuid, ResourceError> {
+        ids.get(name)
+            .or_else(|| ids.get(&name.to_lowercase()))
+            .copied()
+            .ok_or(ResourceError::NotFound)
+    }
 }
 
 #[cfg(all(test, feature = "sqlite"))]
@@ -179,5 +426,184 @@ mod tests {
                 .all(|c| matches!(c, Change::Unchanged { .. })),
             "{plan:?}"
         );
+    }
+
+    const GITOPS: ProviderId = ProviderId::GITOPS;
+
+    fn resources(yaml: &str) -> Vec<Resource> {
+        let files = [(std::path::PathBuf::from("test.yaml"), yaml.to_owned())];
+        warpgate_gitops::validate::check_files(&files).unwrap()
+    }
+
+    async fn plan_against<C: ConnectionTrait>(db: &C, desired: &[Resource]) -> Plan {
+        plan(GITOPS, desired, &load_current(db).await.unwrap())
+    }
+
+    fn summary(plan: &Plan) -> Vec<String> {
+        plan.changes
+            .iter()
+            .map(|change| {
+                let action = match change {
+                    Change::Create(_) => "create",
+                    Change::Update { .. } => "update",
+                    Change::Adopt { .. } => "adopt",
+                    Change::Unchanged { .. } => "unchanged",
+                    Change::Collision { .. } => "collision",
+                    Change::Blocked { .. } => "blocked",
+                    Change::WouldPrune { .. } => "would_prune",
+                };
+                format!("{action} {}", change.name())
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn applying_every_field_then_planning_again_changes_nothing() {
+        let db = db().await;
+        let desired = resources(include_str!(
+            "../../../warpgate-gitops/tests/fixtures/valid/every-field.yaml"
+        ));
+        let first = plan_against(&db, &desired).await;
+        assert!(first.changes.iter().all(|c| matches!(c, Change::Create(_))));
+
+        apply(&db, GITOPS, &desired, &first).await.unwrap();
+
+        let again = plan_against(&db, &desired).await;
+        assert!(
+            again
+                .changes
+                .iter()
+                .all(|c| matches!(c, Change::Unchanged { .. })),
+            "{:?}",
+            summary(&again)
+        );
+        let target = Target::Entity::find().one(&db).await.unwrap().unwrap();
+        assert_eq!(target.provider, Some(GITOPS));
+    }
+
+    #[tokio::test]
+    async fn roles_and_fields_follow_the_file() {
+        let db = db().await;
+        let fileset = |port: u16, roles: &str| {
+            resources(&format!(
+                "apiVersion: warpgate/v1\nkind: Role\nmetadata: {{name: dba}}\nspec: {{}}\n---\n\
+                 apiVersion: warpgate/v1\nkind: Role\nmetadata: {{name: ops}}\nspec: {{}}\n---\n\
+                 apiVersion: warpgate/v1\nkind: Target\nmetadata: {{name: web}}\n\
+                 spec: {{roles: [{roles}], options: {{ssh: {{host: h, port: {port}}}}}}}\n"
+            ))
+        };
+        let before = fileset(22, "dba, ops");
+        apply(&db, GITOPS, &before, &plan_against(&db, &before).await)
+            .await
+            .unwrap();
+        assert_eq!(
+            TargetRoleAssignment::Entity::find()
+                .all(&db)
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+
+        let after = fileset(2222, "DBA");
+        let plan = plan_against(&db, &after).await;
+        assert_eq!(
+            summary(&plan),
+            ["unchanged dba", "unchanged ops", "update web"]
+        );
+        apply(&db, GITOPS, &after, &plan).await.unwrap();
+
+        let target = Target::Entity::find().one(&db).await.unwrap().unwrap();
+        assert_eq!(target.options["ssh"]["port"], 2222);
+        let assigned = TargetRoleAssignment::Entity::find().all(&db).await.unwrap();
+        let dba = Role::Entity::find()
+            .filter(<Role::Entity as EntityTrait>::Column::Name.eq("dba"))
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(assigned.len(), 1);
+        assert_eq!(assigned[0].role_id, dba.id);
+        assert!(
+            plan_against(&db, &after)
+                .await
+                .changes
+                .iter()
+                .all(|c| matches!(c, Change::Unchanged { .. }))
+        );
+    }
+
+    #[tokio::test]
+    async fn adopts_hand_made_rows_only_when_annotated() {
+        let db = db().await;
+        let legacy = roles::create(
+            &db,
+            Actor::Admin,
+            &RoleDataRequest {
+                name: "legacy".into(),
+                description: Some("by hand".into()),
+                is_default: None,
+            },
+        )
+        .await
+        .unwrap();
+        let role = |annotation: &str| {
+            resources(&format!(
+                "apiVersion: warpgate/v1\nkind: Role\n\
+                 metadata: {{name: legacy{annotation}}}\nspec: {{description: from git}}\n"
+            ))
+        };
+
+        let plain = role("");
+        let refused = plan_against(&db, &plain).await;
+        assert_eq!(summary(&refused), ["collision legacy"]);
+        assert!(matches!(
+            apply(&db, GITOPS, &plain, &refused).await,
+            Err(ApplyError::PlanHasErrors)
+        ));
+
+        let annotated = role(", annotations: {warpgate.dev/adopt-existing: \"true\"}");
+        let adopting = plan_against(&db, &annotated).await;
+        assert_eq!(summary(&adopting), ["adopt legacy"]);
+        apply(&db, GITOPS, &annotated, &adopting).await.unwrap();
+
+        let legacy = Role::Entity::find_by_id(legacy.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(legacy.provider, Some(GITOPS));
+        assert_eq!(legacy.description, "from git");
+    }
+
+    #[tokio::test]
+    async fn a_stale_plan_is_refused_and_writes_nothing() {
+        let db = db().await;
+        let desired = resources(
+            "apiVersion: warpgate/v1\nkind: Role\nmetadata: {name: dba}\nspec: {}\n---\n\
+             apiVersion: warpgate/v1\nkind: Role\nmetadata: {name: ops}\nspec: {}\n",
+        );
+        let confirmed = plan_against(&db, &desired).await;
+
+        // An admin creates one of the planned names by hand in the meantime
+        roles::create(
+            &db,
+            Actor::Admin,
+            &RoleDataRequest {
+                name: "ops".into(),
+                description: None,
+                is_default: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(
+            apply(&db, GITOPS, &desired, &confirmed).await,
+            Err(ApplyError::Stale)
+        ));
+        let roles = Role::Entity::find().all(&db).await.unwrap();
+        assert_eq!(roles.len(), 1, "dba must not have been created");
+        assert_eq!(roles[0].provider, None);
     }
 }
