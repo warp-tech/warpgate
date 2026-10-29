@@ -465,6 +465,7 @@ mod tests {
             ticket_require_approval: false,
             require_approval: false,
             ticket_max_uses: None,
+            provider: None,
         }
     }
 

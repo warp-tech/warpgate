@@ -108,6 +108,7 @@ impl TryFrom<Model> for Target {
             ticket_requests_disabled: model.ticket_requests_disabled,
             ticket_require_approval: model.ticket_require_approval,
             ticket_max_uses: model.ticket_max_uses,
+            provider: model.provider,
             require_approval: model.require_approval,
         })
     }

@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.30.2-7-g7b2e7a472-modified"
+    "version": "v0.30.2-8-gc30ddd0b9-modified"
   },
   "servers": [
     {
@@ -478,6 +478,16 @@
         "responses": {
           "204": {
             "description": ""
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "404": {
             "description": ""
@@ -1708,6 +1718,16 @@
           "204": {
             "description": ""
           },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "404": {
             "description": ""
           }
@@ -1845,6 +1865,16 @@
             "description": ""
           },
           "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
             "description": ""
           }
         },
@@ -1886,6 +1916,16 @@
         "responses": {
           "204": {
             "description": ""
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "404": {
             "description": ""
@@ -2102,6 +2142,16 @@
         "responses": {
           "204": {
             "description": ""
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "404": {
             "description": ""
@@ -6986,6 +7036,11 @@
           },
           "is_default": {
             "type": "boolean"
+          },
+          "provider": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Set by the provider that manages the role; read-only"
           }
         }
       },
@@ -7846,6 +7901,11 @@
           "ticket_max_uses": {
             "type": "integer",
             "format": "int16"
+          },
+          "provider": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Set by the provider that manages the target; read-only"
           }
         }
       },
@@ -7929,8 +7989,7 @@
           },
           "provider": {
             "type": "string",
-            "format": "uuid",
-            "title": "The provider that owns a row it reconciles. A row without one is managed by hand."
+            "format": "uuid"
           }
         }
       },

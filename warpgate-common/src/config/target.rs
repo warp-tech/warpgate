@@ -12,7 +12,7 @@ use super::defaults::{
     _default_ssh_ca_mount, _default_ssh_port, _default_username, _default_vnc_port,
 };
 use crate::secrets::{MaybeSecretRef, SecretRef, StoredSecrets};
-use crate::{Protocol, Secret, StoredSecret};
+use crate::{Protocol, ProviderId, Secret, StoredSecret};
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
 pub struct KubernetesTargetCertificateAuth {
@@ -424,6 +424,8 @@ pub struct Target {
     pub ticket_require_approval: bool,
     pub require_approval: bool,
     pub ticket_max_uses: Option<i16>,
+    #[serde(default)]
+    pub provider: Option<ProviderId>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union, JsonSchema)]

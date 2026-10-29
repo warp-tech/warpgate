@@ -4,12 +4,12 @@ use sea_orm::{
     TransactionTrait,
 };
 use uuid::Uuid;
-use warpgate_common::{StoredSecrets, TargetOptions, WarpgateError};
+use warpgate_common::{ProviderId, StoredSecrets, TargetOptions, WarpgateError};
 use warpgate_db_entities::{
     KnownHost, Target, TargetRoleAssignment, TargetSession, Ticket, TicketRequest,
 };
 
-use super::{AdmittedSessions, ResourceError, check_name, name_taken};
+use super::{Actor, AdmittedSessions, ResourceError, check_name, name_taken};
 use crate::db::is_unique_violation;
 
 #[derive(Object)]
@@ -54,12 +54,14 @@ fn set_data(
 
 pub async fn create<C: ConnectionTrait>(
     db: &C,
+    actor: Actor,
     data: &TargetDataRequest,
 ) -> Result<Target::Model, ResourceError> {
     check_name(&data.name)?;
     let mut model = Target::ActiveModel {
         id: Set(Uuid::new_v4()),
         kind: Set((&data.options).into()),
+        provider: Set(actor.provider_id()),
         ..Default::default()
     };
     set_data(&mut model, data)?;
@@ -68,6 +70,7 @@ pub async fn create<C: ConnectionTrait>(
 
 pub async fn update<C: ConnectionTrait>(
     db: &C,
+    actor: Actor,
     id: Uuid,
     data: &TargetDataRequest,
 ) -> Result<Target::Model, ResourceError> {
@@ -76,6 +79,7 @@ pub async fn update<C: ConnectionTrait>(
         .one(db)
         .await?
         .ok_or(ResourceError::NotFound)?;
+    actor.may_write(target.provider)?;
     if target.kind != (&data.options).into() {
         return Err(ResourceError::ProtocolChange);
     }
@@ -87,6 +91,7 @@ pub async fn update<C: ConnectionTrait>(
 
 pub async fn delete<C: ConnectionTrait + TransactionTrait>(
     db: &C,
+    actor: Actor,
     id: Uuid,
 ) -> Result<AdmittedSessions, ResourceError> {
     let txn = db.begin().await?;
@@ -94,6 +99,7 @@ pub async fn delete<C: ConnectionTrait + TransactionTrait>(
         .one(&txn)
         .await?
         .ok_or(ResourceError::NotFound)?;
+    actor.may_write(target.provider)?;
 
     TargetRoleAssignment::Entity::delete_many()
         .filter(TargetRoleAssignment::Column::TargetId.eq(target.id))
@@ -130,11 +136,25 @@ pub async fn delete<C: ConnectionTrait + TransactionTrait>(
     Ok(AdmittedSessions(admitted))
 }
 
+/// An assignment belongs to its target, so the target's owner decides
+async fn target_owner<C: ConnectionTrait>(
+    db: &C,
+    target_id: Uuid,
+) -> Result<Option<ProviderId>, ResourceError> {
+    Ok(Target::Entity::find_by_id(target_id)
+        .one(db)
+        .await?
+        .ok_or(ResourceError::NotFound)?
+        .provider)
+}
+
 pub async fn add_role<C: ConnectionTrait>(
     db: &C,
+    actor: Actor,
     target_id: Uuid,
     role_id: Uuid,
 ) -> Result<(), ResourceError> {
+    actor.may_write(target_owner(db, target_id).await?)?;
     TargetRoleAssignment::ActiveModel {
         target_id: Set(target_id),
         role_id: Set(role_id),
@@ -153,9 +173,11 @@ pub async fn add_role<C: ConnectionTrait>(
 
 pub async fn remove_role<C: ConnectionTrait>(
     db: &C,
+    actor: Actor,
     target_id: Uuid,
     role_id: Uuid,
 ) -> Result<(), ResourceError> {
+    actor.may_write(target_owner(db, target_id).await?)?;
     let result = TargetRoleAssignment::Entity::delete_by_id((target_id, role_id))
         .exec(db)
         .await?;

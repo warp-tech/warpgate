@@ -6,7 +6,7 @@ use sea_orm::{
 use uuid::Uuid;
 use warpgate_db_entities::{Role, TargetRoleAssignment, UserRoleAssignment};
 
-use super::{ResourceError, check_name, name_taken};
+use super::{Actor, ResourceError, check_name, name_taken};
 
 #[derive(Object)]
 pub struct RoleDataRequest {
@@ -25,12 +25,14 @@ fn set_data(model: &mut Role::ActiveModel, data: &RoleDataRequest) {
 
 pub async fn create<C: ConnectionTrait>(
     db: &C,
+    actor: Actor,
     data: &RoleDataRequest,
 ) -> Result<Role::Model, ResourceError> {
     check_name(&data.name)?;
     let mut model = Role::ActiveModel {
         id: Set(Uuid::new_v4()),
         is_default: Set(false),
+        provider: Set(actor.provider_id()),
         ..Default::default()
     };
     set_data(&mut model, data);
@@ -39,6 +41,7 @@ pub async fn create<C: ConnectionTrait>(
 
 pub async fn update<C: ConnectionTrait>(
     db: &C,
+    actor: Actor,
     id: Uuid,
     data: &RoleDataRequest,
 ) -> Result<Role::Model, ResourceError> {
@@ -47,6 +50,7 @@ pub async fn update<C: ConnectionTrait>(
         .one(db)
         .await?
         .ok_or(ResourceError::NotFound)?;
+    actor.may_write(role.provider)?;
 
     let mut model: Role::ActiveModel = role.into();
     set_data(&mut model, data);
@@ -56,6 +60,7 @@ pub async fn update<C: ConnectionTrait>(
 /// Also removes every assignment of the role, including revoked ones
 pub async fn delete<C: ConnectionTrait + TransactionTrait>(
     db: &C,
+    actor: Actor,
     id: Uuid,
 ) -> Result<(), ResourceError> {
     let txn = db.begin().await?;
@@ -63,6 +68,7 @@ pub async fn delete<C: ConnectionTrait + TransactionTrait>(
         .one(&txn)
         .await?
         .ok_or(ResourceError::NotFound)?;
+    actor.may_write(role.provider)?;
 
     UserRoleAssignment::Entity::delete_many()
         .filter(UserRoleAssignment::Column::RoleId.eq(id))

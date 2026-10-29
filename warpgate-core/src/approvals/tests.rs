@@ -1761,6 +1761,7 @@ mod polled_gate {
             ticket_require_approval: false,
             require_approval: true,
             ticket_max_uses: None,
+            provider: None,
         }
     }
 

@@ -84,6 +84,14 @@ uuid_newtype!(ProviderId);
 
 impl ProviderId {
     pub const GITOPS: Self = Self(Uuid::nil());
+
+    pub fn label(self) -> String {
+        if self == Self::GITOPS {
+            "GitOps".to_owned()
+        } else {
+            self.to_string()
+        }
+    }
 }
 
 /// Identity of a Warpgate protocol. Used wherever code branches on the

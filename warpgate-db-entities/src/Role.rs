@@ -79,6 +79,7 @@ impl From<Model> for Role {
             name: model.name,
             description: model.description,
             is_default: model.is_default,
+            provider: model.provider,
         }
     }
 }

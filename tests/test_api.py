@@ -1259,6 +1259,31 @@ def test_update_target_must_state_the_approval_gate(
     assert not admin_client.get_target(target.id).require_approval
 
 
+def test_provider_cannot_be_set_by_clients(admin_client: sdk.DefaultApi, pg_wg):
+    """`provider` marks rows a reconciler owns; the server alone sets it."""
+    url = f"https://localhost:{pg_wg.http_port}/@warpgate/admin/api"
+    session = requests.Session()
+    session.verify = False
+    session.headers["X-Warpgate-Token"] = "token-value"
+    forged = "00000000-0000-0000-0000-000000000000"
+
+    body = _ssh_target_request(f"forged-{uuid4()}").to_dict()
+    body["provider"] = forged
+    created = session.post(f"{url}/targets", json=body)
+    assert created.status_code == 201, created.text
+    target_id = created.json()["id"]
+    assert created.json()["provider"] is None
+    updated = session.put(f"{url}/targets/{target_id}", json=body)
+    assert updated.status_code == 200, updated.text
+    assert admin_client.get_target(target_id).provider is None
+
+    created = session.post(
+        f"{url}/roles", json={"name": f"forged-{uuid4()}", "provider": forged}
+    )
+    assert created.status_code == 201, created.text
+    assert admin_client.get_role(created.json()["id"]).provider is None
+
+
 def test_approval_parameters_can_be_cleared_and_reject_nonsense(
     pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
 ):

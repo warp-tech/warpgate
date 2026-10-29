@@ -8,8 +8,8 @@ use warpgate_common::{
     AdminPermission, Role as RoleConfig, Target as TargetConfig, User as UserConfig, WarpgateError,
 };
 use warpgate_common_http::errors::invalid_field;
-use warpgate_core::resources::ResourceError;
 use warpgate_core::resources::roles::{self as store, RoleDataRequest};
+use warpgate_core::resources::{Actor, ResourceError};
 use warpgate_db_entities::{Role, Target, User};
 
 use super::AdminContext;
@@ -67,7 +67,7 @@ impl ListApi {
     ) -> Result<CreateRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesCreate)?;
 
-        match store::create(&admin.services().db, &body).await {
+        match store::create(&admin.services().db, Actor::Admin, &body).await {
             Ok(role) => Ok(CreateRoleResponse::Created(Json(role.into()))),
             Err(ResourceError::EmptyName) => Ok(CreateRoleResponse::BadRequest(invalid_field(
                 "name",
@@ -105,6 +105,8 @@ enum UpdateRoleResponse {
 enum DeleteRoleResponse {
     #[oai(status = 204)]
     Deleted,
+    #[oai(status = 409)]
+    Conflict(Json<String>),
     #[oai(status = 404)]
     NotFound,
 }
@@ -154,7 +156,7 @@ impl DetailApi {
     ) -> Result<UpdateRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesEdit)?;
 
-        match store::update(&admin.services().db, id.0, &body).await {
+        match store::update(&admin.services().db, Actor::Admin, id.0, &body).await {
             Ok(role) => Ok(UpdateRoleResponse::Ok(Json(role.into()))),
             Err(ResourceError::EmptyName) => {
                 warn!("Rejecting request: role name is empty");
@@ -164,6 +166,9 @@ impl DetailApi {
                 "Name already exists".into(),
             ))),
             Err(ResourceError::NotFound) => Ok(UpdateRoleResponse::NotFound),
+            Err(err @ ResourceError::OwnedBy(_)) => {
+                Ok(UpdateRoleResponse::Conflict(Json(err.to_string())))
+            }
             Err(err) => Err(err.into()),
         }
     }
@@ -176,9 +181,12 @@ impl DetailApi {
     ) -> Result<DeleteRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesDelete)?;
 
-        match store::delete(&admin.services().db, id.0).await {
+        match store::delete(&admin.services().db, Actor::Admin, id.0).await {
             Ok(()) => Ok(DeleteRoleResponse::Deleted),
             Err(ResourceError::NotFound) => Ok(DeleteRoleResponse::NotFound),
+            Err(err @ ResourceError::OwnedBy(_)) => {
+                Ok(DeleteRoleResponse::Conflict(Json(err.to_string())))
+            }
             Err(err) => Err(err.into()),
         }
     }

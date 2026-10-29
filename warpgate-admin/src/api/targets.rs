@@ -9,8 +9,8 @@ use warpgate_common::{
     TargetSSHOptions, WarpgateError,
 };
 use warpgate_common_http::errors::invalid_field;
-use warpgate_core::resources::ResourceError;
 use warpgate_core::resources::targets::{self as store, TargetDataRequest};
+use warpgate_core::resources::{Actor, ResourceError};
 use warpgate_db_entities::Target::fuzzy_filter_targets;
 use warpgate_db_entities::{KnownHost, Role, Target, TargetGroup};
 
@@ -87,7 +87,7 @@ impl ListApi {
     ) -> Result<CreateTargetResponse, WarpgateError> {
         admin.require(AdminPermission::TargetsCreate)?;
 
-        match store::create(&admin.services().db, &body).await {
+        match store::create(&admin.services().db, Actor::Admin, &body).await {
             Ok(target) => Ok(CreateTargetResponse::Created(Json(maybe_redacted_target(
                 &admin, target,
             )?))),
@@ -129,6 +129,9 @@ enum UpdateTargetResponse {
 enum DeleteTargetResponse {
     #[oai(status = 204)]
     Deleted,
+
+    #[oai(status = 409)]
+    Conflict(Json<String>),
 
     #[oai(status = 404)]
     NotFound,
@@ -177,7 +180,7 @@ impl DetailApi {
         admin.require(AdminPermission::TargetsEdit)?;
 
         let services = admin.services();
-        let target = match store::update(&services.db, id.0, &body).await {
+        let target = match store::update(&services.db, Actor::Admin, id.0, &body).await {
             Ok(target) => target,
             Err(ResourceError::EmptyName) => {
                 warn!("Rejecting request: target name is empty");
@@ -193,6 +196,9 @@ impl DetailApi {
                 )));
             }
             Err(ResourceError::NotFound) => return Ok(UpdateTargetResponse::NotFound),
+            Err(err @ ResourceError::OwnedBy(_)) => {
+                return Ok(UpdateTargetResponse::Conflict(Json(err.to_string())));
+            }
             Err(err) => return Err(err.into()),
         };
 
@@ -220,12 +226,15 @@ impl DetailApi {
         admin.require(AdminPermission::TargetsDelete)?;
 
         let services = admin.services();
-        match store::delete(&services.db, id.0).await {
+        match store::delete(&services.db, Actor::Admin, id.0).await {
             Ok(admitted) => {
                 services.close_admitted_sessions(admitted).await?;
                 Ok(DeleteTargetResponse::Deleted)
             }
             Err(ResourceError::NotFound) => Ok(DeleteTargetResponse::NotFound),
+            Err(err @ ResourceError::OwnedBy(_)) => {
+                Ok(DeleteTargetResponse::Conflict(Json(err.to_string())))
+            }
             Err(err) => Err(err.into()),
         }
     }
@@ -284,13 +293,17 @@ enum AddTargetRoleResponse {
     #[oai(status = 201)]
     Created,
     #[oai(status = 409)]
-    AlreadyExists,
+    Conflict(Json<String>),
+    #[oai(status = 404)]
+    NotFound,
 }
 
 #[derive(ApiResponse)]
 enum DeleteTargetRoleResponse {
     #[oai(status = 204)]
     Deleted,
+    #[oai(status = 409)]
+    Conflict(Json<String>),
     #[oai(status = 404)]
     NotFound,
 }
@@ -339,9 +352,12 @@ impl RolesApi {
     ) -> Result<AddTargetRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesAssign)?;
 
-        match store::add_role(&admin.services().db, id.0, role_id.0).await {
+        match store::add_role(&admin.services().db, Actor::Admin, id.0, role_id.0).await {
             Ok(()) => Ok(AddTargetRoleResponse::Created),
-            Err(ResourceError::RoleAlreadyAssigned) => Ok(AddTargetRoleResponse::AlreadyExists),
+            Err(err @ (ResourceError::RoleAlreadyAssigned | ResourceError::OwnedBy(_))) => {
+                Ok(AddTargetRoleResponse::Conflict(Json(err.to_string())))
+            }
+            Err(ResourceError::NotFound) => Ok(AddTargetRoleResponse::NotFound),
             Err(err) => Err(err.into()),
         }
     }
@@ -359,9 +375,12 @@ impl RolesApi {
     ) -> Result<DeleteTargetRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesAssign)?;
 
-        match store::remove_role(&admin.services().db, id.0, role_id.0).await {
+        match store::remove_role(&admin.services().db, Actor::Admin, id.0, role_id.0).await {
             Ok(()) => Ok(DeleteTargetRoleResponse::Deleted),
             Err(ResourceError::NotFound) => Ok(DeleteTargetRoleResponse::NotFound),
+            Err(err @ ResourceError::OwnedBy(_)) => {
+                Ok(DeleteTargetRoleResponse::Conflict(Json(err.to_string())))
+            }
             Err(err) => Err(err.into()),
         }
     }
