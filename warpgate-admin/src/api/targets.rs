@@ -1,7 +1,7 @@
 use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
 use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::{
@@ -9,6 +9,7 @@ use warpgate_common::{
     TargetSSHOptions, WarpgateError,
 };
 use warpgate_common_http::errors::invalid_field;
+use warpgate_core::logging::AuditEvent;
 use warpgate_core::resources::ResourceError;
 use warpgate_core::resources::targets::{self as store, TargetDataRequest};
 use warpgate_db_entities::Target::fuzzy_filter_targets;
@@ -88,9 +89,17 @@ impl ListApi {
         admin.require(AdminPermission::TargetsCreate)?;
 
         match store::create(&admin.services().db, &body).await {
-            Ok(target) => Ok(CreateTargetResponse::Created(Json(maybe_redacted_target(
-                &admin, target,
-            )?))),
+            Ok(target) => {
+                AuditEvent::TargetCreated {
+                    target_id: target.id,
+                    target_name: target.name.clone(),
+                    actor_user_id: admin.auth.user_id(),
+                }
+                .emit();
+                Ok(CreateTargetResponse::Created(Json(maybe_redacted_target(
+                    &admin, target,
+                )?)))
+            }
             Err(ResourceError::EmptyName) => Ok(CreateTargetResponse::BadRequest(invalid_field(
                 "name",
                 "target name is empty",
@@ -196,6 +205,13 @@ impl DetailApi {
             Err(err) => return Err(err.into()),
         };
 
+        AuditEvent::TargetUpdated {
+            target_id: target.id,
+            target_name: target.name.clone(),
+            actor_user_id: admin.auth.user_id(),
+        }
+        .emit();
+
         warpgate_core::rate_limiting::apply_new_rate_limits(
             &services.rate_limiter_registry,
             &services.state,
@@ -220,8 +236,21 @@ impl DetailApi {
         admin.require(AdminPermission::TargetsDelete)?;
 
         let services = admin.services();
+        // Read before the delete so the audit entry can name the target
+        let target_name = Target::Entity::find_by_id(id.0)
+            .one(&services.db)
+            .await?
+            .map(|t| t.name)
+            .unwrap_or_default();
+
         match store::delete(&services.db, id.0).await {
             Ok(admitted) => {
+                AuditEvent::TargetDeleted {
+                    target_id: id.0,
+                    target_name,
+                    actor_user_id: admin.auth.user_id(),
+                }
+                .emit();
                 services.close_admitted_sessions(admitted).await?;
                 Ok(DeleteTargetResponse::Deleted)
             }
@@ -339,8 +368,20 @@ impl RolesApi {
     ) -> Result<AddTargetRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesAssign)?;
 
-        match store::add_role(&admin.services().db, id.0, role_id.0).await {
-            Ok(()) => Ok(AddTargetRoleResponse::Created),
+        let db = &admin.services().db;
+        match store::add_role(db, id.0, role_id.0).await {
+            Ok(()) => {
+                let (target_name, role_name) = target_and_role_names(db, id.0, role_id.0).await?;
+                AuditEvent::TargetRoleAdded {
+                    target_id: id.0,
+                    target_name,
+                    role_id: role_id.0,
+                    role_name,
+                    actor_user_id: admin.auth.user_id(),
+                }
+                .emit();
+                Ok(AddTargetRoleResponse::Created)
+            }
             Err(ResourceError::RoleAlreadyAssigned) => Ok(AddTargetRoleResponse::AlreadyExists),
             Err(err) => Err(err.into()),
         }
@@ -359,10 +400,41 @@ impl RolesApi {
     ) -> Result<DeleteTargetRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesAssign)?;
 
-        match store::remove_role(&admin.services().db, id.0, role_id.0).await {
-            Ok(()) => Ok(DeleteTargetRoleResponse::Deleted),
+        let db = &admin.services().db;
+        match store::remove_role(db, id.0, role_id.0).await {
+            Ok(()) => {
+                let (target_name, role_name) = target_and_role_names(db, id.0, role_id.0).await?;
+                AuditEvent::TargetRoleRemoved {
+                    target_id: id.0,
+                    target_name,
+                    role_id: role_id.0,
+                    role_name,
+                    actor_user_id: admin.auth.user_id(),
+                }
+                .emit();
+                Ok(DeleteTargetRoleResponse::Deleted)
+            }
             Err(ResourceError::NotFound) => Ok(DeleteTargetRoleResponse::NotFound),
             Err(err) => Err(err.into()),
         }
     }
+}
+
+/// Names are best-effort: the assignment row is the authoritative part
+async fn target_and_role_names(
+    db: &DatabaseConnection,
+    target_id: Uuid,
+    role_id: Uuid,
+) -> Result<(String, String), WarpgateError> {
+    let target_name = Target::Entity::find_by_id(target_id)
+        .one(db)
+        .await?
+        .map(|t| t.name)
+        .unwrap_or_default();
+    let role_name = Role::Entity::find_by_id(role_id)
+        .one(db)
+        .await?
+        .map(|r| r.name)
+        .unwrap_or_default();
+    Ok((target_name, role_name))
 }
