@@ -239,7 +239,114 @@ struct Write<'a, C> {
     adopt: bool,
 }
 
+/// The service layer's writes for one kind of resource, keyed by its spec
+trait Store {
+    type Data;
+
+    async fn create<C: ConnectionTrait>(
+        db: &C,
+        actor: Actor,
+        data: Self::Data,
+    ) -> Result<Uuid, ResourceError>;
+
+    async fn update<C: ConnectionTrait>(
+        db: &C,
+        actor: Actor,
+        id: Uuid,
+        data: Self::Data,
+    ) -> Result<(), ResourceError>;
+
+    async fn set_owner<C: ConnectionTrait>(
+        db: &C,
+        id: Uuid,
+        owner: ProviderId,
+    ) -> Result<(), ResourceError>;
+}
+
+/// For a resource module whose `create` and `update` take just the request
+macro_rules! store {
+    ($spec:ty, $module:ident, $data:ty) => {
+        impl Store for $spec {
+            type Data = $data;
+
+            async fn create<C: ConnectionTrait>(
+                db: &C,
+                actor: Actor,
+                data: $data,
+            ) -> Result<Uuid, ResourceError> {
+                Ok($module::create(db, actor, &data).await?.id)
+            }
+
+            async fn update<C: ConnectionTrait>(
+                db: &C,
+                actor: Actor,
+                id: Uuid,
+                data: $data,
+            ) -> Result<(), ResourceError> {
+                $module::update(db, actor, id, &data).await?;
+                Ok(())
+            }
+
+            async fn set_owner<C: ConnectionTrait>(
+                db: &C,
+                id: Uuid,
+                owner: ProviderId,
+            ) -> Result<(), ResourceError> {
+                $module::set_owner(db, id, owner).await
+            }
+        }
+    };
+}
+
+store!(TargetGroupSpec, target_groups, TargetGroupDataRequest);
+store!(RoleSpec, roles, RoleDataRequest);
+store!(TargetSpec, targets, TargetDataRequest);
+
+impl Store for SshClientKeySpec {
+    type Data = (SshClientKeyDataRequest, KeyMaterial);
+
+    async fn create<C: ConnectionTrait>(
+        db: &C,
+        actor: Actor,
+        (data, material): Self::Data,
+    ) -> Result<Uuid, ResourceError> {
+        Ok(ssh_client_keys::create(db, actor, &data, material)
+            .await?
+            .id)
+    }
+
+    async fn update<C: ConnectionTrait>(
+        db: &C,
+        actor: Actor,
+        id: Uuid,
+        (data, material): Self::Data,
+    ) -> Result<(), ResourceError> {
+        ssh_client_keys::update(db, actor, id, &data, Some(material)).await?;
+        Ok(())
+    }
+
+    async fn set_owner<C: ConnectionTrait>(
+        db: &C,
+        id: Uuid,
+        owner: ProviderId,
+    ) -> Result<(), ResourceError> {
+        ssh_client_keys::set_owner(db, id, owner).await
+    }
+}
+
 impl<C: ConnectionTrait> Write<'_, C> {
+    /// Creates the row, or updates it after taking it over for an adoption
+    async fn save<S: Store>(&self, data: S::Data) -> Result<Uuid, ResourceError> {
+        let Some(id) = self.id else {
+            return S::create(self.db, self.actor, data).await;
+        };
+        if self.adopt {
+            S::set_owner(self.db, id, self.provider).await?;
+        }
+        S::update(self.db, self.actor, id, data).await?;
+        Ok(id)
+    }
+
     async fn group(&self, manifest: &Manifest<TargetGroupSpec>) -> Result<(), ResourceError> {
         let TargetGroupSpec { description, color } = &manifest.spec;
         let data = TargetGroupDataRequest {
@@ -247,17 +354,7 @@ impl<C: ConnectionTrait> Write<'_, C> {
             description: Some(description.clone()),
             color: color.clone(),
         };
-        match self.id {
-            None => {
-                target_groups::create(self.db, self.actor, &data).await?;
-            }
-            Some(id) => {
-                if self.adopt {
-                    target_groups::set_owner(self.db, id, self.provider).await?;
-                }
-                target_groups::update(self.db, self.actor, id, &data).await?;
-            }
-        }
+        self.save::<TargetGroupSpec>(data).await?;
         Ok(())
     }
 
@@ -271,17 +368,7 @@ impl<C: ConnectionTrait> Write<'_, C> {
             description: Some(description.clone()),
             is_default: Some(*is_default),
         };
-        match self.id {
-            None => {
-                roles::create(self.db, self.actor, &data).await?;
-            }
-            Some(id) => {
-                if self.adopt {
-                    roles::set_owner(self.db, id, self.provider).await?;
-                }
-                roles::update(self.db, self.actor, id, &data).await?;
-            }
-        }
+        self.save::<RoleSpec>(data).await?;
         Ok(())
     }
 
@@ -299,17 +386,7 @@ impl<C: ConnectionTrait> Write<'_, C> {
             label: manifest.metadata.name.clone(),
             is_default: *is_default,
         };
-        match self.id {
-            None => {
-                ssh_client_keys::create(self.db, self.actor, &data, material).await?;
-            }
-            Some(id) => {
-                if self.adopt {
-                    ssh_client_keys::set_owner(self.db, id, self.provider).await?;
-                }
-                ssh_client_keys::update(self.db, self.actor, id, &data, Some(material)).await?;
-            }
-        }
+        self.save::<SshClientKeySpec>((data, material)).await?;
         Ok(())
     }
 
@@ -363,20 +440,8 @@ impl<C: ConnectionTrait> Write<'_, C> {
             require_approval: *require_approval,
             ticket_max_uses: *ticket_max_uses,
         };
-        let id = match self.id {
-            None => {
-                let id = targets::create(self.db, self.actor, &data).await?.id;
-                names.add_target(&manifest.metadata.name, id);
-                id
-            }
-            Some(id) => {
-                if self.adopt {
-                    targets::set_owner(self.db, id, self.provider).await?;
-                }
-                targets::update(self.db, self.actor, id, &data).await?;
-                id
-            }
-        };
+        let id = self.save::<TargetSpec>(data).await?;
+        names.add_target(&manifest.metadata.name, id);
 
         let wanted = roles
             .iter()
