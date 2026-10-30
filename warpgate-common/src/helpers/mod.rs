@@ -8,6 +8,7 @@ pub mod net;
 pub mod otp;
 pub mod password_policy;
 pub mod proxy_protocol;
+pub mod qr;
 pub mod rng;
 pub mod serde_base64;
 pub mod serde_base64_secret;

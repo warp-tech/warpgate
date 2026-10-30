@@ -18,6 +18,7 @@ pub mod version;
 pub use config::*;
 pub use error::{UserFacingReason, WarpgateError, io_connect_reason};
 pub use helpers::password_policy::{PasswordPolicy, PasswordPolicyViolation, validate_password};
+pub use helpers::qr::render_qr_code_terminal;
 pub use secrets::{
     BackendType, MaybeSecretRef, SecretBackendConfig, SecretError, SecretRef, SecretResolver,
     StoredSecrets, VaultAppRoleAuth, VaultAuthConfig, VaultKubernetesAuth, VaultTokenAuth,
