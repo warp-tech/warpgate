@@ -127,19 +127,26 @@
 </script>
 
 <Loadable promise={init()} bind:value={target}>
-    {#snippet children(target)}
+    {#snippet children(
+        target,
+    )}
         <div class="main-container container-max-lg">
             <div class="flex-grow-1">
                 <Modal
                     isOpen={connectionsInstructionsModalOpen}
-                    toggle={() => connectionsInstructionsModalOpen = false}
+                    toggle={() => (connectionsInstructionsModalOpen = false)}
                     size="lg"
                 >
                     <ModalHeader>Access instructions</ModalHeader>
                     <ModalBody>
-                        {#if target.options.kind === 'Ssh' || target.options.kind === 'MySql' || target.options.kind === 'Postgres' || target.options.kind === 'Kubernetes'}
+                        {#if target.options.kind === 'Ssh' ||
+                            target.options.kind === 'MySql' ||
+                            target.options.kind === 'Postgres' ||
+                            target.options.kind === 'Kubernetes'}
                             <Loadable promise={api.getUsers()}>
-                                {#snippet children(users)}
+                                {#snippet children(
+                                    users,
+                                )}
                                     <FormGroup floating label="Select a user">
                                         <select
                                             bind:value={selectedUsername}
@@ -161,9 +168,15 @@
                                 targetName={target.name}
                                 username={selectedUsername}
                                 targetKind={target.options.kind}
-                                targetExternalHost={target.options.kind === TargetKind.Http ? target.options.externalHost : undefined}
-                                targetDefaultDatabaseName={(target.options.kind === TargetKind.MySql || target.options.kind === TargetKind.Postgres)
-                                ? target.options.defaultDatabaseName : undefined}
+                                targetExternalHost={target.options.kind ===
+                                TargetKind.Http
+                                    ? target.options.externalHost
+                                    : undefined}
+                                targetDefaultDatabaseName={target.options
+                                    .kind === TargetKind.MySql ||
+                                target.options.kind === TargetKind.Postgres
+                                    ? target.options.defaultDatabaseName
+                                    : undefined}
                             />
                         {/key}
                     </ModalBody>
@@ -172,7 +185,8 @@
                             color="secondary"
                             class="modal-button"
                             block
-                            on:click={() => connectionsInstructionsModalOpen = false}
+                            on:click={() =>
+                                (connectionsInstructionsModalOpen = false)}
                         >
                             Close
                         </Button>
@@ -294,7 +308,8 @@
                             />
                         {/if}
 
-                        {#if target.options.kind === 'MySql' || target.options.kind === 'Postgres'}
+                        {#if target.options.kind === 'MySql' ||
+                            target.options.kind === 'Postgres'}
                             <div class="row">
                                 <div class="col-8">
                                     <FormGroup floating label="Target host">
@@ -335,7 +350,8 @@
                                         >
                                             <select
                                                 class="form-control"
-                                                bind:value={target.options.auth.kind}
+                                                bind:value={target.options.auth
+                                                    .kind}
                                             >
                                                 <option value="Password">
                                                     Password
@@ -399,7 +415,8 @@
                                     <textarea
                                         class="form-control"
                                         style="height: 18rem;"
-                                        bind:value={target.options.auth.certificate}
+                                        bind:value={target.options.auth
+                                            .certificate}
                                         placeholder="-----BEGIN CERTIFICATE-----"
                                     ></textarea>
                                 </FormGroup>
@@ -407,7 +424,8 @@
                                     <textarea
                                         class="form-control"
                                         style="height: 12rem;"
-                                        bind:value={target.options.auth.privateKey}
+                                        bind:value={target.options.auth
+                                            .privateKey}
                                         placeholder="-----BEGIN RSA PRIVATE KEY-----"
                                     ></textarea>
                                 </FormGroup>
@@ -436,7 +454,9 @@
                         bodyTitle="Allow access for roles"
                     >
                         <Loadable promise={loadRolesPromise}>
-                            {#snippet children(roles)}
+                            {#snippet children(
+                                roles,
+                            )}
                                 <div class="list-group list-group-flush mb-3">
                                     {#each roles as role (role.id)}
                                         <label
@@ -448,7 +468,8 @@
                                                 class="mb-0 me-2"
                                                 type="switch"
                                                 disabled={!$adminPermissions.targetsEdit}
-                                                on:change={() => toggleRole(role)}
+                                                on:change={() =>
+                                                    toggleRole(role)}
                                                 checked={roleIsAllowed[role.id]}
                                             />
                                             <div>
@@ -478,13 +499,15 @@
                         </FormGroup>
                     </Section>
 
-                    {#if target.options.kind === 'MySql' || target.options.kind === 'Postgres'}
+                    {#if target.options.kind === 'MySql' ||
+                        target.options.kind === 'Postgres'}
                         <Section id="advanced" title="Advanced">
                             {#if target.options.kind === 'Postgres'}
                                 <FormGroup floating label="Protocol version">
                                     <select
                                         class="form-control"
-                                        bind:value={target.options.protocolVersion}
+                                        bind:value={target.options
+                                            .protocolVersion}
                                     >
                                         <option value="3.2">3.2</option>
                                         <option value="3.0">3.0</option>
@@ -523,7 +546,8 @@
                                     class="form-control"
                                     type="text"
                                     placeholder="database-name"
-                                    bind:value={target.options.defaultDatabaseName}
+                                    bind:value={target.options
+                                        .defaultDatabaseName}
                                 >
                                 <small class="form-text text-muted">
                                     Default database name used in connection
@@ -546,7 +570,8 @@
                                 class="mb-0 me-2"
                                 type="switch"
                                 on:change={() => {
-                                    target.requireApproval = !target.requireApproval
+                                    target.requireApproval =
+                                        !target.requireApproval
                                     update()
                                 }}
                                 checked={target.requireApproval}
@@ -578,9 +603,10 @@
                                     class="mb-0 me-2"
                                     type="switch"
                                     on:change={() => {
-                                    target.ticketRequestsDisabled = !target.ticketRequestsDisabled
-                                    update()
-                                }}
+                                        target.ticketRequestsDisabled =
+                                            !target.ticketRequestsDisabled
+                                        update()
+                                    }}
                                     checked={target.ticketRequestsDisabled}
                                 />
                                 <div>
@@ -597,9 +623,10 @@
                                     class="mb-0 me-2"
                                     type="switch"
                                     on:change={() => {
-                                    target.ticketRequireApproval = !target.ticketRequireApproval
-                                    update()
-                                }}
+                                        target.ticketRequireApproval =
+                                            !target.ticketRequireApproval
+                                        update()
+                                    }}
                                     checked={target.ticketRequireApproval}
                                 />
                                 <div>Always require admin approval</div>
@@ -608,7 +635,10 @@
                             <DurationInput
                                 label="Max self-service ticket duration"
                                 seconds={target.ticketMaxDurationSeconds}
-                                onChange={v => { target.ticketMaxDurationSeconds = v; update() }}
+                                onChange={v => {
+                                    target.ticketMaxDurationSeconds = v
+                                    update()
+                                }}
                                 class="mb-1"
                             />
                             <small class="form-text text-muted mb-3 d-block">
@@ -623,10 +653,15 @@
                                     class="form-control"
                                     value={target.ticketMaxUses ?? ''}
                                     onchange={e => {
-                                    const v = parseInt(e.currentTarget.value, 10)
-                                    target.ticketMaxUses = Number.isNaN(v) ? undefined : v
-                                    update()
-                                }}
+                                        const v = parseInt(
+                                            e.currentTarget.value,
+                                            10,
+                                        )
+                                        target.ticketMaxUses = Number.isNaN(v)
+                                            ? undefined
+                                            : v
+                                        update()
+                                    }}
                                 >
                                 <small class="form-text text-muted">
                                     Leave empty to use the global default.
@@ -652,14 +687,20 @@
 
 <StickyActionBar>
     {#snippet start()}
-        {#if ($serverInfo?.webClientsEnabled ?? true) && target && (target.options.kind === 'Ssh' || target.options.kind === 'Rdp' || target.options.kind === 'Vnc')}
+        {#if ($serverInfo?.webClientsEnabled ?? true) &&
+            target &&
+            (target.options.kind === 'Ssh' ||
+                target.options.kind === 'Rdp' ||
+                target.options.kind === 'Vnc')}
             <AsyncButton color="secondary" click={connect}>
                 Connect
             </AsyncButton>
         {/if}
         <Button
             color="secondary"
-            onclick={() => { connectionsInstructionsModalOpen = true }}
+            onclick={() => {
+                connectionsInstructionsModalOpen = true
+            }}
         >
             Access instructions
         </Button>

@@ -146,7 +146,8 @@
                                 <div>
                                     <h6 class="mb-1">
                                         {user.username}
-                                        {#if user.displayName && user.displayName !== user.username}
+                                        {#if user.displayName &&
+                                            user.displayName !== user.username}
                                             <small class="text-muted ms-1"
                                                 >({user.displayName})</small
                                             >

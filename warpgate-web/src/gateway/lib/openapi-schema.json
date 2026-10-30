@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.30.0-beta.3-1-g9a45f727-modified"
+    "version": "v0.30.0-modified"
   },
   "servers": [
     {
@@ -474,6 +474,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": ""
           }
         },
         "security": [
@@ -2174,6 +2177,9 @@
           },
           "external_hosts": {
             "$ref": "#/components/schemas/ExternalHostsInfo"
+          },
+          "control_plane_host": {
+            "type": "string"
           },
           "ports": {
             "$ref": "#/components/schemas/PortsInfo"

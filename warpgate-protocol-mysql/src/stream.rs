@@ -82,7 +82,7 @@ where
     }
 
     /// Raises the codec's packet-size ceiling to the value negotiated in the
-    /// handshake, never below MySQL's default. Without this the proxy keeps the
+    /// handshake, kept between MySQL's default and its hard maximum. Without this the proxy keeps the
     /// 4 MiB `PacketCodec` default and aborts mid-stream on any larger packet
     /// (a wide row, a large BLOB) even though both peers agreed on more.
     pub fn set_max_packet_size(&mut self, negotiated: u32) {
@@ -110,6 +110,20 @@ where
     }
 }
 
+const MAX_ALLOWED_PACKET: usize = 1024 * 1024 * 1024;
+
 fn effective_max_packet(negotiated: u32) -> usize {
-    (negotiated as usize).max(DEFAULT_MAX_ALLOWED_PACKET)
+    (negotiated as usize).clamp(DEFAULT_MAX_ALLOWED_PACKET, MAX_ALLOWED_PACKET)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_packet_is_clamped() {
+        assert_eq!(effective_max_packet(0), DEFAULT_MAX_ALLOWED_PACKET);
+        assert_eq!(effective_max_packet(64 << 20), 64 << 20);
+        assert_eq!(effective_max_packet(u32::MAX), MAX_ALLOWED_PACKET);
+    }
 }

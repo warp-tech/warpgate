@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use sea_orm::ActiveValue::Set;
+use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter,
     QueryOrder, TransactionTrait,
@@ -400,9 +401,22 @@ pub async fn activate_ticket_request(
     )
     .await?;
 
-    let mut active: TicketRequest::ActiveModel = request.into();
-    active.ticket_id = Set(Some(ticket_id));
-    let updated = active.update(&txn).await?;
+    let update_res = TicketRequest::Entity::update_many()
+        .col_expr(
+            TicketRequest::Column::TicketId,
+            Expr::value(Some(ticket_id)),
+        )
+        .filter(TicketRequest::Column::Id.eq(request_id))
+        .filter(TicketRequest::Column::Status.eq(TicketRequestStatus::Approved))
+        .filter(TicketRequest::Column::TicketId.is_null())
+        .exec(&txn)
+        .await?;
+    if update_res.rows_affected == 0 {
+        return Err(ActivateTicketRequestError::AlreadyActivated);
+    }
+
+    let mut updated = request;
+    updated.ticket_id = Some(ticket_id);
 
     txn.commit().await?;
 
@@ -470,21 +484,4 @@ pub async fn list_ticket_requests(
     }
 
     Ok(query.all(db_conn).await?)
-}
-
-pub async fn delete_ticket(
-    db: &sea_orm::DatabaseConnection,
-    ticket_id: Uuid,
-) -> Result<(), WarpgateError> {
-    let txn = db.begin().await?;
-
-    TicketRequest::Entity::delete_many()
-        .filter(TicketRequest::Column::TicketId.eq(Some(ticket_id)))
-        .exec(&txn)
-        .await?;
-
-    Ticket::Entity::delete_by_id(ticket_id).exec(&txn).await?;
-    txn.commit().await?;
-
-    Ok(())
 }

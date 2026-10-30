@@ -170,8 +170,8 @@
                         color="success"
                         class="mb-4 d-flex align-items-center w-100 text-start"
                         on:click={() => {
-                        push(`/login/${authRequest.id}`)
-                    }}
+                            push(`/login/${authRequest.id}`)
+                        }}
                     >
                         <div>
                             <strong class="d-block">

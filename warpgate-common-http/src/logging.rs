@@ -1,9 +1,11 @@
+use std::borrow::Cow;
 use std::net::{IpAddr, ToSocketAddrs};
 
 use poem::http::{Method, StatusCode, Uri};
 use poem::web::RemoteAddr;
 use poem::{Addr, Request};
 use tracing::*;
+use url::form_urlencoded;
 use warpgate_core::{Services, WarpgateServerHandle};
 
 use crate::request::trusted_client_ip;
@@ -60,7 +62,48 @@ pub async fn span_for_request(
     })
 }
 
+/// The request URI for logs: a `warpgate-ticket` query value is a credential.
+pub fn redacted_uri(uri: &Uri) -> String {
+    let Some(query) = uri.query() else {
+        return uri.to_string();
+    };
+    let is_ticket = |key: &str| key == "warpgate-ticket";
+    if !form_urlencoded::parse(query.as_bytes()).any(|(key, _)| is_ticket(&key)) {
+        return uri.to_string();
+    }
+    let query = form_urlencoded::Serializer::new(String::new())
+        .extend_pairs(
+            form_urlencoded::parse(query.as_bytes()).map(|(key, value)| {
+                let value = if is_ticket(&key) {
+                    Cow::Borrowed("redacted")
+                } else {
+                    value
+                };
+                (key, value)
+            }),
+        )
+        .finish();
+    format!("{}?{query}", uri.path())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ticket_query_value_is_redacted() {
+        let uri: Uri = "/app/x?a=1&warpgate-ticket=s3cret&b=2".parse().unwrap();
+        assert_eq!(
+            redacted_uri(&uri),
+            "/app/x?a=1&warpgate-ticket=redacted&b=2"
+        );
+        let plain: Uri = "/app/x?a=1".parse().unwrap();
+        assert_eq!(redacted_uri(&plain), "/app/x?a=1");
+    }
+}
+
 pub fn log_request_result(method: &Method, url: &Uri, client_ip: Option<&str>, status: StatusCode) {
+    let url = redacted_uri(url);
     let client_ip = client_ip.unwrap_or("<unknown>");
     if status.is_server_error() || status.is_client_error() {
         warn!(%method, %url, %status, %client_ip, "Request failed");
@@ -75,6 +118,7 @@ pub fn log_request_error(method: &Method, url: &Uri, client_ip: Option<&str>, er
         log_request_result(method, url, client_ip, status);
         return;
     }
+    let url = redacted_uri(url);
     let client_ip = client_ip.unwrap_or("<unknown>");
     error!(%method, %url, ?error, %client_ip, "Request failed");
 }

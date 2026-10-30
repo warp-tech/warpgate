@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.30.0-beta.3-1-g9a45f727-modified"
+    "version": "v0.30.0-modified"
   },
   "servers": [
     {
@@ -327,6 +327,16 @@
               }
             }
           },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "400": {
             "description": "",
             "content": {
@@ -420,6 +430,19 @@
               "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/Role"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -6147,8 +6170,7 @@
           "text",
           "target",
           "values",
-          "timestamp",
-          "session_id"
+          "timestamp"
         ],
         "properties": {
           "id": {
@@ -7868,8 +7890,7 @@
             "minimum": 1.0
           },
           "ticket_requests_disabled": {
-            "type": "boolean",
-            "description": "Required on every write, so that saving a target without mentioning a\ngate is refused rather than quietly taking it off."
+            "type": "boolean"
           },
           "ticket_require_approval": {
             "type": "boolean"
@@ -8264,6 +8285,12 @@
           },
           "domain": {
             "type": "string"
+          },
+          "kdc_url": {
+            "type": "string",
+            "description": "Kerberos KDC for network-level authentication: `tcp://dc:88`, `udp://dc:88`\nor a KDC proxy `https://` URL. When set, CredSSP negotiates Kerberos (falling\nback to NTLM), which accounts barred from NTLM (Protected Users) require.\nThe target host must then be a name matching its `TERMSRV/` SPN, not an IP.",
+            "maxLength": 2048,
+            "pattern": "^$|^(tcp|udp|https?)://.+"
           },
           "auth": {
             "$ref": "#/components/schemas/RdpTargetAuth"

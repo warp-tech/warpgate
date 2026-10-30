@@ -118,6 +118,7 @@ pub struct Info {
     selected_target: Option<String>,
     external_host: Option<String>,
     external_hosts: Option<ExternalHostsInfo>,
+    control_plane_host: Option<String>,
     ports: PortsInfo,
     password_login_mode: Parameters::PasswordLoginMode,
     authorized_via_ticket: bool,
@@ -368,6 +369,9 @@ impl Api {
                     rdp: None,
                 }
             },
+            control_plane_host: config
+                .control_plane_host()
+                .or_else(|| fallback_host.clone()),
             own_credential_management_allowed: parameters.allow_own_credential_management,
             ticket_self_service_enabled: parameters.ticket_self_service_enabled,
             ticket_max_duration_seconds: parameters.ticket_max_duration_seconds,

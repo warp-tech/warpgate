@@ -1,0 +1,51 @@
+[package]
+name = "ironrdp-pdu"
+version = "0.9.0"
+readme = "README.md"
+description = "RDP PDU encoding and decoding"
+edition.workspace = true
+rust-version = "1.89"
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+doctest = false
+# test = false
+
+[features]
+default = []
+std = ["alloc", "ironrdp-error/std", "ironrdp-core/std"]
+alloc = ["ironrdp-core/alloc", "ironrdp-error/alloc"]
+qoi = []
+qoiz = ["qoi"]
+arbitrary = ["alloc", "dep:arbitrary", "bitflags/arbitrary"]
+
+[dependencies]
+bitflags = "2.11"
+ironrdp-core = { path = "../ironrdp-core", version = "0.2", features = ["std"] } # public
+ironrdp-error = { path = "../ironrdp-error", version = "0.2" } # public
+arbitrary = { version = "1", features = ["derive"], optional = true }
+tap = "1"
+
+# TODO: get rid of these dependencies (related code should probably go into another crate)
+bit_field = "0.10"
+byteorder = "1.5" # TODO: remove
+der-parser = "10.0"
+md5 = { package = "md-5", version = "0.10" }
+num-bigint = "0.4"
+num-derive.workspace = true # TODO: remove
+num-integer = "0.1"
+num-traits.workspace = true # TODO: remove
+sha1 = "0.10"
+x509-cert = { version = "0.2", default-features = false, features = ["std"] }
+pkcs1 = "0.7"
+
+[dev-dependencies]
+expect-test.workspace = true
+
+[lints]
+workspace = true

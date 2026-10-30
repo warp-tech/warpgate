@@ -9,7 +9,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, trace, warn};
 use url::Url;
-use warpgate_common::auth::AuthSelector;
+use warpgate_common::auth::{AuthSelector, redacted_selector};
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{Protocol, Secret, TargetMySqlOptions, UserSessionId};
 use warpgate_common_http::ext::construct_external_url;
@@ -173,8 +173,11 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
             let resp = HandshakeResponse::decode_with(payload, &mut self.capabilities)
                 .map_err(MySqlError::decode)?;
 
-            trace!(?resp, "Handshake response");
-            info!(capabilities=?self.capabilities, username=%resp.username, "User handshake");
+            // `resp` carries the raw username (possibly a ticket secret) and the
+            // auth response (cleartext under mysql_clear_password), so only the
+            // harmless fields are traced.
+            trace!(database=?resp.database, auth_plugin=?resp.auth_plugin, "Handshake response");
+            info!(capabilities=?self.capabilities, username=%redacted_selector(&resp.username), "User handshake");
 
             if self.capabilities.contains(Capabilities::SSL) {
                 if self.stream.is_tls() {
@@ -283,7 +286,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         admitted: AdmittedTarget<TargetMySqlOptions>,
     ) -> Result<(), MySqlError> {
         self.database = handshake.database.clone();
-        self.username = Some(handshake.username);
+        self.username = Some(redacted_selector(&handshake.username).to_owned());
         if let Some(ref database) = handshake.database {
             info!("Selected database: {database}");
         }

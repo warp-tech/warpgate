@@ -115,9 +115,9 @@
     <Form
         {validated}
         on:submit={e => {
-        _save()
-        e.preventDefault()
-    }}
+            _save()
+            e.preventDefault()
+        }}
     >
         <ModalBody>
             <div class="d-flex gap-4 layout ms-2">
@@ -182,7 +182,7 @@
                 class="modal-button"
                 color="primary"
                 disabled={!totpValid}
-                on:click={() => validated = true}
+                on:click={() => (validated = true)}
             >
                 Confirm
             </Button>

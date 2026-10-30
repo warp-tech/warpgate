@@ -193,7 +193,9 @@
     })
 </script>
 
-{#snippet row(entry: Entry)}
+{#snippet row(
+    entry: Entry,
+)}
     {#if entry.kind === 'item'}
         {@render item?.(entry.item)}
     {:else if groupHeader}
@@ -234,7 +236,9 @@
             class="list-group list-group-flush mb-3"
             hidden={!built.entries.length}
         >
-            {#each built.entries as _entry (_entry.kind === 'item' ? _entry.item : _entry.key)}
+            {#each built.entries as _entry (_entry.kind === 'item'
+                ? _entry.item
+                : _entry.key)}
                 {@render row(_entry)}
             {/each}
         </div>

@@ -26,7 +26,8 @@ $info: $blue;
 $component-active-bg: #192528;
 
 $input-bg: #1c1c24;
-$input-border-color: #ced4da40;
+// WCAG AA: field borders 3.2:1 on $input-bg
+$input-border-color: #666b80;
 $input-color: #ccc;
 $input-focus-bg: #1b1b22;
 $input-focus-border-color: tint-color($component-active-bg, 25%) ;
@@ -51,8 +52,6 @@ $list-group-action-active-bg: rgba(#fff, .125);
 $link-hover-color: lighten($link-color, 25%);
 
 $badge-color: $body-bg;
-
-$text-muted: rgba($body-color, .5);
 
 $modal-content-bg: $body-bg;
 

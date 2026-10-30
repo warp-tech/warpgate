@@ -56,9 +56,9 @@
     <Form
         {validated}
         on:submit={e => {
-        _save()
-        e.preventDefault()
-    }}
+            _save()
+            e.preventDefault()
+        }}
     >
         <ModalBody>
             <FormGroup floating label="Enter a new password" spacing="0">
@@ -77,15 +77,20 @@
                     <ul class="m-0">
                         {#each policyViolations as violation (violation)}
                             <li>
-                                {#if violation === PasswordPolicyViolation.MissingDigit}
+                                {#if violation ===
+                                    PasswordPolicyViolation.MissingDigit}
                                     Must contain a digit
-                                {:else if violation === PasswordPolicyViolation.MissingLowercase}
+                                {:else if violation ===
+                                    PasswordPolicyViolation.MissingLowercase}
                                     Must contain a lowercase letter
-                                {:else if violation === PasswordPolicyViolation.MissingUppercase}
+                                {:else if violation ===
+                                    PasswordPolicyViolation.MissingUppercase}
                                     Must contain an uppercase letter
-                                {:else if violation === PasswordPolicyViolation.MissingSpecial}
+                                {:else if violation ===
+                                    PasswordPolicyViolation.MissingSpecial}
                                     Must contain a special character
-                                {:else if violation === PasswordPolicyViolation.TooShort}
+                                {:else if violation ===
+                                    PasswordPolicyViolation.TooShort}
                                     Must be longer
                                 {/if}
                             </li>
@@ -98,7 +103,7 @@
             <Button
                 class="modal-button"
                 color="primary"
-                on:click={() => validated = true}
+                on:click={() => (validated = true)}
             >
                 Create
             </Button>

@@ -25,7 +25,7 @@ use warpgate_tls::configure_cluster_tls_connector;
 use crate::SessionsFilter;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
-const REAP_INTERVAL: Duration = Duration::from_secs(15);
+pub const REAP_INTERVAL: Duration = Duration::from_secs(15);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub const NOTIFICATION_TIMEOUT: Duration = Duration::from_secs(10);
@@ -268,7 +268,8 @@ impl Cluster {
         Ok(PeerConnection { tls, addrs, port })
     }
 
-    /// Register this node and spawn heartbeat + reaper tasks
+    /// Registers this node and spawns the heartbeat. The reaper runs in
+    /// [`crate::Services::start_cluster`] so it can close what it ends.
     pub async fn start(self: &Arc<Self>) -> Result<(), WarpgateError> {
         self.heartbeat().await?;
         info!(node_id = %self.node_id, address = %self.address, "Joined cluster");
@@ -281,19 +282,6 @@ impl Cluster {
                     interval.tick().await;
                     if let Err(error) = this.heartbeat().await {
                         warn!(%error, "Node heartbeat failed");
-                    }
-                }
-            }
-        });
-
-        tokio::spawn({
-            let db = self.db.clone();
-            async move {
-                let mut interval = tokio::time::interval(REAP_INTERVAL);
-                loop {
-                    interval.tick().await;
-                    if let Err(error) = reap(&db).await {
-                        warn!(%error, "Node reaper failed");
                     }
                 }
             }
@@ -392,7 +380,7 @@ const SHARED_SESSION_ORPHAN_GRACE: time::Duration = time::Duration::minutes(5);
 async fn end_connection_bound_sessions(
     db: &DatabaseConnection,
     node_filter: impl IntoCondition,
-) -> Result<(), WarpgateError> {
+) -> Result<Vec<UserSessionId>, WarpgateError> {
     UserSession::revoke_open_matching(
         db,
         Condition::all()
@@ -404,7 +392,9 @@ async fn end_connection_bound_sessions(
 
 /// End unowned (HTTP browser) sessions whose backing is gone: they are kept
 /// alive by their stored cookie sessions, not by any node.
-async fn end_sessions_without_cookie(db: &DatabaseConnection) -> Result<(), WarpgateError> {
+async fn end_sessions_without_cookie(
+    db: &DatabaseConnection,
+) -> Result<Vec<UserSessionId>, WarpgateError> {
     let grace_cutoff = OffsetDateTime::now_utc() - SHARED_SESSION_ORPHAN_GRACE;
     UserSession::revoke_open_matching(
         db,
@@ -457,7 +447,9 @@ pub async fn alive_nodes(db: &DatabaseConnection) -> Result<Vec<Node::Model>, Wa
         .await?)
 }
 
-async fn reap(db: &DatabaseConnection) -> Result<(), WarpgateError> {
+/// Returns the ids of the sessions it ended. Other nodes may still hold live
+/// views of them, which the caller closes.
+pub async fn reap(db: &DatabaseConnection) -> Result<Vec<UserSessionId>, WarpgateError> {
     let cutoff = OffsetDateTime::now_utc() - HEARTBEAT_TIMEOUT;
     // reap dead nodes
     let dead = Node::Entity::delete_many()
@@ -478,13 +470,15 @@ async fn reap(db: &DatabaseConnection) -> Result<(), WarpgateError> {
 
     // At least the current node should have been present - bail
     // intead of ending all sessions
-    if !live.is_empty() {
-        end_connection_bound_sessions(db, UserSession::Column::NodeId.is_not_in(live)).await?;
-    }
+    let mut ended = if live.is_empty() {
+        vec![]
+    } else {
+        end_connection_bound_sessions(db, UserSession::Column::NodeId.is_not_in(live)).await?
+    };
 
-    end_sessions_without_cookie(db).await?;
+    ended.extend(end_sessions_without_cookie(db).await?);
     end_children_of_ended_parents(db).await?;
-    Ok(())
+    Ok(ended)
 }
 
 /// Fallback order
@@ -777,5 +771,54 @@ mod tests {
 
         assert!(is_user_session_open(&db, ticket_session).await);
         assert!(is_open(&db, ticket_child).await);
+    }
+
+    async fn admitted_by(db: &DatabaseConnection, target_session: Uuid, ticket: Uuid) {
+        TargetSession::Entity::update_many()
+            .col_expr(TargetSession::Column::TicketId, Expr::value(Some(ticket)))
+            .filter(TargetSession::Column::Id.eq(warpgate_common::TargetSessionId(target_session)))
+            .exec(db)
+            .await
+            .unwrap();
+    }
+
+    /// Revoking or expiring a ticket must find exactly the open sessions it
+    /// admitted: not a password session, not one under another live ticket,
+    /// and not one that has already ended.
+    #[tokio::test]
+    async fn ticket_lookup_finds_only_the_sessions_it_admitted() {
+        use warpgate_db_entities::Ticket;
+
+        use crate::approvals::tests::seed_ticket;
+        let db = migrated_db().await;
+        let now = OffsetDateTime::now_utc();
+        let expired = seed_ticket(&db, None, Some(now - time::Duration::minutes(1))).await;
+        let live = seed_ticket(&db, None, Some(now + time::Duration::minutes(1))).await;
+
+        let under_expired = user_session_started(&db, None, Protocol::Ssh, now).await;
+        admitted_by(&db, target_session(&db, under_expired, None).await, expired).await;
+        let under_live = user_session_started(&db, None, Protocol::Ssh, now).await;
+        admitted_by(&db, target_session(&db, under_live, None).await, live).await;
+        let password = user_session_started(&db, None, Protocol::Ssh, now).await;
+        target_session(&db, password, None).await;
+        let ended = user_session_started(&db, None, Protocol::Ssh, now).await;
+        admitted_by(&db, target_session(&db, ended, None).await, expired).await;
+        UserSession::revoke(&db, UserSessionId(ended))
+            .await
+            .unwrap();
+
+        let by_expiry = TargetSession::open_user_sessions_admitted_by_tickets(
+            &db,
+            Ticket::Column::Expiry.lt(now),
+        )
+        .await
+        .unwrap();
+        assert_eq!(by_expiry, vec![UserSessionId(under_expired)]);
+
+        let by_id =
+            TargetSession::open_user_sessions_admitted_by_tickets(&db, Ticket::Column::Id.eq(live))
+                .await
+                .unwrap();
+        assert_eq!(by_id, vec![UserSessionId(under_live)]);
     }
 }

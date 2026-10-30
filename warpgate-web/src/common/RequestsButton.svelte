@@ -61,7 +61,7 @@
         href={PAGE_URL}
         color="success"
         size={collapsed ? 'sm' : undefined}
-        class={classnames("d-flex align-items-center gap-2", className)}
+        class={classnames('d-flex align-items-center gap-2', className)}
     >
         <Fa icon={faHand} />
         <span>

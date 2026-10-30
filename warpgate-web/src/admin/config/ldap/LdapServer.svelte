@@ -157,7 +157,12 @@
             </div>
         </div>
 
-        <form onsubmit={(e) => { e.preventDefault(); save() }}>
+        <form
+            onsubmit={e => {
+                e.preventDefault()
+                save()
+            }}
+        >
             <FormGroup floating label="Name">
                 <Input bind:value={name} required />
             </FormGroup>
@@ -228,7 +233,9 @@
 
             {#if testResult}
                 <div
-                    class="alert {testResult.success ? 'alert-success' : 'alert-danger'}"
+                    class="alert {testResult.success
+                        ? 'alert-success'
+                        : 'alert-danger'}"
                     role="alert"
                 >
                     {testResult.message}

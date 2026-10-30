@@ -17,12 +17,14 @@ use ironrdp::cliprdr::backend::ClipboardMessage;
 use ironrdp::connector::connection_activation::{
     ConnectionActivationFactory, ConnectionActivationState,
 };
+use ironrdp::connector::credssp::KerberosConfig;
 use ironrdp::connector::{self, ConnectionResult, Credentials};
 use ironrdp::core::WriteBuf;
 use ironrdp::displaycontrol::client::DisplayControlClient;
 use ironrdp::displaycontrol::pdu::MonitorLayoutEntry;
 use ironrdp::dvc::DrdynvcClient;
 use ironrdp::graphics::image_processing::PixelFormat;
+use ironrdp::graphics::pointer::DecodedPointer;
 use ironrdp::pdu::gcc::KeyboardType;
 use ironrdp::pdu::geometry::InclusiveRectangle;
 use ironrdp::pdu::rdp::capability_sets::{MajorPlatformType, client_codecs_capabilities};
@@ -41,7 +43,7 @@ use tracing::{debug, warn};
 use warpgate_common::{RdpTargetAuth, RdpTargetCompression, SecretResolver, TargetRdpOptions};
 use warpgate_core::{
     DESKTOP_CONNECT_TIMEOUT, DESKTOP_HANDSHAKE_TIMEOUT, DesktopConnectionError, DesktopEvent,
-    DesktopInput, DesktopRect, DesktopState, within_deadline,
+    DesktopInput, DesktopRect, DesktopState, check_desktop_size, within_deadline,
 };
 
 pub(crate) use self::logon::LogonWatcher;
@@ -113,6 +115,7 @@ pub async fn run(
             options.port,
             options.verify_tls,
             options.tls_security,
+            options.kdc_url.clone().filter(|url| !url.is_empty()),
             clipboard.backend(),
         ),
     )
@@ -428,6 +431,7 @@ async fn reactivate(
 
         active_stage.set_share_id(share_id);
         active_stage.set_enable_server_pointer(enable_server_pointer);
+        check_desktop_size(desktop_size.width, desktop_size.height)?;
 
         if image.width() != desktop_size.width || image.height() != desktop_size.height {
             debug!(
@@ -511,9 +515,16 @@ async fn process_outputs(
     report_size(image, reported_size, None, event_tx, abort_rx).await?;
 
     for out in outputs {
-        if let ActiveStageOutput::GraphicsUpdate(region) = out
-            && let Some(event) = encode_region(image, &region)
-        {
+        let event = match out {
+            ActiveStageOutput::GraphicsUpdate(region) => encode_region(image, &region),
+            ActiveStageOutput::PointerBitmap(pointer) => encode_pointer(&pointer),
+            ActiveStageOutput::PointerDefault => Some(DesktopEvent::CursorDefault),
+            ActiveStageOutput::PointerHidden => Some(DesktopEvent::CursorHidden),
+            // The viewer owns the pointer position; warping it to wherever the target last
+            // put its own would fight the user's mouse.
+            _ => None,
+        };
+        if let Some(event) = event {
             send_event(event_tx, abort_rx, event).await?;
         }
     }
@@ -616,6 +627,34 @@ fn encode_region(image: &DecodedImage, region: &InclusiveRectangle) -> Option<De
     })
 }
 
+/// Build the cursor shape update for a pointer bitmap. `None` for a degenerate or short
+/// bitmap rather than panicking downstream; a zero-sized pointer is how RDP hides one.
+fn encode_pointer(pointer: &DecodedPointer) -> Option<DesktopEvent> {
+    if pointer.width == 0 || pointer.height == 0 {
+        return Some(DesktopEvent::CursorHidden);
+    }
+    let len = usize::from(pointer.width) * usize::from(pointer.height) * 4;
+    if pointer.bitmap_data.len() != len {
+        return None;
+    }
+
+    // The decoder yields non-premultiplied RGBA for an accelerated target.
+    let mut data = Vec::with_capacity(len);
+    for px in pointer.bitmap_data.as_chunks::<4>().0 {
+        data.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
+    }
+
+    Some(DesktopEvent::Cursor {
+        rect: DesktopRect {
+            x: pointer.hotspot_x.min(pointer.width - 1),
+            y: pointer.hotspot_y.min(pointer.height - 1),
+            width: pointer.width,
+            height: pointer.height,
+        },
+        data: Bytes::from(data),
+    })
+}
+
 /// A full BGRA frame for the resized desktop: opaque black with the pre-resize content copied
 /// into the overlap.
 fn encode_resized_keyframe(
@@ -679,7 +718,7 @@ fn build_config(
         domain: options.domain.clone(),
         enable_tls: true,
         enable_credssp: true,
-        keyboard_type: KeyboardType::IbmEnhanced,
+        keyboard_type: KeyboardType::IBM_ENHANCED,
         keyboard_subtype: 0,
         keyboard_layout: 0,
         keyboard_functional_keys_count: 12,
@@ -722,8 +761,11 @@ fn build_config(
         license_cache: None,
         timezone_info: TimezoneInfo::default(),
         compression_type: None,
-        enable_server_pointer: false,
-        pointer_software_rendering: true,
+        // The target's pointer is relayed to the viewer as shape updates and never drawn into
+        // the framebuffer: software rendering would paint a second cursor under the viewer's
+        // own, and into recordings.
+        enable_server_pointer: true,
+        pointer_software_rendering: false,
         desktop_scale_factor: 0,
         multitransport_flags: None,
         // `connect` registers the Graphics Pipeline channel from this flag: advertising
@@ -769,8 +811,15 @@ async fn connect(
     port: u16,
     verify_tls: bool,
     tls_security: warpgate_common::RdpTlsSecurity,
+    kdc_url: Option<String>,
     clipboard: TextClipboard<ClientClipboardSink>,
 ) -> Result<(ConnectionResult, Framed), DesktopConnectionError> {
+    // Without a Kerberos config IronRDP runs CredSSP over NTLM only.
+    let kerberos_config = kdc_url
+        .map(|url| KerberosConfig::new(Some(url), config.client_name.clone()))
+        .transpose()
+        .map_err(|error| connector_error("kerberos_config", error))?;
+
     let tcp_stream = within_deadline(DESKTOP_CONNECT_TIMEOUT, async {
         TcpStream::connect((server_name.as_str(), port))
             .await
@@ -825,7 +874,7 @@ async fn connect(
         &mut network_client,
         server_name.into(),
         server_public_key,
-        None,
+        kerberos_config,
     )
     .await
     .map_err(|error| connector_error("connect_finalize", error))?;
@@ -833,6 +882,10 @@ async fn connect(
     if connection_result.desktop_size.width == 0 || connection_result.desktop_size.height == 0 {
         warn!("target reported a zero desktop size");
     }
+    check_desktop_size(
+        connection_result.desktop_size.width,
+        connection_result.desktop_size.height,
+    )?;
 
     Ok((connection_result, upgraded_framed))
 }
@@ -853,10 +906,11 @@ fn connector_error(step: &'static str, error: connector::ConnectorError) -> Desk
 #[cfg(test)]
 mod tests {
     use ironrdp::graphics::image_processing::PixelFormat;
+    use ironrdp::graphics::pointer::DecodedPointer;
     use ironrdp::session::image::DecodedImage;
     use warpgate_core::{DesktopEvent, DesktopRect};
 
-    use super::{GraphicsPipelineOutput, connector, encode_resized_keyframe};
+    use super::{GraphicsPipelineOutput, connector, encode_pointer, encode_resized_keyframe};
 
     #[test]
     fn unhandled_graphics_are_reported_once_per_codec() {
@@ -908,5 +962,57 @@ mod tests {
                 data,
             }) if data.len() == 4 * 3 * 4 && data.iter().skip(3).step_by(4).all(|alpha| *alpha == 255)
         ));
+    }
+
+    fn pointer(width: u16, height: u16, bitmap_data: Vec<u8>) -> DecodedPointer {
+        DecodedPointer {
+            width,
+            height,
+            hotspot_x: 1,
+            hotspot_y: 0,
+            bitmap_data,
+        }
+    }
+
+    #[test]
+    fn pointer_bitmap_becomes_a_bgra_cursor_with_its_hotspot() {
+        let event = encode_pointer(&pointer(2, 1, vec![1, 2, 3, 4, 5, 6, 7, 8]));
+
+        assert!(matches!(
+            event,
+            Some(DesktopEvent::Cursor {
+                rect: DesktopRect {
+                    x: 1,
+                    y: 0,
+                    width: 2,
+                    height: 1,
+                },
+                data,
+            }) if data[..] == [3, 2, 1, 4, 7, 6, 5, 8]
+        ));
+    }
+
+    #[test]
+    fn hotspot_outside_the_pointer_is_clamped() {
+        let mut decoded = pointer(1, 1, vec![0; 4]);
+        decoded.hotspot_x = 40;
+        decoded.hotspot_y = 40;
+
+        assert!(matches!(
+            encode_pointer(&decoded),
+            Some(DesktopEvent::Cursor {
+                rect: DesktopRect { x: 0, y: 0, .. },
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn empty_pointer_hides_the_cursor_and_short_one_is_dropped() {
+        assert!(matches!(
+            encode_pointer(&DecodedPointer::new_invisible()),
+            Some(DesktopEvent::CursorHidden)
+        ));
+        assert!(encode_pointer(&pointer(2, 2, vec![0; 4])).is_none());
     }
 }

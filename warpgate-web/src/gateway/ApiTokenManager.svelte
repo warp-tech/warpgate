@@ -58,9 +58,9 @@
         color="primary"
         class="ms-auto"
         onclick={e => {
-        creatingToken = true
-        e.preventDefault()
-    }}
+            creatingToken = true
+            e.preventDefault()
+        }}
     >
         Create token
     </Button>
@@ -79,7 +79,9 @@
 {/if}
 
 <Loadable promise={api.getMyApiTokens()}>
-    {#snippet children(tokens)}
+    {#snippet children(
+        tokens,
+    )}
         {#if tokens.length === 0}
             <EmptyState
                 title="No tokens yet"
@@ -104,9 +106,9 @@
                         color="link"
                         class="ms-2"
                         onclick={e => {
-                    deleteToken(token)
-                    e.preventDefault()
-                }}
+                            deleteToken(token)
+                            e.preventDefault()
+                        }}
                     >
                         Delete
                     </Button>

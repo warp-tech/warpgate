@@ -48,9 +48,9 @@
 
     <form
         onsubmit={e => {
-        e.preventDefault()
-        save()
-    }}
+            e.preventDefault()
+            save()
+        }}
     >
         <FormGroup>
             <Label for="name">Name</Label>

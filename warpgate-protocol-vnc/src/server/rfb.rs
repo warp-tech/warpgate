@@ -192,8 +192,15 @@ E485B576625E7EC6F44C42E9A63A3620FFFFFFFFFFFFFFFF";
             .await
             .context("reading Apple DH client key")?;
 
+        // Reject degenerate Diffie-Hellman public keys outside (1, p - 1).
+        let client_pub_uint = BigUint::from_bytes_be(&client_pub);
+        let one = BigUint::from(1u8);
+        if client_pub_uint <= one || client_pub_uint >= &prime - &one {
+            bail!("invalid Apple DH client public key");
+        }
+
         // Shared secret -> AES-128 key = MD5(shared secret), both as key_len big-endian.
-        let shared = BigUint::from_bytes_be(&client_pub).modpow(&server_private, &prime);
+        let shared = client_pub_uint.modpow(&server_private, &prime);
         let aes_key = md5_16(&left_pad(&shared.to_bytes_be(), key_len));
 
         // Decrypt: username in [0..64], password in [64..128], each NUL-terminated.

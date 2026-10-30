@@ -627,6 +627,48 @@ async fn closing_keeps_the_row_and_never_overwrites_an_answer() {
     );
 }
 
+/// A timeout close that loses the race to a decision must leave the decision
+/// in place and let the gate read it; one that wins is the only one audited.
+#[tokio::test]
+async fn a_decision_that_beats_the_timeout_close_is_honoured() {
+    let db = migrated_db().await;
+
+    let unanswered = plain_subject("a-target");
+    pending_row(&db, unanswered.session_id, "a-target").await;
+    assert!(
+        super::wait::close_timed_out(&db, &unanswered)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        status_of(&db, unanswered.session_id, "a-target").await,
+        SessionApprovalRequest::ApprovalRequestStatus::TimedOut,
+    );
+    assert!(
+        super::wait::row_decision(&db, unanswered.session_id, ApprovalKind::Admin, "a-target")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        !super::wait::close_timed_out(&db, &unanswered)
+            .await
+            .unwrap(),
+        "a second close finds nothing left to end",
+    );
+
+    let answered = plain_subject("a-target");
+    pending_row(&db, answered.session_id, "a-target").await;
+    assert!(approve(&db, answered.session_id, "a-target").await);
+    assert!(!super::wait::close_timed_out(&db, &answered).await.unwrap());
+    assert!(matches!(
+        super::wait::row_decision(&db, answered.session_id, ApprovalKind::Admin, "a-target")
+            .await
+            .unwrap(),
+        Some(ApprovalDecision::Approved(ApprovalScope::Once)),
+    ));
+}
+
 /// The waiting side has to notice a decision written by *another* task —
 /// that hand-off is the whole substrate, and a wait that only ever reads the
 /// row once would hold the session open forever.
@@ -907,6 +949,15 @@ async fn only_an_approval_is_remembered() {
 }
 
 async fn ticket_with_uses(db: &DatabaseConnection, uses: i16) -> Uuid {
+    seed_ticket(db, Some(uses), None).await
+}
+
+/// A ticket row with the user and target rows its foreign keys need
+pub(crate) async fn seed_ticket(
+    db: &DatabaseConnection,
+    uses_left: Option<i16>,
+    expiry: Option<OffsetDateTime>,
+) -> Uuid {
     use warpgate_db_entities::Target::TargetKind;
     use warpgate_db_entities::{Target, Ticket, User};
 
@@ -951,9 +1002,9 @@ async fn ticket_with_uses(db: &DatabaseConnection, uses: i16) -> Uuid {
         user_id: Set(user_id),
         description: Set(String::new()),
         target_id: Set(target_id),
-        uses_left: Set(Some(uses)),
+        uses_left: Set(uses_left),
         self_service: Set(false),
-        expiry: Set(None),
+        expiry: Set(expiry),
         created: Set(OffsetDateTime::now_utc()),
     })
     .exec(db)

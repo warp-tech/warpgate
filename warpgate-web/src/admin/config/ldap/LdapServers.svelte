@@ -39,7 +39,7 @@
 
 <div class="container-max-md">
     <div class="page-summary-bar">
-        <h1>LDAP Servers</h1>
+        <h1>LDAP servers</h1>
         <a
             class="btn btn-primary ms-auto"
             href="/config/ldap-servers/create"
@@ -67,7 +67,9 @@
                     hint="Connecting to LDAP lets you synchronize users' SSH keys from it"
                 />
             {/snippet}
-            {#snippet item(server)}
+            {#snippet item(
+                server,
+            )}
                 <a
                     class="list-group-item list-group-item-action"
                     href="/config/ldap-servers/{server.id}"

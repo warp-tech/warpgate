@@ -1,6 +1,6 @@
 use sea_orm::entity::prelude::*;
-use sea_orm::sea_query::OnConflict;
-use sea_orm::TransactionTrait;
+use sea_orm::sea_query::{IntoCondition, OnConflict};
+use sea_orm::{QuerySelect, TransactionTrait};
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::audit::AuditEvent;
@@ -166,6 +166,22 @@ pub async fn is_open(
         .one(db)
         .await?
         .is_some())
+}
+
+pub async fn open_user_sessions_admitted_by_tickets<C: ConnectionTrait>(
+    db: &C,
+    tickets: impl IntoCondition,
+) -> Result<Vec<UserSessionId>, WarpgateError> {
+    Ok(Entity::find()
+        .inner_join(super::Ticket::Entity)
+        .filter(Column::Ended.is_null())
+        .filter(tickets)
+        .select_only()
+        .column(Column::UserSessionId)
+        .distinct()
+        .into_tuple()
+        .all(db)
+        .await?)
 }
 
 pub fn emit_ended_audit_event(session: &TargetSession::Model, user_id: Uuid, username: &str) {

@@ -1,16 +1,24 @@
 [package]
 name = "warpgate-secrets-vault"
-version = "0.30.0"
+version = "0.30.2"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
 
 [dependencies]
 async-trait.workspace = true
+# vaultrs's own `rustls` feature pulls reqwest's bundled Mozilla roots; the
+# TLS backend comes from the workspace reqwest_12 dependency instead so Vault
+# is verified against the OS certificate store like every other outbound client.
+reqwest_12 = { workspace = true }
+rustify = { version = "0.6", default-features = false, features = ["reqwest"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "time"] }
 tracing.workspace = true
-vaultrs = { version = "0.7", default-features = false, features = ["rustls"] }
+vaultrs = { version = "0.7", default-features = false }
 warpgate-common = { path = "../warpgate-common" }
+
+[dev-dependencies]
+rustls = { workspace = true, features = ["aws-lc-rs"] }

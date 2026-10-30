@@ -21,7 +21,9 @@
 
     <h5 class="mb-2">Protocol listeners</h5>
     <Loadable promise={api.getListenerStates()}>
-        {#snippet children(listeners)}
+        {#snippet children(
+            listeners,
+        )}
             <div class="list-group list-group-flush mb-4">
                 {#each listeners as listener (listener.name)}
                     <div class="list-group-item">
@@ -43,14 +45,17 @@
                                 {/if}
                                 {#each listener.certificates as cert, index}
                                     <small class="d-block text-muted">
-                                        {(listener.certificates.length > 1)
-                                    ? (index === 0 ? 'Default certificate' : 'SNI certificate')
-                                    : 'Certificate'}:
+                                        {listener.certificates.length > 1
+                                            ? index === 0
+                                                ? 'Default certificate'
+                                                : 'SNI certificate'
+                                            : 'Certificate'}:
                                         {cert.domains.join(', ')}
                                         {#if cert.expiry}
                                             &middot;
                                             <span
-                                                class:text-danger={cert.expiry < new Date()}
+                                                class:text-danger={cert.expiry <
+                                                    new Date()}
                                             >
                                                 expires
                                                 <RelativeDate
@@ -76,7 +81,9 @@
         ensures that both audit and login protection will work correctly.
     </HelpText>
     <Loadable promise={api.getIpEcho()}>
-        {#snippet children(ipEcho)}
+        {#snippet children(
+            ipEcho,
+        )}
             <div class="list-group list-group-flush mb-3">
                 <div class="list-group-item d-flex">
                     <span>Peer IP as seen by the server</span>
@@ -108,7 +115,8 @@
                 <div class="list-group-item d-flex">
                     <span>Trust X-Forwarded-* headers</span>
                     <span class="ms-auto">
-                        {#if !ipEcho.trustXForwardedHeaders && ipEcho.xForwardedFor}
+                        {#if !ipEcho.trustXForwardedHeaders &&
+                            ipEcho.xForwardedFor}
                             <span
                                 class="d-flex gap-2 align-items-center text-warning"
                             >
@@ -116,7 +124,9 @@
                                 disabled
                             </span>
                         {:else}
-                            {ipEcho.trustXForwardedHeaders ? 'enabled' : 'disabled'}
+                            {ipEcho.trustXForwardedHeaders
+                                ? 'enabled'
+                                : 'disabled'}
                         {/if}
                     </span>
                 </div>

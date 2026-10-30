@@ -17,6 +17,15 @@ pub const DESKTOP_INPUT_CHANNEL_CAPACITY: usize = 256;
 
 pub const MAX_CLIPBOARD_BYTES: usize = 10 * 1024 * 1024;
 
+pub const MAX_DESKTOP_DIM: u16 = 8192;
+
+pub fn check_desktop_size(width: u16, height: u16) -> Result<(), DesktopConnectionError> {
+    if width > MAX_DESKTOP_DIM || height > MAX_DESKTOP_DIM {
+        return Err(DesktopConnectionError::OversizedDesktop { width, height });
+    }
+    Ok(())
+}
+
 /// The longest prefix of `text` that fits in `max` bytes, cut on a char boundary.
 pub fn truncate_clipboard_contents(text: &str, max: usize) -> &str {
     if text.len() <= max {
@@ -108,8 +117,13 @@ pub enum DesktopEvent {
         src_x: u16,
         src_y: u16,
     },
-    /// The mouse cursor shape changed (BGRA pixels for `rect`).
+    /// The mouse cursor shape changed (BGRA pixels, top row first, for `rect`). As in RFB,
+    /// `rect.x` and `rect.y` are the hotspot rather than a position.
     Cursor { rect: DesktopRect, data: Bytes },
+    /// The mouse cursor reverted to the viewer's own default arrow.
+    CursorDefault,
+    /// The mouse cursor was hidden.
+    CursorHidden,
     /// The remote clipboard contents changed.
     Clipboard(String),
     /// The remote rang the bell.
@@ -163,6 +177,10 @@ pub enum DesktopConnectionError {
     Handshake(#[source] anyhow::Error),
     #[error("session")]
     Session(#[source] anyhow::Error),
+    #[error(
+        "target reported a {width}x{height} desktop, above the {MAX_DESKTOP_DIM} per-edge limit"
+    )]
+    OversizedDesktop { width: u16, height: u16 },
 }
 
 impl UserFacingReason for DesktopConnectionError {
@@ -174,6 +192,7 @@ impl UserFacingReason for DesktopConnectionError {
             Self::TargetRejectedCredentials(_) => "Target rejected the credentials".into(),
             Self::Handshake(_) => "Protocol negotiation with the target failed".into(),
             Self::Session(_) => "The target session failed".into(),
+            Self::OversizedDesktop { .. } => "Target reported an unsupported desktop size".into(),
         }
     }
 }

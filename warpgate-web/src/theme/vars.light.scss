@@ -22,6 +22,10 @@ $cyan:    #0e6b7e !default;
 $secondary: #737055;
 $body-tertiary-bg: #fbf4e9;
 
+// WCAG AA on $body-bg: secondary text 5.3:1, field borders 3.2:1
+$body-secondary-color: #6e6a60;
+$input-border-color: #948f81;
+
 $btn-disabled-color: #969696;
 
 
@@ -33,8 +37,6 @@ $form-check-input-border: 2px solid rgba(#000, .25);
 @import "./vars.common.scss";
 
 $form-check-color: $primary;
-
-$text-muted: $gray-500;
 
 $link-underline-color: rgba($body-color, 0.25);
 $link-hover-underline-color: $body-color;

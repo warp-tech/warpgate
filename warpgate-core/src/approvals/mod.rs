@@ -35,7 +35,7 @@ use subject::*;
 pub use wait::*;
 
 #[cfg(all(test, feature = "sqlite"))]
-mod tests;
+pub(crate) mod tests;
 
 /// A decision delivered to the waiting side
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

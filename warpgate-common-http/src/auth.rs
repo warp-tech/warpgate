@@ -13,7 +13,8 @@ use warpgate_common::{Protocol, WarpgateError};
 use warpgate_core::AuthorizedIdentity;
 use warpgate_db_entities::Parameters;
 
-use crate::request::{trusted_host_header, trusted_proto};
+use crate::logging::raw_remote_ip;
+use crate::request::{trusted_client_ip, trusted_host_header, trusted_proto};
 
 /// Used to enforce the re-authentication policy (web_auth_max_age_seconds)
 const AUTH_TIME_SESSION_KEY: &str = "auth_time";
@@ -169,6 +170,10 @@ impl UnauthenticatedRequestContext {
         trusted_host_header(self.should_trust_x_forwarded, req)
     }
 
+    pub fn trusted_client_ip(&self, req: &Request) -> Option<String> {
+        trusted_client_ip(req, raw_remote_ip(req), self.should_trust_x_forwarded)
+    }
+
     /// Returns the trusted hostname only (port stripped),
     /// preferring X-Forwarded-Host if trust_x_forwarded_headers is enabled in config.
     pub fn trusted_hostname(&self, req: &Request) -> Option<String> {
@@ -266,13 +271,44 @@ impl RequestAuthorization {
     }
 }
 
-/// Check if a host is localhost or 127.x.x.x (for development/testing scenarios)
+/// Whether `host` is `localhost` or a loopback IP literal (for development/testing
+/// scenarios). Parsed rather than prefix-matched: `127.example.org` is a DNS name
+/// anyone can register.
 pub fn is_localhost_host(host: &str) -> bool {
-    host == "localhost" || host == "127.0.0.1" || host.starts_with("127.")
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn localhost_hosts_are_loopback_only() {
+        use super::is_localhost_host;
+        for host in [
+            "localhost",
+            "LocalHost",
+            "127.0.0.1",
+            "127.1.2.3",
+            "[::1]",
+            "::1",
+        ] {
+            assert!(is_localhost_host(host), "{host}");
+        }
+        for host in [
+            "127.example.org",
+            "127.0.0.1.nip.io",
+            "localhost.example.org",
+            "10.0.0.1",
+            "[::2]",
+        ] {
+            assert!(!is_localhost_host(host), "{host}");
+        }
+    }
+
     use uuid::Uuid;
 
     use super::{RequestAuthorization, SessionAuthorization};
