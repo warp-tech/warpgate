@@ -21,6 +21,15 @@ fn needs_web_approval(state: &AuthState) -> bool {
     )
 }
 
+/// Whether the login is waiting on nothing but a web approval
+fn awaits_only_web_approval(state: &AuthState) -> bool {
+    matches!(
+        state.verify(),
+        AuthResult::Need(ref kinds)
+            if kinds.len() == 1 && kinds.contains(&CredentialKind::WebUserApproval)
+    )
+}
+
 pub(crate) async fn try_web_approval_bypass(
     db: &DatabaseConnection,
     cluster: &Arc<Cluster>,
@@ -88,6 +97,25 @@ impl Services {
 
         for row in rows {
             self.deliver_user_decision(&row).await?;
+        }
+        self.apply_remembered_user_approvals().await
+    }
+
+    /// Lets in the logins on this node that are still waiting for an approval
+    /// which has since been remembered. A client that opens several
+    /// connections at once (a DB GUI, an app's connection pool) puts up one
+    /// request per connection before any is answered, and a remembered
+    /// approval is otherwise only checked by the connections made after it.
+    ///
+    /// Only logins with nothing but the approval left are considered: an
+    /// approval is remembered by the credentials a login presented, so one
+    /// still owing a credential is left to its own flow.
+    async fn apply_remembered_user_approvals(&self) -> Result<(), WarpgateError> {
+        let states = self.auth_state_store.lock().await.snapshot_states();
+        for state_arc in states {
+            if awaits_only_web_approval(&*state_arc.lock().await) {
+                try_web_approval_bypass(&self.db, &self.cluster, &state_arc).await?;
+            }
         }
         Ok(())
     }
