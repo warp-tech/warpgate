@@ -7,10 +7,14 @@ use std::fmt::Write;
 use serde::Serialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
-use warpgate_common::{ProviderId, StoredSecrets, TargetOptions};
+use warpgate_common::{
+    MaybeSecretRef, ProviderId, StoredSecrets, TargetOptions, public_key_of_pem,
+};
 
 use crate::diagnostic::{Path, Segment};
-use crate::types::{ADOPT_EXISTING, Kind, Resource, RoleSpec, TargetGroupSpec, TargetSpec};
+use crate::types::{
+    ADOPT_EXISTING, Kind, Resource, RoleSpec, SshClientKeySpec, TargetGroupSpec, TargetSpec,
+};
 
 /// A row as it is in the database, with its references by name
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,6 +30,7 @@ pub struct Current {
     pub groups: Vec<Row<TargetGroupSpec>>,
     pub roles: Vec<Row<RoleSpec>>,
     pub targets: Vec<Row<TargetSpec>>,
+    pub ssh_client_keys: Vec<Row<SshClientKeySpec>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -116,8 +121,8 @@ impl Change {
     }
 }
 
-/// Changes in the order they can be applied: groups and roles before the
-/// targets that reference them
+/// Changes in the order they can be applied: groups, roles and keys before
+/// the targets that reference them
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Plan {
     pub changes: Vec<Change>,
@@ -159,6 +164,10 @@ pub fn plan(provider: ProviderId, desired: &[Resource], current: &Current) -> Pl
     let rows: HashMap<Kind, Vec<LiveRow<'_>>> = [
         (Kind::TargetGroup, live_rows(&current.groups, plain)),
         (Kind::Role, live_rows(&current.roles, plain)),
+        (
+            Kind::SshClientKey,
+            live_rows(&current.ssh_client_keys, compare_client_key),
+        ),
         (
             Kind::Target,
             live_rows(&current.targets, |s| compare_target(s, None)),
@@ -254,7 +263,8 @@ const fn apply_order(kind: Kind) -> u8 {
     match kind {
         Kind::TargetGroup => 0,
         Kind::Role => 1,
-        Kind::Target => 2,
+        Kind::SshClientKey => 2,
+        Kind::Target => 3,
     }
 }
 
@@ -298,6 +308,7 @@ fn compare_resource(resource: &Resource, canonical: &HashMap<(Kind, String), Str
         Resource::Target(m) => compare_target(&m.spec, Some(canonical)),
         Resource::TargetGroup(m) => plain(&m.spec),
         Resource::Role(m) => plain(&m.spec),
+        Resource::SshClientKey(m) => compare_client_key(&m.spec),
     };
     set_name(&mut compared.value, &resource.metadata().name);
     compared
@@ -332,12 +343,42 @@ fn compare_target(
         .map(|role| resolve(Kind::Role, role))
         .collect();
     spec.roles = roles.into_iter().collect();
+    spec.references.jump_host = spec
+        .references
+        .jump_host
+        .as_ref()
+        .map(|target| resolve(Kind::Target, target));
+    spec.references.client_key = spec
+        .references
+        .client_key
+        .as_ref()
+        .map(|key| resolve(Kind::SshClientKey, key));
 
-    let value = to_value(&spec.options);
+    let options = to_value(&spec.options);
+    let mut value = to_value(&spec);
+    spec.references.put(&mut value);
     Compared {
         credentials: credential_paths(&spec.options),
-        protocol: value.as_object().and_then(|o| o.keys().next().cloned()),
-        value: json!({ "spec": to_value(&spec) }),
+        protocol: options.as_object().and_then(|o| o.keys().next().cloned()),
+        value: json!({ "spec": value }),
+    }
+}
+
+/// A literal key compares by its public key, so the same key in another
+/// format is no change; a reference compares as written
+fn compare_client_key(spec: &SshClientKeySpec) -> Compared {
+    let private_key = match &spec.private_key {
+        MaybeSecretRef::Inline(secret) => secret
+            .reveal()
+            .ok()
+            .and_then(|pem| public_key_of_pem(pem.expose_secret()).ok())
+            .map_or(Value::Null, Value::String),
+        other => to_value(other),
+    };
+    Compared {
+        value: json!({ "spec": { "private_key": private_key, "is_default": spec.is_default } }),
+        credentials: HashSet::from([Path::keys(&["spec", "private_key"])]),
+        protocol: None,
     }
 }
 
@@ -525,6 +566,8 @@ fn fields_json(fields: &[FieldChange]) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use warpgate_common::SshHostKeyKind;
+
     use super::*;
     use crate::diagnostic::test::path;
 
@@ -560,6 +603,7 @@ mod tests {
             Resource::Target(m) => &mut m.metadata,
             Resource::TargetGroup(m) => &mut m.metadata,
             Resource::Role(m) => &mut m.metadata,
+            Resource::SshClientKey(m) => &mut m.metadata,
         };
         metadata
             .annotations
@@ -587,6 +631,12 @@ mod tests {
                     live: m.spec.clone(),
                 }),
                 Resource::Role(m) => current.roles.push(Row {
+                    id,
+                    name,
+                    provider,
+                    live: m.spec.clone(),
+                }),
+                Resource::SshClientKey(m) => current.ssh_client_keys.push(Row {
                     id,
                     name,
                     provider,
@@ -820,5 +870,81 @@ mod tests {
              \n\
              1 to create, 1 to update, 0 to adopt, 0 unchanged, 1 errors\n"
         );
+    }
+
+    #[test]
+    fn jump_hosts_compare_by_name() {
+        let through = |jump_host: &str| {
+            manifest(
+                "Target",
+                "app",
+                json!({"options": {"ssh": {"host": "h", "jump_host": jump_host}}}),
+            )
+        };
+        let bastion = ssh("bastion", 22, &[]);
+        let other = ssh("other", 22, &[]);
+        let before = through("bastion");
+        let live = current(&[
+            (&bastion, Some(GITOPS)),
+            (&other, Some(GITOPS)),
+            (&before, Some(GITOPS)),
+        ]);
+
+        let unchanged = plan(
+            GITOPS,
+            &[bastion.clone(), other.clone(), through("BASTION")],
+            &live,
+        );
+        assert!(!unchanged.has_pending(), "{:?}", summary(&unchanged));
+
+        let moved = plan(GITOPS, &[bastion, other, through("other")], &live);
+        assert_eq!(
+            fields(&moved, "app"),
+            [value(
+                &["spec", "options", "ssh", "jump_host"],
+                json!("bastion"),
+                json!("other")
+            )]
+        );
+    }
+
+    #[test]
+    fn client_keys_compare_without_showing_the_key() {
+        let key = |name: &str, private_key: &str| {
+            manifest(
+                "SshClientKey",
+                name,
+                json!({"private_key": private_key, "is_default": true}),
+            )
+        };
+        let (pem, other_pem) = (
+            SshHostKeyKind::Ed25519.generate_pem().unwrap(),
+            SshHostKeyKind::Ed25519.generate_pem().unwrap(),
+        );
+        let reference = "secret://vault/kv/keys#deploy";
+        let (literal, referenced) = (key("deploy", &pem), key("ci", reference));
+        let live = current(&[(&literal, Some(GITOPS)), (&referenced, Some(GITOPS))]);
+
+        let unchanged = plan(GITOPS, &[literal, referenced], &live);
+        assert!(!unchanged.has_pending(), "{:?}", summary(&unchanged));
+
+        let changed = plan(
+            GITOPS,
+            &[
+                key("deploy", &other_pem),
+                key("ci", "secret://vault/kv/keys#ci"),
+            ],
+            &live,
+        );
+        let credential = [FieldChange {
+            path: path(&["spec", "private_key"]),
+            change: ValueChange::Credential,
+        }];
+        assert_eq!(fields(&changed, "deploy"), credential);
+        assert_eq!(fields(&changed, "ci"), credential);
+        let rendered = format!("{}{}", format_plan(&changed), format_plan_json(&changed));
+        assert!(!rendered.contains("PRIVATE"), "{rendered}");
+        assert!(!rendered.contains("ssh-ed25519"), "{rendered}");
+        assert!(!rendered.contains("secret://"), "{rendered}");
     }
 }

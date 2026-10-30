@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
@@ -13,8 +14,66 @@ pub mod plan;
 pub mod types;
 pub mod validate;
 
-pub fn json_schema() -> schemars::Schema {
-    schemars::schema_for!(types::Resource)
+pub fn json_schema() -> Value {
+    let mut schema = schemars::schema_for!(types::Resource).to_value();
+    let mut variant_targets = HashSet::new();
+    collect_variant_targets(&schema, &mut variant_targets);
+    close_objects(&mut schema, None, &variant_targets);
+    schema
+}
+
+/// References made next to `properties`, which is how a `kind`-tagged variant
+/// adds its tag to the struct it refers to
+fn collect_variant_targets(value: &Value, out: &mut HashSet<String>) {
+    match value {
+        Value::Object(object) => {
+            if object.contains_key("properties")
+                && let Some(Value::String(target)) = object.get("$ref")
+            {
+                out.insert(target.clone());
+            }
+            object
+                .values()
+                .for_each(|v| collect_variant_targets(v, out));
+        }
+        Value::Array(items) => items.iter().for_each(|v| collect_variant_targets(v, out)),
+        _ => {}
+    }
+}
+
+/// Lets editors flag an unknown field, as `config validate` does. The struct a
+/// tagged variant refers to stays open and the variant is closed instead:
+/// `unevaluatedProperties` there sees the tag and the struct's fields together,
+/// while inside the struct it would reject the tag.
+fn close_objects(value: &mut Value, definition: Option<&str>, variant_targets: &HashSet<String>) {
+    match value {
+        Value::Object(object) => {
+            let refers_here = definition.is_some_and(|d| variant_targets.contains(d));
+            if object.contains_key("properties")
+                && !object.contains_key("additionalProperties")
+                && !refers_here
+            {
+                object.insert("unevaluatedProperties".into(), Value::Bool(false));
+            }
+            for (key, child) in object.iter_mut() {
+                match (key.as_str(), child) {
+                    ("$defs", Value::Object(definitions)) => {
+                        for (name, schema) in definitions.iter_mut() {
+                            let reference = format!("#/$defs/{name}");
+                            close_objects(schema, Some(&reference), variant_targets);
+                        }
+                    }
+                    (_, child) => close_objects(child, None, variant_targets),
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                close_objects(item, None, variant_targets);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Reads each given file, and every `*.yaml` and `*.yml` under each given
@@ -82,4 +141,31 @@ pub fn format_json(diagnostics: &[(&Path, Diagnostic)]) -> Value {
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::Value;
+
+    use super::json_schema;
+
+    #[test]
+    fn the_published_schema_rejects_unknown_fields() {
+        let schema = json_schema();
+        let closed =
+            |schema: &Value| schema.get("unevaluatedProperties") == Some(&Value::Bool(false));
+        let definitions = &schema["$defs"];
+
+        assert!(closed(&definitions["TargetSSHOptions"]));
+        assert!(closed(&definitions["Metadata"]));
+        for variant in definitions["SSHTargetAuth"]["oneOf"].as_array().unwrap() {
+            assert!(closed(variant), "{variant}");
+        }
+        for variant in schema["oneOf"].as_array().unwrap() {
+            assert!(closed(variant), "{variant}");
+        }
+        // Closing the struct a variant refers to would reject the variant's `kind`
+        assert!(!closed(&definitions["SshTargetPasswordAuth"]));
+        assert!(!closed(&definitions["TargetSpecManifest"]));
+    }
 }

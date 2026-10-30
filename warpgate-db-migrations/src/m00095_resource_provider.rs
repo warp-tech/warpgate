@@ -9,6 +9,45 @@ fn index_name(table: &str) -> String {
     format!("{table}_provider")
 }
 
+pub async fn add_provider_column(manager: &SchemaManager<'_>, table: &str) -> Result<(), DbErr> {
+    manager
+        .alter_table(
+            Table::alter()
+                .table(Alias::new(table))
+                .add_column(ColumnDef::new(Alias::new("provider")).uuid().null())
+                .to_owned(),
+        )
+        .await?;
+    manager
+        .create_index(
+            Index::create()
+                .name(index_name(table))
+                .table(Alias::new(table))
+                .col(Alias::new("provider"))
+                .to_owned(),
+        )
+        .await
+}
+
+pub async fn drop_provider_column(manager: &SchemaManager<'_>, table: &str) -> Result<(), DbErr> {
+    manager
+        .drop_index(
+            Index::drop()
+                .name(index_name(table))
+                .table(Alias::new(table))
+                .to_owned(),
+        )
+        .await?;
+    manager
+        .alter_table(
+            Table::alter()
+                .table(Alias::new(table))
+                .drop_column(Alias::new("provider"))
+                .to_owned(),
+        )
+        .await
+}
+
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -16,45 +55,14 @@ pub struct Migration;
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         for table in TABLES {
-            manager
-                .alter_table(
-                    Table::alter()
-                        .table(Alias::new(table))
-                        .add_column(ColumnDef::new(Alias::new("provider")).uuid().null())
-                        .to_owned(),
-                )
-                .await?;
-            manager
-                .create_index(
-                    Index::create()
-                        .name(index_name(table))
-                        .table(Alias::new(table))
-                        .col(Alias::new("provider"))
-                        .to_owned(),
-                )
-                .await?;
+            add_provider_column(manager, table).await?;
         }
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         for table in TABLES {
-            manager
-                .drop_index(
-                    Index::drop()
-                        .name(index_name(table))
-                        .table(Alias::new(table))
-                        .to_owned(),
-                )
-                .await?;
-            manager
-                .alter_table(
-                    Table::alter()
-                        .table(Alias::new(table))
-                        .drop_column(Alias::new("provider"))
-                        .to_owned(),
-                )
-                .await?;
+            drop_provider_column(manager, table).await?;
         }
         Ok(())
     }

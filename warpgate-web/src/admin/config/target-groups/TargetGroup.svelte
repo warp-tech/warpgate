@@ -11,6 +11,7 @@
         type BootstrapThemeColor,
         type TargetGroup,
     } from 'admin/lib/api'
+    import ManagedIcon from 'admin/lib/ManagedIcon.svelte'
     import { adminPermissions } from 'admin/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
@@ -98,7 +99,9 @@
             <div class="page-summary-bar">
                 <div>
                     <h1>{group.name}</h1>
-                    <div class="text-muted">Target group</div>
+                    <div class="text-muted d-flex align-items-center gap-2">
+                        Target group <ManagedIcon provider={group.provider} />
+                    </div>
                 </div>
             </div>
 
@@ -108,67 +111,70 @@
                     update()
                 }}
             >
-                <FormGroup>
-                    <Label for="name">Name</Label>
-                    <Input
-                        id="name"
-                        bind:value={name}
-                        required
-                        disabled={saving}
-                    />
-                </FormGroup>
+                <fieldset disabled={!!group.provider}>
+                    <FormGroup>
+                        <Label for="name">Name</Label>
+                        <Input
+                            id="name"
+                            bind:value={name}
+                            required
+                            disabled={saving}
+                        />
+                    </FormGroup>
 
-                <FormGroup>
-                    <Label for="description">Description</Label>
-                    <Input
-                        id="description"
-                        type="textarea"
-                        bind:value={description}
-                        disabled={saving}
-                    />
-                </FormGroup>
+                    <FormGroup>
+                        <Label for="description">Description</Label>
+                        <Input
+                            id="description"
+                            type="textarea"
+                            bind:value={description}
+                            disabled={saving}
+                        />
+                    </FormGroup>
 
-                <FormGroup>
-                    <Label for="color">Color</Label>
-                    <small class="form-text text-muted">
-                        Optional Bootstrap theme color for visual organization
-                    </small>
-                    <div class="color-picker">
-                        {#each VALID_CHOICES as value (value)}
-                            <button
-                                type="button"
-                                class="btn btn-secondary gap-2 d-flex align-items-center"
-                                class:active={color === value}
-                                disabled={saving}
-                                onclick={e => {
-                                    e.preventDefault()
-                                    color = value
-                                }}
-                                title={value || 'None'}
-                            >
-                                <GroupColorIcon color={value} />
-                                <span>{value || 'None'}</span>
-                            </button>
-                        {/each}
+                    <FormGroup>
+                        <Label for="color">Color</Label>
+                        <small class="form-text text-muted">
+                            Optional Bootstrap theme color for visual
+                            organization
+                        </small>
+                        <div class="color-picker">
+                            {#each VALID_CHOICES as value (value)}
+                                <button
+                                    type="button"
+                                    class="btn btn-secondary gap-2 d-flex align-items-center"
+                                    class:active={color === value}
+                                    disabled={saving}
+                                    onclick={e => {
+                                        e.preventDefault()
+                                        color = value
+                                    }}
+                                    title={value || 'None'}
+                                >
+                                    <GroupColorIcon color={value} />
+                                    <span>{value || 'None'}</span>
+                                </button>
+                            {/each}
+                        </div>
+                    </FormGroup>
+
+                    <div class="d-flex gap-2 mt-5">
+                        <AsyncButton
+                            click={update}
+                            color="primary"
+                            disabled={!$adminPermissions.targetsEdit}
+                        >
+                            Update
+                        </AsyncButton>
+                        <Button
+                            color="danger"
+                            onclick={remove}
+                            disabled={!$adminPermissions.targetsDelete}
+                        >
+                            Remove
+                        </Button>
                     </div>
-                </FormGroup>
-
-                <div class="d-flex gap-2 mt-5">
-                    <AsyncButton
-                        click={update}
-                        color="primary"
-                        disabled={!$adminPermissions.targetsEdit}
-                    >
-                        Update
-                    </AsyncButton>
-                    <Button
-                        color="danger"
-                        onclick={remove}
-                        disabled={!$adminPermissions.targetsDelete}
-                    >
-                        Remove
-                    </Button>
-                </div>
+                </fieldset>
             </form>
         </div>
     {/if}

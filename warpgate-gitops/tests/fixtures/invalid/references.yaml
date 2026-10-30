@@ -14,3 +14,6 @@ spec:
   options:
     ssh:
       host: h
+      auth:
+        kind: publickey
+        key_id: deploy-key

@@ -1,12 +1,13 @@
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path as FilePath, PathBuf};
 
 use serde_json::Value;
+use warpgate_common::{MaybeSecretRef, TargetOptions, public_key_of_pem};
 
 use crate::diagnostic::{Diagnostic, Location, Path, Segment};
 use crate::parse::{Document, parse};
-use crate::types::{ADOPT_EXISTING, Kind, Resource};
+use crate::types::{ADOPT_EXISTING, Kind, OptionReferences, Resource};
 
 /// Checks every document of every file, then the names and references across all of them
 /// The resources of a valid fileset, or every problem found in it
@@ -78,10 +79,44 @@ fn check_names_and_references<'a>(
         }
     }
 
+    // Lowercase target names to the target their jump host names, for SSH targets
+    let mut jump_hosts: HashMap<String, Option<String>> = HashMap::new();
+    for (_, _, resource) in documents {
+        if let Resource::Target(target) = resource
+            && let TargetOptions::Ssh(_) = target.spec.options
+        {
+            jump_hosts.insert(
+                target.metadata.name.to_lowercase(),
+                target
+                    .spec
+                    .references
+                    .jump_host
+                    .as_ref()
+                    .map(|name| name.to_lowercase()),
+            );
+        }
+    }
+
     for (file, doc, resource) in documents {
         let Resource::Target(target) = resource else {
             continue;
         };
+        if let Some(jump_host) = &target.spec.references.jump_host {
+            let path = Path::pointer(&format!("/spec{}", OptionReferences::JUMP_HOST));
+            let problem = if !jump_hosts.contains_key(&jump_host.to_lowercase()) {
+                Some(format!("no SSH target named `{jump_host}`"))
+            } else if leads_back(&jump_hosts, &target.metadata.name.to_lowercase()) {
+                Some("jump hosts must not form a loop".to_owned())
+            } else {
+                None
+            };
+            if let Some(problem) = problem {
+                diagnostics.push((
+                    file,
+                    Diagnostic::new(doc.value_location(&path), path, problem),
+                ));
+            }
+        }
         let group = target
             .spec
             .group
@@ -92,7 +127,11 @@ fn check_names_and_references<'a>(
             path.0.push(Segment::Index(index));
             (path, Kind::Role, name)
         });
-        for (path, kind, name) in group.chain(roles) {
+        let client_key = target.spec.references.client_key.iter().map(|name| {
+            let path = Path::pointer(&format!("/spec{}", OptionReferences::CLIENT_KEY));
+            (path, Kind::SshClientKey, name)
+        });
+        for (path, kind, name) in group.chain(roles).chain(client_key) {
             if !names.contains_key(&(kind, name.to_lowercase())) {
                 diagnostics.push((
                     file,
@@ -105,6 +144,22 @@ fn check_names_and_references<'a>(
             }
         }
     }
+}
+
+/// Whether following jump hosts from `start` comes back to it
+fn leads_back(jump_hosts: &HashMap<String, Option<String>>, start: &str) -> bool {
+    let mut seen = HashSet::new();
+    let mut next = jump_hosts.get(start).cloned().flatten();
+    while let Some(name) = next {
+        if name == start {
+            return true;
+        }
+        if !seen.insert(name.clone()) {
+            return false;
+        }
+        next = jump_hosts.get(&name).cloned().flatten();
+    }
+    false
 }
 
 pub fn check_document(doc: &Document) -> (Option<Resource>, Vec<Diagnostic>) {
@@ -183,6 +238,27 @@ pub fn check_document(doc: &Document) -> (Option<Resource>, Vec<Diagnostic>) {
         }
     }
 
+    if let Resource::SshClientKey(key) = &resource {
+        let problem = match &key.spec.private_key {
+            MaybeSecretRef::Inline(pem) => pem
+                .reveal()
+                .ok()
+                .and_then(|pem| public_key_of_pem(pem.expose_secret()).ok())
+                .is_none()
+                .then_some(
+                    "not a private key in OpenSSH or PKCS#8 PEM format without a passphrase",
+                ),
+            MaybeSecretRef::Reference(_) => None,
+            MaybeSecretRef::Malformed(_) => {
+                Some("not a valid secret://backend/mount/path#field reference")
+            }
+        };
+        if let Some(problem) = problem {
+            let path = Path::keys(&["spec", "private_key"]);
+            diagnostics.push(Diagnostic::new(doc.value_location(&path), path, problem));
+        }
+    }
+
     (Some(resource), diagnostics)
 }
 
@@ -247,7 +323,7 @@ mod tests {
     #[test]
     fn every_field_is_known() {
         let docs = parse(include_str!("../tests/fixtures/valid/every-field.yaml")).unwrap();
-        assert_eq!(docs.len(), 16);
+        assert_eq!(docs.len(), 18);
         for doc in &docs {
             let (resource, diagnostics) = check_document(doc);
             assert!(resource.is_some());

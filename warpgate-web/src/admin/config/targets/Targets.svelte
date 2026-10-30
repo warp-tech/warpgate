@@ -7,6 +7,7 @@
         DropdownToggle,
     } from '@sveltestrap/sveltestrap'
     import { api, type Target, type TargetGroup } from 'admin/lib/api'
+    import ManagedIcon from 'admin/lib/ManagedIcon.svelte'
     import { autosave } from 'common/autosave'
     import CollapsibleGroupHeader from 'common/CollapsibleGroupHeader.svelte'
     import EmptyState from 'common/EmptyState.svelte'
@@ -174,7 +175,8 @@
                             >
                         {/if}
                     </div>
-                    <small class="text-muted ms-auto">
+                    <ManagedIcon provider={target.provider} />
+                    <small class="text-muted">
                         {TARGET_KIND_LABELS[target.options.kind]}
                     </small>
                 </a>

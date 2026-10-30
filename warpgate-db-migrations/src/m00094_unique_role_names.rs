@@ -11,7 +11,7 @@ const INDEX: &str = "roles_name_unique";
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        add_unique_name_index(manager, TABLE, INDEX).await
+        add_unique_name_index(manager, TABLE, "name", INDEX).await
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {

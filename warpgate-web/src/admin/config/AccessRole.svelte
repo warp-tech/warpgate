@@ -1,6 +1,7 @@
 <script lang="ts">
     import { Alert, FormGroup, Input } from '@sveltestrap/sveltestrap'
     import { api, type Role, type Target, type User } from 'admin/lib/api'
+    import ManagedIcon from 'admin/lib/ManagedIcon.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
     import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
@@ -79,32 +80,38 @@
 
 <div class="container-max-md">
     <Loadable promise={initPromise} bind:value={role}>
-        {#snippet children(role)}
+        {#snippet children(
+            role,
+        )}
             <div class="page-summary-bar">
                 <div>
                     <h1>{role.name}</h1>
-                    <div class="text-muted">role</div>
+                    <div class="text-muted d-flex align-items-center gap-2">
+                        role <ManagedIcon provider={role.provider} />
+                    </div>
                 </div>
             </div>
 
-            <FormGroup floating label="Name">
-                <Input bind:value={role.name} />
-            </FormGroup>
+            <fieldset disabled={!!role.provider}>
+                <FormGroup floating label="Name">
+                    <Input bind:value={role.name} />
+                </FormGroup>
 
-            <FormGroup floating label="Description">
-                <Input bind:value={role.description} />
-            </FormGroup>
+                <FormGroup floating label="Description">
+                    <Input bind:value={role.description} />
+                </FormGroup>
 
-            <div class="mb-4">
-                <label class="d-flex align-items-center" for="isDefault">
-                    <Input
-                        id="isDefault"
-                        type="switch"
-                        bind:checked={role.isDefault}
-                    />
-                    <div>Automatically assign to all new users</div>
-                </label>
-            </div>
+                <div class="mb-4">
+                    <label class="d-flex align-items-center" for="isDefault">
+                        <Input
+                            id="isDefault"
+                            type="switch"
+                            bind:checked={role.isDefault}
+                        />
+                        <div>Automatically assign to all new users</div>
+                    </label>
+                </div>
+            </fieldset>
         {/snippet}
     </Loadable>
 
@@ -123,7 +130,7 @@
 
         <AsyncButton
             color="primary"
-            disabled={!$adminPermissions.accessRolesEdit}
+            disabled={!$adminPermissions.accessRolesEdit || !!role?.provider}
             class="ms-auto"
             click={update}
         >
@@ -132,7 +139,7 @@
 
         <AsyncButton
             class="ms-2"
-            disabled={!$adminPermissions.accessRolesDelete}
+            disabled={!$adminPermissions.accessRolesDelete || !!role?.provider}
             color="danger"
             click={remove}
         >
@@ -143,7 +150,9 @@
     <h4 class="mt-5">Assigned users</h4>
 
     <ItemList load={loadUsers}>
-        {#snippet item(user)}
+        {#snippet item(
+            user,
+        )}
             <a
                 class="list-group-item list-group-item-action"
                 href="/config/users/{user.id}"
@@ -169,7 +178,9 @@
     <h4 class="mt-4">Assigned targets</h4>
 
     <ItemList load={loadTargets}>
-        {#snippet item(target)}
+        {#snippet item(
+            target,
+        )}
             <a
                 class="list-group-item list-group-item-action"
                 href="/config/targets/{target.id}"

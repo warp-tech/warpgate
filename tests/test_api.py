@@ -1309,6 +1309,11 @@ def test_gitops_rows_are_read_only_through_the_api(
     files = tmp_path / "gitops"
     files.mkdir()
     resource = files / "resources.yaml"
+    key_path = tmp_path / "key"
+    subprocess.run(
+        ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key_path)], check=True
+    )
+    private_key = "\n".join("    " + line for line in key_path.read_text().splitlines())
 
     def write(port: int):
         resource.write_text(
@@ -1317,6 +1322,14 @@ kind: Role
 metadata:
   name: {name}
 spec: {{}}
+---
+apiVersion: warpgate/v1
+kind: SshClientKey
+metadata:
+  name: {name}
+spec:
+  private_key: |
+{private_key}
 ---
 apiVersion: warpgate/v1
 kind: Target
@@ -1331,6 +1344,7 @@ spec:
       username: user
       auth:
         kind: publickey
+        key_id: {name}
 """
         )
 
@@ -1345,6 +1359,9 @@ spec:
     role = next(r for r in admin_client.get_roles() if r.name == name)
     assert target.provider == "00000000-0000-0000-0000-000000000000"
     assert role.provider == target.provider
+    key = next(k for k in admin_client.get_ssh_own_keys() if k.label == name)
+    assert key.provider == target.provider
+    assert target.options.actual_instance.auth.actual_instance.key_id == key.id
     other = admin_client.create_role(sdk.RoleDataRequest(name=f"manual-{uuid4()}"))
 
     for call in [
@@ -1354,6 +1371,10 @@ spec:
         lambda: admin_client.delete_target_role(target.id, role.id),
         lambda: admin_client.update_role(role.id, sdk.RoleDataRequest(name=name)),
         lambda: admin_client.delete_role(role.id),
+        lambda: admin_client.update_ssh_own_key(
+            key.id, sdk.UpdateSSHClientKeyRequest(label=name, is_default=False)
+        ),
+        lambda: admin_client.delete_ssh_own_key(key.id),
     ]:
         with pytest.raises(sdk.ApiException) as err:
             call()

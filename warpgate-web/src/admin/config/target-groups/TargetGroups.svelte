@@ -1,5 +1,6 @@
 <script lang="ts">
     import { api, type TargetGroup } from 'admin/lib/api'
+    import ManagedIcon from 'admin/lib/ManagedIcon.svelte'
     import { adminPermissions } from 'admin/lib/store'
     import EmptyState from 'common/EmptyState.svelte'
     import GroupColorIcon from 'common/GroupColorIcon.svelte'
@@ -79,6 +80,7 @@
                         >
                     {/if}
                 </div>
+                <ManagedIcon provider={group.provider} />
             </a>
         {/snippet}
     </ItemList>

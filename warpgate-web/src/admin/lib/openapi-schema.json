@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.30.2-8-gc30ddd0b9-modified"
+    "version": "v0.30.2-11-g36eb3b5e-modified"
   },
   "servers": [
     {
@@ -1399,6 +1399,26 @@
               }
             }
           },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "404": {
             "description": ""
           }
@@ -1432,6 +1452,16 @@
             "description": ""
           },
           "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
             "description": "",
             "content": {
               "application/json; charset=utf-8": {
@@ -7039,8 +7069,7 @@
           },
           "provider": {
             "type": "string",
-            "format": "uuid",
-            "description": "Set by the provider that manages the role; read-only"
+            "format": "uuid"
           }
         }
       },
@@ -7192,6 +7221,11 @@
           },
           "secret_backend": {
             "type": "string"
+          },
+          "provider": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The provider that manages the key, if any; such a key is read-only here"
           }
         }
       },
@@ -7904,8 +7938,7 @@
           },
           "provider": {
             "type": "string",
-            "format": "uuid",
-            "description": "Set by the provider that manages the target; read-only"
+            "format": "uuid"
           }
         }
       },

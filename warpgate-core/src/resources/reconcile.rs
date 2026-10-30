@@ -3,13 +3,18 @@ use std::collections::{HashMap, HashSet};
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, TransactionTrait};
 use uuid::Uuid;
 use warpgate_common::{
-    MaybeSecretRef, ProviderId, StoredSecret, Target as TargetConfig, TargetSecrets, WarpgateError,
+    MaybeSecretRef, ProviderId, SSHTargetAuth, SecretResolver, StoredSecret,
+    Target as TargetConfig, TargetOptions, TargetSecrets, WarpgateError,
 };
-use warpgate_db_entities::{Role, Target, TargetGroup, TargetRoleAssignment};
+use warpgate_db_entities::{Role, SshClientKey, Target, TargetGroup, TargetRoleAssignment};
 use warpgate_gitops::plan::{Change, Current, Plan, Row, plan};
-use warpgate_gitops::types::{Kind, Manifest, Resource, RoleSpec, TargetGroupSpec, TargetSpec};
+use warpgate_gitops::types::{
+    Kind, Manifest, OptionReferences, Resource, RoleSpec, SshClientKeySpec, TargetGroupSpec,
+    TargetSpec,
+};
 
 use super::roles::{self, RoleDataRequest};
+use super::ssh_client_keys::{self, KeyMaterial, SshClientKeyDataRequest};
 use super::target_groups::{self, TargetGroupDataRequest};
 use super::targets::{self, TargetDataRequest};
 use super::{Actor, ResourceError};
@@ -33,13 +38,23 @@ pub async fn load_current<C: ConnectionTrait>(db: &C) -> Result<Current, Warpgat
         }
     }
 
+    let keys = SshClientKey::Entity::find().all(db).await?;
+    let key_names: HashMap<Uuid, String> = keys.iter().map(|k| (k.id, k.label.clone())).collect();
+    let models = Target::Entity::find().all(db).await?;
+    let target_names: HashMap<Uuid, String> =
+        models.iter().map(|t| (t.id, t.name.clone())).collect();
     let mut targets = Vec::new();
-    for model in Target::Entity::find().all(db).await? {
+    for model in models {
         let mut target = TargetConfig::try_from(model)?;
-        for slot in target.options.secrets_mut() {
-            if let MaybeSecretRef::Inline(secret) = slot {
-                *secret = StoredSecret::from(secret.reveal()?.expose_secret().clone());
+        let mut references = OptionReferences::default();
+        if let TargetOptions::Ssh(ssh) = &mut target.options {
+            references.jump_host = ssh.jump_host.take().map(|id| name_of(&target_names, id));
+            if let SSHTargetAuth::PublicKey(auth) = &mut ssh.auth {
+                references.client_key = auth.key_id.take().map(|id| name_of(&key_names, id));
             }
+        }
+        for slot in target.options.secrets_mut() {
+            reveal_inline(slot)?;
         }
         targets.push(Row {
             id: target.id,
@@ -59,6 +74,7 @@ pub async fn load_current<C: ConnectionTrait>(db: &C) -> Result<Current, Warpgat
                 ticket_require_approval: target.ticket_require_approval,
                 require_approval: target.require_approval,
                 ticket_max_uses: target.ticket_max_uses,
+                references,
             },
         });
     }
@@ -89,7 +105,35 @@ pub async fn load_current<C: ConnectionTrait>(db: &C) -> Result<Current, Warpgat
             })
             .collect(),
         targets,
+        ssh_client_keys: keys
+            .into_iter()
+            .map(|mut key| {
+                reveal_inline(&mut key.secret_key)?;
+                Ok(Row {
+                    id: key.id,
+                    name: key.label,
+                    provider: key.provider,
+                    live: SshClientKeySpec {
+                        private_key: key.secret_key,
+                        is_default: key.is_default,
+                    },
+                })
+            })
+            .collect::<Result<_, WarpgateError>>()?,
     })
+}
+
+/// Decrypts an inline credential, so that it compares with a file's literal
+fn reveal_inline(slot: &mut MaybeSecretRef) -> Result<(), WarpgateError> {
+    if let MaybeSecretRef::Inline(secret) = slot {
+        *secret = StoredSecret::from(secret.reveal()?.expose_secret().clone());
+    }
+    Ok(())
+}
+
+/// The name of the row an ID refers to, or the ID itself if that row is gone
+fn name_of(names: &HashMap<Uuid, String>, id: Uuid) -> String {
+    names.get(&id).cloned().unwrap_or_else(|| id.to_string())
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -119,11 +163,13 @@ impl From<DbErr> for ApplyError {
 /// again inside the transaction and must still be the one that was confirmed,
 /// so exactly what was shown gets written; a change made after that still
 /// rolls everything back, through the unique names and the ownership checks.
+/// `secrets` resolves the references of client keys, to derive their public keys.
 pub async fn apply<C: ConnectionTrait + TransactionTrait>(
     db: &C,
     provider: ProviderId,
     desired: &[Resource],
     confirmed: &Plan,
+    secrets: &dyn SecretResolver,
 ) -> Result<(), ApplyError> {
     if confirmed.has_errors() {
         return Err(ApplyError::PlanHasErrors);
@@ -134,10 +180,14 @@ pub async fn apply<C: ConnectionTrait + TransactionTrait>(
     }
 
     let actor = Actor::Provider(provider);
-    // Plans list groups and roles before the targets that refer to them by
-    // name, so the names are read once every group and role is in place
+    // Plans list groups, roles and keys before the targets that refer to them
+    // by name, so the names are read once all of those are in place
     let mut names = None;
-    for change in &confirmed.changes {
+    let (targets, others): (Vec<&Change>, Vec<&Change>) = confirmed
+        .changes
+        .iter()
+        .partition(|change| change.kind() == Kind::Target);
+    for change in others.into_iter().chain(jump_hosts_first(targets)) {
         let (id, adopt, desired) = match change {
             Change::Create(desired) => (None, false, desired),
             Change::Update { id, desired, .. } => (Some(*id), false, desired),
@@ -157,8 +207,11 @@ pub async fn apply<C: ConnectionTrait + TransactionTrait>(
         let result = match desired {
             Resource::TargetGroup(manifest) => write.group(manifest).await,
             Resource::Role(manifest) => write.role(manifest).await,
+            // ponytail: resolves a reference while the transaction is open;
+            // resolve before it if backend latency starts holding locks too long
+            Resource::SshClientKey(manifest) => write.client_key(manifest, secrets).await,
             Resource::Target(manifest) => {
-                let names = match &names {
+                let names = match &mut names {
                     Some(names) => names,
                     None => names.insert(Names::load(&txn).await?),
                 };
@@ -232,10 +285,38 @@ impl<C: ConnectionTrait> Write<'_, C> {
         Ok(())
     }
 
+    async fn client_key(
+        &self,
+        manifest: &Manifest<SshClientKeySpec>,
+        secrets: &dyn SecretResolver,
+    ) -> Result<(), ResourceError> {
+        let SshClientKeySpec {
+            private_key,
+            is_default,
+        } = &manifest.spec;
+        let material = KeyMaterial::resolve(private_key, secrets).await?;
+        let data = SshClientKeyDataRequest {
+            label: manifest.metadata.name.clone(),
+            is_default: *is_default,
+        };
+        match self.id {
+            None => {
+                ssh_client_keys::create(self.db, self.actor, &data, material).await?;
+            }
+            Some(id) => {
+                if self.adopt {
+                    ssh_client_keys::set_owner(self.db, id, self.provider).await?;
+                }
+                ssh_client_keys::update(self.db, self.actor, id, &data, Some(material)).await?;
+            }
+        }
+        Ok(())
+    }
+
     async fn target(
         &self,
         manifest: &Manifest<TargetSpec>,
-        names: &Names,
+        names: &mut Names,
     ) -> Result<(), ResourceError> {
         let TargetSpec {
             description,
@@ -248,11 +329,29 @@ impl<C: ConnectionTrait> Write<'_, C> {
             ticket_require_approval,
             require_approval,
             ticket_max_uses,
+            references:
+                OptionReferences {
+                    jump_host,
+                    client_key,
+                },
         } = &manifest.spec;
+        let mut options = options.clone();
+        if let TargetOptions::Ssh(ssh) = &mut options {
+            ssh.jump_host = jump_host
+                .as_deref()
+                .map(|name| names.target(name))
+                .transpose()?;
+            if let SSHTargetAuth::PublicKey(auth) = &mut ssh.auth {
+                auth.key_id = client_key
+                    .as_deref()
+                    .map(|name| names.client_key(name))
+                    .transpose()?;
+            }
+        }
         let data = TargetDataRequest {
             name: manifest.metadata.name.clone(),
             description: Some(description.clone()),
-            options: options.clone(),
+            options,
             rate_limit_bytes_per_second: *rate_limit_bytes_per_second,
             group_id: group
                 .as_deref()
@@ -265,7 +364,11 @@ impl<C: ConnectionTrait> Write<'_, C> {
             ticket_max_uses: *ticket_max_uses,
         };
         let id = match self.id {
-            None => targets::create(self.db, self.actor, &data).await?.id,
+            None => {
+                let id = targets::create(self.db, self.actor, &data).await?.id;
+                names.add_target(&manifest.metadata.name, id);
+                id
+            }
             Some(id) => {
                 if self.adopt {
                     targets::set_owner(self.db, id, self.provider).await?;
@@ -296,26 +399,91 @@ impl<C: ConnectionTrait> Write<'_, C> {
     }
 }
 
+/// Puts each target after the one it uses as a jump host, so that a target
+/// can refer to a jump host this same apply creates
+fn jump_hosts_first(mut pending: Vec<&Change>) -> Vec<&Change> {
+    let jump_host = |change: &Change| match change {
+        Change::Create(Resource::Target(manifest))
+        | Change::Update {
+            desired: Resource::Target(manifest),
+            ..
+        }
+        | Change::Adopt {
+            desired: Resource::Target(manifest),
+            ..
+        } => manifest
+            .spec
+            .references
+            .jump_host
+            .as_ref()
+            .map(|name| name.to_lowercase()),
+        _ => None,
+    };
+    let mut ordered = Vec::new();
+    while !pending.is_empty() {
+        let waiting: HashSet<String> = pending.iter().map(|c| c.name().to_lowercase()).collect();
+        let (ready, rest): (Vec<_>, Vec<_>) = pending
+            .into_iter()
+            .partition(|change| jump_host(change).is_none_or(|host| !waiting.contains(&host)));
+        if ready.is_empty() {
+            // A loop, which validation rejects; the writes then fail on it
+            ordered.extend(rest);
+            break;
+        }
+        ordered.extend(ready);
+        pending = rest;
+    }
+    ordered
+}
+
 /// Resolves a target's references the way the plan matches rows: ignoring case,
 /// unless a backend with case-sensitive names holds an exact match
 struct Names {
     groups: HashMap<String, Uuid>,
     roles: HashMap<String, Uuid>,
+    targets: HashMap<String, Uuid>,
+    client_keys: HashMap<String, Uuid>,
 }
 
 impl Names {
     async fn load<C: ConnectionTrait>(db: &C) -> Result<Self, DbErr> {
-        let mut groups = HashMap::new();
+        let mut names = Self {
+            groups: HashMap::new(),
+            roles: HashMap::new(),
+            targets: HashMap::new(),
+            client_keys: HashMap::new(),
+        };
         for group in TargetGroup::Entity::find().all(db).await? {
-            groups.entry(group.name.to_lowercase()).or_insert(group.id);
-            groups.insert(group.name, group.id);
+            Self::add(&mut names.groups, &group.name, group.id);
         }
-        let mut roles = HashMap::new();
         for role in Role::Entity::find().all(db).await? {
-            roles.entry(role.name.to_lowercase()).or_insert(role.id);
-            roles.insert(role.name, role.id);
+            Self::add(&mut names.roles, &role.name, role.id);
         }
-        Ok(Self { groups, roles })
+        for key in SshClientKey::Entity::find().all(db).await? {
+            Self::add(&mut names.client_keys, &key.label, key.id);
+        }
+        for target in Target::Entity::find().all(db).await? {
+            names.add_target(&target.name, target.id);
+        }
+        Ok(names)
+    }
+
+    fn add_target(&mut self, name: &str, id: Uuid) {
+        Self::add(&mut self.targets, name, id);
+    }
+
+    /// The lowercase entry goes to whichever row comes first
+    fn add(ids: &mut HashMap<String, Uuid>, name: &str, id: Uuid) {
+        ids.entry(name.to_lowercase()).or_insert(id);
+        ids.insert(name.to_owned(), id);
+    }
+
+    fn target(&self, name: &str) -> Result<Uuid, ResourceError> {
+        Self::find(&self.targets, name)
+    }
+
+    fn client_key(&self, name: &str) -> Result<Uuid, ResourceError> {
+        Self::find(&self.client_keys, name)
     }
 
     fn group(&self, name: &str) -> Result<Uuid, ResourceError> {
@@ -337,7 +505,7 @@ impl Names {
 #[cfg(all(test, feature = "sqlite"))]
 mod tests {
     use serde_json::json;
-    use warpgate_common::ProviderId;
+    use warpgate_common::{ProviderId, Secret, SecretError, SecretRef, SshHostKeyKind};
     use warpgate_gitops::plan::{Change, plan};
     use warpgate_gitops::types::Resource;
 
@@ -430,6 +598,16 @@ mod tests {
 
     const GITOPS: ProviderId = ProviderId::GITOPS;
 
+    /// Every reference holds a fresh private key
+    struct Keys;
+
+    #[async_trait::async_trait]
+    impl SecretResolver for Keys {
+        async fn resolve(&self, _: &SecretRef) -> Result<Secret<String>, SecretError> {
+            Ok(Secret::new(SshHostKeyKind::Ed25519.generate_pem().unwrap()))
+        }
+    }
+
     fn resources(yaml: &str) -> Vec<Resource> {
         let files = [(std::path::PathBuf::from("test.yaml"), yaml.to_owned())];
         warpgate_gitops::validate::check_files(&files).unwrap()
@@ -466,7 +644,7 @@ mod tests {
         let first = plan_against(&db, &desired).await;
         assert!(first.changes.iter().all(|c| matches!(c, Change::Create(_))));
 
-        apply(&db, GITOPS, &desired, &first).await.unwrap();
+        apply(&db, GITOPS, &desired, &first, &Keys).await.unwrap();
 
         let again = plan_against(&db, &desired).await;
         assert!(
@@ -493,9 +671,15 @@ mod tests {
             ))
         };
         let before = fileset(22, "dba, ops");
-        apply(&db, GITOPS, &before, &plan_against(&db, &before).await)
-            .await
-            .unwrap();
+        apply(
+            &db,
+            GITOPS,
+            &before,
+            &plan_against(&db, &before).await,
+            &Keys,
+        )
+        .await
+        .unwrap();
         assert_eq!(
             TargetRoleAssignment::Entity::find()
                 .all(&db)
@@ -511,7 +695,7 @@ mod tests {
             summary(&plan),
             ["unchanged dba", "unchanged ops", "update web"]
         );
-        apply(&db, GITOPS, &after, &plan).await.unwrap();
+        apply(&db, GITOPS, &after, &plan, &Keys).await.unwrap();
 
         let target = Target::Entity::find().one(&db).await.unwrap().unwrap();
         assert_eq!(target.options["ssh"]["port"], 2222);
@@ -558,14 +742,16 @@ mod tests {
         let refused = plan_against(&db, &plain).await;
         assert_eq!(summary(&refused), ["collision legacy"]);
         assert!(matches!(
-            apply(&db, GITOPS, &plain, &refused).await,
+            apply(&db, GITOPS, &plain, &refused, &Keys).await,
             Err(ApplyError::PlanHasErrors)
         ));
 
         let annotated = role(", annotations: {warpgate.dev/adopt-existing: \"true\"}");
         let adopting = plan_against(&db, &annotated).await;
         assert_eq!(summary(&adopting), ["adopt legacy"]);
-        apply(&db, GITOPS, &annotated, &adopting).await.unwrap();
+        apply(&db, GITOPS, &annotated, &adopting, &Keys)
+            .await
+            .unwrap();
 
         let legacy = Role::Entity::find_by_id(legacy.id)
             .one(&db)
@@ -599,7 +785,7 @@ mod tests {
         .unwrap();
 
         assert!(matches!(
-            apply(&db, GITOPS, &desired, &confirmed).await,
+            apply(&db, GITOPS, &desired, &confirmed, &Keys).await,
             Err(ApplyError::Stale)
         ));
         let roles = Role::Entity::find().all(&db).await.unwrap();

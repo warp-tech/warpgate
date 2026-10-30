@@ -5,6 +5,7 @@ use anyhow::Result;
 use sea_orm::DatabaseConnection;
 use warpgate_common::encryption::{EncryptionError, validate_encryption_config};
 use warpgate_common::{GlobalParams, ProviderId, WarpgateError, warnings};
+use warpgate_core::SecretBackendRegistry;
 use warpgate_core::db::{connect_to_db, has_pending_migrations};
 use warpgate_core::resources::reconcile::{ApplyError, apply, load_current};
 use warpgate_gitops::diagnostic::Diagnostic;
@@ -195,7 +196,8 @@ async fn apply_command(params: &GlobalParams, paths: &[PathBuf], yes: bool) -> R
         }
     }
 
-    match apply(&db, ProviderId::GITOPS, &resources, &plan).await {
+    let secrets = SecretBackendRegistry::new(db.clone());
+    match apply(&db, ProviderId::GITOPS, &resources, &plan, &secrets).await {
         Ok(()) => {
             println!("Applied");
             Ok(())

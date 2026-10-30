@@ -1,2 +1,3 @@
 tests/fixtures/invalid/references.yaml:12:10 spec.group: unknown TargetGroup `prod`
 tests/fixtures/invalid/references.yaml:13:16 spec.roles[1]: unknown Role `ops`
+tests/fixtures/invalid/references.yaml:19:17 spec.options.ssh.auth.key_id: unknown SshClientKey `deploy-key`

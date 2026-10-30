@@ -1,5 +1,6 @@
 pub mod reconcile;
 pub mod roles;
+pub mod ssh_client_keys;
 pub mod target_groups;
 pub mod targets;
 
@@ -26,6 +27,10 @@ pub enum ResourceError {
     OwnedBy(ProviderId),
     #[error("created by hand; a provider may not change it")]
     Manual,
+    #[error("this key is already stored")]
+    KeyTaken,
+    #[error("at least one SSH client key must remain")]
+    LastClientKey,
 
     #[error(transparent)]
     Other(#[from] WarpgateError),

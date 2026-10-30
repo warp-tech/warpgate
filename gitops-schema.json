@@ -1,57 +1,12 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Resource",
-  "description": "One document of a Warpgate resource file",
-  "oneOf": [
-    {
-      "type": "object",
-      "properties": {
-        "kind": {
-          "type": "string",
-          "const": "Target"
-        }
-      },
-      "$ref": "#/$defs/TargetSpecManifest",
-      "required": [
-        "kind"
-      ]
-    },
-    {
-      "type": "object",
-      "properties": {
-        "kind": {
-          "type": "string",
-          "const": "TargetGroup"
-        }
-      },
-      "$ref": "#/$defs/TargetGroupSpecManifest",
-      "required": [
-        "kind"
-      ]
-    },
-    {
-      "type": "object",
-      "properties": {
-        "kind": {
-          "type": "string",
-          "const": "Role"
-        }
-      },
-      "$ref": "#/$defs/RoleSpecManifest",
-      "required": [
-        "kind"
-      ]
-    }
-  ],
   "$defs": {
     "ApiVersion": {
-      "type": "string",
       "enum": [
         "warpgate/v1"
-      ]
+      ],
+      "type": "string"
     },
     "BootstrapThemeColor": {
-      "type": "string",
       "enum": [
         "Primary",
         "Secondary",
@@ -61,35 +16,38 @@
         "Info",
         "Light",
         "Dark"
-      ]
+      ],
+      "type": "string"
     },
     "DatabaseTargetAuth": {
       "oneOf": [
         {
-          "type": "object",
+          "$ref": "#/$defs/DatabaseTargetPasswordAuth",
           "properties": {
             "kind": {
-              "type": "string",
-              "const": "password"
+              "const": "password",
+              "type": "string"
             }
           },
-          "$ref": "#/$defs/DatabaseTargetPasswordAuth",
           "required": [
             "kind"
-          ]
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
         },
         {
-          "type": "object",
+          "$ref": "#/$defs/DatabaseTargetIamRoleAuth",
           "properties": {
             "kind": {
-              "type": "string",
-              "const": "iam_role"
+              "const": "iam_role",
+              "type": "string"
             }
           },
-          "$ref": "#/$defs/DatabaseTargetIamRoleAuth",
           "required": [
             "kind"
-          ]
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
         }
       ]
     },
@@ -97,59 +55,61 @@
       "type": "object"
     },
     "DatabaseTargetPasswordAuth": {
-      "type": "object",
       "properties": {
         "password": {
           "$ref": "#/$defs/MaybeSecretRef",
           "default": ""
         }
-      }
+      },
+      "type": "object"
     },
     "KubernetesTargetAuth": {
       "oneOf": [
         {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "const": "token"
-            }
-          },
           "$ref": "#/$defs/KubernetesTargetTokenAuth",
-          "required": [
-            "kind"
-          ]
-        },
-        {
-          "type": "object",
           "properties": {
             "kind": {
-              "type": "string",
-              "const": "certificate"
+              "const": "token",
+              "type": "string"
             }
           },
+          "required": [
+            "kind"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        },
+        {
           "$ref": "#/$defs/KubernetesTargetCertificateAuth",
-          "required": [
-            "kind"
-          ]
-        },
-        {
-          "type": "object",
           "properties": {
             "kind": {
-              "type": "string",
-              "const": "iam_role"
+              "const": "certificate",
+              "type": "string"
             }
           },
-          "$ref": "#/$defs/KubernetesTargetIamRoleAuth",
           "required": [
             "kind"
-          ]
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        },
+        {
+          "$ref": "#/$defs/KubernetesTargetIamRoleAuth",
+          "properties": {
+            "kind": {
+              "const": "iam_role",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
         }
       ]
     },
     "KubernetesTargetCertificateAuth": {
-      "type": "object",
       "properties": {
         "certificate": {
           "type": "string"
@@ -161,13 +121,13 @@
       "required": [
         "certificate",
         "private_key"
-      ]
+      ],
+      "type": "object"
     },
     "KubernetesTargetIamRoleAuth": {
       "type": "object"
     },
     "KubernetesTargetTokenAuth": {
-      "type": "object",
       "properties": {
         "token": {
           "$ref": "#/$defs/MaybeSecretRef"
@@ -175,80 +135,82 @@
       },
       "required": [
         "token"
-      ]
+      ],
+      "type": "object"
     },
     "MaybeSecretRef": {
       "description": "A literal value, or a reference to one: secret://backend/mount/path#field",
       "type": "string"
     },
     "Metadata": {
-      "type": "object",
       "properties": {
         "annotations": {
-          "type": "object",
           "additionalProperties": {
             "type": "string"
           },
-          "default": {}
+          "default": {},
+          "type": "object"
         },
         "labels": {
-          "type": "object",
           "additionalProperties": {
             "type": "string"
           },
-          "default": {}
+          "default": {},
+          "type": "object"
         },
         "name": {
-          "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "type": "string"
         }
       },
       "required": [
         "name"
-      ]
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
     },
     "PostgresProtocolVersion": {
-      "type": "string",
       "enum": [
         "3.0",
         "3.2"
-      ]
+      ],
+      "type": "string"
     },
     "RdpTargetAuth": {
       "oneOf": [
         {
-          "type": "object",
+          "$ref": "#/$defs/RdpTargetPasswordAuth",
           "properties": {
             "kind": {
-              "type": "string",
-              "const": "password"
+              "const": "password",
+              "type": "string"
             }
           },
-          "$ref": "#/$defs/RdpTargetPasswordAuth",
           "required": [
             "kind"
-          ]
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
         }
       ]
     },
     "RdpTargetCompression": {
       "oneOf": [
         {
-          "type": "string",
           "enum": [
             "remotefx",
             "lossless"
-          ]
+          ],
+          "type": "string"
         },
         {
+          "const": "graphics_pipeline",
           "description": "MS-RDPEGFX",
-          "type": "string",
-          "const": "graphics_pipeline"
+          "type": "string"
         }
       ]
     },
     "RdpTargetPasswordAuth": {
-      "type": "object",
       "properties": {
         "password": {
           "$ref": "#/$defs/MaybeSecretRef"
@@ -256,43 +218,44 @@
       },
       "required": [
         "password"
-      ]
+      ],
+      "type": "object"
     },
     "RdpTlsSecurity": {
       "oneOf": [
         {
+          "const": "tls_1_2",
           "description": "~ Windows 2016/10",
-          "type": "string",
-          "const": "tls_1_2"
+          "type": "string"
         },
         {
+          "const": "tls_1_2_with_legacy_ciphers",
           "description": "~ Windows 2012/8",
-          "type": "string",
-          "const": "tls_1_2_with_legacy_ciphers"
+          "type": "string"
         },
         {
+          "const": "tls_1_0_unsafe",
           "description": "~ Windows 2008/Vista",
-          "type": "string",
-          "const": "tls_1_0_unsafe"
+          "type": "string"
         }
       ]
     },
     "RoleSpec": {
-      "type": "object",
       "properties": {
         "description": {
-          "type": "string",
-          "default": ""
+          "default": "",
+          "type": "string"
         },
         "is_default": {
+          "default": false,
           "description": "Grant to every new user",
-          "type": "boolean",
-          "default": false
+          "type": "boolean"
         }
-      }
+      },
+      "type": "object",
+      "unevaluatedProperties": false
     },
     "RoleSpecManifest": {
-      "type": "object",
       "properties": {
         "apiVersion": {
           "$ref": "#/$defs/ApiVersion"
@@ -308,74 +271,116 @@
         "apiVersion",
         "metadata",
         "spec"
-      ]
+      ],
+      "type": "object"
     },
     "SSHTargetAuth": {
       "oneOf": [
         {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "const": "password"
-            }
-          },
           "$ref": "#/$defs/SshTargetPasswordAuth",
-          "required": [
-            "kind"
-          ]
-        },
-        {
-          "type": "object",
           "properties": {
             "kind": {
-              "type": "string",
-              "const": "publickey"
+              "const": "password",
+              "type": "string"
             }
           },
+          "required": [
+            "kind"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        },
+        {
           "$ref": "#/$defs/SshTargetPublicKeyAuth",
-          "required": [
-            "kind"
-          ]
-        },
-        {
-          "type": "object",
           "properties": {
             "kind": {
-              "type": "string",
-              "const": "certificate"
+              "const": "publickey",
+              "type": "string"
             }
           },
+          "required": [
+            "kind"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        },
+        {
           "$ref": "#/$defs/SshTargetCertificateAuth",
-          "required": [
-            "kind"
-          ]
-        },
-        {
-          "type": "object",
           "properties": {
             "kind": {
-              "type": "string",
-              "const": "iam_role"
+              "const": "certificate",
+              "type": "string"
             }
           },
-          "$ref": "#/$defs/SshTargetIamRoleAuth",
           "required": [
             "kind"
-          ]
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        },
+        {
+          "$ref": "#/$defs/SshTargetIamRoleAuth",
+          "properties": {
+            "kind": {
+              "const": "iam_role",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
         }
       ]
     },
-    "SshTargetCertificateAuth": {
+    "SshClientKeySpec": {
+      "description": "A key Warpgate authenticates to SSH targets with. `metadata.name` is its label.",
+      "properties": {
+        "is_default": {
+          "default": false,
+          "description": "Offer the key to SSH targets that don't name one",
+          "type": "boolean"
+        },
+        "private_key": {
+          "$ref": "#/$defs/MaybeSecretRef",
+          "description": "The private key in OpenSSH or PKCS#8 PEM format, without a passphrase,\nor a reference to one"
+        }
+      },
+      "required": [
+        "private_key"
+      ],
       "type": "object",
+      "unevaluatedProperties": false
+    },
+    "SshClientKeySpecManifest": {
+      "properties": {
+        "apiVersion": {
+          "$ref": "#/$defs/ApiVersion"
+        },
+        "metadata": {
+          "$ref": "#/$defs/Metadata"
+        },
+        "spec": {
+          "$ref": "#/$defs/SshClientKeySpec"
+        }
+      },
+      "required": [
+        "apiVersion",
+        "metadata",
+        "spec"
+      ],
+      "type": "object"
+    },
+    "SshTargetCertificateAuth": {
       "properties": {
         "backend": {
           "type": "string"
         },
         "mount": {
+          "default": "ssh",
           "description": "Mount of the SSH secrets engine",
-          "type": "string",
-          "default": "ssh"
+          "type": "string"
         },
         "role": {
           "description": "Signing role",
@@ -385,13 +390,13 @@
       "required": [
         "backend",
         "role"
-      ]
+      ],
+      "type": "object"
     },
     "SshTargetIamRoleAuth": {
       "type": "object"
     },
     "SshTargetPasswordAuth": {
-      "type": "object",
       "properties": {
         "password": {
           "$ref": "#/$defs/MaybeSecretRef"
@@ -399,23 +404,23 @@
       },
       "required": [
         "password"
-      ]
+      ],
+      "type": "object"
     },
     "SshTargetPublicKeyAuth": {
-      "type": "object",
       "properties": {
         "key_id": {
+          "default": null,
           "description": "Specific stored client key to authenticate with; `None` uses the keys\nmarked default.",
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         }
-      }
+      },
+      "type": "object"
     },
     "TargetGroupSpec": {
-      "type": "object",
       "properties": {
         "color": {
           "anyOf": [
@@ -428,13 +433,14 @@
           ]
         },
         "description": {
-          "type": "string",
-          "default": ""
+          "default": "",
+          "type": "string"
         }
-      }
+      },
+      "type": "object",
+      "unevaluatedProperties": false
     },
     "TargetGroupSpecManifest": {
-      "type": "object",
       "properties": {
         "apiVersion": {
           "$ref": "#/$defs/ApiVersion"
@@ -450,24 +456,24 @@
         "apiVersion",
         "metadata",
         "spec"
-      ]
+      ],
+      "type": "object"
     },
     "TargetHTTPOptions": {
-      "type": "object",
       "properties": {
         "external_host": {
+          "default": null,
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         },
         "headers": {
-          "type": "object",
           "additionalProperties": {
             "type": "string"
           },
-          "default": {}
+          "default": {},
+          "type": "object"
         },
         "tls": {
           "$ref": "#/$defs/Tls",
@@ -477,13 +483,14 @@
           }
         },
         "url": {
-          "type": "string",
-          "default": ""
+          "default": "",
+          "type": "string"
         }
-      }
+      },
+      "type": "object",
+      "unevaluatedProperties": false
     },
     "TargetKubernetesOptions": {
-      "type": "object",
       "properties": {
         "auth": {
           "$ref": "#/$defs/KubernetesTargetAuth",
@@ -494,8 +501,8 @@
           }
         },
         "cluster_url": {
-          "type": "string",
-          "default": ""
+          "default": "",
+          "type": "string"
         },
         "tls": {
           "$ref": "#/$defs/Tls",
@@ -504,10 +511,11 @@
             "verify": true
           }
         }
-      }
+      },
+      "type": "object",
+      "unevaluatedProperties": false
     },
     "TargetMySqlOptions": {
-      "type": "object",
       "properties": {
         "auth": {
           "$ref": "#/$defs/DatabaseTargetAuth",
@@ -517,22 +525,22 @@
           }
         },
         "default_database_name": {
+          "default": null,
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         },
         "host": {
-          "type": "string",
-          "default": ""
+          "default": "",
+          "type": "string"
         },
         "port": {
-          "type": "integer",
-          "format": "uint16",
           "default": 3306,
+          "format": "uint16",
           "maximum": 65535,
-          "minimum": 0
+          "minimum": 0,
+          "type": "integer"
         },
         "tls": {
           "$ref": "#/$defs/Tls",
@@ -542,101 +550,102 @@
           }
         },
         "username": {
-          "type": "string",
-          "default": "root"
+          "default": "root",
+          "type": "string"
         }
-      }
+      },
+      "type": "object",
+      "unevaluatedProperties": false
     },
     "TargetOptions": {
       "oneOf": [
         {
-          "type": "object",
+          "additionalProperties": false,
           "properties": {
             "ssh": {
               "$ref": "#/$defs/TargetSSHOptions"
             }
           },
-          "additionalProperties": false,
           "required": [
             "ssh"
-          ]
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
+          "additionalProperties": false,
           "properties": {
             "http": {
               "$ref": "#/$defs/TargetHTTPOptions"
             }
           },
-          "additionalProperties": false,
           "required": [
             "http"
-          ]
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
+          "additionalProperties": false,
           "properties": {
             "kubernetes": {
               "$ref": "#/$defs/TargetKubernetesOptions"
             }
           },
-          "additionalProperties": false,
           "required": [
             "kubernetes"
-          ]
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
+          "additionalProperties": false,
           "properties": {
             "mysql": {
               "$ref": "#/$defs/TargetMySqlOptions"
             }
           },
-          "additionalProperties": false,
           "required": [
             "mysql"
-          ]
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
+          "additionalProperties": false,
           "properties": {
             "postgres": {
               "$ref": "#/$defs/TargetPostgresOptions"
             }
           },
-          "additionalProperties": false,
           "required": [
             "postgres"
-          ]
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
+          "additionalProperties": false,
           "properties": {
             "vnc": {
               "$ref": "#/$defs/TargetVncOptions"
             }
           },
-          "additionalProperties": false,
           "required": [
             "vnc"
-          ]
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
+          "additionalProperties": false,
           "properties": {
             "rdp": {
               "$ref": "#/$defs/TargetRdpOptions"
             }
           },
-          "additionalProperties": false,
           "required": [
             "rdp"
-          ]
+          ],
+          "type": "object"
         }
       ]
     },
     "TargetPostgresOptions": {
-      "type": "object",
       "properties": {
         "auth": {
           "$ref": "#/$defs/DatabaseTargetAuth",
@@ -646,29 +655,29 @@
           }
         },
         "default_database_name": {
+          "default": null,
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         },
         "host": {
-          "type": "string",
-          "default": ""
+          "default": "",
+          "type": "string"
         },
         "idle_timeout": {
+          "default": "10m",
           "type": [
             "string",
             "null"
-          ],
-          "default": "10m"
+          ]
         },
         "port": {
-          "type": "integer",
-          "format": "uint16",
           "default": 5432,
+          "format": "uint16",
           "maximum": 65535,
-          "minimum": 0
+          "minimum": 0,
+          "type": "integer"
         },
         "protocol_version": {
           "$ref": "#/$defs/PostgresProtocolVersion",
@@ -682,13 +691,14 @@
           }
         },
         "username": {
-          "type": "string",
-          "default": "root"
+          "default": "root",
+          "type": "string"
         }
-      }
+      },
+      "type": "object",
+      "unevaluatedProperties": false
     },
     "TargetRdpOptions": {
-      "type": "object",
       "properties": {
         "auth": {
           "$ref": "#/$defs/RdpTargetAuth",
@@ -702,57 +712,58 @@
           "default": "remotefx"
         },
         "domain": {
+          "default": null,
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         },
         "host": {
-          "type": "string",
-          "default": ""
+          "default": "",
+          "type": "string"
         },
         "interactive_logon": {
+          "default": false,
           "description": "Show the target's own sign-in screen instead of logging on automatically.\nThe stored credentials still pass network-level authentication (CredSSP).",
-          "type": "boolean",
-          "default": false
+          "type": "boolean"
         },
         "kdc_url": {
+          "default": null,
           "description": "Kerberos KDC for network-level authentication: `tcp://dc:88`, `udp://dc:88`\nor a KDC proxy `https://` URL. When set, CredSSP negotiates Kerberos (falling\nback to NTLM), which accounts barred from NTLM (Protected Users) require.\nThe target host must then be a name matching its `TERMSRV/` SPN, not an IP.",
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         },
         "port": {
-          "type": "integer",
-          "format": "uint16",
           "default": 3389,
+          "format": "uint16",
           "maximum": 65535,
-          "minimum": 0
+          "minimum": 0,
+          "type": "integer"
         },
         "tls_security": {
           "$ref": "#/$defs/RdpTlsSecurity",
           "default": "tls_1_2"
         },
         "username": {
-          "type": "string",
-          "default": "root"
+          "default": "root",
+          "type": "string"
         },
         "verify_tls": {
+          "default": false,
           "description": "Verify the RDP server's TLS certificate against the system root store.\nRDP servers commonly use self-signed certificates, so this is off by default.",
-          "type": "boolean",
-          "default": false
+          "type": "boolean"
         }
-      }
+      },
+      "type": "object",
+      "unevaluatedProperties": false
     },
     "TargetSSHOptions": {
-      "type": "object",
       "properties": {
         "allow_insecure_algos": {
-          "type": "boolean",
-          "default": false
+          "default": false,
+          "type": "boolean"
         },
         "auth": {
           "$ref": "#/$defs/SSHTargetAuth",
@@ -765,34 +776,35 @@
           "type": "string"
         },
         "jump_host": {
+          "default": null,
           "type": [
             "string",
             "null"
-          ],
-          "default": null
+          ]
         },
         "port": {
-          "type": "integer",
-          "format": "uint16",
           "default": 22,
+          "format": "uint16",
           "maximum": 65535,
-          "minimum": 0
+          "minimum": 0,
+          "type": "integer"
         },
         "username": {
-          "type": "string",
-          "default": "root"
+          "default": "root",
+          "type": "string"
         }
       },
       "required": [
         "host"
-      ]
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
     },
     "TargetSpec": {
-      "type": "object",
       "properties": {
         "description": {
-          "type": "string",
-          "default": ""
+          "default": "",
+          "type": "string"
         },
         "group": {
           "description": "TargetGroup name",
@@ -805,56 +817,57 @@
           "$ref": "#/$defs/TargetOptions"
         },
         "rate_limit_bytes_per_second": {
+          "format": "uint32",
+          "minimum": 0,
           "type": [
             "integer",
             "null"
-          ],
-          "format": "uint32",
-          "minimum": 0
+          ]
         },
         "require_approval": {
-          "type": "boolean",
-          "default": false
+          "default": false,
+          "type": "boolean"
         },
         "roles": {
-          "description": "Role names that are allowed to access the target",
-          "type": "array",
           "default": [],
+          "description": "Role names that are allowed to access the target",
           "items": {
             "type": "string"
-          }
+          },
+          "type": "array"
         },
         "ticket_max_duration_seconds": {
+          "format": "int64",
           "type": [
             "integer",
             "null"
-          ],
-          "format": "int64"
+          ]
         },
         "ticket_max_uses": {
+          "format": "int16",
+          "maximum": 32767,
+          "minimum": -32768,
           "type": [
             "integer",
             "null"
-          ],
-          "format": "int16",
-          "maximum": 32767,
-          "minimum": -32768
+          ]
         },
         "ticket_requests_disabled": {
-          "type": "boolean",
-          "default": false
+          "default": false,
+          "type": "boolean"
         },
         "ticket_require_approval": {
-          "type": "boolean",
-          "default": false
+          "default": false,
+          "type": "boolean"
         }
       },
       "required": [
         "options"
-      ]
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
     },
     "TargetSpecManifest": {
-      "type": "object",
       "properties": {
         "apiVersion": {
           "$ref": "#/$defs/ApiVersion"
@@ -870,10 +883,10 @@
         "apiVersion",
         "metadata",
         "spec"
-      ]
+      ],
+      "type": "object"
     },
     "TargetVncOptions": {
-      "type": "object",
       "properties": {
         "auth": {
           "$ref": "#/$defs/VncTargetAuth",
@@ -882,66 +895,71 @@
           }
         },
         "host": {
-          "type": "string",
-          "default": ""
+          "default": "",
+          "type": "string"
         },
         "port": {
-          "type": "integer",
-          "format": "uint16",
           "default": 5900,
+          "format": "uint16",
           "maximum": 65535,
-          "minimum": 0
+          "minimum": 0,
+          "type": "integer"
         }
-      }
+      },
+      "type": "object",
+      "unevaluatedProperties": false
     },
     "Tls": {
-      "type": "object",
       "properties": {
         "mode": {
           "$ref": "#/$defs/TlsMode",
           "default": "preferred"
         },
         "verify": {
-          "type": "boolean",
-          "default": true
+          "default": true,
+          "type": "boolean"
         }
-      }
+      },
+      "type": "object",
+      "unevaluatedProperties": false
     },
     "TlsMode": {
-      "type": "string",
       "enum": [
         "disabled",
         "preferred",
         "required"
-      ]
+      ],
+      "type": "string"
     },
     "VncTargetAuth": {
       "oneOf": [
         {
-          "type": "object",
+          "$ref": "#/$defs/VncTargetNoneAuth",
           "properties": {
             "kind": {
-              "type": "string",
-              "const": "none"
+              "const": "none",
+              "type": "string"
             }
           },
-          "$ref": "#/$defs/VncTargetNoneAuth",
           "required": [
             "kind"
-          ]
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
         },
         {
-          "type": "object",
+          "$ref": "#/$defs/VncTargetPasswordAuth",
           "properties": {
             "kind": {
-              "type": "string",
-              "const": "password"
+              "const": "password",
+              "type": "string"
             }
           },
-          "$ref": "#/$defs/VncTargetPasswordAuth",
           "required": [
             "kind"
-          ]
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
         }
       ]
     },
@@ -949,7 +967,6 @@
       "type": "object"
     },
     "VncTargetPasswordAuth": {
-      "type": "object",
       "properties": {
         "password": {
           "$ref": "#/$defs/MaybeSecretRef"
@@ -957,7 +974,69 @@
       },
       "required": [
         "password"
-      ]
+      ],
+      "type": "object"
     }
-  }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "One document of a Warpgate resource file",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/TargetSpecManifest",
+      "properties": {
+        "kind": {
+          "const": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    {
+      "$ref": "#/$defs/TargetGroupSpecManifest",
+      "properties": {
+        "kind": {
+          "const": "TargetGroup",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    {
+      "$ref": "#/$defs/RoleSpecManifest",
+      "properties": {
+        "kind": {
+          "const": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    {
+      "$ref": "#/$defs/SshClientKeySpecManifest",
+      "properties": {
+        "kind": {
+          "const": "SshClientKey",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    }
+  ],
+  "title": "Resource"
 }

@@ -18,6 +18,28 @@ spec:
   color: Danger
 ---
 apiVersion: warpgate/v1
+kind: SshClientKey
+metadata:
+  name: deploy-key
+spec:
+  is_default: true
+  private_key: |
+    -----BEGIN OPENSSH PRIVATE KEY-----
+    b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+    QyNTUxOQAAACCidMSX3i76yXjvz13guDEtoHqYWMmXRQlibkXFsiG4nwAAAIiewO28nsDt
+    vAAAAAtzc2gtZWQyNTUxOQAAACCidMSX3i76yXjvz13guDEtoHqYWMmXRQlibkXFsiG4nw
+    AAAEAMXZFKTAkbDoIpTpbFRlF7NDbFcJHUrGuASnDU5Dd4HqJ0xJfeLvrJeO/PXeC4MS2g
+    ephYyZdFCWJuRcWyIbifAAAAAAECAwQF
+    -----END OPENSSH PRIVATE KEY-----
+---
+apiVersion: warpgate/v1
+kind: SshClientKey
+metadata:
+  name: vault-key
+spec:
+  private_key: secret://vault/kv/ssh#private_key
+---
+apiVersion: warpgate/v1
 kind: Target
 metadata:
   name: ssh-password
@@ -41,7 +63,7 @@ spec:
       port: 22
       username: deploy
       allow_insecure_algos: false
-      jump_host: 6f1c2c1e-6b3f-4c55-9a1e-2f5d8c0a7b10
+      jump_host: ssh-iam
       auth:
         kind: password
         password: secret://vault/kv/ssh#password
@@ -56,7 +78,7 @@ spec:
       host: 10.0.1.11
       auth:
         kind: publickey
-        key_id: 6f1c2c1e-6b3f-4c55-9a1e-2f5d8c0a7b11
+        key_id: deploy-key
 ---
 apiVersion: warpgate/v1
 kind: Target

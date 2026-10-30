@@ -29,6 +29,11 @@ impl Path {
     pub fn keys(keys: &[&str]) -> Self {
         Self(keys.iter().map(|k| Segment::Key((*k).to_owned())).collect())
     }
+
+    /// From a JSON pointer of plain keys, such as `/spec/options`
+    pub fn pointer(pointer: &str) -> Self {
+        Self::keys(&pointer.split('/').skip(1).collect::<Vec<_>>())
+    }
 }
 
 impl Borrow<[Segment]> for Path {
