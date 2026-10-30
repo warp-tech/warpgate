@@ -16,7 +16,7 @@ use warpgate_common::version::warpgate_version;
 use warpgate_common::{GlobalParams, WarpgateConfig};
 use warpgate_core::db::cleanup_db;
 use warpgate_core::logging::install_database_logger;
-use warpgate_core::{ListenerStatusRegistry, ProtocolServer, Services};
+use warpgate_core::{ADMIN_LISTENER_NAME, ListenerStatusRegistry, ProtocolServer, Services};
 use warpgate_protocol_http::HTTPProtocolServer;
 use warpgate_protocol_kubernetes::KubernetesProtocolServer;
 use warpgate_protocol_mysql::MySQLProtocolServer;
@@ -81,6 +81,9 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
     let services = Services::new(config.clone(), admin_token, params.clone()).await?;
 
     validate_encryption_config(&config);
+    if let Some(message) = config.store.http.admin_listener_overlap() {
+        anyhow::bail!(message);
+    }
 
     // Join the cluster before the credential backfill below
     services.start_cluster().await?;
@@ -163,6 +166,55 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
         });
         supervisors.push(
             spawn_supervisor("HTTP", true, factory, selector, &config_rx, status_registry).await?,
+        );
+    }
+
+    // Optional separate listener for the admin UI and API (`http.admin`), with
+    // the main listener's certificates. Never started when it overlaps the main
+    // listener (a reload can introduce that; startup refuses it above).
+    {
+        let status_registry = services.listener_status.clone();
+        let services = services.clone();
+        let factory: ServerFactory = Arc::new(move |address, proxy_protocol, tls| {
+            let services = services.clone();
+            async move {
+                HTTPProtocolServer::new_admin(&services)
+                    .bind(address, proxy_protocol, tls)
+                    .await
+            }
+            .boxed()
+        });
+        let base = base.clone();
+        let selector: ConfigSelector<WarpgateConfig> = Arc::new(move |c: &WarpgateConfig| {
+            let mut tls = Vec::new();
+            if let Some(pair) =
+                TlsPathPair::new(&base, &c.store.http.certificate, &c.store.http.key)
+            {
+                tls.push(pair);
+            }
+            for sni in &c.store.http.sni_certificates {
+                if let Some(pair) = TlsPathPair::new(&base, &sni.certificate, &sni.key) {
+                    tls.push(pair);
+                }
+            }
+            let admin = c.store.http.admin_listener();
+            ListenerParams {
+                enabled: admin.is_some(),
+                endpoint: admin.map_or_else(|| c.store.http.listen.clone(), |a| a.listen.clone()),
+                proxy_protocol: admin.is_some_and(|a| a.proxy_protocol),
+                tls,
+            }
+        });
+        supervisors.push(
+            spawn_supervisor(
+                ADMIN_LISTENER_NAME,
+                true,
+                factory,
+                selector,
+                &config_rx,
+                status_registry,
+            )
+            .await?,
         );
     }
 

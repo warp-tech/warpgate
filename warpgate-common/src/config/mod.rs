@@ -508,6 +508,33 @@ pub struct SniCertificateConfig {
     pub key: String,
 }
 
+/// A separate listener for the admin UI and admin API (`http.admin`).
+#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
+pub struct HttpAdminListenerConfig {
+    /// Where the admin UI and admin API are served. Must not overlap
+    /// `http.listen`.
+    pub listen: ListenEndpoint,
+
+    /// Accept HAProxy PROXY protocol v1/v2 headers on this listener.
+    #[serde(default)]
+    pub proxy_protocol: bool,
+
+    /// Overrides `http.trust_x_forwarded_headers` for this listener.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trust_x_forwarded_headers: Option<bool>,
+
+    /// The port the admin listener is reached on from outside, if a proxy or
+    /// port mapping changes it. Defaults to the `listen` port.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_port: Option<u16>,
+}
+
+impl HttpAdminListenerConfig {
+    pub fn external_port(&self) -> u16 {
+        self.external_port.unwrap_or_else(|| self.listen.port())
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, JsonSchema)]
 pub struct HttpConfig {
     #[serde(default = "_default_http_listen")]
@@ -542,6 +569,11 @@ pub struct HttpConfig {
 
     #[serde(default)]
     pub sni_certificates: Vec<SniCertificateConfig>,
+
+    /// Serve the admin UI and admin API on a separate listener. When set, the
+    /// main listener answers them only to authenticated cluster peers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admin: Option<HttpAdminListenerConfig>,
 }
 
 impl Default for HttpConfig {
@@ -557,11 +589,32 @@ impl Default for HttpConfig {
             session_max_age: _default_session_max_age(),
             cookie_max_age: _default_cookie_max_age(),
             sni_certificates: vec![],
+            admin: None,
         }
     }
 }
 
 impl HttpConfig {
+    /// The separate admin listener's config, unless it overlaps the main
+    /// listener (then it is not started, and admin stays unreachable rather
+    /// than taking over the public port).
+    pub fn admin_listener(&self) -> Option<&HttpAdminListenerConfig> {
+        self.admin
+            .as_ref()
+            .filter(|admin| !admin.listen.overlaps(&self.listen))
+    }
+
+    /// An error message if `http.admin.listen` overlaps `http.listen`.
+    pub fn admin_listener_overlap(&self) -> Option<String> {
+        let admin = self.admin.as_ref()?;
+        admin.listen.overlaps(&self.listen).then(|| {
+            format!(
+                "`http.admin.listen` ({:?}) overlaps `http.listen` ({:?}); the admin listener would take the main port. Use a different port.",
+                admin.listen, self.listen
+            )
+        })
+    }
+
     pub fn external_port(&self) -> u16 {
         self.external_port.unwrap_or_else(|| self.listen.port())
     }
@@ -988,6 +1041,9 @@ impl WarpgateConfig {
     }
 
     pub fn validate(&self) {
+        if let Some(message) = self.store.http.admin_listener_overlap() {
+            emit_config_warning(message);
+        }
         let Some(ext) = self.store.external_host.as_deref() else {
             return;
         };
