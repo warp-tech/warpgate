@@ -5449,6 +5449,12 @@
           "uuid_attribute": {
             "type": "string",
             "default": ""
+          },
+          "base_dns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -8775,6 +8781,12 @@
           },
           "uuid_attribute": {
             "type": "string"
+          },
+          "base_dns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
