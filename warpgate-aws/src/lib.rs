@@ -13,8 +13,8 @@ pub use error::AwsError;
 pub use rds::generate_rds_auth_token;
 pub use region::{get_imds_region, parse_eks_region, parse_rds_region};
 pub use s3::{
-    AutoCredentials, S3Credentials, S3MultipartUpload, S3Storage, S3StorageConfig,
-    StaticCredentials,
+    AutoCredentials, S3Credentials, S3MultipartUpload, S3Object, S3RangeRead, S3Storage,
+    S3StorageConfig, StaticCredentials,
 };
 
 /// Cached EC2 detection result
