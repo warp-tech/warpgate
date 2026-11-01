@@ -63,11 +63,17 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
     let version = warpgate_version();
     info!(%version, "Warpgate");
 
+    // An empty token would match a request with an empty X-Warpgate-Token header.
     let admin_token = enable_admin_token.then(|| {
-        std::env::var("WARPGATE_ADMIN_TOKEN").unwrap_or_else(|_| {
-            error!("`WARPGATE_ADMIN_TOKEN` env variable must set when using --enable-admin-token");
-            std::process::exit(1);
-        })
+        std::env::var("WARPGATE_ADMIN_TOKEN")
+            .ok()
+            .filter(|token| !token.is_empty())
+            .unwrap_or_else(|| {
+                error!(
+                    "`WARPGATE_ADMIN_TOKEN` env variable must be set to a non-empty value when using --enable-admin-token"
+                );
+                std::process::exit(1);
+            })
     });
 
     let config = match load_config(params, true) {
