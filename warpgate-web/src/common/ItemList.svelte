@@ -53,6 +53,8 @@
         groupObject?: (_: T) => G
         groupKey?: (_: G) => GK
         showSearch?: boolean
+        // The page's main search: focused on load and by `/` or Ctrl/Cmd+K.
+        primarySearch?: boolean
         header?: Snippet<[T[] | null, GroupControls]>
         item?: Snippet<[T]>
         footer?: Snippet<[T[]]>
@@ -67,6 +69,7 @@
         pageSize = undefined,
         load,
         showSearch = false,
+        primarySearch = false,
         groupObject,
         groupKey,
         header,
@@ -82,6 +85,8 @@
     let loaded = $state(false)
     let list = $state.raw<T[] | null>(null)
     let total = $state(0)
+    let searchInput: HTMLInputElement | undefined = $state()
+    let autofocused = false
 
     const page$ = new Subject<number>()
     const filter$ = new Subject<string>()
@@ -167,6 +172,28 @@
         collapsedGroups = next.filter(k => present.includes(k))
     }
 
+    function isTextEntry(target: EventTarget | null): boolean {
+        return (
+            target instanceof HTMLElement &&
+            (target.isContentEditable ||
+                ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+        )
+    }
+
+    function onWindowKeydown(e: KeyboardEvent) {
+        if (!primarySearch || !searchInput) {
+            return
+        }
+        const shortcut =
+            (e.key === 'k' && (e.ctrlKey || e.metaKey)) ||
+            (e.key === '/' && !isTextEntry(e.target))
+        if (shortcut) {
+            e.preventDefault()
+            searchInput.focus()
+            searchInput.select()
+        }
+    }
+
     onMount(() => {
         if (groupHeader && (!groupObject || !groupKey)) {
             throw new Error(
@@ -186,6 +213,19 @@
     })
     $effect(() => {
         filter$.next(filter)
+    })
+    // Once only, so a later re-render never steals focus. Touch devices are
+    // skipped, where focusing would pop up the on-screen keyboard.
+    $effect(() => {
+        if (
+            primarySearch &&
+            searchInput &&
+            !autofocused &&
+            matchMedia('(pointer: fine)').matches
+        ) {
+            autofocused = true
+            searchInput.focus()
+        }
     })
 
     filter$.subscribe(() => {
@@ -207,17 +247,24 @@
     {/if}
 {/snippet}
 
+<svelte:window onkeydown={onWindowKeydown} />
+
 {#if !list}
     <DelayedSpinner />
 {:else}
     <div class="d-flex align-items-center mb-2" hidden={!loaded}>
         <!-- either filtering or not filtering and there are at least some items at all -->
         {#if showSearch && (filter || !!list.length)}
-            <Input
-                bind:value={filter}
-                placeholder="Search..."
-                class="flex-grow-1"
-            />
+            <div class="search position-relative flex-grow-1">
+                <Input
+                    bind:inner={searchInput}
+                    bind:value={filter}
+                    placeholder="Search..."
+                />
+                {#if primarySearch && !filter}
+                    <kbd class="shortcut-hint" aria-hidden="true">/</kbd>
+                {/if}
+            </div>
         {/if}
         {@render header?.(list, {
             available: built.keys.length > 0 && !filter,
@@ -257,3 +304,22 @@
 {#if pageSize && total > pageSize}
     <Pagination {total} bind:page {pageSize} />
 {/if}
+
+<style lang="scss">
+    .shortcut-hint {
+        position: absolute;
+        top: 50%;
+        right: 0.75rem;
+        transform: translateY(-50%);
+        pointer-events: none;
+        padding: 0.1rem 0.4rem;
+        font-size: 0.75rem;
+        color: var(--bs-secondary-color);
+        background: transparent;
+        border: 1px solid var(--bs-border-color);
+    }
+
+    .search:focus-within .shortcut-hint {
+        display: none;
+    }
+</style>
