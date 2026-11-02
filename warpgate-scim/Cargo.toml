@@ -10,7 +10,7 @@ poem.workspace = true
 sea-orm.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-time = { workspace = true, features = ["formatting", "parsing"] }
+time = { workspace = true, features = ["formatting", "macros"] }
 tracing.workspace = true
 uuid.workspace = true
 warpgate-common = { path = "../warpgate-common" }

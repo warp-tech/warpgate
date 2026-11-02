@@ -170,7 +170,9 @@ LDAP link, SCIM) can forget it. `meta.lastModified` is **derived**: the maximum 
 `updated_at` and the `granted_at`/`revoked_at` of the user's (or group's) role assignments, so a
 membership change moves both the user's and the group's `lastModified` without extra bookkeeping.
 Both timestamps are exposed on the admin `User`/`Role` objects and shown on the user page, and
-`sortBy meta.created` / `meta.lastModified` is supported. Rejected: NOT NULL with a literal
+`sortBy meta.created` / `meta.lastModified` is supported. SCIM timestamps are rendered as RFC 3339
+UTC with a fixed three-digit fraction so that string comparison (which filters and sorting use)
+orders them correctly. Rejected: NOT NULL with a literal
 default — three backends, three literal syntaxes, no gain.
 
 **D16 — Cluster.** All state is in the DB; `close_sessions` already fans out to peers; nothing

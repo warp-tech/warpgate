@@ -1,6 +1,5 @@
 use serde_json::{Map, Value, json};
 use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
 use warpgate_db_entities::UserRoleAssignment;
 
 use crate::protocol::ScimError;
@@ -57,10 +56,40 @@ impl ScimTimestamps {
     }
 }
 
+/// RFC 3339 in UTC with exactly three fractional digits, so two timestamps
+/// compare correctly as strings: filters and `sortBy` compare them that way,
+/// and the well-known formatter would otherwise print a variable-length
+/// fraction (`.5Z` sorts after `.123Z`).
 pub fn rfc3339(time: OffsetDateTime) -> String {
+    const FORMAT: &[time::format_description::BorrowedFormatItem<'static>] = time::macros::format_description!(
+        "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
+    );
     time.to_offset(time::UtcOffset::UTC)
-        .format(&Rfc3339)
+        .format(FORMAT)
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use time::macros::datetime;
+
+    use super::rfc3339;
+
+    #[test]
+    fn timestamps_have_a_fixed_width_fraction_in_utc() {
+        assert_eq!(
+            rfc3339(datetime!(2026-11-02 04:16:07.5 +00:00)),
+            "2026-11-02T04:16:07.500Z"
+        );
+        assert_eq!(
+            rfc3339(datetime!(2026-11-02 06:16:07.123456 +02:00)),
+            "2026-11-02T04:16:07.123Z"
+        );
+        assert_eq!(
+            rfc3339(datetime!(2026-11-02 04:16:07 +00:00)),
+            "2026-11-02T04:16:07.000Z"
+        );
+    }
 }
 
 /// The request body as an object, or `invalidSyntax`.
