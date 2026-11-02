@@ -86,7 +86,7 @@ mod tests {
     async fn existing_rows_become_manual() {
         set_config_migration_values(ConfigMigrationValues::default());
         let db = Database::connect("sqlite::memory:").await.unwrap();
-        crate::migrate_up_to(&db, "m00095_resource_provider").await;
+        crate::migrate_up_to(&db, "m00096_resource_provider").await;
 
         let id = Uuid::new_v4();
         let backend = db.get_database_backend();

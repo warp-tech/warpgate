@@ -193,9 +193,7 @@
     })
 </script>
 
-{#snippet row(
-    entry: Entry,
-)}
+{#snippet row(entry: Entry)}
     {#if entry.kind === 'item'}
         {@render item?.(entry.item)}
     {:else if groupHeader}

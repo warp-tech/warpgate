@@ -78,6 +78,7 @@ overrides_config: ""
 
 # Space-separated list of environment variable names to substitute in the config
 # Example: "FOO BAR" → replaces $FOO and $BAR from pod environment
+# Substituted in order: a value may reference variables listed after it
 config_env_var_replace: ""
 
 # Environment variables for the main Warpgate container, mapped from Secrets.

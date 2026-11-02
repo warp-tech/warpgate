@@ -81,9 +81,7 @@
     </div>
 
     <ItemList load={getUsers} showSearch={true} virtual>
-        {#snippet item(
-            user,
-        )}
+        {#snippet item(user)}
             <a
                 class="list-group-item list-group-item-action"
                 href="/config/users/{user.id}"

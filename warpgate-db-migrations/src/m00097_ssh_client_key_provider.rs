@@ -1,7 +1,7 @@
 use sea_orm_migration::prelude::*;
 
 use crate::m00079_unique_target_and_group_names::{add_unique_name_index, drop_unique_name_index};
-use crate::m00095_resource_provider::{add_provider_column, drop_provider_column};
+use crate::m00096_resource_provider::{add_provider_column, drop_provider_column};
 
 /// Client keys become provider-ownable, and resource files refer to them by
 /// label, so labels must be unique
@@ -38,7 +38,7 @@ mod tests {
     async fn duplicate_labels_are_renamed_and_then_rejected() {
         set_config_migration_values(ConfigMigrationValues::default());
         let db = Database::connect("sqlite::memory:").await.unwrap();
-        crate::migrate_up_to(&db, "m00096_ssh_client_key_provider").await;
+        crate::migrate_up_to(&db, "m00097_ssh_client_key_provider").await;
 
         let backend = db.get_database_backend();
         let insert = |label: &str| {

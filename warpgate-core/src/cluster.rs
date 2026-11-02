@@ -25,7 +25,7 @@ use warpgate_tls::configure_cluster_tls_connector;
 use crate::SessionsFilter;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
-const REAP_INTERVAL: Duration = Duration::from_secs(15);
+pub const REAP_INTERVAL: Duration = Duration::from_secs(15);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub const NOTIFICATION_TIMEOUT: Duration = Duration::from_secs(10);
@@ -268,7 +268,8 @@ impl Cluster {
         Ok(PeerConnection { tls, addrs, port })
     }
 
-    /// Register this node and spawn heartbeat + reaper tasks
+    /// Registers this node and spawns the heartbeat. The reaper runs in
+    /// [`crate::Services::start_cluster`] so it can close what it ends.
     pub async fn start(self: &Arc<Self>) -> Result<(), WarpgateError> {
         self.heartbeat().await?;
         info!(node_id = %self.node_id, address = %self.address, "Joined cluster");
@@ -281,19 +282,6 @@ impl Cluster {
                     interval.tick().await;
                     if let Err(error) = this.heartbeat().await {
                         warn!(%error, "Node heartbeat failed");
-                    }
-                }
-            }
-        });
-
-        tokio::spawn({
-            let db = self.db.clone();
-            async move {
-                let mut interval = tokio::time::interval(REAP_INTERVAL);
-                loop {
-                    interval.tick().await;
-                    if let Err(error) = reap(&db).await {
-                        warn!(%error, "Node reaper failed");
                     }
                 }
             }
@@ -392,7 +380,7 @@ const SHARED_SESSION_ORPHAN_GRACE: time::Duration = time::Duration::minutes(5);
 async fn end_connection_bound_sessions(
     db: &DatabaseConnection,
     node_filter: impl IntoCondition,
-) -> Result<(), WarpgateError> {
+) -> Result<Vec<UserSessionId>, WarpgateError> {
     UserSession::revoke_open_matching(
         db,
         Condition::all()
@@ -404,7 +392,9 @@ async fn end_connection_bound_sessions(
 
 /// End unowned (HTTP browser) sessions whose backing is gone: they are kept
 /// alive by their stored cookie sessions, not by any node.
-async fn end_sessions_without_cookie(db: &DatabaseConnection) -> Result<(), WarpgateError> {
+async fn end_sessions_without_cookie(
+    db: &DatabaseConnection,
+) -> Result<Vec<UserSessionId>, WarpgateError> {
     let grace_cutoff = OffsetDateTime::now_utc() - SHARED_SESSION_ORPHAN_GRACE;
     UserSession::revoke_open_matching(
         db,
@@ -457,7 +447,9 @@ pub async fn alive_nodes(db: &DatabaseConnection) -> Result<Vec<Node::Model>, Wa
         .await?)
 }
 
-async fn reap(db: &DatabaseConnection) -> Result<(), WarpgateError> {
+/// Returns the ids of the sessions it ended. Other nodes may still hold live
+/// views of them, which the caller closes.
+pub async fn reap(db: &DatabaseConnection) -> Result<Vec<UserSessionId>, WarpgateError> {
     let cutoff = OffsetDateTime::now_utc() - HEARTBEAT_TIMEOUT;
     // reap dead nodes
     let dead = Node::Entity::delete_many()
@@ -478,13 +470,15 @@ async fn reap(db: &DatabaseConnection) -> Result<(), WarpgateError> {
 
     // At least the current node should have been present - bail
     // intead of ending all sessions
-    if !live.is_empty() {
-        end_connection_bound_sessions(db, UserSession::Column::NodeId.is_not_in(live)).await?;
-    }
+    let mut ended = if live.is_empty() {
+        vec![]
+    } else {
+        end_connection_bound_sessions(db, UserSession::Column::NodeId.is_not_in(live)).await?
+    };
 
-    end_sessions_without_cookie(db).await?;
+    ended.extend(end_sessions_without_cookie(db).await?);
     end_children_of_ended_parents(db).await?;
-    Ok(())
+    Ok(ended)
 }
 
 /// Fallback order
