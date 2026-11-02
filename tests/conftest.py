@@ -26,7 +26,7 @@ from typing import List, Optional
 
 from deepmerge import always_merger
 
-from .util import _wait_timeout, alloc_port, port_owners, wait_port
+from .util import _wait_timeout, alloc_port, mysql_containers, port_owners, wait_port, wait_until
 from .test_http_common import echo_server_port  # noqa
 
 
@@ -412,19 +412,29 @@ class ProcessManager:
         )
         return port
 
-    def start_mariadb_server(self):
+    def _start_mysql_like(self, image: str) -> int:
         port = alloc_port()
+        container_name = f"{image}-{uuid.uuid4()}"
+        mysql_containers[port] = container_name
         self.start(
-            ["docker", "run", "--rm", "-p", f"{port}:3306", "warpgate-e2e-mariadb-server"]
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--name",
+                container_name,
+                "-p",
+                f"{port}:3306",
+                image,
+            ]
         )
         return port
 
+    def start_mariadb_server(self):
+        return self._start_mysql_like("warpgate-e2e-mariadb-server")
+
     def start_mysql_server(self):
-        port = alloc_port()
-        self.start(
-            ["docker", "run", "--rm", "-p", f"{port}:3306", "warpgate-e2e-mysql-server"]
-        )
-        return port
+        return self._start_mysql_like("warpgate-e2e-mysql-server")
 
     def start_vnc_server(self, require_password=False):
         port = alloc_port()
@@ -1280,6 +1290,26 @@ def admin_client(shared_wg: WarpgateProcess):
     url = f"https://localhost:{shared_wg.http_port}"
     with _admin_client_context(url) as api:
         yield api
+
+
+def wait_for_open_session(wg: WarpgateProcess, username: str, since, timeout=30):
+    """Until Warpgate records a session for `username` that started at or
+    after `since` and is still open; returns it. Proves a client got in
+    without waiting a fixed time for it not to exit, and `since` keeps a
+    session that is still winding down from an earlier connection from
+    counting."""
+    url = f"https://localhost:{wg.http_port}"
+
+    def open_session():
+        with _admin_client_context(url) as api:
+            page = api.get_sessions(username=username, active_only=True)
+        return next(
+            (s for s in page.items if s.ended is None and s.started >= since), None
+        )
+
+    return wait_until(
+        open_session, lambda: f"no open session for {username}", timeout=timeout
+    )
 
 
 # ----

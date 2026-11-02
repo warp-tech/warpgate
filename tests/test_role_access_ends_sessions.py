@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
-from .conftest import ProcessManager, WarpgateProcess
+from .conftest import ProcessManager, WarpgateProcess, wait_for_open_session
 from .test_ssh_proto import common_args, setup_user_and_target
 from .util import wait_port
 
@@ -58,10 +58,12 @@ class Test:
         wait_port(wg.ssh_port, for_process=wg.process)
         user, target = setup_user_and_target(processes, wg, wg_c_ed25519_pubkey)
         other, other_target = setup_user_and_target(processes, wg, wg_c_ed25519_pubkey)
+        launched = datetime.now(timezone.utc)
         session = _long_session(processes, wg, user, target)
         bystander = _long_session(processes, wg, other, other_target)
-        assert not _ended_within(session, 8), "the session did not start"
-        assert bystander.poll() is None
+        wait_for_open_session(wg, user.username, launched)
+        wait_for_open_session(wg, other.username, launched)
+        assert session.poll() is None and bystander.poll() is None
 
         for role_id in _role_ids(wg, user):
             _admin(wg, "DELETE", f"/users/{user.id}/roles/{role_id}")
@@ -76,8 +78,10 @@ class Test:
         wg = processes.start_wg()
         wait_port(wg.ssh_port, for_process=wg.process)
         user, target = setup_user_and_target(processes, wg, wg_c_ed25519_pubkey)
+        launched = datetime.now(timezone.utc)
         session = _long_session(processes, wg, user, target)
-        assert not _ended_within(session, 8), "the session did not start"
+        wait_for_open_session(wg, user.username, launched)
+        assert session.poll() is None
 
         soon = (datetime.now(timezone.utc) + timedelta(seconds=8)).isoformat()
         for role_id in _role_ids(wg, user):

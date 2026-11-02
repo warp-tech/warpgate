@@ -14,7 +14,7 @@ from uuid import uuid4
 import requests
 
 from .api_client import admin_client, sdk
-from .conftest import ProcessManager, WarpgateProcess
+from .conftest import ProcessManager, WarpgateProcess, wait_for_open_session
 from .test_http_common import *  # noqa
 from .test_http_user_auth_oidc import _do_oidc_login, _make_sso_provider_config
 from .test_ssh_proto import common_args
@@ -27,6 +27,10 @@ ENTERPRISE_SCHEMA = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
 PATCH_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:PatchOp"
 LIST_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:ListResponse"
 ERROR_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:Error"
+
+
+def _ts(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def _url(wg: WarpgateProcess) -> str:
@@ -290,7 +294,7 @@ class TestUsers:
         assert user["groups"] == []
         assert user["meta"]["resourceType"] == "User"
         assert user["meta"]["created"].endswith("Z")
-        assert user["meta"]["lastModified"] >= user["meta"]["created"]
+        assert _ts(user["meta"]["lastModified"]) >= _ts(user["meta"]["created"])
 
         # The admin API sees the same account.
         with admin_client(_url(shared_wg)) as api:
@@ -468,10 +472,12 @@ class TestDeactivation:
         username = user["userName"]
 
         assert _ssh_works(processes, shared_wg, username, target.name, timeout)
+        launched = datetime.now(timezone.utc)
         long_session = _ssh(
             processes, shared_wg, username, target.name, "sh", "-c", "'sleep 120'"
         )
-        assert not _ended_within(long_session, 8), "the session did not start"
+        wait_for_open_session(shared_wg, username, launched)
+        assert long_session.poll() is None
 
         # A web session and an API token minted before deactivation.
         web, login = _web_login(shared_wg, username, "123")
@@ -599,10 +605,12 @@ class TestGroups:
             ]
 
         # ... and removes it again by filter while a session is open.
+        launched = datetime.now(timezone.utc)
         long_session = _ssh(
             processes, shared_wg, username, target.name, "sh", "-c", "'sleep 120'"
         )
-        assert not _ended_within(long_session, 8), "the session did not start"
+        wait_for_open_session(shared_wg, username, launched)
+        assert long_session.poll() is None
         r = scim.patch(
             f"/Groups/{role.id}",
             [{"op": "Remove", "path": f'members[value eq "{user["id"]}"]'}],
@@ -700,14 +708,13 @@ class TestGroups:
             == 1
         )
 
-        time.sleep(1.1)
         r = scim.patch(
             f"/Groups/{group['id']}",
             [{"op": "remove", "path": "members", "value": [{"value": bob["id"]}]}],
         )
         assert r.status_code == 200, r.text
         assert [m["value"] for m in r.json()["members"]] == [alice["id"]]
-        assert r.json()["meta"]["lastModified"] > last_modified, (
+        assert _ts(r.json()["meta"]["lastModified"]) > _ts(last_modified), (
             "a membership change moves lastModified"
         )
 

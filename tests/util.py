@@ -13,14 +13,23 @@ import yaml
 
 # Each xdist worker (gw0, gw1, ...) hands out ports from its own range, so
 # workers never race each other for the same port. A serial run is worker 0.
+# The range also starts at a point derived from the PID, so two pytest
+# processes on one machine (a second local run, or a run started while
+# another is still winding down) do not walk the same ports either.
 # ponytail: 3000 ports per worker keeps 20 workers under 61234; widen the
 # stride if a worker ever runs out.
 _worker = int(os.getenv("PYTEST_XDIST_WORKER", "gw0").removeprefix("gw"))
-last_port = 1234 + _worker * 3000
+_PORT_FLOOR = 2000
+_PORT_CEILING = 60000
+last_port = _PORT_FLOOR + (os.getpid() * 7919 + _worker * 3000) % (_PORT_CEILING - _PORT_FLOOR)
 
 # Process listening on each allocated port, so that wait_port fails as soon as
 # that process exits instead of waiting out its timeout.
 port_owners: dict = {}
+
+# MySQL/MariaDB container name by published port, so that readiness is probed
+# inside the container (see wait_mysql_port).
+mysql_containers: dict = {}
 
 mysql_client_ssl_opt = "--ssl"
 mysql_client_opts = []
@@ -57,9 +66,25 @@ def alloc_port():
     # keeps this process from racing itself, nothing guards other processes.
     global last_port
     last_port += 1
+    if last_port >= _PORT_CEILING:
+        last_port = _PORT_FLOOR
     while not _port_is_free(last_port):
         last_port += 1
     return last_port
+
+
+def wait_until(condition, msg, timeout=60, interval=0.5):
+    """Polls `condition` until it returns a truthy value, which is returned, or
+    `timeout` seconds pass, which raises with `msg` (a string or a callable
+    describing what the wait kept seeing)."""
+    deadline = time.monotonic() + timeout
+    while True:
+        result = condition()
+        if result:
+            return result
+        if time.monotonic() >= deadline:
+            raise Exception(msg() if callable(msg) else msg)
+        time.sleep(interval)
 
 
 def _wait_timeout(fn, msg, timeout=60):
@@ -127,23 +152,36 @@ def wait_port(port, recv=True, timeout=60, for_process: subprocess.Popen = None,
     _wait_timeout(wait, lambda: f"Port {port} is not up: {last_seen[0]}", timeout=timeout)
 
 
-def wait_mysql_port(port):
-    logging.debug(f"Waiting for MySQL port {port}")
+def wait_mysql_port(port, timeout=120):
+    """Waits for the MySQL/MariaDB container published on `port` to serve
+    queries. Probed with the client inside the container: the image's
+    entrypoint runs a temporary server with networking disabled while it
+    initialises, so a TCP probe only succeeds once the real server is up, and
+    no host client (whose flags differ between versions) is involved."""
+    container = mysql_containers[port]
+    logging.debug(f"Waiting for MySQL in {container} (port {port})")
 
-    def wait():
-        while True:
-            try:
-                subprocess.check_call(
-                    f'mysql --user=root --password=123 --host=127.0.0.1 --port={port} --execute="show schemas;"',
-                    shell=True,
-                )
-                logging.debug(f"Port {port} is up")
-                break
-            except subprocess.CalledProcessError:
-                time.sleep(1)
-                continue
+    def ready():
+        return (
+            subprocess.run(
+                [
+                    "docker",
+                    "exec",
+                    container,
+                    "mysql",
+                    "--protocol=tcp",
+                    "--user=root",
+                    "--password=123",
+                    "--execute=show schemas;",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).returncode
+            == 0
+        )
 
-    _wait_timeout(wait, f"Port {port} is not up")
+    wait_until(ready, f"MySQL in {container} is not ready", timeout=timeout, interval=1)
+    logging.debug(f"Port {port} is up")
 
 
 def open_wg_sqlite_db(config_path):
