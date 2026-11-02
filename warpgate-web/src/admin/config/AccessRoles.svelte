@@ -49,9 +49,7 @@
     </div>
 
     <ItemList load={getRoles} showSearch={true}>
-        {#snippet item(
-            role,
-        )}
+        {#snippet item(role)}
             <a
                 class="list-group-item list-group-item-action"
                 href="/config/access-roles/{role.id}"

@@ -217,9 +217,7 @@
     ]
 </script>
 
-{#snippet nameCell(
-    target: TargetSnapshot,
-)}
+{#snippet nameCell(target: TargetSnapshot)}
     <div class="d-flex align-items-center gap-2">
         {target.name}
     </div>
@@ -230,9 +228,7 @@
     {/if}
 {/snippet}
 
-{#snippet actionCell(
-    target: TargetSnapshot,
-)}
+{#snippet actionCell(target: TargetSnapshot)}
     {const kind = defaultTargetAction(target).kind}
     <div class="d-flex align-items-center gap-1">
         {#if kind === 'instructions'}
@@ -257,15 +253,11 @@
     </div>
 {/snippet}
 
-{#snippet kindCell(
-    target: TargetSnapshot,
-)}
+{#snippet kindCell(target: TargetSnapshot)}
     {TARGET_KIND_LABELS[target.kind]}
 {/snippet}
 
-{#snippet menuCell(
-    target: TargetSnapshot,
-)}
+{#snippet menuCell(target: TargetSnapshot)}
     <Dropdown>
         <DropdownToggle
             color="link"
@@ -350,11 +342,7 @@
     {columns}
     virtual
 >
-    {#snippet header(
-        items,
-        groupControls,
-        columnControls,
-    )}
+    {#snippet header(items, groupControls, columnControls)}
         {#if items?.length}
             <ListOverflowMenu {groupControls} {columnControls}>
                 <div class="dropdown-header">Preferences</div>
@@ -394,16 +382,10 @@
             hint={`Ask an administrator to give ${$serverInfo?.username ?? 'your account'} a role with the targets you need.`}
         />
     {/snippet}
-    {#snippet groupHeader(
-        group,
-        state,
-    )}
+    {#snippet groupHeader(group, state)}
         <CollapsibleGroupHeader {group} {state} />
     {/snippet}
-    {#snippet item(
-        target,
-        cells,
-    )}
+    {#snippet item(target, cells)}
         {@const url = urlForTarget(target)}
         <a
             class="list-group-item list-group-item-action target-item gap-3"

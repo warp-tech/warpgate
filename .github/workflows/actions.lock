@@ -18,7 +18,7 @@ workflows:
         - 'actions/upload-artifact@2848b2cda0e5190984587ec6bb1f36730ca78d50'
         - 'rlespinasse/github-slug-action@v5.7.1'
         - 'softprops/action-gh-release@v3.0.3'
-        - 'swatinem/rust-cache@v2.9.2'
+        - 'swatinem/rust-cache@v2.9.3'
     '.github/workflows/cargo-deny.yml':
         - 'actions/checkout@v7.0.1'
     '.github/workflows/check-schema-compatibility.yml':
@@ -27,7 +27,7 @@ workflows:
         - 'actions/checkout@v7.0.1'
     '.github/workflows/codeql.yml':
         - 'actions/checkout@v7.0.1'
-        - 'github/codeql-action@v4.38.3'
+        - 'github/codeql-action@v4.39.1'
     '.github/workflows/contributor-discord-role.yml':
         - 'actions/checkout@v4.4.0'
     '.github/workflows/docker.yml':
@@ -38,7 +38,7 @@ workflows:
         - 'actions/upload-artifact@v4.6.2'
         - 'anchore/sbom-action@v0.24.3'
         - 'docker/build-push-action@v7.4.0'
-        - 'docker/login-action@v4.6.0'
+        - 'docker/login-action@v4.7.0'
         - 'docker/metadata-action@v6.2.0'
         - 'docker/setup-buildx-action@v4.4.1'
         - 'docker/setup-qemu-action@v4.4.0'
@@ -48,7 +48,7 @@ workflows:
     '.github/workflows/helm-publish.yaml':
         - 'actions/checkout@v7.0.1'
         - 'azure/setup-helm@v5.0.1'
-        - 'docker/login-action@v4.6.0'
+        - 'docker/login-action@v4.7.0'
     '.github/workflows/issue-type-triage.yml':
         - 'actions/ai-inference@v1.2.8'
     '.github/workflows/lockfile.yml':
@@ -58,15 +58,15 @@ workflows:
     '.github/workflows/scorecard.yml':
         - 'actions/checkout@v7.0.1'
         - 'actions/upload-artifact@v4.6.1'
-        - 'github/codeql-action@v4.38.3'
+        - 'github/codeql-action@v4.39.1'
         - 'ossf/scorecard-action@v2.5.0'
     '.github/workflows/test.yml':
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-node@v7.1.0'
         - 'actions/upload-artifact@2848b2cda0e5190984587ec6bb1f36730ca78d50'
         - 'jlumbroso/free-disk-space@v2.0.0'
-        - 'sonarsource/sonarqube-scan-action@v8.3.0'
-        - 'swatinem/rust-cache@v2.9.2'
+        - 'sonarsource/sonarqube-scan-action@v8.4.0'
+        - 'swatinem/rust-cache@v2.9.3'
 dependencies:
     'actions-rs/cargo@v1.0.3':
         ref: 'v1.0.3'
@@ -177,9 +177,9 @@ dependencies:
         commit: 'sha1-c3c9e263c25d99ce0380d002d59b67737d91b0dc'
         owner_id: 5429470
         repo_id: 241092383
-    'docker/login-action@v4.6.0':
-        ref: 'v4.6.0'
-        commit: 'sha1-dbcb813823bdd20940b903addbd779551569679f'
+    'docker/login-action@v4.7.0':
+        ref: 'v4.7.0'
+        commit: 'sha1-81c6f93d4bc991e510b342a00b419b3bb4efc5c6'
         owner_id: 5429470
         repo_id: 287743349
     'docker/metadata-action@v6.2.0':
@@ -197,9 +197,9 @@ dependencies:
         commit: 'sha1-99012661954931238ded8c8b007157a8430204e1'
         owner_id: 5429470
         repo_id: 288487894
-    'github/codeql-action@v4.38.3':
-        ref: 'v4.38.3'
-        commit: 'sha1-24c54180a607b1449ed407dd24f251e4e9147c8d'
+    'github/codeql-action@v4.39.1':
+        ref: 'v4.39.1'
+        commit: 'sha1-9b3254085494b55a0f7c4c2b3d2d52cc712ce370'
         owner_id: 9919
         repo_id: 259445878
     'jlumbroso/free-disk-space@v2.0.0':
@@ -240,13 +240,13 @@ dependencies:
         commit: 'sha1-efb35369e0ad2afab669f228072c1b0d510eae64'
         owner_id: 2242
         repo_id: 204253808
-    'sonarsource/sonarqube-scan-action@v8.3.0':
-        ref: 'v8.3.0'
-        commit: 'sha1-d209202bc7d53ff1cc128f7f907dac145c9d6ae9'
+    'sonarsource/sonarqube-scan-action@v8.4.0':
+        ref: 'v8.4.0'
+        commit: 'sha1-4d1dc0c91ee400dcf8a6dddf2f705ac36542e304'
         owner_id: 545988
         repo_id: 366408409
-    'swatinem/rust-cache@v2.9.2':
-        ref: 'v2.9.2'
-        commit: 'sha1-6323deb102c322ba6fcbdcafc7e3dddab59af2b6'
+    'swatinem/rust-cache@v2.9.3':
+        ref: 'v2.9.3'
+        commit: 'sha1-d1527c8f67ef9af357290475d4af4b0fab8f12e0'
         owner_id: 580492
         repo_id: 298565987

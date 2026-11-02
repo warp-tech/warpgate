@@ -268,9 +268,7 @@
     })
 </script>
 
-{#snippet cells(
-    _item: T,
-)}
+{#snippet cells(_item: T)}
     {#each enabledColumns ?? [] as column (column.id)}
         <div class="item-list-cell {column.class ?? ''}">
             {@render column.cell(_item)}
@@ -299,9 +297,7 @@ widest one anywhere in the list. -->
     {/if}
 {/snippet}
 
-{#snippet row(
-    entry: Entry,
-)}
+{#snippet row(entry: Entry)}
     {#if entry.kind === 'item'}
         {@render item?.(entry.item, cells)}
     {:else if groupHeader}

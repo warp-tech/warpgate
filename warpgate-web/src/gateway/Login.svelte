@@ -304,9 +304,7 @@
             authState === ApiAuthState.Failed ||
             authState === ApiAuthState.IpRejected}
             <Loadable promise={ssoProvidersPromise}>
-                {#snippet children(
-                    ssoProviders,
-                )}
+                {#snippet children(ssoProviders)}
                     {#if ssoProviders.length &&
                         passwordLoginAllowed &&
                         !(passwordLoginMinimized && !showPasswordLogin)}

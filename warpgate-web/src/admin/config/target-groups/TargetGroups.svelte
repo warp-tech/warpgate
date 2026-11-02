@@ -52,21 +52,15 @@
     ]
 </script>
 
-{#snippet iconCell(
-    group: TargetGroup,
-)}
+{#snippet iconCell(group: TargetGroup)}
     {#if group.color}
         <GroupColorIcon color={group.color} />
     {/if}
 {/snippet}
-{#snippet nameCell(
-    group: TargetGroup,
-)}
+{#snippet nameCell(group: TargetGroup)}
     <strong>{group.name}</strong>
 {/snippet}
-{#snippet descriptionCell(
-    group: TargetGroup,
-)}
+{#snippet descriptionCell(group: TargetGroup)}
     <small class="d-block text-muted">
         {group.description}
     </small>
@@ -97,17 +91,10 @@
                 hint="Target groups help organize your targets for easier management"
             />
         {/snippet}
-        {#snippet header(
-            _items,
-            groupControls,
-            columnControls,
-        )}
+        {#snippet header(_items, groupControls, columnControls)}
             <ListOverflowMenu {groupControls} {columnControls} />
         {/snippet}
-        {#snippet item(
-            group,
-            cells,
-        )}
+        {#snippet item(group, cells)}
             <a
                 class="list-group-item list-group-item-action"
                 href="/config/target-groups/{group.id}"

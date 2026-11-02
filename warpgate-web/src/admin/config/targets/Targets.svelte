@@ -108,33 +108,23 @@
     }
 </script>
 
-{#snippet nameCell(
-    target: Target,
-)}
+{#snippet nameCell(target: Target)}
     <strong>{target.name}</strong>
 {/snippet}
 
-{#snippet addressCell(
-    target: Target,
-)}
+{#snippet addressCell(target: Target)}
     {targetAddress(target.options)}
 {/snippet}
 
-{#snippet descriptionCell(
-    target: Target,
-)}
+{#snippet descriptionCell(target: Target)}
     {target.description}
 {/snippet}
 
-{#snippet kindCell(
-    target: Target,
-)}
+{#snippet kindCell(target: Target)}
     {TARGET_KIND_LABELS[target.options.kind]}
 {/snippet}
 
-{#snippet requiresApprovalCell(
-    target: Target,
-)}
+{#snippet requiresApprovalCell(target: Target)}
     {const id = uuid()}
     {#if target.requireApproval}
         <Fa icon={faLock} {id}></Fa>
@@ -200,11 +190,7 @@
             groupKey={group => group.id}
             virtual
         >
-            {#snippet header(
-                _items,
-                groupControls,
-                columnControls,
-            )}
+            {#snippet header(_items, groupControls, columnControls)}
                 <ListOverflowMenu {groupControls} {columnControls} />
             {/snippet}
             {#snippet empty()}
@@ -213,16 +199,10 @@
                     hint="Targets are destinations on the internal network that your users will connect to"
                 />
             {/snippet}
-            {#snippet groupHeader(
-                group,
-                state,
-            )}
+            {#snippet groupHeader(group, state)}
                 <CollapsibleGroupHeader {group} {state} />
             {/snippet}
-            {#snippet item(
-                target,
-                cells,
-            )}
+            {#snippet item(target, cells)}
                 <a
                     class="list-group-item list-group-item-action"
                     href="/config/targets/{target.id}"

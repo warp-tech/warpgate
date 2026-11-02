@@ -29,7 +29,7 @@ jobs:
         with:
           node-version: 24
 
-      - uses: Swatinem/rust-cache@v2.9.2
+      - uses: Swatinem/rust-cache@v2.9.3
         with:
           key: "test"
 
@@ -84,7 +84,7 @@ jobs:
           path: target/llvm-cov/html
 
       - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@v8.3.0
+        uses: SonarSource/sonarqube-scan-action@v8.4.0
         if: ${{ env.SONAR_TOKEN }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
