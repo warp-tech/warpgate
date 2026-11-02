@@ -1,6 +1,7 @@
 <script lang="ts">
     import 'core-js/actual/map/group-by'
 
+    import { faClipboard } from '@fortawesome/free-regular-svg-icons'
     import {
         faArrowRight,
         faDesktop,
@@ -40,8 +41,8 @@
         type TargetSnapshot,
     } from 'gateway/lib/api'
     import { from, map, type Observable } from 'rxjs'
-    import Fa from 'svelte-fa'
     import { get } from 'svelte/store'
+    import Fa from 'svelte-fa'
     import {
         openTargetsInNewTab,
         openTargetsInNewTabForced,
@@ -49,7 +50,6 @@
         setOpenTargetsInNewTab,
     } from './lib/store'
     import { openWebDesktopSession, openWebSshSession } from './lib/webSessions'
-    import { faClipboard } from '@fortawesome/free-regular-svg-icons'
 
     let instructionsTarget: TargetSnapshot | undefined = $state()
     // The target an in-browser session is being opened for. Opening one can
@@ -217,7 +217,9 @@
     ]
 </script>
 
-{#snippet nameCell(target: TargetSnapshot)}
+{#snippet nameCell(
+    target: TargetSnapshot,
+)}
     <div class="d-flex align-items-center gap-2">
         {target.name}
     </div>
@@ -246,7 +248,8 @@
                 <Fa icon={faTerminal} fw />
                 Open terminal
             {/if}
-            {#if target.kind === TargetKind.Rdp || target.kind === TargetKind.Vnc}
+            {#if target.kind === TargetKind.Rdp ||
+                target.kind === TargetKind.Vnc}
                 <Fa icon={faDesktop} fw />
                 Open desktop
             {/if}
@@ -260,7 +263,9 @@
     {TARGET_KIND_LABELS[target.kind]}
 {/snippet}
 
-{#snippet menuCell(target: TargetSnapshot)}
+{#snippet menuCell(
+    target: TargetSnapshot,
+)}
     <Dropdown>
         <DropdownToggle
             color="link"
@@ -288,8 +293,8 @@
                 </DropdownItem>
             {/if}
             {#if (target.kind === TargetKind.Vnc ||
-            target.kind === TargetKind.Rdp) &&
-            webClientsEnabled}
+                target.kind === TargetKind.Rdp) &&
+                webClientsEnabled}
                 <DropdownItem
                     onclick={e => {
                         openWebDesktopSession(target.id)
@@ -396,7 +401,8 @@
         <CollapsibleGroupHeader {group} {state} />
     {/snippet}
     {#snippet item(
-        target,cells,
+        target,
+        cells,
     )}
         {@const url = urlForTarget(target)}
         <a

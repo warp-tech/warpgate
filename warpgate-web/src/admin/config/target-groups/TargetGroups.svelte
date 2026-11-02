@@ -52,12 +52,16 @@
     ]
 </script>
 
-{#snippet iconCell(group: TargetGroup)}
+{#snippet iconCell(
+    group: TargetGroup,
+)}
     {#if group.color}
         <GroupColorIcon color={group.color} />
     {/if}
 {/snippet}
-{#snippet nameCell(group: TargetGroup)}
+{#snippet nameCell(
+    group: TargetGroup,
+)}
     <strong>{group.name}</strong>
 {/snippet}
 {#snippet descriptionCell(
@@ -101,7 +105,8 @@
             <ListOverflowMenu {groupControls} {columnControls} />
         {/snippet}
         {#snippet item(
-            group,cells
+            group,
+            cells,
         )}
             <a
                 class="list-group-item list-group-item-action"

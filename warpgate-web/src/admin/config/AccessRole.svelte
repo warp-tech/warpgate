@@ -79,7 +79,9 @@
 
 <div class="container-max-md">
     <Loadable promise={initPromise} bind:value={role}>
-        {#snippet children(role)}
+        {#snippet children(
+            role,
+        )}
             <div class="page-summary-bar">
                 <div>
                     <h1>{role.name}</h1>
@@ -143,7 +145,9 @@
     <h4 class="mt-5">Assigned users</h4>
 
     <ItemList load={loadUsers}>
-        {#snippet item(user)}
+        {#snippet item(
+            user,
+        )}
             <a
                 class="list-group-item list-group-item-action"
                 href="/config/users/{user.id}"
@@ -169,7 +173,9 @@
     <h4 class="mt-4">Assigned targets</h4>
 
     <ItemList load={loadTargets}>
-        {#snippet item(target)}
+        {#snippet item(
+            target,
+        )}
             <a
                 class="list-group-item list-group-item-action"
                 href="/config/targets/{target.id}"

@@ -10,6 +10,7 @@
         type LoadOptions,
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
+    import ListOverflowMenu from 'common/ListOverflowMenu.svelte'
     import RelativeDate from 'common/RelativeDate.svelte'
     import { formatDistance } from 'date-fns'
     import { serverInfo } from 'gateway/lib/store'
@@ -27,7 +28,6 @@
     import { link } from 'svelte-spa-router'
     import PermissionGate from '../lib/PermissionGate.svelte'
     import { adminPermissions } from '../lib/store'
-    import ListOverflowMenu from 'common/ListOverflowMenu.svelte'
 
     let [showActiveOnly, showActiveOnly$] = autosave(
         'sessions-list:show-active-only',
@@ -128,44 +128,54 @@
     ]
 </script>
 
-{#snippet iconCell(session: UserSessionSnapshot)}
+{#snippet iconCell(
+    session: UserSessionSnapshot,
+)}
     <div class="icon" class:text-success={!session.ended}>
         {#if !session.ended}
             <Fa icon={iconActive} fw />
         {/if}
     </div>
 {/snippet}
-{#snippet protocolCell(session: UserSessionSnapshot)}
+{#snippet protocolCell(
+    session: UserSessionSnapshot,
+)}
     <div class="text-muted me-2">
         {session.protocol}
     </div>
 {/snippet}
-{#snippet sourceAddressCell(session: UserSessionSnapshot)}
+{#snippet sourceAddressCell(
+    session: UserSessionSnapshot,
+)}
     <div class="meta">
-        {session.remoteAddress
-            .replace(/:\d+$/, '')
-            .replace(/^\[(.*)\]$/, '$1')}
+        {session.remoteAddress.replace(/:\d+$/, '').replace(/^\[(.*)\]$/, '$1')}
     </div>
 {/snippet}
-{#snippet usernameCell(session: UserSessionSnapshot)}
+{#snippet usernameCell(
+    session: UserSessionSnapshot,
+)}
     <strong>
-        {session.username ?? (session.ended ? '<not logged in>' : '<logging in>')}
+        {session.username ??
+            (session.ended ? '<not logged in>' : '<logging in>')}
     </strong>
 {/snippet}
-{#snippet targetsCell(session: UserSessionSnapshot)}
+{#snippet targetsCell(
+    session: UserSessionSnapshot,
+)}
     {describeTargets(session)}
 {/snippet}
-{#snippet durationCell(session: UserSessionSnapshot)}
+{#snippet durationCell(
+    session: UserSessionSnapshot,
+)}
     {#if session.ended}
         <div class="meta ms-auto">
-            {formatDistance(
-                new Date(session.started),
-                new Date(session.ended),
-            )}
+            {formatDistance(new Date(session.started), new Date(session.ended))}
         </div>
     {/if}
 {/snippet}
-{#snippet startTimeCell(session: UserSessionSnapshot)}
+{#snippet startTimeCell(
+    session: UserSessionSnapshot,
+)}
     <div class="meta ms-auto">
         <RelativeDate date={session.started} />
     </div>
@@ -205,7 +215,11 @@
         {columns}
         storageKey="admin-sessions"
     >
-        {#snippet header(_items, groupControls, columnControls)}
+        {#snippet header(
+            _items,
+            groupControls,
+            columnControls,
+        )}
             <div class="d-flex align-items-center mb-1 w-100">
                 <div class="ms-auto"></div>
                 <Input
@@ -225,7 +239,8 @@
         {/snippet}
 
         {#snippet item(
-            session,cells,
+            session,
+            cells,
         )}
             <a
                 class="list-group-item list-group-item-action"
