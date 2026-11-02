@@ -58,9 +58,7 @@
                 hint="Target groups help organize your targets for easier management"
             />
         {/snippet}
-        {#snippet item(
-            group,
-        )}
+        {#snippet item(group)}
             <a
                 class="list-group-item list-group-item-action"
                 href="/config/target-groups/{group.id}"

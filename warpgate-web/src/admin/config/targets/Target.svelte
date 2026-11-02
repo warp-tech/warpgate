@@ -127,9 +127,7 @@
 </script>
 
 <Loadable promise={init()} bind:value={target}>
-    {#snippet children(
-        target,
-    )}
+    {#snippet children(target)}
         <div class="main-container container-max-lg">
             <div class="flex-grow-1">
                 <Modal
@@ -144,9 +142,7 @@
                             target.options.kind === 'Postgres' ||
                             target.options.kind === 'Kubernetes'}
                             <Loadable promise={api.getUsers()}>
-                                {#snippet children(
-                                    users,
-                                )}
+                                {#snippet children(users)}
                                     <FormGroup floating label="Select a user">
                                         <select
                                             bind:value={selectedUsername}
@@ -454,9 +450,7 @@
                         bodyTitle="Allow access for roles"
                     >
                         <Loadable promise={loadRolesPromise}>
-                            {#snippet children(
-                                roles,
-                            )}
+                            {#snippet children(roles)}
                                 <div class="list-group list-group-flush mb-3">
                                     {#each roles as role (role.id)}
                                         <label

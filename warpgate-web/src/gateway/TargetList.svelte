@@ -182,10 +182,7 @@
     bind:collapsedGroups={$collapsedTargetGroups}
     virtual
 >
-    {#snippet header(
-        items,
-        groupControls,
-    )}
+    {#snippet header(items, groupControls)}
         {#if items?.length}
             <ListOverflowMenu {groupControls}>
                 <div class="dropdown-header">Preferences</div>
@@ -225,15 +222,10 @@
             hint={`Ask an administrator to give ${$serverInfo?.username ?? 'your account'} a role with the targets you need.`}
         />
     {/snippet}
-    {#snippet groupHeader(
-        group,
-        state,
-    )}
+    {#snippet groupHeader(group, state)}
         <CollapsibleGroupHeader {group} {state} />
     {/snippet}
-    {#snippet item(
-        target,
-    )}
+    {#snippet item(target)}
         {@const url = urlForTarget(target)}
         <a
             class="list-group-item list-group-item-action target-item gap-3"

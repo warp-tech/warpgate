@@ -13,7 +13,8 @@ use warpgate_aws::EksClusterInfo;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
 use warpgate_common::auth::{AuthResult, AuthState, AuthStateUserInfo, CredentialKind};
 use warpgate_common::{
-    Protocol, Secret, TargetKubernetesOptions, User, UserSessionId, WarpgateError,
+    Protocol, Secret, Target, TargetKubernetesOptions, TargetOptions, User, UserSessionId,
+    WarpgateError,
 };
 use warpgate_common_http::authorization_token;
 use warpgate_common_http::logging::get_client_ip_addr;
@@ -175,7 +176,7 @@ pub async fn authenticate_kubernetes_user(
 pub async fn authorize_kubernetes_target(
     req: &Request,
     user: &User,
-    target_name: &str,
+    target: Target,
     session_id: UserSessionId,
     services: &Services,
 ) -> poem::Result<TargetAuthorization<TargetKubernetesOptions>> {
@@ -184,8 +185,39 @@ pub async fn authorize_kubernetes_target(
     // When the user has a Kubernetes credential policy, enforce its web-approval
     // factor on top of the transport identity; otherwise use the identity directly.
     let identity =
-        authorize_kubernetes_identity(services, user, client_ip, target_name, session_id).await?;
-    lookup_authorized_k8s_target(services.config_provider.as_ref(), target_name, &identity).await
+        authorize_kubernetes_identity(services, user, client_ip, &target.name, session_id).await?;
+    authorize_k8s_target(services.config_provider.as_ref(), target, &identity).await
+}
+
+/// For joining a session another node admitted. Re-checks roles but skips the
+/// credential policy, which the opener already satisfied.
+pub async fn authorize_kubernetes_join(
+    user: &User,
+    target: Target,
+    services: &Services,
+) -> poem::Result<TargetAuthorization<TargetKubernetesOptions>> {
+    let identity = AuthorizedIdentity::for_authenticated_session(user.into(), crate::PROTOCOL_NAME);
+    authorize_k8s_target(services.config_provider.as_ref(), target, &identity).await
+}
+
+fn target_not_found(target_name: &str) -> poem::Error {
+    poem::Error::from_string(
+        format!("Kubernetes target not found: {target_name}"),
+        poem::http::StatusCode::NOT_FOUND,
+    )
+}
+
+pub async fn resolve_kubernetes_target(
+    services: &Services,
+    target_name: &str,
+) -> poem::Result<Target> {
+    services
+        .config_provider
+        .get_target_by_name(target_name)
+        .await
+        .context("looking up target")?
+        .filter(|target| matches!(target.options, TargetOptions::Kubernetes(_)))
+        .ok_or_else(|| target_not_found(target_name))
 }
 
 /// Turn a validated Kubernetes identity into an [`AuthorizedIdentity`], applying
@@ -386,25 +418,13 @@ async fn authenticate(req: &Request, services: &Services) -> poem::Result<Option
     Ok(None)
 }
 
-/// Look up a Kubernetes target by name and prove the user is authorized for it.
-/// Shared by the API-token, OIDC and client-certificate auth paths.
-async fn lookup_authorized_k8s_target<C: ConfigProvider + Send>(
+/// Checks the identity's roles against a resolved Kubernetes target.
+async fn authorize_k8s_target<C: ConfigProvider + Send>(
     config_provider: &C,
-    target_name: &str,
+    target: Target,
     identity: &AuthorizedIdentity,
 ) -> poem::Result<TargetAuthorization<TargetKubernetesOptions>> {
-    let not_found = || {
-        poem::Error::from_string(
-            format!("Kubernetes target not found: {target_name}"),
-            poem::http::StatusCode::NOT_FOUND,
-        )
-    };
-    let target = config_provider
-        .get_target_by_name(target_name)
-        .await
-        .context("looking up target")?
-        .ok_or_else(not_found)?;
-
+    let target_name = target.name.clone();
     authorize_for_target(config_provider, identity, target)
         .await?
         .ok_or_else(|| {
@@ -414,7 +434,7 @@ async fn lookup_authorized_k8s_target<C: ConfigProvider + Send>(
             )
         })?
         .narrow()
-        .map_err(|_| not_found())
+        .map_err(|_| target_not_found(&target_name))
 }
 
 /// Load a resolved SSO user by username.
