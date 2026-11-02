@@ -1,5 +1,5 @@
 {
-    "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+    "$schema": "https://biomejs.dev/schemas/2.6.3/schema.json",
     "vcs": {
         "enabled": true,
         "clientKind": "git",
@@ -68,6 +68,19 @@
                     },
                     "correctness": {
                         "noUnusedImports": "off"
+                    }
+                }
+            }
+        },
+        {
+            "includes": ["**/*.scss"],
+            "linter": {
+                "rules": {
+                    "correctness": {
+                        "noUnknownFunction": "off"
+                    },
+                    "complexity": {
+                        "noImportantStyles": "off"
                     }
                 }
             }

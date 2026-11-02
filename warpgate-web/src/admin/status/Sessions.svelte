@@ -147,9 +147,7 @@
             </div>
         {/snippet}
 
-        {#snippet item(
-            session,
-        )}
+        {#snippet item(session)}
             <a
                 class="list-group-item list-group-item-action"
                 href="/status/sessions/{session.id}"

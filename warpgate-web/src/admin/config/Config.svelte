@@ -89,9 +89,7 @@
 </script>
 
 <SidebarNavContainer {routes} prefix="/config">
-    {#snippet navItems(
-        sidebarMode,
-    )}
+    {#snippet navItems(sidebarMode)}
         <NavListItem
             class="mb-2"
             title="Targets"
