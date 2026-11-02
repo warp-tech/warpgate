@@ -14,7 +14,6 @@
         ApprovalRequestStatus,
         api,
         type Recording,
-        type Target,
         type TargetSessionSnapshot,
         type UserSessionSnapshot,
     } from 'admin/lib/api'
@@ -57,32 +56,6 @@
     async function close() {
         if (!session) return
         api.closeSession(session)
-    }
-
-    function getTargetAddress(target: Target) {
-        let address = '<unknown>'
-        if (target.options.kind === 'Ssh') {
-            address = `${target.options.host}:${target.options?.port}`
-        }
-        if (target.options.kind === 'MySql') {
-            address = `${target.options.host}:${target.options?.port}`
-        }
-        if (target.options.kind === 'Postgres') {
-            address = `${target.options.host}:${target.options?.port}`
-        }
-        if (target.options.kind === 'Http') {
-            address = target.options.url
-        }
-        if (target.options.kind === 'Kubernetes') {
-            address = target.options.clusterUrl
-        }
-        if (target.options.kind === 'Vnc') {
-            address = `${target.options.host}:${target.options?.port}`
-        }
-        if (target.options.kind === 'Rdp') {
-            address = `${target.options.host}:${target.options?.port}`
-        }
-        return address
     }
 
     function getRecordingsForSession(s: TargetSessionSnapshot) {
