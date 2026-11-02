@@ -67,14 +67,23 @@ pub struct S3StorageConfig {
     /// Local directory buffering recordings before upload, resolved against the
     /// config file's directory unless absolute. Defaults to `data/recordings-scratch`.
     pub scratch_path: Option<String>,
+    /// Stream completed recordings to the browser through Warpgate instead of
+    /// redirecting it to a presigned URL, so the bucket only has to be
+    /// reachable from Warpgate itself.
+    #[serde(default)]
+    #[oai(default)]
+    pub proxy_downloads: bool,
 }
 
 impl S3StorageConfig {
     /// The `scheme://host[:port]` origin the browser connects to when following a
     /// presigned recording URL — used to allow-list the bucket in the page CSP.
-    /// `None` when a custom endpoint has no parseable scheme/host.
+    /// `None` when a custom endpoint has no parseable scheme/host, or when
+    /// downloads are proxied and the browser never talks to the bucket.
     pub fn browser_origin(&self) -> Option<String> {
-        if let Some(endpoint) = &self.endpoint {
+        if self.proxy_downloads {
+            None
+        } else if let Some(endpoint) = &self.endpoint {
             let uri: http::Uri = endpoint.parse().ok()?;
             Some(format!("{}://{}", uri.scheme_str()?, uri.authority()?))
         } else if self.path_style {
@@ -87,6 +96,21 @@ impl S3StorageConfig {
             ))
         }
     }
+}
+
+/// An object body opened by [`S3Storage::get_range`], with what's needed to
+/// answer the HTTP request it was opened for.
+pub struct S3Object {
+    pub body: Box<dyn tokio::io::AsyncRead + Send + Unpin>,
+    pub content_length: Option<i64>,
+    /// Set when a `Range` was requested and S3 answered with a partial body.
+    pub content_range: Option<String>,
+}
+
+pub enum S3RangeRead {
+    Object(S3Object),
+    /// The requested range starts at or past the end of the object (HTTP 416).
+    NotSatisfiable,
 }
 
 /// A configured S3 client scoped to one bucket + key prefix.
@@ -142,6 +166,33 @@ impl S3Storage {
             .await
             .map_err(AwsError::sdk_error)?;
         Ok(Box::new(output.body.into_async_read()))
+    }
+
+    /// Open an object, or the byte range given as an HTTP `Range` header value,
+    /// as a streaming reader. Used to proxy downloads to the browser.
+    pub async fn get_range(
+        &self,
+        path: &str,
+        range: Option<&str>,
+    ) -> Result<S3RangeRead, AwsError> {
+        let result = self
+            .client
+            .get_object()
+            .bucket(&self.bucket)
+            .key(self.key(path))
+            .set_range(range.map(str::to_string))
+            .send()
+            .await;
+        let output = match result {
+            Ok(output) => output,
+            Err(err) if is_invalid_range(&err) => return Ok(S3RangeRead::NotSatisfiable),
+            Err(err) => return Err(AwsError::sdk_error(err)),
+        };
+        Ok(S3RangeRead::Object(S3Object {
+            content_length: output.content_length(),
+            content_range: output.content_range().map(str::to_string),
+            body: Box::new(output.body.into_async_read()),
+        }))
     }
 
     /// Presigned GET URL the browser can fetch directly (supports `Range`).
@@ -209,6 +260,17 @@ impl S3Storage {
             parts: Vec::new(),
         })
     }
+}
+
+fn is_invalid_range<R>(
+    err: &aws_sdk_s3::error::SdkError<aws_sdk_s3::operation::get_object::GetObjectError, R>,
+) -> bool
+where
+    R: std::fmt::Debug,
+{
+    use aws_sdk_s3::error::ProvideErrorMetadata;
+    err.as_service_error()
+        .is_some_and(|e| e.code() == Some("InvalidRange"))
 }
 
 /// A streaming multipart upload: bytes are buffered and flushed to S3 in
@@ -328,6 +390,7 @@ mod tests {
             prefix: String::new(),
             credentials: S3Credentials::Auto(AutoCredentials {}),
             scratch_path: None,
+            proxy_downloads: false,
         }
     }
 
@@ -349,5 +412,9 @@ mod tests {
         );
         // No scheme is unusable for a CSP origin.
         assert_eq!(config(Some("minio:9000"), true).browser_origin(), None);
+        // Proxied downloads never reach the bucket from the browser.
+        let mut proxied = config(Some("https://minio.example.com:9000"), true);
+        proxied.proxy_downloads = true;
+        assert_eq!(proxied.browser_origin(), None);
     }
 }

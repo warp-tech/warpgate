@@ -9,7 +9,7 @@ use poem::{Request, Response};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ConnectionTrait, Database, IntoActiveModel};
 use tokio::io::AsyncReadExt;
-use warpgate_aws::{S3Credentials, S3Storage, S3StorageConfig, StaticCredentials};
+use warpgate_aws::{S3Credentials, S3RangeRead, S3Storage, S3StorageConfig, StaticCredentials};
 use warpgate_db_entities::Parameters::{
     self, ConfigMigrationValues, RecordingsStorageConfig, set_config_migration_values,
 };
@@ -51,10 +51,20 @@ struct FakeS3 {
     failed_completes: Vec<String>,
     completed: Vec<String>,
     aborted: Vec<String>,
+    /// Bodies served on GET, by request path. Part bodies aren't kept, so
+    /// tests seed what a read should return.
+    objects: std::collections::HashMap<String, Vec<u8>>,
 }
 
 impl FakeS3 {
-    fn handle(&mut self, method: &Method, path: &str, query: &str, len: usize) -> Response {
+    fn handle(
+        &mut self,
+        method: &Method,
+        path: &str,
+        query: &str,
+        len: usize,
+        range: Option<&str>,
+    ) -> Response {
         let part = query
             .split('&')
             .find_map(|pair| pair.strip_prefix("partNumber="))
@@ -66,6 +76,7 @@ impl FakeS3 {
                 .body("<Error><Code>InvalidRequest</Code><Message>injected</Message></Error>")
         };
         match (method, part) {
+            (&Method::GET, _) => self.get(path, range),
             (&Method::POST, _) if query.split('&').any(|q| q.starts_with("uploads")) => {
                 if self.fail_create.is_some_and(|f| path.ends_with(f)) {
                     self.failed_creates.push(path.into());
@@ -107,6 +118,38 @@ impl FakeS3 {
         }
     }
 
+    /// GET with just the open-ended `bytes=N-` ranges the player sends.
+    fn get(&self, path: &str, range: Option<&str>) -> Response {
+        let Some(body) = self.objects.get(path) else {
+            return Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body("<Error><Code>NoSuchKey</Code><Message>missing</Message></Error>");
+        };
+        let Some(start) = range.and_then(|r| {
+            r.strip_prefix("bytes=")?
+                .strip_suffix('-')?
+                .parse::<usize>()
+                .ok()
+        }) else {
+            return Response::builder()
+                .header("Content-Length", body.len())
+                .body(body.clone());
+        };
+        if start >= body.len() {
+            return Response::builder()
+                .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                .body("<Error><Code>InvalidRange</Code><Message>range</Message></Error>");
+        }
+        Response::builder()
+            .status(StatusCode::PARTIAL_CONTENT)
+            .header("Content-Length", body.len() - start)
+            .header(
+                "Content-Range",
+                format!("bytes {start}-{}/{}", body.len() - 1, body.len()),
+            )
+            .body(body[start..].to_vec())
+    }
+
     fn completed(&self, file: &str) -> bool {
         self.completed.iter().any(|key| key.ends_with(file))
     }
@@ -123,6 +166,10 @@ struct Harness {
 
 impl Harness {
     async fn new(s3: Option<FakeS3>) -> Self {
+        Self::new_with(s3, false).await
+    }
+
+    async fn new_with(s3: Option<FakeS3>, proxy_downloads: bool) -> Self {
         set_config_migration_values(ConfigMigrationValues::default());
         let db = Database::connect("sqlite::memory:").await.unwrap();
         migrate_database(&db).await.unwrap();
@@ -143,6 +190,7 @@ impl Harness {
                     secret_access_key: Some("test".into()),
                 }),
                 scratch_path: Some(root.join("scratch").to_string_lossy().into_owned()),
+                proxy_downloads,
             })
         } else {
             None
@@ -247,11 +295,13 @@ async fn serve(s3: Arc<std::sync::Mutex<FakeS3>>) -> std::net::SocketAddr {
                 .map(|b| b.len())
                 .unwrap_or_default();
             let uri = request.uri();
+            let range = request.headers().get("range").and_then(|v| v.to_str().ok());
             s3.lock().unwrap().handle(
                 request.method(),
                 uri.path(),
                 uri.query().unwrap_or_default(),
                 len,
+                range,
             )
         }
     });
@@ -569,4 +619,90 @@ async fn a_recorder_cancelled_while_opening_its_files_does_not_end() {
     );
     assert_eq!(h.ended().await, None);
     assert!(exists(&h.scratch(RecordingFile::NDJsonData).await));
+}
+
+/// Records a terminal recording to S3 and returns it once ended, along with
+/// the request path of its uploaded data.ndjson.
+async fn ended_s3_recording(h: &Harness) -> (Recording::Model, String) {
+    let recording: TwoFiles = h
+        .recordings
+        .start(&h.session_id, None, ())
+        .await
+        .unwrap()
+        .unwrap();
+    recording.data.write(b"data\n").await.unwrap();
+    recording.index.write(b"index\n").await.unwrap();
+    drop(recording);
+    h.wait_for_writers(0).await;
+
+    let recording = h.recording().await;
+    assert!(recording.ended.is_some(), "never ended");
+    let key = h
+        .s3()
+        .completed
+        .iter()
+        .find(|key| key.ends_with("data.ndjson"))
+        .cloned()
+        .expect("data.ndjson was never uploaded");
+    (recording, key)
+}
+
+/// Without the option, completed S3 recordings are still handed to the
+/// browser as presigned URLs, so existing setups behave as before.
+#[tokio::test]
+async fn s3_downloads_redirect_by_default() {
+    let h = Harness::new(Some(FakeS3::default())).await;
+    let (recording, _) = ended_s3_recording(&h).await;
+
+    let url = h
+        .recordings
+        .access(&recording, RecordingFile::NDJsonData)
+        .await
+        .unwrap()
+        .external_access_url()
+        .await
+        .unwrap()
+        .expect("no presigned URL");
+    assert!(url.contains("X-Amz-Signature"), "not presigned: {url}");
+}
+
+/// With proxied downloads the browser never gets a presigned URL; Warpgate
+/// reads the object itself and forwards the player's byte ranges to S3.
+#[tokio::test]
+async fn proxied_s3_downloads_forward_ranges_instead_of_redirecting() {
+    let h = Harness::new_with(Some(FakeS3::default()), true).await;
+    let (recording, key) = ended_s3_recording(&h).await;
+    h.s3().objects.insert(key, b"0123456789".to_vec());
+
+    let access = h
+        .recordings
+        .access(&recording, RecordingFile::NDJsonData)
+        .await
+        .unwrap();
+    assert_eq!(access.external_access_url().await.unwrap(), None);
+
+    let Some(S3RangeRead::Object(mut object)) =
+        access.open_proxied(Some("bytes=4-")).await.unwrap()
+    else {
+        panic!("expected a partial object");
+    };
+    assert_eq!(object.content_range.as_deref(), Some("bytes 4-9/10"));
+    assert_eq!(object.content_length, Some(6));
+    let mut body = Vec::new();
+    object.body.read_to_end(&mut body).await.unwrap();
+    assert_eq!(body, b"456789");
+
+    let Some(S3RangeRead::Object(mut whole)) = access.open_proxied(None).await.unwrap() else {
+        panic!("expected the whole object");
+    };
+    assert_eq!(whole.content_range, None);
+    let mut body = Vec::new();
+    whole.body.read_to_end(&mut body).await.unwrap();
+    assert_eq!(body, b"0123456789");
+
+    // The player opens at the end of the file to splice in the live stream.
+    assert!(matches!(
+        access.open_proxied(Some("bytes=10-")).await.unwrap(),
+        Some(S3RangeRead::NotSatisfiable)
+    ));
 }

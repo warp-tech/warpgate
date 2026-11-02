@@ -6,7 +6,7 @@ use sea_orm::DatabaseConnection;
 use tokio::fs::File;
 use tokio::io::{AsyncRead, AsyncWriteExt};
 use tracing::error;
-use warpgate_aws::{S3MultipartUpload, S3Storage};
+use warpgate_aws::{S3MultipartUpload, S3RangeRead, S3Storage};
 use warpgate_common::helpers::fs::secure_file;
 use warpgate_common::{GlobalParams, TargetSessionId};
 use warpgate_db_entities::Parameters::RecordingsStorageConfig;
@@ -21,13 +21,21 @@ const PRESIGNED_URL_TTL: Duration = Duration::from_secs(3600);
 
 enum Backend {
     Disk,
-    S3(S3Storage),
+    S3 {
+        s3: S3Storage,
+        proxy_downloads: bool,
+    },
 }
 
 /// Where a recording file lives, resolved by [`Storage::access`].
 pub enum FileAccess {
     Local(PathBuf),
-    S3 { s3: S3Storage, key: String },
+    S3 {
+        s3: S3Storage,
+        key: String,
+        /// Serve through Warpgate instead of handing out a presigned URL.
+        proxy_downloads: bool,
+    },
 }
 
 /// The destination for a RawRecordingWriter
@@ -89,14 +97,28 @@ impl RecordingSink {
 impl FileAccess {
     pub async fn open_read(&self) -> Result<Box<dyn AsyncRead + Send + Unpin>> {
         match self {
-            Self::S3 { s3, key } => Ok(s3.get_reader(key).await?),
+            Self::S3 { s3, key, .. } => Ok(s3.get_reader(key).await?),
             Self::Local(path) => Ok(Box::new(tokio::fs::File::open(path).await?)),
         }
     }
 
+    /// A presigned URL to redirect the browser to, unless downloads are proxied.
     pub async fn external_access_url(&self) -> Result<Option<String>> {
         match self {
-            Self::S3 { s3, key } => Ok(Some(s3.presign_get(key, PRESIGNED_URL_TTL).await?)),
+            Self::S3 {
+                s3,
+                key,
+                proxy_downloads: false,
+            } => Ok(Some(s3.presign_get(key, PRESIGNED_URL_TTL).await?)),
+            Self::S3 { .. } | Self::Local(_) => Ok(None),
+        }
+    }
+
+    /// Open an S3 object (optionally a `Range` of it) for Warpgate to stream to
+    /// the browser itself. `None` for local files, which are served from disk.
+    pub async fn open_proxied(&self, range: Option<&str>) -> Result<Option<S3RangeRead>> {
+        match self {
+            Self::S3 { s3, key, .. } => Ok(Some(s3.get_range(key, range).await?)),
             Self::Local(_) => Ok(None),
         }
     }
@@ -131,7 +153,10 @@ impl Storage {
             }
             RecordingsStorageConfig::S3(s3) => {
                 local_root.push(s3.scratch_path.as_deref().unwrap_or(S3_SCRATCH_SUBDIR));
-                Backend::S3(S3Storage::new(&s3).await?)
+                Backend::S3 {
+                    s3: S3Storage::new(&s3).await?,
+                    proxy_downloads: s3.proxy_downloads,
+                }
             }
         };
 
@@ -172,7 +197,7 @@ impl Storage {
         }
 
         Ok(match &self.backend {
-            Backend::S3(s3) => RecordingSink::S3 {
+            Backend::S3 { s3, .. } => RecordingSink::S3 {
                 scratch: local_file,
                 scratch_path: local_path,
                 upload: Some(s3.start_multipart(&relative_path(recording, file)).await?),
@@ -185,9 +210,13 @@ impl Storage {
     /// recordings and the disk backend, S3 for completed recordings on S3.
     pub(crate) fn access(&self, recording: &Recording::Model, file: RecordingFile) -> FileAccess {
         match &self.backend {
-            Backend::S3(s3) if recording.ended.is_some() => FileAccess::S3 {
+            Backend::S3 {
+                s3,
+                proxy_downloads,
+            } if recording.ended.is_some() => FileAccess::S3 {
                 s3: s3.clone(),
                 key: relative_path(recording, file),
+                proxy_downloads: *proxy_downloads,
             },
             _ => FileAccess::Local(local_path_in(&self.local_root, recording, file)),
         }
@@ -196,7 +225,7 @@ impl Storage {
     /// Delete a recording's files from this storage — its S3 objects (if any)
     /// and the local folder (best-effort; on S3 the scratch is already gone).
     pub(crate) async fn remove(&self, session_id: &TargetSessionId, name: &str) -> Result<()> {
-        if let Backend::S3(s3) = &self.backend {
+        if let Backend::S3 { s3, .. } = &self.backend {
             for key in [
                 format!(
                     "{session_id}/{name}/{}",
