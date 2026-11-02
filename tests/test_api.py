@@ -177,6 +177,12 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         expected_statuses={200},
     ),
     AdminApiTestCase(
+        id="release_role",
+        permission="access_roles_edit",
+        call=lambda api, r: api.release_role_with_http_info(r["role_id"]),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
         id="get_role_targets",
         permission=None,
         call=lambda api, r: api.get_role_targets_with_http_info(r["role_id"]),
@@ -402,6 +408,14 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         expected_statuses={200, 404},
     ),
     AdminApiTestCase(
+        id="release_ssh_own_key",
+        permission="config_edit",
+        call=lambda api, r: api.release_ssh_own_key_with_http_info(
+            r["ssh_client_key_id"]
+        ),
+        expected_statuses={200, 404},
+    ),
+    AdminApiTestCase(
         id="delete_ssh_own_key",
         permission="config_edit",
         call=lambda api, r: api.delete_ssh_own_key_with_http_info(
@@ -446,6 +460,12 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
             r["target_id"],
             _ssh_target_request(f"target-{uuid4()}"),
         ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="release_target",
+        permission="targets_edit",
+        call=lambda api, r: api.release_target_with_http_info(r["target_id"]),
         expected_statuses={200},
     ),
     AdminApiTestCase(
@@ -504,6 +524,14 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         call=lambda api, r: api.update_target_group_with_http_info(
             r["target_group_id"],
             sdk.TargetGroupDataRequest(name=f"group-{uuid4()}"),
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="release_target_group",
+        permission="targets_edit",
+        call=lambda api, r: api.release_target_group_with_http_info(
+            r["target_group_id"]
         ),
         expected_statuses={200},
     ),
@@ -1324,6 +1352,12 @@ metadata:
 spec: {{}}
 ---
 apiVersion: warpgate/v1
+kind: TargetGroup
+metadata:
+  name: {name}
+spec: {{}}
+---
+apiVersion: warpgate/v1
 kind: SshClientKey
 metadata:
   name: {name}
@@ -1336,6 +1370,7 @@ kind: Target
 metadata:
   name: {name}
 spec:
+  group: {name}
   roles: [{name}]
   options:
     ssh:
@@ -1357,8 +1392,10 @@ spec:
 
     target = next(t for t in admin_client.get_targets() if t.name == name)
     role = next(r for r in admin_client.get_roles() if r.name == name)
+    group = admin_client.get_target_group(target.group_id)
     assert target.provider == "00000000-0000-0000-0000-000000000000"
     assert role.provider == target.provider
+    assert group.provider == target.provider
     key = next(k for k in admin_client.get_ssh_own_keys() if k.label == name)
     assert key.provider == target.provider
     assert target.options.actual_instance.auth.actual_instance.key_id == key.id
@@ -1371,6 +1408,7 @@ spec:
         lambda: admin_client.delete_target_role(target.id, role.id),
         lambda: admin_client.update_role(role.id, sdk.RoleDataRequest(name=name)),
         lambda: admin_client.delete_role(role.id),
+        lambda: admin_client.delete_target_group(group.id),
         lambda: admin_client.update_ssh_own_key(
             key.id, sdk.UpdateSSHClientKeyRequest(label=name, is_default=False)
         ),
@@ -1387,6 +1425,18 @@ spec:
     applied = _config(pg_wg, "apply", "--yes", str(files))
     assert applied.returncode == 0, applied.stdout + applied.stderr
     assert admin_client.get_target(target.id).options.actual_instance.port == 2222
+
+    # Released rows are the admin's again, and the files now collide with them
+    released = [
+        admin_client.release_target(target.id),
+        admin_client.release_target_group(group.id),
+        admin_client.release_role(role.id),
+        admin_client.release_ssh_own_key(key.id),
+    ]
+    assert [r.provider for r in released] == [None] * 4
+    admin_client.delete_target_role(target.id, role.id)
+    planned = _config(pg_wg, "plan", str(files))
+    assert planned.returncode == 1, planned.stdout + planned.stderr
 
 
 def test_approval_parameters_can_be_cleared_and_reject_nonsense(

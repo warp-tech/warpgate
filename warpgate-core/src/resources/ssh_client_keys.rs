@@ -145,10 +145,10 @@ pub async fn delete<C: ConnectionTrait>(
     Ok(())
 }
 
-pub async fn set_owner<C: ConnectionTrait>(
+pub(crate) async fn set_owner<C: ConnectionTrait>(
     db: &C,
     id: Uuid,
-    owner: ProviderId,
+    owner: Option<ProviderId>,
 ) -> Result<(), ResourceError> {
     super::set_owner::<SshClientKey::Entity, _>(
         db,
@@ -158,6 +158,10 @@ pub async fn set_owner<C: ConnectionTrait>(
         owner,
     )
     .await
+}
+
+pub async fn release<C: ConnectionTrait>(db: &C, id: Uuid) -> Result<(), ResourceError> {
+    set_owner(db, id, None).await
 }
 
 /// Records the public key a referenced key resolves to now, after a rotation

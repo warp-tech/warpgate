@@ -148,10 +148,10 @@ async fn target_owner<C: ConnectionTrait>(
         .provider)
 }
 
-pub async fn set_owner<C: ConnectionTrait>(
+pub(crate) async fn set_owner<C: ConnectionTrait>(
     db: &C,
     id: Uuid,
-    owner: ProviderId,
+    owner: Option<ProviderId>,
 ) -> Result<(), ResourceError> {
     super::set_owner::<Target::Entity, _>(
         db,
@@ -161,6 +161,10 @@ pub async fn set_owner<C: ConnectionTrait>(
         owner,
     )
     .await
+}
+
+pub async fn release<C: ConnectionTrait>(db: &C, id: Uuid) -> Result<(), ResourceError> {
+    set_owner(db, id, None).await
 }
 
 pub async fn add_role<C: ConnectionTrait>(

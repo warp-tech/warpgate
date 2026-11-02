@@ -170,6 +170,21 @@ impl DetailApi {
         )?)))
     }
 
+    #[oai(
+        path = "/targets/:id/release",
+        method = "post",
+        operation_id = "release_target"
+    )]
+    async fn api_release_target(
+        &self,
+        admin: AdminContext,
+        id: Path<Uuid>,
+    ) -> Result<GetTargetResponse, WarpgateError> {
+        admin.require(AdminPermission::TargetsEdit)?;
+        store::release(&admin.services().db, id.0).await?;
+        self.api_get_target(admin, id).await
+    }
+
     #[oai(path = "/targets/:id", method = "put", operation_id = "update_target")]
     async fn api_update_target(
         &self,

@@ -133,6 +133,21 @@ impl DetailApi {
     }
 
     #[oai(
+        path = "/target-groups/:id/release",
+        method = "post",
+        operation_id = "release_target_group"
+    )]
+    async fn api_release_target_group(
+        &self,
+        admin: AdminContext,
+        id: Path<Uuid>,
+    ) -> Result<GetTargetGroupResponse, WarpgateError> {
+        admin.require(AdminPermission::TargetsEdit)?;
+        store::release(&admin.services().db, id.0).await?;
+        self.api_get_target_group(admin, id).await
+    }
+
+    #[oai(
         path = "/target-groups/:id",
         method = "put",
         operation_id = "update_target_group"

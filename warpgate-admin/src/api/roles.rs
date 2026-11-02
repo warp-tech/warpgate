@@ -147,6 +147,17 @@ impl DetailApi {
         })
     }
 
+    #[oai(path = "/role/:id/release", method = "post", operation_id = "release_role")]
+    async fn api_release_role(
+        &self,
+        admin: AdminContext,
+        id: Path<Uuid>,
+    ) -> Result<GetRoleResponse, WarpgateError> {
+        admin.require(AdminPermission::AccessRolesEdit)?;
+        store::release(&admin.services().db, id.0).await?;
+        self.api_get_role(admin, id).await
+    }
+
     #[oai(path = "/role/:id", method = "put", operation_id = "update_role")]
     async fn api_update_role(
         &self,

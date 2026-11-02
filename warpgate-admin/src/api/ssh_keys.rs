@@ -4,6 +4,7 @@ use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use russh::keys::{Algorithm, HashAlg, PrivateKey};
+use sea_orm::EntityTrait;
 use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::helpers::rng::get_crypto_rng;
@@ -122,6 +123,14 @@ enum UpdateSSHClientKeyResponse {
     BadRequest(Json<String>),
     #[oai(status = 409)]
     Conflict(Json<String>),
+    #[oai(status = 404)]
+    NotFound,
+}
+
+#[derive(ApiResponse)]
+enum ReleaseSSHClientKeyResponse {
+    #[oai(status = 200)]
+    Ok(Json<SSHClientKey>),
     #[oai(status = 404)]
     NotFound,
 }
@@ -258,6 +267,27 @@ impl Api {
             Err(ResourceError::NotFound) => Ok(UpdateSSHClientKeyResponse::NotFound),
             Err(err) => Err(err.into()),
         }
+    }
+
+    /// Hands a managed key back to manual editing
+    #[oai(
+        path = "/ssh/own-keys/:id/release",
+        method = "post",
+        operation_id = "release_ssh_own_key"
+    )]
+    async fn api_release_client_key(
+        &self,
+        admin: AdminContext,
+        id: Path<Uuid>,
+    ) -> Result<ReleaseSSHClientKeyResponse, WarpgateError> {
+        admin.require(AdminPermission::ConfigEdit)?;
+
+        let db = &admin.services().db;
+        ssh_client_keys::release(db, id.0).await?;
+        Ok(match SshClientKey::Entity::find_by_id(id.0).one(db).await? {
+            Some(key) => ReleaseSSHClientKeyResponse::Ok(Json(key.into())),
+            None => ReleaseSSHClientKeyResponse::NotFound,
+        })
     }
 
     #[oai(

@@ -54,8 +54,9 @@ impl From<ResourceError> for WarpgateError {
 /// Who is writing. A row is changed only by whoever owns it: an admin for a
 /// row created by hand, the owning provider for a reconciled one. HTTP
 /// handlers always write as [`Actor::Admin`], so a provider's rows stay
-/// read-only through the API, and a provider never overwrites a hand-made row
-/// unless the resource is annotated `warpgate.dev/adopt-existing`.
+/// read-only through the API until an admin releases them, and a provider never
+/// overwrites a hand-made row unless the resource is annotated
+/// `warpgate.dev/adopt-existing`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Actor {
     Admin,
@@ -87,18 +88,20 @@ impl Actor {
 #[must_use]
 pub struct AdmittedSessions(pub Vec<UserSessionId>);
 
-/// Hands a hand-made row to `owner`, changing nothing else. The one write
-/// that skips [`Actor::may_write`]: only applying a resource annotated with
-/// `warpgate.dev/adopt-existing` reaches it, never an HTTP handler.
+/// Sets a row's owner, changing nothing else. The one write that skips
+/// [`Actor::may_write`]. Each module exposes it as crate-private (only the
+/// reconciler hands a row to a provider, when applying a resource annotated
+/// with `warpgate.dev/adopt-existing`) plus a public `release`, which hands a
+/// row back to manual editing.
 async fn set_owner<E: EntityTrait, C: ConnectionTrait>(
     db: &C,
     provider: E::Column,
     id_column: E::Column,
     id: Uuid,
-    owner: ProviderId,
+    owner: Option<ProviderId>,
 ) -> Result<(), ResourceError> {
     E::update_many()
-        .col_expr(provider, Expr::value(Some(owner)))
+        .col_expr(provider, Expr::value(owner))
         .filter(id_column.eq(id))
         .exec(db)
         .await?;

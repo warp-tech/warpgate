@@ -57,10 +57,10 @@ pub async fn update<C: ConnectionTrait>(
     model.update(db).await.map_err(name_taken)
 }
 
-pub async fn set_owner<C: ConnectionTrait>(
+pub(crate) async fn set_owner<C: ConnectionTrait>(
     db: &C,
     id: Uuid,
-    owner: ProviderId,
+    owner: Option<ProviderId>,
 ) -> Result<(), ResourceError> {
     super::set_owner::<TargetGroup::Entity, _>(
         db,
@@ -70,6 +70,10 @@ pub async fn set_owner<C: ConnectionTrait>(
         owner,
     )
     .await
+}
+
+pub async fn release<C: ConnectionTrait>(db: &C, id: Uuid) -> Result<(), ResourceError> {
+    set_owner(db, id, None).await
 }
 
 pub async fn delete<C: ConnectionTrait + TransactionTrait>(

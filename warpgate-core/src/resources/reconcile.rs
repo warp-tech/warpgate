@@ -292,7 +292,7 @@ macro_rules! store {
                 id: Uuid,
                 owner: ProviderId,
             ) -> Result<(), ResourceError> {
-                $module::set_owner(db, id, owner).await
+                $module::set_owner(db, id, Some(owner)).await
             }
         }
     };
@@ -330,7 +330,7 @@ impl Store for SshClientKeySpec {
         id: Uuid,
         owner: ProviderId,
     ) -> Result<(), ResourceError> {
-        ssh_client_keys::set_owner(db, id, owner).await
+        ssh_client_keys::set_owner(db, id, Some(owner)).await
     }
 }
 

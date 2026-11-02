@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.30.2-11-g36eb3b5e-modified"
+    "version": "v0.30.2-13-g67dee72e-modified"
   },
   "servers": [
     {
@@ -502,6 +502,48 @@
           }
         ],
         "operationId": "delete_role"
+      }
+    },
+    "/role/{id}/release": {
+      "post": {
+        "summary": "Hands a managed role back to manual editing",
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/Role"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "release_role"
       }
     },
     "/role/{id}/targets": {
@@ -1486,6 +1528,48 @@
         "operationId": "delete_ssh_own_key"
       }
     },
+    "/ssh/own-keys/{id}/release": {
+      "post": {
+        "summary": "Hands a managed key back to manual editing",
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSHClientKey"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "release_ssh_own_key"
+      }
+    },
     "/logs": {
       "post": {
         "requestBody": {
@@ -1771,6 +1855,48 @@
           }
         ],
         "operationId": "delete_target"
+      }
+    },
+    "/targets/{id}/release": {
+      "post": {
+        "summary": "Hands a managed target back to manual editing. Its provider then\nreports it as a collision until the target is dropped from its source.",
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/Target"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "release_target"
       }
     },
     "/targets/{id}/known-ssh-host-keys": {
@@ -2196,6 +2322,48 @@
           }
         ],
         "operationId": "delete_target_group"
+      }
+    },
+    "/target-groups/{id}/release": {
+      "post": {
+        "summary": "Hands a managed target group back to manual editing",
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/TargetGroup"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "release_target_group"
       }
     },
     "/users": {
