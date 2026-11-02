@@ -337,6 +337,10 @@ mod tests {
         migrate_database_up(&db, 1).await.unwrap();
 
         db.close().await.unwrap();
-        std::fs::remove_file(path).unwrap();
+        // Only the temp file's cleanup: Windows may still hold it just after close().
+        let removed = std::fs::remove_file(path);
+        if cfg!(not(windows)) {
+            removed.unwrap();
+        }
     }
 }
