@@ -4,7 +4,7 @@ DB field type related issues that don't surface on SQLite (e.g. timestamp types)
 """
 
 import contextlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from typing import Callable, Dict, Optional, Set
 from json import load
 from datetime import datetime, timedelta, timezone
@@ -26,6 +26,9 @@ class AdminApiTestCase:
     permission: Optional[str]
     call: Callable[[sdk.DefaultApi, Dict[str, object]], sdk.ApiResponse]
     expected_statuses: Set[int]
+    # Further permissions the operation demands on top of `permission`; the
+    # allowed admin holds all of them, the denied one none.
+    also_requires: Set[str] = dataclass_field(default_factory=set)
 
 
 @contextlib.contextmanager
@@ -1001,6 +1004,29 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         call=lambda api, r: api.get_ip_echo_with_http_info(),
         expected_statuses={200},
     ),
+    AdminApiTestCase(
+        id="get_scim_tokens",
+        permission="config_edit",
+        call=lambda api, r: api.get_scim_tokens_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="create_scim_token",
+        permission="config_edit",
+        # A SCIM token can delete users and access roles, so minting one takes
+        # those permissions as well.
+        also_requires={"users_delete", "access_roles_delete"},
+        call=lambda api, r: api.create_scim_token_with_http_info(
+            sdk.CreateScimTokenRequest(label=f"scim-{uuid4()}"),
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="delete_scim_token",
+        permission="config_edit",
+        call=lambda api, r: api.delete_scim_token_with_http_info(r["scim_token_id"]),
+        expected_statuses={204, 404},
+    ),
 ]
 
 
@@ -1112,6 +1138,10 @@ def api_test_resources(
     resources["user_id"] = user.id
     resources["username"] = user.username
 
+    resources["scim_token_id"] = ac.create_scim_token(
+        sdk.CreateScimTokenRequest(label=f"scim-{uuid4()}")
+    ).token.id
+
     # fake IDs here
     resources["session_id"] = str(uuid4())
     resources["recording_id"] = str(uuid4())
@@ -1188,7 +1218,11 @@ def test_admin_api_permission_enforcement(
     # Base-check endpoints (permission=None) admit any admin. An admin holds at least one
     # permission — a permissionless role is not a real admin — so grant a benign baseline.
     allow_payload = make_limited_admin_role_payload(
-        **({case.permission: True} if case.permission else {"sessions_view": True})
+        **(
+            {case.permission: True, **{p: True for p in case.also_requires}}
+            if case.permission
+            else {"sessions_view": True}
+        )
     )
     allowed_role = _create_admin_role(admin_client, allow_payload)
     allowed_user = _create_user_with_role(admin_client, allowed_role.id)

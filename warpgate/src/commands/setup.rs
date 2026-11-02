@@ -405,6 +405,9 @@ async fn bootstrap_database(
                 name: Set(BUILTIN_ADMIN_USERNAME.to_string()),
                 description: Set("".to_string()),
                 is_default: Set(false),
+                scim_external_id: Set(None),
+                created_at: Set(None),
+                updated_at: Set(None),
             }
             .insert(db)
             .await?

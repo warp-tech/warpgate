@@ -371,6 +371,41 @@
                     <FormGroup floating label="Description">
                         <Input bind:value={user.description} />
                     </FormGroup>
+
+                    <div class="d-flex align-items-center gap-3 mb-3">
+                        <Input
+                            id="user-enabled"
+                            class="mb-0"
+                            type="switch"
+                            label="Account enabled"
+                            bind:checked={user.enabled}
+                        />
+                        {#if !user.enabled}
+                            <small class="text-danger">
+                                A disabled account cannot log in anywhere; its
+                                open sessions are closed when this is saved.
+                            </small>
+                        {/if}
+                    </div>
+
+                    {#if user.scimExternalId}
+                        <Alert color="info" class="mb-3">
+                            Provisioned by an identity provider over SCIM
+                            (external id <code>{user.scimExternalId}</code>).
+                            Changes made here may be overwritten by the next
+                            sync.
+                        </Alert>
+                    {/if}
+
+                    <small class="text-muted d-block">
+                        {#if user.createdAt}
+                            Created <RelativeDate date={user.createdAt} />
+                        {/if}
+                        {#if user.updatedAt}
+                            &bull; Last modified
+                            <RelativeDate date={user.updatedAt} />
+                        {/if}
+                    </small>
                 </Section>
 
                 {#if $adminPermissions.usersEdit && user.credentialPolicy}

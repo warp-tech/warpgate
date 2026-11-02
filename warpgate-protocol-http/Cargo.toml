@@ -39,6 +39,7 @@ warpgate-common-cache = { path = "../warpgate-common-cache" }
 warpgate-common-http = { path = "../warpgate-common-http", default-features = false }
 warpgate-core = { path = "../warpgate-core", default-features = false }
 warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }
+warpgate-scim = { path = "../warpgate-scim" }
 warpgate-sso = { path = "../warpgate-sso", default-features = false }
 warpgate-tls = { path = "../warpgate-tls", default-features = false }
 warpgate-web = { path = "../warpgate-web", default-features = false }

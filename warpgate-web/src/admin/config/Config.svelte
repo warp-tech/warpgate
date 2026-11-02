@@ -75,6 +75,9 @@
             asyncComponent: () =>
                 import('./secret-backends/SecretBackends.svelte'),
         }),
+        '/scim': wrap({
+            asyncComponent: () => import('./scim/ScimTokens.svelte'),
+        }),
         '/target-groups/create': wrap({
             asyncComponent: () =>
                 import('./target-groups/CreateTargetGroup.svelte'),
@@ -179,6 +182,14 @@
             title="Secret backends"
             description="Vault / OpenBao connections"
             href="/config/secret-backends"
+            small={sidebarMode}
+        />
+
+        <NavListItem
+            class="mb-2"
+            title="SCIM provisioning"
+            description="Sync users and roles from an identity provider"
+            href="/config/scim"
             small={sidebarMode}
         />
     {/snippet}

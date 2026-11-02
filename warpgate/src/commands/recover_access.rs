@@ -76,9 +76,11 @@ pub async fn command(params: &GlobalParams, username: Option<&String>) -> Result
         .get_or_insert_with(Default::default)
         .http = Some(vec![CredentialKind::Password]);
 
+    // Re-enabled too: an identity provider may have disabled every admin.
     User::ActiveModel {
         id: Set(user.id),
         credential_policy: Set(serde_json::to_value(Some(&user.credential_policy))?),
+        enabled: Set(true),
         ..Default::default()
     }
     .update(db)

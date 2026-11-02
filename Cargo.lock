@@ -9206,6 +9206,7 @@ dependencies = [
 name = "warpgate-db-entities"
 version = "0.30.2"
 dependencies = [
+ "async-trait",
  "bytes",
  "data-encoding",
  "data-url",
@@ -9325,6 +9326,7 @@ dependencies = [
  "warpgate-core",
  "warpgate-db-entities",
  "warpgate-db-migrations",
+ "warpgate-scim",
  "warpgate-sso",
  "warpgate-tls",
  "warpgate-web",
@@ -9531,6 +9533,25 @@ dependencies = [
  "warpgate-desktop-auth",
  "warpgate-desktop-ui",
  "warpgate-tls",
+]
+
+[[package]]
+name = "warpgate-scim"
+version = "0.30.2"
+dependencies = [
+ "poem",
+ "sea-orm",
+ "serde_json",
+ "thiserror 2.0.20",
+ "time",
+ "tokio",
+ "tracing",
+ "uuid",
+ "warpgate-common",
+ "warpgate-common-http",
+ "warpgate-core",
+ "warpgate-db-entities",
+ "warpgate-db-migrations",
 ]
 
 [[package]]

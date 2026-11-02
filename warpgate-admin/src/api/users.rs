@@ -32,6 +32,8 @@ struct UserDataRequest {
     description: Option<String>,
     rate_limit_bytes_per_second: Option<u32>,
     allowed_ip_ranges: Option<Vec<String>>,
+    /// Whether the account may log in. Left out, the flag is unchanged.
+    enabled: Option<bool>,
 }
 
 #[derive(ApiResponse)]
@@ -116,6 +118,11 @@ impl ListApi {
             ldap_server_id: Set(None),
             ldap_object_uuid: Set(None),
             allowed_ip_ranges: Set(serde_json::Value::Null),
+            enabled: Set(true),
+            scim_external_id: Set(None),
+            scim_attributes: Set(None),
+            created_at: Set(None),
+            updated_at: Set(None),
         };
 
         let user = values.insert(db).await.map_err(WarpgateError::from)?;
@@ -288,6 +295,7 @@ impl DetailApi {
             None => serde_json::Value::Null,
         };
 
+        let was_enabled = user.enabled;
         let mut model: User::ActiveModel = user.into();
 
         model.username = Set(body.username.clone());
@@ -297,7 +305,33 @@ impl DetailApi {
                 .map_err(WarpgateError::from)?);
         model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(i64::from));
         model.allowed_ip_ranges = Set(allowed_ip_ranges);
+        if let Some(enabled) = body.enabled {
+            model.enabled = Set(enabled);
+        }
         let user = model.update(db).await?;
+
+        match (was_enabled, user.enabled) {
+            (true, false) => {
+                AuditEvent::UserDisabled {
+                    user_id: user.id,
+                    username: user.username.clone(),
+                    actor_user_id: admin.auth.user_id(),
+                }
+                .emit();
+                // A disabled account must not keep serving its open sessions.
+                admin
+                    .services()
+                    .close_sessions(SessionsFilter::User { user_id: user.id })
+                    .await?;
+            }
+            (false, true) => AuditEvent::UserEnabled {
+                user_id: user.id,
+                username: user.username.clone(),
+                actor_user_id: admin.auth.user_id(),
+            }
+            .emit(),
+            _ => {}
+        }
 
         warpgate_core::rate_limiting::apply_new_rate_limits(
             &admin.services().rate_limiter_registry,
