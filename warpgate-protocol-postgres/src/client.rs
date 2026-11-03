@@ -163,6 +163,12 @@ impl PostgresClient {
                         info!("Authenticated at target");
                         break;
                     }
+                    pgwire::messages::startup::Authentication::CleartextPassword
+                    | pgwire::messages::startup::Authentication::MD5Password(_)
+                        if !stream.is_tls() && target.tls.mode != TlsMode::Disabled =>
+                    {
+                        return Err(PostgresError::PasswordAuthWithoutTls);
+                    }
                     pgwire::messages::startup::Authentication::CleartextPassword => {
                         let password_message =
                             pgwire::messages::startup::Password::new(effective_password.clone());
