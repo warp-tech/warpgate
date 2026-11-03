@@ -67,9 +67,10 @@ pub async fn map_sso_result(
         };
     }
 
-    // If preferred_username is absent, fall back to `email`
+    // If preferred_username is absent or empty, fall back to `email`
     let preferred_username = get_claim!(preferred_username)
         .map(|x| x.as_str())
+        .filter(|x| !x.is_empty())
         .map(ToString::to_string)
         .or_else(|| {
             get_claim!(email)
@@ -159,5 +160,54 @@ fn extract_groups(result: &SsoResult, claim: &str, warn_if_missing: bool) -> Opt
             warn!("Claim {claim:?} is not a list of role names, ignoring: {e}");
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn empty_preferred_username_falls_back_to_userinfo_email() {
+        let claims = json!({
+            "iss": "https://idp.example.com", "sub": "alice",
+            "aud": "warpgate", "iat": 1, "exp": 2,
+            "preferred_username": "",
+        });
+        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let key =
+            jsonwebtoken::EncodingKey::from_ec_pem(key_pair.serialize_pem().as_bytes()).unwrap();
+        let token = jsonwebtoken::encode(
+            &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::ES256),
+            &claims,
+            &key,
+        )
+        .unwrap()
+        .parse()
+        .unwrap();
+        let result = crate::SsoResult {
+            token,
+            claims: serde_json::from_value(claims).unwrap(),
+            userinfo_claims: Some(
+                openidconnect::UserInfoClaims::from_json::<std::io::Error>(
+                    &serde_json::to_vec(&json!({
+                        "sub": "alice", "email": "alice@example.com", "email_verified": true,
+                    }))
+                    .unwrap(),
+                    None,
+                )
+                .unwrap(),
+            ),
+        };
+        let config = serde_json::from_value(json!({
+            "type": "custom", "client_id": "warpgate", "client_secret": "secret",
+            "issuer_url": "https://idp.example.com", "scopes": [],
+        }))
+        .unwrap();
+        let response = super::map_sso_result(&config, result).await;
+        assert_eq!(
+            response.preferred_username.as_deref(),
+            Some("alice@example.com")
+        );
     }
 }

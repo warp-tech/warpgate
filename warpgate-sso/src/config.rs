@@ -160,6 +160,10 @@ pub enum SsoInternalProviderConfig {
         client_secret: ClientSecret,
         #[schemars(with = "String")]
         issuer_url: IssuerUrl,
+        /// Full discovery document URL when it is hosted separately from the issuer.
+        /// The document and ID tokens must still match issuer_url exactly.
+        #[schemars(with = "Option<String>")]
+        discovery_url: Option<openidconnect::url::Url>,
         scopes: Vec<String>,
         role_mappings: Option<HashMap<String, RoleMapping>>,
         admin_role_mappings: Option<HashMap<String, RoleMapping>>,
@@ -253,6 +257,13 @@ impl SsoInternalProviderConfig {
                 )?)
             }
         })
+    }
+
+    pub fn discovery_url(&self) -> Option<&openidconnect::url::Url> {
+        match self {
+            Self::Custom { discovery_url, .. } => discovery_url.as_ref(),
+            _ => None,
+        }
     }
 
     #[inline]
