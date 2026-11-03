@@ -26,23 +26,40 @@ use warpgate_db_entities::{CertificateCredential, CertificateRevocation, Paramet
 
 use crate::server::client_certs::RequestCertificateExt;
 
+// used to key correlator entries to prevent cross-token/ticket approvals
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum TransportCredential {
+    Ticket(Uuid),
+    ApiToken(Uuid),
+    /// ID tokens are reissued every few minutes, so the stable issuer-side
+    /// identity is the credential, not the token bytes.
+    OidcToken {
+        provider: String,
+        subject: String,
+    },
+    ClientCertificate(Uuid),
+}
+
 pub enum KubernetesIdentity {
-    User(User),
+    User {
+        user: User,
+        credential: TransportCredential,
+    },
     Ticket(ValidatedTicket),
 }
 
 impl KubernetesIdentity {
     pub fn user_info(&self) -> AuthStateUserInfo {
         match self {
-            Self::User(user) => user.into(),
+            Self::User { user, .. } => user.into(),
             Self::Ticket(ticket) => ticket.user_info().clone(),
         }
     }
 
-    pub fn ticket_id(&self) -> Option<Uuid> {
+    pub fn credential(&self) -> TransportCredential {
         match self {
-            Self::User(_) => None,
-            Self::Ticket(ticket) => Some(ticket.id()),
+            Self::User { credential, .. } => credential.clone(),
+            Self::Ticket(ticket) => TransportCredential::Ticket(ticket.id()),
         }
     }
 }
@@ -120,9 +137,7 @@ pub async fn authenticate_kubernetes_user(
         .await?
         .map(KubernetesIdentity::Ticket)
     } else {
-        authenticate(req, services)
-            .await?
-            .map(KubernetesIdentity::User)
+        authenticate(req, services).await?
     };
 
     let Some(identity) = identity else {
@@ -146,7 +161,7 @@ pub async fn authenticate_kubernetes_user(
 
     // Account lockout and the user's IP allow-list, both fail-closed. A ticket's
     // bearer is vetted the same way inside `validate_ticket`.
-    if let KubernetesIdentity::User(user) = &identity
+    if let KubernetesIdentity::User { user, .. } = &identity
         && !vet_credential_bearer(&services.login_protection, user, client_ip).await?
     {
         return Err(unauthorized());
@@ -292,11 +307,17 @@ async fn await_kubernetes_web_approval(
 /// web approval on top). Returns `None` if no presented credential validated;
 /// genuine lookup/verification errors propagate rather than being treated as a
 /// failure.
-async fn authenticate(req: &Request, services: &Services) -> poem::Result<Option<User>> {
+async fn authenticate(
+    req: &Request,
+    services: &Services,
+) -> poem::Result<Option<KubernetesIdentity>> {
     // Bearer token authentication (API tokens, then OIDC ID tokens).
     if let Some(token) = authorization_token(req, "Bearer") {
-        if let Ok(Some(user)) = services.config_provider.validate_api_token(token).await {
-            return Ok(Some(user));
+        if let Ok(Some(token)) = services.config_provider.validate_api_token(token).await {
+            return Ok(Some(KubernetesIdentity::User {
+                user: token.user,
+                credential: TransportCredential::ApiToken(token.id),
+            }));
         }
 
         // API token did not match — try OIDC ID token validation against any SSO
@@ -356,7 +377,13 @@ async fn authenticate(req: &Request, services: &Services) -> poem::Result<Option
             // the stored-SSO-linkage `validate_credential` arm, which would deny
             // legitimately-authenticated users resolved via preferred-username or
             // role mapping.
-            return Ok(Some(user_for_username(services, &username).await?));
+            return Ok(Some(KubernetesIdentity::User {
+                user: user_for_username(services, &username).await?,
+                credential: TransportCredential::OidcToken {
+                    provider: provider_config.name.clone(),
+                    subject: response.subject,
+                },
+            }));
         }
     }
 
@@ -366,7 +393,7 @@ async fn authenticate(req: &Request, services: &Services) -> poem::Result<Option
         debug!("Found client certificate from middleware, validating against database");
 
         match validate_client_certificate(&client_cert.der_bytes, services).await {
-            Ok(Some(user)) => return Ok(Some(user)),
+            Ok(Some(identity)) => return Ok(Some(identity)),
             Ok(None) => debug!("Client certificate provided but not found in database"),
             // A rejected certificate returns `Ok(None)`; an `Err` is a fault in the
             // certificate store (DB) or an unparseable cert, not a credential
@@ -572,7 +599,7 @@ fn cert_is_currently_valid(not_before: SystemTime, not_after: SystemTime, now: S
 pub async fn validate_client_certificate(
     cert_der: &[u8],
     services: &Services,
-) -> anyhow::Result<Option<User>> {
+) -> anyhow::Result<Option<KubernetesIdentity>> {
     // Convert DER to PEM format for comparison
     let cert_pem = der_to_pem(cert_der);
 
@@ -622,6 +649,7 @@ pub async fn validate_client_certificate(
                     "Client certificate validated for user"
                 );
 
+                let credential_id = cert_credential.id;
                 // Update last_used timestamp
                 let mut active_model: CertificateCredential::ActiveModel = cert_credential.into();
                 active_model.last_used = Set(Some(OffsetDateTime::now_utc()));
@@ -629,7 +657,10 @@ pub async fn validate_client_certificate(
                     warn!("Failed to update certificate last_used timestamp: {}", e);
                 }
 
-                return Ok(Some(User::try_from(user)?));
+                return Ok(Some(KubernetesIdentity::User {
+                    user: User::try_from(user)?,
+                    credential: TransportCredential::ClientCertificate(credential_id),
+                }));
             }
         }
     }

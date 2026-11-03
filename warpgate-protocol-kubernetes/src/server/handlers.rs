@@ -126,7 +126,7 @@ pub async fn handle_api_request(
             ticket.target().name.clone(),
             req.uri().path().trim_start_matches('/').to_owned(),
         ),
-        KubernetesIdentity::User(_) => named_target_path(req.uri().path())?,
+        KubernetesIdentity::User { .. } => named_target_path(req.uri().path())?,
     };
 
     // The path exactly as the API server will see it. The url crate resolves

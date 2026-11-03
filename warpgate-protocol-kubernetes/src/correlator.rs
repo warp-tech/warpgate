@@ -15,17 +15,17 @@ use warpgate_core::{
     WarpgateServerHandle,
 };
 
-use crate::server::auth::{KubernetesIdentity, authorize_kubernetes_target, unauthorized};
+use crate::server::auth::{
+    KubernetesIdentity, TransportCredential, authorize_kubernetes_target, unauthorized,
+};
 use crate::session_handle::KubernetesSessionHandle;
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct CorrelationKey {
     user_id: Uuid,
     target_name: String,
     ip: Option<String>,
-    // Ticket sessions must never share admission with another ticket or a
-    // normal login by the same user.
-    ticket_id: Option<Uuid>,
+    credential: TransportCredential,
 }
 
 impl CorrelationKey {
@@ -39,7 +39,7 @@ impl CorrelationKey {
             user_id: identity.user_info().id,
             target_name,
             ip: get_client_ip(request, services).await,
-            ticket_id: identity.ticket_id(),
+            credential: identity.credential(),
         }
     }
 }
@@ -169,7 +169,7 @@ pub async fn correlated_authorization(
 
         let resolved = match identity {
             // close cancels authorization wait
-            KubernetesIdentity::User(user) => closed
+            KubernetesIdentity::User { user, .. } => closed
                 .run_until_cancelled(authorize_kubernetes_target(
                     request,
                     &user,
@@ -449,6 +449,25 @@ mod tests {
             &closed,
             Duration::from_secs(60)
         ));
+    }
+
+    #[test]
+    fn keys_separate_credentials_of_one_user() {
+        let user_id = Uuid::new_v4();
+        let key = |credential| CorrelationKey {
+            user_id,
+            target_name: "k8s".into(),
+            ip: Some("10.0.0.1".into()),
+            credential,
+        };
+        let token_a = key(TransportCredential::ApiToken(Uuid::new_v4()));
+        assert_eq!(token_a, token_a.clone());
+        assert_ne!(token_a, key(TransportCredential::ApiToken(Uuid::new_v4())));
+        assert_ne!(
+            token_a,
+            key(TransportCredential::ClientCertificate(Uuid::new_v4()))
+        );
+        assert_ne!(token_a, key(TransportCredential::Ticket(Uuid::new_v4())));
     }
 
     #[test]
