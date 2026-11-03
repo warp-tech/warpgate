@@ -177,6 +177,7 @@
 <ItemList
     load={loadTargets}
     showSearch={true}
+    primarySearch
     groupObject={groupInfoFromTarget}
     groupKey={group => group.id}
     bind:collapsedGroups={$collapsedTargetGroups}
