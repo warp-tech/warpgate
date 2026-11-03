@@ -51,11 +51,13 @@ impl Related<super::UserSession::Entity> for Entity {
 impl ActiveModelBehavior for ActiveModel {}
 
 /// Ids, not names, so a rename doesn't split a live session.
-pub fn key(user_id: Uuid, target_id: Uuid, ip: Option<&str>, ticket_id: Option<Uuid>) -> String {
+/// `credential` names the transport credential the session was admitted for
+/// (see `TransportCredential::key_segment`), so another credential of the same
+/// user from the same address gets a session of its own.
+pub fn key(user_id: Uuid, target_id: Uuid, ip: Option<&str>, credential: &str) -> String {
     format!(
-        "{user_id}|{target_id}|{}|{}",
+        "{user_id}|{target_id}|{}|{credential}",
         ip.unwrap_or_default(),
-        ticket_id.map(|id| id.to_string()).unwrap_or_default(),
     )
 }
 
@@ -194,11 +196,12 @@ mod tests {
     }
 
     #[test]
-    fn keys_separate_tickets_and_unknown_ips() {
-        let (user, target, ticket) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
-        let plain = key(user, target, Some("10.0.0.1"), None);
-        assert_ne!(plain, key(user, target, Some("10.0.0.1"), Some(ticket)));
-        assert_ne!(plain, key(user, target, None, None));
-        assert_eq!(plain, key(user, target, Some("10.0.0.1"), None));
+    fn keys_separate_credentials_and_unknown_ips() {
+        let (user, target) = (Uuid::new_v4(), Uuid::new_v4());
+        let token_a = key(user, target, Some("10.0.0.1"), "token:a");
+        assert_ne!(token_a, key(user, target, Some("10.0.0.1"), "token:b"));
+        assert_ne!(token_a, key(user, target, Some("10.0.0.1"), "ticket:a"));
+        assert_ne!(token_a, key(user, target, None, "token:a"));
+        assert_eq!(token_a, key(user, target, Some("10.0.0.1"), "token:a"));
     }
 }
