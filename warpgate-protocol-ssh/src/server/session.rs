@@ -2056,12 +2056,6 @@ impl ServerSession {
             return russh::server::Auth::reject();
         }
 
-        // Accept the unsigned offer without spending the ticket. _auth_publickey
-        // validates and consumes it when the client sends a signed request.
-        if let AuthSelector::Ticket { .. } = selector {
-            return russh::server::Auth::Accept;
-        }
-
         if matches!(
             self.try_validate_public_key_offer(
                 &selector,
@@ -2345,7 +2339,7 @@ impl ServerSession {
 
                 Ok(false)
             }
-            AuthSelector::Ticket { .. } => Ok(false),
+            AuthSelector::Ticket { .. } => Ok(true),
         }
     }
 

@@ -1,5 +1,4 @@
 import os
-import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -8,11 +7,40 @@ from .conftest import ProcessManager, WarpgateProcess
 from .util import wait_port
 
 
-def _uses_left(url, ticket_id):
-    with admin_client(url) as api:
-        for ticket in api.get_tickets():
-            if ticket.id == ticket_id:
-                return ticket.uses_left
+def _create_user_and_target(api, ssh_port):
+    role = api.create_role(
+        sdk.RoleDataRequest(name=f"role-{uuid4()}"),
+    )
+    user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
+    api.add_user_role(user.id, role.id)
+    ssh_target = api.create_target(
+        sdk.TargetDataRequest(
+            name=f"ssh-{uuid4()}",
+            require_approval=False,
+            ticket_requests_disabled=False,
+            ticket_require_approval=False,
+            options=sdk.TargetOptions(
+                sdk.TargetOptionsTargetSSHOptions(
+                    kind="Ssh",
+                    allow_insecure_algos=False,
+                    host="localhost",
+                    port=ssh_port,
+                    username="root",
+                    auth=sdk.SSHTargetAuth(
+                        sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
+                    ),
+                )
+            ),
+        )
+    )
+    api.add_target_role(ssh_target.id, role.id)
+    return user, ssh_target
+
+
+def _uses_left(api, ticket_id):
+    for ticket in api.get_tickets():
+        if ticket.id == ticket_id:
+            return ticket.uses_left
     return None
 
 
@@ -32,37 +60,10 @@ class Test:
 
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
-            role = api.create_role(
-                sdk.RoleDataRequest(name=f"role-{uuid4()}"),
-            )
-            user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
+            user, ssh_target = _create_user_and_target(api, ssh_port)
             api.create_password_credential(
                 user.id, sdk.NewPasswordCredential(password="123")
             )
-            api.add_user_role(user.id, role.id)
-            ssh_target = api.create_target(
-                sdk.TargetDataRequest(
-                    name=f"ssh-{uuid4()}",
-                    require_approval=False,
-                    ticket_requests_disabled=False,
-                    ticket_require_approval=False,
-                    options=sdk.TargetOptions(
-                        sdk.TargetOptionsTargetSSHOptions(
-                            kind="Ssh",
-                            allow_insecure_algos=False,
-                            host="localhost",
-                            port=ssh_port,
-                            username="root",
-                            auth=sdk.SSHTargetAuth(
-                                sdk.SSHTargetAuthSshTargetPublicKeyAuth(
-                                    kind="PublicKey"
-                                )
-                            ),
-                        )
-                    ),
-                )
-            )
-            api.add_target_role(ssh_target.id, role.id)
 
             secret = api.create_ticket(
                 sdk.CreateTicketRequest(
@@ -93,7 +94,6 @@ class Test:
         timeout,
         shared_wg: WarpgateProcess,
     ):
-        # Accept the unsigned key offer without spending the one-use ticket.
         ssh_port = processes.start_ssh_server(
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
         )
@@ -102,34 +102,7 @@ class Test:
 
         url = f"https://localhost:{shared_wg.http_port}"
         with admin_client(url) as api:
-            role = api.create_role(
-                sdk.RoleDataRequest(name=f"role-{uuid4()}"),
-            )
-            user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
-            api.add_user_role(user.id, role.id)
-            ssh_target = api.create_target(
-                sdk.TargetDataRequest(
-                    name=f"ssh-{uuid4()}",
-                    require_approval=False,
-                    ticket_requests_disabled=False,
-                    ticket_require_approval=False,
-                    options=sdk.TargetOptions(
-                        sdk.TargetOptionsTargetSSHOptions(
-                            kind="Ssh",
-                            allow_insecure_algos=False,
-                            host="localhost",
-                            port=ssh_port,
-                            username="root",
-                            auth=sdk.SSHTargetAuth(
-                                sdk.SSHTargetAuthSshTargetPublicKeyAuth(
-                                    kind="PublicKey"
-                                )
-                            ),
-                        )
-                    ),
-                )
-            )
-            api.add_target_role(ssh_target.id, role.id)
+            user, ssh_target = _create_user_and_target(api, ssh_port)
 
             created = api.create_ticket(
                 sdk.CreateTicketRequest(
@@ -139,11 +112,12 @@ class Test:
                 )
             )
             ticket_id, secret = created.ticket.id, created.secret
-            assert _uses_left(url, ticket_id) == 1
+            assert _uses_left(api, ticket_id) == 1
 
-            # Offer only the public half, with no agent to sign the follow-up.
-            # This failed login must leave the ticket unused: a final zero after
-            # successful auth could hide an early spend behind the auth cache.
+            # Public half only and no agent: the offer gets PK_OK but the client
+            # has nothing to sign the follow-up with. The final check alone can't
+            # catch an offer that spends the ticket, since the signed request
+            # would then hit the session's cached ticket auth.
             offer_only_env = {**os.environ}
             offer_only_env.pop("SSH_AUTH_SOCK", None)
             offer_only_client = processes.start_ssh_client(
@@ -151,7 +125,7 @@ class Test:
                 "-p",
                 str(shared_wg.ssh_port),
                 "-i",
-                str(Path("ssh-keys/id_ed25519.pub")),
+                "ssh-keys/id_ed25519.pub",
                 "-o",
                 "IdentitiesOnly=yes",
                 "-o",
@@ -162,16 +136,14 @@ class Test:
             )
             offer_only_client.communicate(timeout=timeout)
             assert offer_only_client.returncode != 0
-            assert (
-                _uses_left(url, ticket_id) == 1
-            ), "the unsigned public-key offer must not spend the ticket"
+            assert _uses_left(api, ticket_id) == 1
 
             ssh_client = processes.start_ssh_client(
                 f"ticket-{secret}@localhost",
                 "-p",
                 str(shared_wg.ssh_port),
                 "-i",
-                str(Path("ssh-keys/id_ed25519")),
+                "ssh-keys/id_ed25519",
                 "-o",
                 "IdentitiesOnly=yes",
                 "-o",
@@ -181,12 +153,4 @@ class Test:
             )
             assert ssh_client.communicate(timeout=timeout)[0] == b"/bin/sh\n"
             assert ssh_client.returncode == 0
-
-            for _ in range(40):
-                if _uses_left(url, ticket_id) == 0:
-                    break
-                time.sleep(0.25)
-            assert _uses_left(url, ticket_id) == 0, (
-                "the signed request must spend the ticket exactly once;"
-                " the unsigned offer must not spend it"
-            )
+            assert _uses_left(api, ticket_id) == 0
