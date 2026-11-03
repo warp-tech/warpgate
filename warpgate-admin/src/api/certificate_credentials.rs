@@ -11,7 +11,7 @@ use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_db_entities::{CertificateCredential, CertificateRevocation, User};
 
-use super::AdminContext;
+use super::{AdminContext, guard_user_mutation};
 
 fn certificate_fingerprint(certificate_pem: &str) -> Result<String, WarpgateError> {
     Ok(warpgate_ca::certificate_sha256_hex_fingerprint(
@@ -111,7 +111,8 @@ impl ListApi {
     #[oai(
         path = "/users/:user_id/credentials/certificates",
         method = "post",
-        operation_id = "issue_certificate_credential"
+        operation_id = "issue_certificate_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_issue(
         &self,
@@ -182,7 +183,8 @@ impl DetailApi {
     #[oai(
         path = "/users/:user_id/credentials/certificates/:id",
         method = "patch",
-        operation_id = "update_certificate_credential"
+        operation_id = "update_certificate_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_update(
         &self,
@@ -215,7 +217,8 @@ impl DetailApi {
     #[oai(
         path = "/users/:user_id/credentials/certificates/:id",
         method = "delete",
-        operation_id = "revoke_certificate_credential"
+        operation_id = "revoke_certificate_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_delete(
         &self,
