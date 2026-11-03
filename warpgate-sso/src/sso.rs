@@ -31,9 +31,9 @@ use crate::{BackchannelLogout, SsoError, discover_metadata, refresh_metadata};
 pub enum GroupClaimEntry {
     Str(String),
     Obj {
-        #[serde(default)]
+        #[serde(default, alias = "id")]
         value: Option<String>,
-        #[serde(default)]
+        #[serde(default, alias = "name")]
         display: Option<String>,
     },
 }
@@ -579,6 +579,14 @@ mod tests {
         assert_eq!(
             flat(json!({"value": "id1", "display": "Admins"})),
             vec!["Admins".to_string(), "id1".to_string()]
+        );
+    }
+
+    #[test]
+    fn idcs_objects_use_id_and_name() {
+        assert_eq!(
+            flat(json!([{"id": "admin-group-id", "name": "Administrators"}])),
+            vec!["Administrators".to_string(), "admin-group-id".to_string()]
         );
     }
 
