@@ -1712,7 +1712,15 @@ impl ServerSession {
                 .await;
         }
 
-        if self.rc_state != RCState::Connected {
+        // Forward the new size even before the target connection is
+        // established: the remote client buffers channel operations and
+        // replays them in order once connected. Dropping it here leaves the
+        // target shell at the size from the original `pty-req`, and clients
+        // such as Tabby open the PTY at 80x24 and send their real size right
+        // after the shell request (#2777). The same applies while the target
+        // selection menu or an approval gate holds the session: the size the
+        // client has by then is the one the target must get.
+        if self.rc_state == RCState::Disconnected {
             return Ok(());
         }
 
