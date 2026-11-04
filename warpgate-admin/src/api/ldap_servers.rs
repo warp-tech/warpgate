@@ -431,6 +431,7 @@ impl ListApi {
         {
             match warpgate_ldap::test_connection(&ldap_config).await {
                 Ok(_) => {
+                    tracing::info!(host = ?body.host, port = body.port, "LDAP connection test succeeded");
                     // Try to discover base DNs
                     let base_dns = warpgate_ldap::discover_base_dns(&ldap_config).await.ok();
 
@@ -442,13 +443,16 @@ impl ListApi {
                         },
                     )))
                 }
-                Err(e) => Ok(TestLdapServerConnectionResponse::Ok(Json(
-                    TestLdapServerResponse {
-                        success: false,
-                        message: format!("Connection failed: {e:#}"),
-                        base_dns: None,
-                    },
-                ))),
+                Err(e) => {
+                    tracing::warn!(host = ?body.host, port = body.port, "LDAP connection test failed");
+                    Ok(TestLdapServerConnectionResponse::Ok(Json(
+                        TestLdapServerResponse {
+                            success: false,
+                            message: format!("Connection failed: {e:#}"),
+                            base_dns: None,
+                        },
+                    )))
+                }
             }
         } else {
             Ok(TestLdapServerConnectionResponse::Ok(Json(
