@@ -10,7 +10,7 @@ mod tls;
 
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use bytes::Bytes;
 use ironrdp_cliprdr::CliprdrClient;
 use ironrdp_cliprdr::backend::ClipboardMessage;
@@ -33,8 +33,6 @@ use ironrdp_pdu::rdp::capability_sets::{
     MajorPlatformType, RailSupportLevel, client_codecs_capabilities,
 };
 use ironrdp_pdu::rdp::client_info::{PerformanceFlags, TimezoneInfo};
-use ironrdp_pdu::rdp::headers::ShareDataPdu;
-use ironrdp_pdu::rdp::refresh_rectangle::RefreshRectanglePdu;
 use ironrdp_session::image::DecodedImage;
 use ironrdp_session::{ActiveStage, ActiveStageBuilder, ActiveStageOutput};
 use ironrdp_tokio::reqwest::ReqwestNetworkClient;
@@ -164,6 +162,14 @@ async fn active_loop(
     logon: &LogonWatcher,
 ) -> Result<()> {
     let activation_factory = connection_result.activation_factory;
+    let channel_ids = ChannelIds {
+        io: connection_result.io_channel_id,
+        user: connection_result.user_channel_id,
+    };
+    let mut redraw = RedrawSupport {
+        refresh_rect: connection_result.refresh_rect_support,
+        suppress_output: connection_result.suppress_output_support,
+    };
     let mut active_stage = ActiveStageBuilder {
         static_channels: connection_result.static_channels,
         user_channel_id: connection_result.user_channel_id,
@@ -304,11 +310,26 @@ async fn active_loop(
             Ok(false) => {}
         }
 
+        // A malformed fast-path bitmap was dropped; only the target can repaint that region.
+        if active_stage.take_bitmap_recovery_request() {
+            let size = connector::DesktopSize {
+                width: image.width(),
+                height: image.height(),
+            };
+            request_full_redraw(&mut framed, &mut active_stage, size, redraw).await?;
+        }
+
         if should_reactivate
-            && let Some(size) =
-                reactivate(&mut framed, &mut active_stage, &activation_factory, image)
-                    .await
-                    .context("RDP deactivation-reactivation sequence")?
+            && let Some(size) = reactivate(
+                &mut framed,
+                &mut active_stage,
+                &activation_factory,
+                channel_ids,
+                &mut redraw,
+                image,
+            )
+            .await
+            .context("RDP deactivation-reactivation sequence")?
         {
             // Reactivation resets the viewer's surface; re-seed it with the pre-resize content
             // (overlap kept, new margin black) so it isn't blank until the full refresh lands.
@@ -320,7 +341,7 @@ async fn active_loop(
             {
                 return Ok(());
             }
-            send_refresh_request(&mut framed, &mut active_stage, size).await?;
+            request_full_redraw(&mut framed, &mut active_stage, size, redraw).await?;
         }
     }
 }
@@ -412,12 +433,30 @@ async fn send_clipboard(
         .context("sending clipboard message")
 }
 
+/// MCS channel ids fixed for the life of the connection; a reactivation rebuilds the
+/// fast-path processor with them.
+#[derive(Clone, Copy)]
+struct ChannelIds {
+    io: u16,
+    user: u16,
+}
+
+/// Which full-redraw PDUs the target accepts, from its capability sets; renegotiated on
+/// every reactivation.
+#[derive(Clone, Copy)]
+struct RedrawSupport {
+    refresh_rect: bool,
+    suppress_output: bool,
+}
+
 /// Drive the deactivation-reactivation sequence. Returns the new desktop size if the target
 /// came back at a different one than `image`.
 async fn reactivate(
     framed: &mut Framed,
     active_stage: &mut ActiveStage,
     activation_factory: &ConnectionActivationFactory,
+    channel_ids: ChannelIds,
+    redraw: &mut RedrawSupport,
     image: &DecodedImage,
 ) -> Result<Option<connector::DesktopSize>> {
     let mut activation = activation_factory.create();
@@ -432,14 +471,31 @@ async fn reactivate(
             desktop_size,
             share_id,
             enable_server_pointer,
+            pointer_software_rendering,
+            static_channel_chunk_size,
+            refresh_rect_support,
+            suppress_output_support,
             ..
         } = activation.connection_activation_state()
         else {
             continue;
         };
 
-        active_stage.set_share_id(share_id);
-        active_stage.set_enable_server_pointer(enable_server_pointer);
+        *redraw = RedrawSupport {
+            refresh_rect: refresh_rect_support,
+            suppress_output: suppress_output_support,
+        };
+
+        if !active_stage.reactivate(
+            channel_ids.io,
+            channel_ids.user,
+            share_id,
+            enable_server_pointer,
+            pointer_software_rendering,
+            static_channel_chunk_size,
+        ) {
+            bail!("target negotiated an invalid static channel chunk size");
+        }
         check_desktop_size(desktop_size.width, desktop_size.height)?;
 
         if image.width() != desktop_size.width || image.height() != desktop_size.height {
@@ -457,38 +513,36 @@ async fn reactivate(
 
 /// Ask the target to repaint the whole desktop. After a resize the target only sends the
 /// regions it considers changed, so the freshly-exposed margin of a grow would stay blank;
-/// a full refresh forces it to resend everything for the new size.
+/// a full redraw forces it to resend everything for the new size. Silently a no-op for a
+/// target that advertises neither Refresh Rect nor Suppress Output.
 ///
-/// `&mut` even though only `encode_static(&self)` is needed: `ActiveStage` is `Send` but not
-/// `Sync`, so a shared borrow held across the write would make the session future non-`Send`.
-async fn send_refresh_request(
+/// `&mut` even though only `request_full_redraw(&self)` is needed: `ActiveStage` is `Send`
+/// but not `Sync`, so a shared borrow held across the write would make the session future
+/// non-`Send`.
+async fn request_full_redraw(
     framed: &mut Framed,
     active_stage: &mut ActiveStage,
     size: connector::DesktopSize,
+    redraw: RedrawSupport,
 ) -> Result<()> {
-    let (Some(right), Some(bottom)) = (size.width.checked_sub(1), size.height.checked_sub(1))
-    else {
+    if size.width == 0 || size.height == 0 {
         return Ok(());
-    };
-
-    let mut output = WriteBuf::new();
-    active_stage
-        .encode_static(
-            &mut output,
-            ShareDataPdu::RefreshRectangle(RefreshRectanglePdu {
-                areas_to_refresh: vec![InclusiveRectangle {
-                    left: 0,
-                    top: 0,
-                    right,
-                    bottom,
-                }],
-            }),
+    }
+    let frames = active_stage
+        .request_full_redraw(
+            size.width,
+            size.height,
+            redraw.refresh_rect,
+            redraw.suppress_output,
         )
-        .context("encoding refresh rectangle request")?;
-    framed
-        .write_all(output.filled())
-        .await
-        .context("requesting refreshed desktop after resize")
+        .context("encoding full redraw request")?;
+    for frame in frames {
+        framed
+            .write_all(&frame)
+            .await
+            .context("requesting full redraw")?;
+    }
+    Ok(())
 }
 
 /// Handle a batch of active-stage outputs. Returns `true` if the session should terminate.
