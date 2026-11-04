@@ -221,6 +221,13 @@
         a {
             font-size: 1.5rem;
             margin-right: 15px;
+
+            // The current section: ink and weight, not just a thicker line
+            &:global(.active) {
+                color: var(--bs-emphasis-color);
+                font-weight: 500;
+                text-decoration-color: currentColor;
+            }
         }
     }
 </style>
