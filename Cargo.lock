@@ -9216,6 +9216,7 @@ dependencies = [
  "warpgate-common-http",
  "warpgate-core",
  "warpgate-database-protocols",
+ "warpgate-protocol-ssh",
  "warpgate-tls",
  "webpki",
 ]
@@ -9246,6 +9247,7 @@ dependencies = [
  "warpgate-common-http",
  "warpgate-core",
  "warpgate-db-entities",
+ "warpgate-protocol-ssh",
  "warpgate-tls",
 ]
 

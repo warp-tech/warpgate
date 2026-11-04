@@ -8023,6 +8023,10 @@
           },
           "default_database_name": {
             "type": "string"
+          },
+          "jump_host": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -8255,6 +8259,10 @@
           },
           "protocol_version": {
             "$ref": "#/components/schemas/PostgresProtocolVersion"
+          },
+          "jump_host": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
