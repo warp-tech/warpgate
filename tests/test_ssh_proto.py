@@ -229,6 +229,66 @@ class Test:
 
         assert ssh_client.returncode != 0
 
+    # A ControlMaster closes a mux session on EOF without waiting for
+    # exit-status (#2872); the plain client is the control.
+    @pytest.mark.parametrize("multiplexed", [False, True])
+    def test_exit_status_after_output_closes(
+        self,
+        processes: ProcessManager,
+        timeout,
+        wg_c_ed25519_pubkey,
+        shared_wg: WarpgateProcess,
+        multiplexed,
+    ):
+        user, ssh_target = setup_user_and_target(
+            processes, shared_wg, wg_c_ed25519_pubkey
+        )
+        destination = [
+            f"{user.username}:{ssh_target.name}@localhost",
+            "-p",
+            str(shared_wg.ssh_port),
+            *common_args,
+        ]
+        command = "exec >&- 2>&-; sleep 1; exit 3"
+        with tempfile.TemporaryDirectory() as tmp:
+            if multiplexed:
+                control_path = os.path.join(tmp, "mux")
+                processes.start_ssh_client(
+                    *destination,
+                    "-o",
+                    "ControlMaster=yes",
+                    "-o",
+                    f"ControlPath={control_path}",
+                    "-N",
+                    password="123",
+                )
+                for _ in range(timeout * 10):
+                    if os.path.exists(control_path):
+                        break
+                    time.sleep(0.1)
+                else:
+                    raise AssertionError("the master never opened its control socket")
+                ssh_client = processes.start_ssh_client(
+                    *destination,
+                    "-o",
+                    "ControlMaster=no",
+                    "-o",
+                    f"ControlPath={control_path}",
+                    command,
+                    stderr=subprocess.PIPE,
+                )
+            else:
+                ssh_client = processes.start_ssh_client(
+                    *destination,
+                    command,
+                    password="123",
+                    stderr=subprocess.PIPE,
+                )
+
+            stderr = ssh_client.communicate(timeout=timeout)[1]
+
+        assert ssh_client.returncode == 3, stderr
+
     def test_direct_tcpip(
         self,
         processes: ProcessManager,
