@@ -38,6 +38,7 @@
     import RateLimitInput from 'common/RateLimitInput.svelte'
     import RelativeDate from 'common/RelativeDate.svelte'
     import StickyActionBar from 'common/StickyActionBar.svelte'
+    import { setCurrentSidebarSubtitle } from 'common/sidebarState.svelte'
     import { formatDistanceToNow } from 'date-fns'
     import { serverInfo } from 'gateway/lib/store'
     import { onDestroy, onMount } from 'svelte'
@@ -55,6 +56,7 @@
 
     let error: string | null = $state(null)
     let user: User | undefined = $state()
+    setCurrentSidebarSubtitle(() => user?.username)
     let allRoles: Role[] = $state([])
     let userRoles: UserRoleAssignmentResponse[] = $state([])
     let roleIsAllowed: Record<string, boolean> = $state({})
@@ -150,7 +152,7 @@
         }
         if (confirm(`Delete user ${user.username}?`)) {
             await api.deleteUser(user)
-            replace('/config/users')
+            replace('/manage/users')
         }
     }
 

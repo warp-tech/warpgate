@@ -97,7 +97,7 @@
                     <div>Nothing at all</div>
                 </label>
                 <HelpText class="mt-3">
-                    You can change this later under <em>Global Parameters</em>.
+                    You can change this later under <em>Config</em>.
                 </HelpText>
                 {#if choice !== 'off'}
                     <HelpText>

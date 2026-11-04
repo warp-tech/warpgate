@@ -16,7 +16,7 @@
                     isDefault: false,
                 },
             })
-            replace(`/config/access-roles/${role.id}`)
+            replace(`/manage/access-roles/${role.id}`)
         } catch (err) {
             error = await stringifyError(err)
         }

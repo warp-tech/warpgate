@@ -31,6 +31,7 @@
         recordingTypeLabel,
     } from 'common/recordings'
     import StickyActionBar from 'common/StickyActionBar.svelte'
+    import { setCurrentSidebarSubtitle } from 'common/sidebarState.svelte'
     import { formatDistance } from 'date-fns'
     import { onDestroy } from 'svelte'
     import Fa from 'svelte-fa'
@@ -45,6 +46,9 @@
 
     let error: string | null = $state(null)
     let session: UserSessionSnapshot | null = $state(null)
+    setCurrentSidebarSubtitle(
+        () => session && (session.username ?? session.id.slice(0, 8)),
+    )
     let recordings: Recording[] | null = $state(null)
 
     async function load() {

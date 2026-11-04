@@ -26,6 +26,7 @@
     import RateLimitInput from 'common/RateLimitInput.svelte'
     import SecretRefInput from 'common/SecretRefInput.svelte'
     import StickyActionBar from 'common/StickyActionBar.svelte'
+    import { setCurrentSidebarSubtitle } from 'common/sidebarState.svelte'
     import { TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import {
@@ -49,6 +50,7 @@
     let error: string | undefined = $state()
     let selectedUsername: string | undefined = $state($serverInfo?.username)
     let target: Target | undefined = $state()
+    setCurrentSidebarSubtitle(() => target?.name)
     let roleIsAllowed: Record<string, boolean> = $state({})
     let connectionsInstructionsModalOpen = $state(false)
     let groups: TargetGroup[] = $state([])
@@ -91,7 +93,7 @@
         if (!target) return
         if (confirm(`Delete target ${target.name}?`)) {
             await api.deleteTarget(target)
-            replace('/config/targets')
+            replace('/manage/targets')
         }
     }
 
