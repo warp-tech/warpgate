@@ -408,7 +408,8 @@
         {#if tickets.length}
             <div class="list-group list-group-flush">
                 {#each tickets as ticket (ticket.id)}
-                    {@const expired = ticket.expiry != null && ticket.expiry.getTime() <= now}
+                    {@const expired =
+                        ticket.expiry != null && ticket.expiry.getTime() <= now}
                     <div class="list-group-item gap-3">
                         <Fa icon={faTicket} fw class="text-success" />
                         <div class="me-auto">
