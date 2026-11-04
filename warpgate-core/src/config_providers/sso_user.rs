@@ -1,6 +1,6 @@
 use tracing::debug;
 use warpgate_common::WarpgateError;
-use warpgate_common::auth::AuthCredential;
+use warpgate_common::auth::{AuthCredential, SsoIdentityError};
 use warpgate_sso::{RoleMapping, SsoLoginResponse, SsoProviderConfig};
 
 use crate::ConfigProvider;
@@ -13,18 +13,13 @@ pub async fn resolve_and_map_sso_user<C: ConfigProvider + Send + ?Sized>(
     provider_config: &SsoProviderConfig,
     response: &SsoLoginResponse,
 ) -> Result<Option<String>, WarpgateError> {
-    let Some(email) = response.email.clone() else {
-        return Ok(None);
-    };
-    if response.email_verified == Some(false) {
-        tracing::warn!("Rejecting SSO user with explicitly unverified email");
-        return Ok(None);
-    }
-
-    let cred = AuthCredential::Sso {
-        provider: provider_config.name.clone(),
-        email,
-        subject: Some(response.subject.clone()),
+    let cred = match AuthCredential::from_sso_response(provider_config, response) {
+        Ok(cred) => cred,
+        Err(SsoIdentityError::EmailNotVerified) => {
+            tracing::warn!("Rejecting SSO user with explicitly unverified email");
+            return Ok(None);
+        }
+        Err(SsoIdentityError::NoEmail) => return Ok(None),
     };
 
     let Some(username) = cp

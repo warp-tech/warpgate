@@ -83,6 +83,20 @@ impl SsoProviderKubernetesConfig {
     }
 }
 
+/// Which claim identifies a Warpgate user at this provider. One rule per provider,
+/// so the outcome never depends on login history.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SsoMatchBy {
+    /// Match the `email` claim against the SSO credential's e-mail (the behaviour
+    /// before this option existed).
+    #[default]
+    Email,
+    /// Match the immutable `sub` claim against the SSO credential's subject, for
+    /// this provider only. The e-mail is neither required nor used for matching.
+    Subject,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SsoProviderConfig {
     pub name: String,
@@ -95,6 +109,9 @@ pub struct SsoProviderConfig {
     pub return_url_prefix: SsoProviderReturnUrlPrefix,
     #[serde(default)]
     pub auto_create_users: bool,
+    /// Which claim identifies a user: `email` (default) or `subject`.
+    #[serde(default)]
+    pub match_by: SsoMatchBy,
     /// Default credential policy for auto-created users.
     /// Keys: "http", "ssh", "mysql", "postgres"
     /// Values: list of credential kinds e.g. ["sso"], ["web"], []

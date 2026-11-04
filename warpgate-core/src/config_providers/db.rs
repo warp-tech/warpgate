@@ -21,7 +21,7 @@ use warpgate_common::{
     UserRequireCredentialsPolicy, UserSsoCredential, WarpgateError,
 };
 use warpgate_db_entities as entities;
-use warpgate_sso::SsoProviderConfig;
+use warpgate_sso::{SsoMatchBy, SsoProviderConfig};
 
 use super::{ConfigProvider, ValidatedApiToken};
 
@@ -529,41 +529,43 @@ impl ConfigProvider for DatabaseConfigProvider {
             provider: client_provider,
             email: client_email,
             subject: client_subject,
+            match_by,
         } = client_credential
         else {
             return Ok(None);
         };
 
-        // A credential naming no provider still matches any of them, as before.
-        let provider_matches = entities::SsoCredential::Column::Provider
-            .eq(client_provider)
-            .or(entities::SsoCredential::Column::Provider.is_null());
-
-        // Prefer the immutable subject: a credential bound to this `sub` wins, and a
-        // subject-bound credential is never matched by e-mail. A credential with no
-        // subject (the only kind before this change) still matches by e-mail.
-        let mut cred = None;
-        if let Some(subject) = client_subject {
-            cred = entities::SsoCredential::Entity::find()
-                .filter(
-                    entities::SsoCredential::Column::Subject
-                        .eq(subject)
-                        .and(provider_matches.clone()),
-                )
-                .one(db)
-                .await?;
-        }
-        if cred.is_none() {
-            cred = entities::SsoCredential::Entity::find()
-                .filter(
-                    entities::SsoCredential::Column::Email
-                        .eq(client_email)
-                        .and(entities::SsoCredential::Column::Subject.is_null())
-                        .and(provider_matches),
-                )
-                .one(db)
-                .await?;
-        }
+        let cred = match match_by {
+            // As before this option: the e-mail, at this provider or at a credential
+            // that names no provider. The subject column plays no part.
+            SsoMatchBy::Email => {
+                let Some(client_email) = client_email else {
+                    return Ok(None);
+                };
+                entities::SsoCredential::Entity::find()
+                    .filter(
+                        entities::SsoCredential::Column::Email.eq(client_email).and(
+                            entities::SsoCredential::Column::Provider
+                                .eq(client_provider)
+                                .or(entities::SsoCredential::Column::Provider.is_null()),
+                        ),
+                    )
+                    .one(db)
+                    .await?
+            }
+            // Only (provider, subject): a `sub` is unique per issuer, so a credential
+            // that names no provider never matches by subject. No e-mail fallback.
+            SsoMatchBy::Subject => {
+                entities::SsoCredential::Entity::find()
+                    .filter(
+                        entities::SsoCredential::Column::Subject
+                            .eq(client_subject)
+                            .and(entities::SsoCredential::Column::Provider.eq(client_provider)),
+                    )
+                    .one(db)
+                    .await?
+            }
+        };
 
         if let Some(cred) = cred {
             let user = cred.find_related(entities::User::Entity).one(db).await?;
@@ -582,11 +584,11 @@ impl ConfigProvider for DatabaseConfigProvider {
                 .maybe_autocreate_sso_user(
                     db,
                     UserSsoCredential {
-                        email: client_email.clone(),
+                        // Informational in `subject` mode, where the IdP may send none.
+                        email: client_email.clone().unwrap_or_default(),
                         provider: Some(client_provider.clone()),
-                        // Bind the new credential to the IdP subject, so future
-                        // logins match by the immutable `sub`, not the e-mail.
-                        subject: client_subject.clone(),
+                        // Stored only where it is the rule, so `email` mode stays as before.
+                        subject: (*match_by == SsoMatchBy::Subject).then(|| client_subject.clone()),
                     },
                     preferred_username,
                     sso_config.default_credential_policy.clone(),
@@ -701,24 +703,24 @@ impl ConfigProvider for DatabaseConfigProvider {
                 provider: client_provider,
                 email: client_email,
                 subject: client_subject,
+                match_by,
             } => user_model
                 .find_related(entities::SsoCredential::Entity)
                 .order_by_asc(entities::SsoCredential::Column::Id)
                 .all(db)
                 .await?
                 .into_iter()
-                // A stored credential naming no provider still matches any of
-                // them, as before. A credential with a subject is matched by it
-                // (never by e-mail); one without a subject is matched by e-mail.
-                .find(|c| {
-                    let provider_ok =
-                        c.provider.as_ref().is_none_or(|p| p == client_provider);
-                    let identity_ok = match (&c.subject, client_subject) {
-                        (Some(stored), Some(client)) => stored == client,
-                        (Some(_), None) => false,
-                        (None, _) => &c.email == client_email,
-                    };
-                    provider_ok && identity_ok
+                // The same rule as `username_for_sso_credential`: by e-mail at this
+                // or any provider, or by subject at this provider only.
+                .find(|c| match match_by {
+                    SsoMatchBy::Email => {
+                        client_email.as_ref() == Some(&c.email)
+                            && c.provider.as_ref().is_none_or(|p| p == client_provider)
+                    }
+                    SsoMatchBy::Subject => {
+                        c.subject.as_ref() == Some(client_subject)
+                            && c.provider.as_ref() == Some(client_provider)
+                    }
                 })
                 .map(|c| {
                     StoredCredential::new(
@@ -1438,7 +1440,7 @@ mod tests {
         .unwrap();
     }
 
-    fn sso_config() -> SsoProviderConfig {
+    fn sso_config(match_by: &str) -> SsoProviderConfig {
         serde_json::from_value(serde_json::json!({
             "name": "keycloak",
             "provider": {
@@ -1449,57 +1451,233 @@ mod tests {
                 "scopes": ["openid"],
             },
             "auto_create_users": false,
+            "match_by": match_by,
         }))
         .unwrap()
     }
 
-    fn sso_login(provider: &str, email: &str, subject: Option<&str>) -> AuthCredential {
+    fn sso_login(
+        provider: &str,
+        email: Option<&str>,
+        subject: &str,
+        match_by: SsoMatchBy,
+    ) -> AuthCredential {
         AuthCredential::Sso {
             provider: provider.to_owned(),
-            email: email.to_owned(),
-            subject: subject.map(str::to_owned),
+            email: email.map(str::to_owned),
+            subject: subject.to_owned(),
+            match_by,
         }
     }
 
-    /// A credential with a subject is matched by the immutable subject, even if the
-    /// login's e-mail has changed, and is never matched by e-mail. A credential with
-    /// no subject (the only kind before this change) still matches by e-mail.
+    async fn lookup(
+        db: &DatabaseConnection,
+        login: &AuthCredential,
+        match_by: &str,
+    ) -> Option<String> {
+        DatabaseConfigProvider::new(db)
+            .username_for_sso_credential(login, None, sso_config(match_by))
+            .await
+            .unwrap()
+    }
+
+    #[test]
+    fn match_by_defaults_to_email() {
+        let cfg: SsoProviderConfig = serde_json::from_value(serde_json::json!({
+            "name": "keycloak",
+            "provider": { "type": "custom", "client_id": "w", "client_secret": "s", "issuer_url": "https://id.example", "scopes": ["openid"] },
+        }))
+        .unwrap();
+        assert_eq!(cfg.match_by, SsoMatchBy::Email);
+    }
+
+    /// `email` mode is the behaviour before the option existed: the e-mail decides,
+    /// a stored subject plays no part, a credential naming no provider matches any.
     #[tokio::test]
-    async fn sso_matches_by_subject_then_falls_back_to_email() {
+    async fn sso_match_by_email_ignores_the_subject() {
         set_config_migration_values(ConfigMigrationValues::default());
         let db = Database::connect("sqlite::memory:").await.unwrap();
         migrate_database(&db).await.unwrap();
-        user_with_sso(&db, "alice", Some("keycloak"), "alice@old.example", Some("sub-alice")).await;
+        user_with_sso(
+            &db,
+            "alice",
+            Some("keycloak"),
+            "alice@example",
+            Some("sub-alice"),
+        )
+        .await;
+        user_with_sso(&db, "bob", None, "bob@example", None).await;
+
+        let e = SsoMatchBy::Email;
+        assert_eq!(
+            lookup(
+                &db,
+                &sso_login("keycloak", Some("alice@example"), "another-sub", e),
+                "email"
+            )
+            .await
+            .as_deref(),
+            Some("alice")
+        );
+        assert_eq!(
+            lookup(
+                &db,
+                &sso_login("keycloak", Some("alice@new.example"), "sub-alice", e),
+                "email"
+            )
+            .await,
+            None
+        );
+        assert_eq!(
+            lookup(
+                &db,
+                &sso_login("keycloak", Some("bob@example"), "sub-bob", e),
+                "email"
+            )
+            .await
+            .as_deref(),
+            Some("bob")
+        );
+        assert_eq!(
+            lookup(&db, &sso_login("keycloak", None, "sub-alice", e), "email").await,
+            None
+        );
+    }
+
+    /// `subject` mode: only (provider, subject) decides. A changed e-mail still
+    /// logs in, a known e-mail with another subject does not, a credential without
+    /// a subject or naming no provider never matches, and no e-mail is required.
+    #[tokio::test]
+    async fn sso_match_by_subject_uses_only_provider_and_subject() {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+        user_with_sso(
+            &db,
+            "alice",
+            Some("keycloak"),
+            "alice@old.example",
+            Some("sub-alice"),
+        )
+        .await;
         user_with_sso(&db, "bob", Some("keycloak"), "bob@example", None).await;
+        user_with_sso(&db, "carol", None, "carol@example", Some("sub-carol")).await;
 
+        let s = SsoMatchBy::Subject;
+        assert_eq!(
+            lookup(
+                &db,
+                &sso_login("keycloak", Some("alice@new.example"), "sub-alice", s),
+                "subject"
+            )
+            .await
+            .as_deref(),
+            Some("alice")
+        );
+        assert_eq!(
+            lookup(&db, &sso_login("keycloak", None, "sub-alice", s), "subject")
+                .await
+                .as_deref(),
+            Some("alice")
+        );
+        assert_eq!(
+            lookup(
+                &db,
+                &sso_login("keycloak", Some("alice@old.example"), "someone-else", s),
+                "subject"
+            )
+            .await,
+            None
+        );
+        assert_eq!(
+            lookup(
+                &db,
+                &sso_login("other-idp", Some("alice@new.example"), "sub-alice", s),
+                "subject"
+            )
+            .await,
+            None
+        );
+        assert_eq!(
+            lookup(
+                &db,
+                &sso_login("keycloak", Some("bob@example"), "sub-bob", s),
+                "subject"
+            )
+            .await,
+            None
+        );
+        assert_eq!(
+            lookup(
+                &db,
+                &sso_login("keycloak", Some("carol@example"), "sub-carol", s),
+                "subject"
+            )
+            .await,
+            None
+        );
+    }
+
+    /// The credential check after login follows the same rule as the lookup.
+    #[tokio::test]
+    async fn sso_validate_credential_follows_match_by() {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+        user_with_sso(
+            &db,
+            "alice",
+            Some("keycloak"),
+            "alice@old.example",
+            Some("sub-alice"),
+        )
+        .await;
         let provider = DatabaseConfigProvider::new(&db);
-        let cfg = sso_config();
-
-        // alice is found by her subject, with a different e-mail
-        assert_eq!(
-            provider
-                .username_for_sso_credential(&sso_login("keycloak", "alice@new.example", Some("sub-alice")), None, cfg.clone())
-                .await
-                .unwrap()
-                .as_deref(),
-            Some("alice"),
+        let ok = |c: AuthCredential| {
+            let provider = &provider;
+            async move {
+                provider
+                    .validate_credential("alice", &c)
+                    .await
+                    .unwrap()
+                    .is_some()
+            }
+        };
+        assert!(
+            ok(sso_login(
+                "keycloak",
+                Some("alice@new.example"),
+                "sub-alice",
+                SsoMatchBy::Subject
+            ))
+            .await
         );
-        // alice's old e-mail with a different subject must NOT bind her credential
-        assert_eq!(
-            provider
-                .username_for_sso_credential(&sso_login("keycloak", "alice@old.example", Some("someone-else")), None, cfg.clone())
-                .await
-                .unwrap(),
-            None,
+        assert!(
+            !ok(sso_login(
+                "keycloak",
+                Some("alice@old.example"),
+                "other",
+                SsoMatchBy::Subject
+            ))
+            .await
         );
-        // bob has no stored subject, so he still matches by e-mail
-        assert_eq!(
-            provider
-                .username_for_sso_credential(&sso_login("keycloak", "bob@example", Some("sub-bob")), None, cfg)
-                .await
-                .unwrap()
-                .as_deref(),
-            Some("bob"),
+        assert!(
+            ok(sso_login(
+                "keycloak",
+                Some("alice@old.example"),
+                "other",
+                SsoMatchBy::Email
+            ))
+            .await
+        );
+        assert!(
+            !ok(sso_login(
+                "keycloak",
+                Some("alice@new.example"),
+                "sub-alice",
+                SsoMatchBy::Email
+            ))
+            .await
         );
     }
 }

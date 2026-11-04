@@ -12,7 +12,7 @@ use tracing::{debug, error, info, warn};
 use url::form_urlencoded;
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
-use warpgate_common::auth::AuthCredential;
+use warpgate_common::auth::{AuthCredential, SsoIdentityError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::logging::get_client_ip_addr;
@@ -279,23 +279,6 @@ impl Api {
                 warn!("Failed to verify SSO code: {e:?}");
             })?;
 
-        if !response.email_verified.unwrap_or(true) {
-            error!(
-                "SSO login attempt with an unverified email: {:?}",
-                response.email
-            );
-            error!(
-                "The SSO provider did provide an email_verified claim, and it is false. Since the provider provides this claim, Warpgate requires the email to be verified."
-            );
-            return Ok(Err("The SSO account's e-mail is not verified".to_string()));
-        }
-
-        let Some(ref email) = response.email else {
-            return Ok(Err("No e-mail information in the SSO response".to_string()));
-        };
-
-        info!("SSO login as {email}");
-
         let providers_config = ctx
             .services()
             .config
@@ -309,11 +292,27 @@ impl Api {
             return Ok(Err(format!("No provider matching {}", context.provider)));
         };
 
-        let cred = AuthCredential::Sso {
-            provider: context.provider.clone(),
-            email: email.clone(),
-            subject: Some(response.subject.clone()),
+        // The provider's `match_by` decides which claim must be present: the e-mail
+        // (verified, as before) or only the subject.
+        let cred = match AuthCredential::from_sso_response(provider_config, &response) {
+            Ok(cred) => cred,
+            Err(SsoIdentityError::EmailNotVerified) => {
+                error!(
+                    "SSO login attempt with an unverified email: {:?}",
+                    response.email
+                );
+                error!(
+                    "The SSO provider did provide an email_verified claim, and it is false. Since the provider provides this claim, Warpgate requires the email to be verified."
+                );
+                return Ok(Err("The SSO account's e-mail is not verified".to_string()));
+            }
+            Err(SsoIdentityError::NoEmail) => {
+                return Ok(Err("No e-mail information in the SSO response".to_string()));
+            }
         };
+        let identity = cred.sso_identity().unwrap_or_default().to_owned();
+
+        info!("SSO login as {identity}");
 
         let username = services
             .config_provider
@@ -328,11 +327,11 @@ impl Api {
             emit_unknown_authentication_failed_event(
                 session_id,
                 client_ip,
-                email,
+                &identity,
                 &cred.readable_description(),
                 "unknown user",
             );
-            return Ok(Err(format!("No user matching {email}")));
+            return Ok(Err(format!("No user matching {identity}")));
         };
 
         let state_arc = match get_or_create_auth_state_for_request(req, &username, &ctx, None).await
