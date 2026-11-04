@@ -1,4 +1,5 @@
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -20,9 +21,6 @@ const MAX_GOP_BYTES: usize = 2_000_000;
 const MAX_GOP_SECONDS: f32 = 10.0;
 const PNG_OFFLOAD_ENCODING_ABOVE_SIZE: usize = 64 * 1024;
 /// Minimum wall-clock gap between PNG-encoded delta frames. A busy target (e.g. a window
-/// drag) emits hundreds of tiny rects per second; without a cap the recorder PNG-encodes
-/// every one and pins a core. We instead composite them into the framebuffer and encode the
-/// coalesced dirty region at most this often — a recording only needs a handful of fps.
 /// Upper bound for the `desktop_recording_frame_rate` parameter (and its default).
 const MAX_RECORD_FRAME_RATE: i16 = 30;
 
@@ -173,6 +171,9 @@ struct RecorderState {
     dirty: Option<Rect>,
     /// Time of the last encoded delta frame; gates the frame-rate cap.
     last_frame_time: f32,
+    /// A timer will flush `dirty` at the end of the current frame interval, so deferred
+    /// pixels never wait for the next event (which may not come while the screen is idle).
+    flush_scheduled: bool,
     // reusable scratch buffers (cleared + refilled, never reallocated per frame)
     rgba_scratch: Vec<u8>,
     png_out: Vec<u8>,
@@ -206,7 +207,10 @@ pub struct DesktopRecorder {
     sign_in: OnceLock<LogonState>,
     record_keyboard: bool,
     /// Shortest time between two encoded delta frames, from the
-    /// `desktop_recording_frame_rate` parameter.
+    /// `desktop_recording_frame_rate` parameter. A burst of updates (a window
+    /// drag emits hundreds of tiny rects per second) is composited into the
+    /// framebuffer and the coalesced dirty region is encoded at most this often;
+    /// without the cap the recorder PNG-encodes every rect and pins a core.
     frame_interval: f32,
 }
 
@@ -249,7 +253,6 @@ impl DesktopRecorder {
     /// PNG-encode the RGBA already in `st.rgba_scratch` (a delta rect) or the full framebuffer,
     /// recycling `st.png_out`. Heavy encodes go to a blocking worker.
     async fn png_encode_scratch_rgba_buffer(
-        &self,
         st: &mut RecorderState,
         w: u32,
         h: u32,
@@ -289,15 +292,22 @@ impl DesktopRecorder {
     /// Encode the coalesced dirty region (deferred by the frame-rate cap) as one PNG delta
     /// and write it. No-op when nothing is pending.
     async fn flush_delta(&self, st: &mut RecorderState, time: f32) -> Result<()> {
+        Self::flush_dirty(&self.data_writer, st, time).await
+    }
+
+    /// `flush_delta` without `&self`, for the timer task.
+    async fn flush_dirty(
+        data_writer: &NDJsonRecordingWriter,
+        st: &mut RecorderState,
+        time: f32,
+    ) -> Result<()> {
         let mut rgba = std::mem::take(&mut st.rgba_scratch);
         let region = take_dirty_region(st, &mut rgba);
         st.rgba_scratch = rgba;
         let Some(r) = region else {
             return Ok(());
         };
-        let png = self
-            .png_encode_scratch_rgba_buffer(st, r.width, r.height)
-            .await?;
+        let png = Self::png_encode_scratch_rgba_buffer(st, r.width, r.height).await?;
         let item = DesktopRecordingItem::PngImage {
             time,
             rect: RecordingRect {
@@ -309,16 +319,48 @@ impl DesktopRecorder {
             keyframe: false,
             data: png,
         };
-        self.write_data_item(st, &item).await?;
+        let len = data_writer.write_json_line(&item).await?;
+        st.offset += len;
+        st.bytes_since_keyframe += len;
         st.last_frame_time = time;
         Ok(())
+    }
+
+    /// Write the deferred pixels at the end of the current frame interval. One timer at a
+    /// time; it does nothing if an event flushed them first. At 30 fps the gap was 33 ms,
+    /// at 1 fps it would be a second or more, so keystrokes would run ahead of the screen.
+    fn schedule_flush(&self, st: &mut RecorderState) {
+        if st.flush_scheduled {
+            return;
+        }
+        st.flush_scheduled = true;
+        let state = self.state.clone();
+        let data_writer = self.data_writer.clone();
+        let started_at = self.started_at;
+        let due = started_at + Duration::from_secs_f32(st.last_frame_time + self.frame_interval);
+        tokio::spawn(async move {
+            tokio::time::sleep_until(due).await;
+            let mut st = state.lock().await;
+            st.flush_scheduled = false;
+            if st.dirty.is_none() {
+                return;
+            }
+            let time = started_at.elapsed().as_secs_f32();
+            // Like every other write: the recording is at least as long as its last frame.
+            st.duration = st.duration.max(time);
+            if let Err(error) = Self::flush_dirty(&data_writer, &mut st, time).await {
+                error!(%error, "Failed to write a deferred desktop recording frame");
+            }
+        });
     }
 
     /// Record a renderable desktop event, compositing it into the framebuffer and
     /// (re-)compressing pixel rects to PNG. Non-visual events are ignored.
     pub async fn write_event(&self, event: &DesktopEvent) -> Result<()> {
-        let time = self.get_time();
+        // The time is taken under the lock, so a frame written by the flush timer in the
+        // meantime can never carry a later time than this event.
         let mut st = self.state.lock().await;
+        let time = self.get_time();
         st.duration = st.duration.max(time);
 
         match event {
@@ -357,6 +399,8 @@ impl DesktopRecorder {
                 });
                 if time - st.last_frame_time >= self.frame_interval {
                     self.flush_delta(&mut st, time).await?;
+                } else {
+                    self.schedule_flush(&mut st);
                 }
             }
             DesktopEvent::JpegImage { rect, data } => {
@@ -448,8 +492,10 @@ impl DesktopRecorder {
         jpeg: &Bytes,
         raw_bgra: &[u8],
     ) -> Result<()> {
-        let time = self.get_time();
+        // The time is taken under the lock, so a frame written by the flush timer in the
+        // meantime can never carry a later time than this event.
         let mut st = self.state.lock().await;
+        let time = self.get_time();
         st.duration = st.duration.max(time);
 
         // Ordered before this JPEG in the stream: flush any pending raw pixels.
@@ -487,7 +533,7 @@ impl DesktopRecorder {
         let (w, h) = st.fb.size();
         st.rgba_scratch.clear();
         st.rgba_scratch.extend_from_slice(st.fb.rgba());
-        let png = self.png_encode_scratch_rgba_buffer(st, w, h).await?;
+        let png = Self::png_encode_scratch_rgba_buffer(st, w, h).await?;
 
         // Index the checkpoint at the offset where this keyframe line will start.
         let offset = st.offset;

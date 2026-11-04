@@ -251,12 +251,15 @@
                         type="number"
                         min="1"
                         max="30"
+                        step="1"
                         required
                         class="form-control"
                         value={parameters.desktopRecordingFrameRate}
                         onchange={e => {
-                            parameters.desktopRecordingFrameRate =
-                                e.currentTarget.valueAsNumber
+                            const v = e.currentTarget.valueAsNumber
+                            if (Number.isInteger(v)) {
+                                parameters.desktopRecordingFrameRate = v
+                            }
                         }}
                     >
                 </FormGroup>
