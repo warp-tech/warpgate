@@ -38,7 +38,7 @@
     )
 </script>
 
-<a class={classes} {href} use:link>
+<a class={classes} {href} title={small ? description : undefined} use:link>
     <div class="text">
         <div class="title">
             {#if titleSnippet}
@@ -112,12 +112,19 @@
         &.sm {
             padding: 0.5rem 1rem;
 
+            // In the sidebar the titles are enough; the full config page
+            // and the tooltip keep the descriptions
             .title {
                 font-size: 1rem;
+                margin-bottom: 0;
+            }
+
+            &.active .title {
+                font-weight: 500;
             }
 
             .description {
-                font-size: 0.8rem;
+                display: none;
             }
 
             .icon {
