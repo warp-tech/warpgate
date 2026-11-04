@@ -5,6 +5,7 @@
     import { stringifyError } from 'common/errors'
     import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import { setCurrentSidebarSubtitle } from 'common/sidebarState.svelte'
     import * as rx from 'rxjs'
     import { link, replace } from 'svelte-spa-router'
     import {
@@ -22,6 +23,7 @@
 
     let error: string | null = $state(null)
     let role: AdminRole | undefined = $state()
+    setCurrentSidebarSubtitle(() => role?.name)
     const initPromise = init()
 
     let disabled = $state(false)

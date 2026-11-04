@@ -1,20 +1,20 @@
 <script lang="ts">
     import { faGithub } from '@fortawesome/free-brands-svg-icons'
-    import { faBriefcase } from '@fortawesome/free-solid-svg-icons'
-    import { Alert } from '@sveltestrap/sveltestrap'
+    import { faBriefcase, faNavicon } from '@fortawesome/free-solid-svg-icons'
+    import { Alert, Button } from '@sveltestrap/sveltestrap'
     import AuthBar from 'common/AuthBar.svelte'
     import Brand from 'common/Brand.svelte'
     import Loadable from 'common/Loadable.svelte'
     import Redirect from 'common/Redirect.svelte'
     import RequestsButton from 'common/RequestsButton.svelte'
+    import Sidebar from 'common/Sidebar.svelte'
+    import { sidebar } from 'common/sidebarState.svelte'
     import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import { get } from 'svelte/store'
     import Fa from 'svelte-fa'
     import Router, {
         link,
-        push,
-        type RouteDetail,
         router,
         type WrappedComponent,
     } from 'svelte-spa-router'
@@ -69,9 +69,6 @@
         '/status/recordings/:id': wrap({
             asyncComponent: () => import('./status/Recording.svelte'),
         }),
-        '/status': wrap({
-            asyncComponent: () => import('./status/Status.svelte'),
-        }),
         '/log': wrap({
             asyncComponent: () => import('./Log.svelte'),
         }),
@@ -94,13 +91,20 @@
             },
         }),
         '/config': wrap({
+            component: Redirect,
+            props: { to: '/config/targets' },
+        }),
+        '/config/*': wrap({
             asyncComponent: () => import('./config/Config.svelte'),
         }),
+        '/status': wrap({
+            component: Redirect,
+            props: { to: '/status/sessions' },
+        }),
+        '/status/*': wrap({
+            asyncComponent: () => import('./status/Status.svelte'),
+        }),
     }
-    // biome-ignore lint/style/noNonNullAssertion: x
-    routes['/config/*'] = routes['/config']!
-    // biome-ignore lint/style/noNonNullAssertion: x
-    routes['/status/*'] = routes['/status']!
 
     const wideMode = $derived(router.location.startsWith('/log'))
 </script>
@@ -112,6 +116,16 @@
         class:container-max={wideMode}
     >
         <header>
+            {#if sidebar.items}
+                <Button
+                    color="link"
+                    class="d-lg-none pe-3 ps-2"
+                    aria-label="Menu"
+                    onclick={() => (sidebar.open = true)}
+                >
+                    <Fa icon={faNavicon} />
+                </Button>
+            {/if}
             <a href="/@warpgate" class="d-flex logo-link me-4">
                 <Brand />
             </a>
@@ -150,7 +164,14 @@
                     </ul>
                 </Alert>
             {/if}
-            <Router {routes} />
+            <div class="d-flex">
+                {#if sidebar.items}
+                    <Sidebar />
+                {/if}
+                <div class="content">
+                    <Router {routes} />
+                </div>
+            </div>
         </main>
 
         <footer class="d-flex mt-5 gap-3">
@@ -203,6 +224,11 @@
 
     header, footer {
         flex: none;
+    }
+
+    .content {
+        flex: 1 0 0;
+        min-width: 0;
     }
 
     main {
