@@ -6,10 +6,10 @@ use std::sync::Arc;
 use std::task::{Context as TaskContext, Poll};
 
 use anyhow::{Context, Result};
-use ironrdp_server::tokio_rustls::TlsConnector;
-use ironrdp_server::tokio_rustls::client::TlsStream as RustlsTlsStream;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
+use tokio_rustls::TlsConnector;
+use tokio_rustls::client::TlsStream as RustlsTlsStream;
 use warpgate_common::RdpTlsSecurity;
 
 pub enum TargetTlsStream {

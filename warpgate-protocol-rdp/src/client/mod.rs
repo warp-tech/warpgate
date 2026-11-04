@@ -12,29 +12,31 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use ironrdp::cliprdr::CliprdrClient;
-use ironrdp::cliprdr::backend::ClipboardMessage;
-use ironrdp::connector::connection_activation::{
+use ironrdp_cliprdr::CliprdrClient;
+use ironrdp_cliprdr::backend::ClipboardMessage;
+use ironrdp_connector::connection_activation::{
     ConnectionActivationFactory, ConnectionActivationState,
 };
-use ironrdp::connector::credssp::KerberosConfig;
-use ironrdp::connector::{self, ConnectionResult, Credentials};
-use ironrdp::core::WriteBuf;
-use ironrdp::displaycontrol::client::DisplayControlClient;
-use ironrdp::displaycontrol::pdu::MonitorLayoutEntry;
-use ironrdp::dvc::DrdynvcClient;
-use ironrdp::graphics::image_processing::PixelFormat;
-use ironrdp::graphics::pointer::DecodedPointer;
-use ironrdp::pdu::gcc::KeyboardType;
-use ironrdp::pdu::geometry::InclusiveRectangle;
-use ironrdp::pdu::rdp::capability_sets::{MajorPlatformType, client_codecs_capabilities};
-use ironrdp::pdu::rdp::client_info::{PerformanceFlags, TimezoneInfo};
-use ironrdp::pdu::rdp::headers::ShareDataPdu;
-use ironrdp::pdu::rdp::refresh_rectangle::RefreshRectanglePdu;
-use ironrdp::session::image::DecodedImage;
-use ironrdp::session::{ActiveStage, ActiveStageBuilder, ActiveStageOutput};
+use ironrdp_connector::credssp::KerberosConfig;
+use ironrdp_connector::{self as connector, ConnectionResult, Credentials};
+use ironrdp_core::WriteBuf;
+use ironrdp_displaycontrol::client::DisplayControlClient;
+use ironrdp_displaycontrol::pdu::MonitorLayoutEntry;
+use ironrdp_dvc::DrdynvcClient;
 use ironrdp_egfx::client::{GraphicsPipelineClient, GraphicsPipelineHandler};
 use ironrdp_egfx::pdu::{Codec1Type, GfxPdu};
+use ironrdp_graphics::image_processing::PixelFormat;
+use ironrdp_graphics::pointer::DecodedPointer;
+use ironrdp_pdu::gcc::{ConnectionType, KeyboardType};
+use ironrdp_pdu::geometry::InclusiveRectangle;
+use ironrdp_pdu::rdp::capability_sets::{
+    MajorPlatformType, RailSupportLevel, client_codecs_capabilities,
+};
+use ironrdp_pdu::rdp::client_info::{PerformanceFlags, TimezoneInfo};
+use ironrdp_pdu::rdp::headers::ShareDataPdu;
+use ironrdp_pdu::rdp::refresh_rectangle::RefreshRectanglePdu;
+use ironrdp_session::image::DecodedImage;
+use ironrdp_session::{ActiveStage, ActiveStageBuilder, ActiveStageOutput};
 use ironrdp_tokio::reqwest::ReqwestNetworkClient;
 use ironrdp_tokio::{FramedWrite as _, TokioFramed};
 use tokio::net::TcpStream;
@@ -173,7 +175,7 @@ async fn active_loop(
         pointer_software_rendering: connection_result.pointer_software_rendering,
     }
     .build();
-    let mut input_db = ironrdp::input::Database::new();
+    let mut input_db = ironrdp_input::Database::new();
     // The Display Control channel only becomes usable once the target has created it and
     // sent its capabilities, which happens after the connection is already active. A
     // resize requested before then (notably the viewer's initial size) is held here and
@@ -265,8 +267,9 @@ async fn active_loop(
             }
             pdu = framed.read_pdu() => {
                 let (action, payload) = pdu.context("reading PDU")?;
+                let received_at = framed.last_read_at();
                 active_stage
-                    .process(image, action, &payload)
+                    .process(image, action, &payload, received_at)
                     .context("processing PDU")?
             }
         };
@@ -275,9 +278,15 @@ async fn active_loop(
             .iter()
             .any(|output| matches!(output, ActiveStageOutput::DeactivateAll));
 
+        // `SessionId` precedes the `SaveSessionInfo` of the same notification.
+        let mut session_id = None;
         for output in &outputs {
-            if let ActiveStageOutput::SaveSessionInfo(pdu) = output {
-                logon.notify_logon_pdu(pdu);
+            match output {
+                ActiveStageOutput::SessionId(id) => session_id = Some(*id),
+                ActiveStageOutput::SaveSessionInfo { logon_complete } => {
+                    logon.notify_logon(*logon_complete, session_id.take());
+                }
+                _ => {}
             }
         }
 
@@ -767,6 +776,17 @@ fn build_config(
         enable_server_pointer: true,
         pointer_software_rendering: false,
         desktop_scale_factor: 0,
+        desktop_physical_size: None,
+        desktop_orientation: None,
+        device_scale_factor: None,
+        monitor_layout: None,
+        monitor_extended_layout: None,
+        relative_mouse_input: false,
+        enable_standard_rdp_security: false,
+        connection_type: ConnectionType::Lan,
+        remote_application_mode: false,
+        rail_support_level: RailSupportLevel::empty(),
+        enable_audio_capture: false,
         multitransport_flags: None,
         // `connect` registers the Graphics Pipeline channel from this flag: advertising
         // it without a processor leaves the desktop blank.
@@ -877,6 +897,7 @@ async fn connect(
         kerberos_config,
     )
     .await
+    .and_then(connector::ConnectionOutcome::into_connected)
     .map_err(|error| connector_error("connect_finalize", error))?;
 
     if connection_result.desktop_size.width == 0 || connection_result.desktop_size.height == 0 {
@@ -905,18 +926,18 @@ fn connector_error(step: &'static str, error: connector::ConnectorError) -> Desk
 
 #[cfg(test)]
 mod tests {
-    use ironrdp::graphics::image_processing::PixelFormat;
-    use ironrdp::graphics::pointer::DecodedPointer;
-    use ironrdp::session::image::DecodedImage;
+    use ironrdp_graphics::image_processing::PixelFormat;
+    use ironrdp_graphics::pointer::DecodedPointer;
+    use ironrdp_session::image::DecodedImage;
     use warpgate_core::{DesktopEvent, DesktopRect};
 
     use super::{GraphicsPipelineOutput, connector, encode_pointer, encode_resized_keyframe};
 
     #[test]
     fn unhandled_graphics_are_reported_once_per_codec() {
-        use ironrdp::pdu::geometry::ExclusiveRectangle;
         use ironrdp_egfx::client::GraphicsPipelineHandler as _;
         use ironrdp_egfx::pdu::{Codec1Type, GfxPdu, PixelFormat, WireToSurface1Pdu};
+        use ironrdp_pdu::geometry::ExclusiveRectangle;
 
         let update = |codec_id| {
             GfxPdu::WireToSurface1(WireToSurface1Pdu {

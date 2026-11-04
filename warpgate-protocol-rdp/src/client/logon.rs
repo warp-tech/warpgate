@@ -3,7 +3,6 @@
 //! target's sign-in screen — which is where the user types credentials that Warpgate never
 //! sees, and which the recording must not keep.
 
-use ironrdp::pdu::rdp::session_info::{InfoData, LogonInfo, SaveSessionInfoPdu};
 use tracing::debug;
 use uuid::Uuid;
 use warpgate_common::TargetSessionId;
@@ -20,27 +19,13 @@ pub(crate) struct LogonWatcher {
 }
 
 impl LogonWatcher {
-    pub fn notify_logon_pdu(&self, pdu: &SaveSessionInfoPdu) {
-        let info = match &pdu.info_data {
-            InfoData::LogonInfoV1(info) => Some(&info.logon_info),
-            InfoData::LogonInfoV2(info) => Some(&info.logon_info),
-            InfoData::PlainNotify => None,
-            InfoData::LogonExtended(extended) => {
-                // Not `?extended`. `LogonInfoExtended` derives `Debug` over its
-                // whole shape, and the auto-reconnect packet inside it carries
-                // the sixteen random bytes a client turns into the verifier
-                // that re-attaches to this session without presenting
-                // credentials again ([MS-RDPBCGR] 2.2.10.1.1.1). Printing the
-                // struct wrote that value into the log.
-                debug!(
-                    flags = ?extended.present_fields_flags,
-                    errors = ?extended.errors_info,
-                    auto_reconnect = extended.auto_reconnect.is_some(),
-                    "Target sent extended logon info"
-                );
-                return;
-            }
-        };
+    /// `logon_complete` and `session_id` are the Save Session Info outputs of one
+    /// notification; IronRDP keeps the PDU itself (and the account it names) private.
+    pub fn notify_logon(&self, logon_complete: bool, session_id: Option<u32>) {
+        if !logon_complete {
+            debug!("Target sent extended logon info");
+            return;
+        }
 
         self.sign_in.mark_logged_on();
 
@@ -50,20 +35,9 @@ impl LogonWatcher {
             target_name: self.target_name.clone(),
             user_id: self.user_id,
             username: self.username.clone(),
-            target_account: info.and_then(account),
-            target_session_id: info.map(|info| info.session_id),
+            target_account: None,
+            target_session_id: session_id,
         }
         .emit();
     }
-}
-
-fn account(info: &LogonInfo) -> Option<String> {
-    if info.user_name.is_empty() {
-        return None;
-    }
-    Some(if info.domain_name.is_empty() {
-        info.user_name.clone()
-    } else {
-        format!("{}\\{}", info.domain_name, info.user_name)
-    })
 }
