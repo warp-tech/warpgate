@@ -173,7 +173,10 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
             let resp = HandshakeResponse::decode_with(payload, &mut self.capabilities)
                 .map_err(MySqlError::decode)?;
 
-            trace!(?resp, "Handshake response");
+            // `resp` carries the raw username (possibly a ticket secret) and the
+            // auth response (cleartext under mysql_clear_password), so only the
+            // harmless fields are traced.
+            trace!(database=?resp.database, auth_plugin=?resp.auth_plugin, "Handshake response");
             info!(capabilities=?self.capabilities, username=%redacted_selector(&resp.username), "User handshake");
 
             if self.capabilities.contains(Capabilities::SSL) {

@@ -24,7 +24,7 @@ use warpgate_db_entities::{
 };
 
 use crate::auth_state_store::ApprovalRequestSink;
-use crate::cluster::{Cluster, ClusterNotification};
+use crate::cluster::{Cluster, ClusterNotification, REAP_INTERVAL};
 use crate::db::connect_to_db_and_migrate;
 use crate::helpers::i64_seconds_to_duration;
 use crate::login_protection::LoginProtectionService;
@@ -66,8 +66,35 @@ const TICKET_EXPIRY_SWEEP_INTERVAL: Duration = Duration::from_secs(5);
 impl Services {
     pub async fn close_sessions(&self, scope: SessionsFilter) -> Result<(), WarpgateError> {
         scope.revoke(&self.db).await?;
-        State::close_local_sessions(&self.state, &scope).await;
-        self.cluster.close_sessions_on_peers(&scope).await;
+        self.close_everywhere(&scope).await;
+        Ok(())
+    }
+
+    /// Closes the live handles of already-ended sessions on every node.
+    async fn close_everywhere(&self, scope: &SessionsFilter) {
+        State::close_local_sessions(&self.state, scope).await;
+        self.cluster.close_sessions_on_peers(scope).await;
+    }
+
+    /// Joins the cluster and starts the reaper.
+    pub async fn start_cluster(&self) -> Result<(), WarpgateError> {
+        self.cluster.start().await?;
+        let services = self.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(REAP_INTERVAL);
+            loop {
+                interval.tick().await;
+                match crate::cluster::reap(&services.db).await {
+                    Ok(ids) if !ids.is_empty() => {
+                        services
+                            .close_everywhere(&SessionsFilter::Sessions { ids })
+                            .await;
+                    }
+                    Ok(_) => {}
+                    Err(error) => warn!(%error, "Node reaper failed"),
+                }
+            }
+        });
         Ok(())
     }
 

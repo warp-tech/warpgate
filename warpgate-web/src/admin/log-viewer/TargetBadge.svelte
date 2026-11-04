@@ -10,7 +10,7 @@
 
 <Badge
     href={$adminPermissions.targetsEdit && id
-        ? `#/config/targets/${id}`
+        ? `#/manage/targets/${id}`
         : undefined}
     color="info"
     class="d-flex align-items-center gap-2"

@@ -83,7 +83,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
     validate_encryption_config(&config);
 
     // Join the cluster before the credential backfill below
-    services.cluster.start().await?;
+    services.start_cluster().await?;
 
     install_database_logger(services.db.clone());
 

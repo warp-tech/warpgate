@@ -93,7 +93,7 @@ version = "0.1"
 features = ["log"]
 
 [dependencies.zstd-safe]
-version = "7.2"
+version = "8.2"
 features = ["std"]
 optional = true
 
