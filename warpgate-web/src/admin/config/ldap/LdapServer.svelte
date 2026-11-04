@@ -10,6 +10,7 @@
     import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
+    import { setCurrentSidebarSubtitle } from 'common/sidebarState.svelte'
     import { push } from 'svelte-spa-router'
     import { defaultLdapPortForTlsMode, testLdapConnection } from './common'
     import LdapConnectionFields from './LdapConnectionFields.svelte'
@@ -21,6 +22,7 @@
     let { params }: Props = $props()
 
     let server = $state<LdapServerResponse | null>(null)
+    setCurrentSidebarSubtitle(() => server?.name)
     let name = $state('')
     let host = $state('')
     let port = $state(389)

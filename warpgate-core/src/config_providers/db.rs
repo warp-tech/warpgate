@@ -23,7 +23,7 @@ use warpgate_common::{
 use warpgate_db_entities as entities;
 use warpgate_sso::SsoProviderConfig;
 
-use super::ConfigProvider;
+use super::{ConfigProvider, ValidatedApiToken};
 
 pub struct DatabaseConfigProvider {
     db: DatabaseConnection,
@@ -992,7 +992,10 @@ impl ConfigProvider for DatabaseConfigProvider {
         Ok(())
     }
 
-    async fn validate_api_token(&self, token: &str) -> Result<Option<User>, WarpgateError> {
+    async fn validate_api_token(
+        &self,
+        token: &str,
+    ) -> Result<Option<ValidatedApiToken>, WarpgateError> {
         let db = &self.db;
         let Some(api_token) = entities::ApiToken::Entity::find()
             .filter(
@@ -1016,7 +1019,10 @@ impl ConfigProvider for DatabaseConfigProvider {
             ));
         };
 
-        Ok(Some(user.try_into()?))
+        Ok(Some(ValidatedApiToken {
+            id: api_token.id,
+            user: user.try_into()?,
+        }))
     }
 }
 
