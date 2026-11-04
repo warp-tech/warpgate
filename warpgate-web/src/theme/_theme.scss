@@ -351,6 +351,7 @@ ul.pagination {
         &:active,
         &.active {
             background: var(--bs-list-group-action-active-bg);
+
             .title {
                 color: var(--bs-list-group-action-active-color);
             }
@@ -362,4 +363,7 @@ code {
     background: $code-bg;
     padding: 0.2rem 0.4rem;
     border-radius: 5px;
+}
+.input-group .form-floating + .form-select {
+    border-width: 1px;
 }

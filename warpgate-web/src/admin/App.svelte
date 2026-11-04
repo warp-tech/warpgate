@@ -99,7 +99,7 @@
         }),
         '/config': wrap({
             component: Redirect,
-            props: { to: '/config/parameters' },
+            props: { to: '/config/parameters/auth' },
         }),
         '/config/*': wrap({
             asyncComponent: () => import('./config/Config.svelte'),
