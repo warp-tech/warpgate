@@ -9,7 +9,7 @@ use warpgate_core::SecretBackendRegistry;
 use warpgate_core::db::{connect_to_db, has_pending_migrations};
 use warpgate_core::resources::reconcile::{ApplyError, apply, load_current};
 use warpgate_gitops::diagnostic::Diagnostic;
-use warpgate_gitops::plan::{Plan, format_plan, format_plan_json, plan};
+use warpgate_gitops::plan::{Plan, Prune, format_plan, format_plan_json, plan};
 use warpgate_gitops::types::Resource;
 use warpgate_gitops::validate::check_files;
 use warpgate_gitops::{format_json, format_text, json_schema, read_files};
@@ -147,7 +147,9 @@ async fn prepare(
         Err(error) => return Err(error.into()),
     };
 
-    let plan = plan(ProviderId::GITOPS, &resources, &current);
+    // Deleting a target closes the sessions it admitted, which needs the
+    // running server's session registry; the server prunes, the CLI previews
+    let plan = plan(ProviderId::GITOPS, &resources, &current, Prune::Off);
     Ok((db, resources, plan))
 }
 
@@ -198,7 +200,7 @@ async fn apply_command(params: &GlobalParams, paths: &[PathBuf], yes: bool) -> R
 
     let secrets = SecretBackendRegistry::new(db.clone());
     match apply(&db, ProviderId::GITOPS, &resources, &plan, &secrets).await {
-        Ok(()) => {
+        Ok(_) => {
             println!("Applied");
             Ok(())
         }

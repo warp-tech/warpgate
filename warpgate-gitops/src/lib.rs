@@ -11,6 +11,7 @@ use walkdir::WalkDir;
 pub mod diagnostic;
 pub mod parse;
 pub mod plan;
+pub mod source;
 pub mod types;
 pub mod validate;
 

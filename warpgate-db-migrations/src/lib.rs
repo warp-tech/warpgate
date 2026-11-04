@@ -101,6 +101,7 @@ mod m00094_unique_role_names;
 mod m00095_kubernetes_sessions;
 mod m00096_resource_provider;
 mod m00097_ssh_client_key_provider;
+mod m00098_gitops_sync;
 
 pub(crate) mod helpers;
 
@@ -207,6 +208,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00095_kubernetes_sessions::Migration),
             Box::new(m00096_resource_provider::Migration),
             Box::new(m00097_ssh_client_key_provider::Migration),
+            Box::new(m00098_gitops_sync::Migration),
         ]
     }
 }

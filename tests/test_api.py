@@ -4,7 +4,10 @@ DB field type related issues that don't surface on SQLite (e.g. timestamp types)
 """
 
 import contextlib
+import hashlib
+import hmac
 import os
+import time
 import subprocess
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional, Set
@@ -832,6 +835,18 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         expected_statuses={200},
     ),
     AdminApiTestCase(
+        id="sync_gitops",
+        permission="config_edit",
+        call=lambda api, r: api.sync_gitops_with_http_info(sdk.SyncGitopsRequest()),
+        expected_statuses={200, 400},
+    ),
+    AdminApiTestCase(
+        id="get_gitops_syncs",
+        permission=None,
+        call=lambda api, r: api.get_gitops_syncs_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
         id="update_parameters",
         permission="config_edit",
         call=lambda api, r: api.update_parameters_with_http_info(
@@ -1437,6 +1452,113 @@ spec:
     admin_client.delete_target_role(target.id, role.id)
     planned = _config(pg_wg, "plan", str(files))
     assert planned.returncode == 1, planned.stdout + planned.stderr
+
+
+def test_gitops_syncs_from_a_git_repository(
+    admin_client: sdk.DefaultApi, pg_wg: WarpgateProcess, tmp_path
+):
+    name = f"synced-{uuid4()}"
+    repo = tmp_path / "repo"
+    (repo / "warpgate").mkdir(parents=True)
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    def commit(port: int) -> str:
+        (repo / "warpgate" / "resources.yaml").write_text(
+            f"""apiVersion: warpgate/v1
+kind: Role
+metadata:
+  name: {name}
+spec: {{}}
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: {name}
+spec:
+  roles: [{name}]
+  options:
+    ssh:
+      host: 127.0.0.1
+      port: {port}
+      username: user
+"""
+        )
+        git("add", ".")
+        git("commit", "-qm", str(port))
+        return git("rev-parse", "HEAD")
+
+    git("init", "-q", "-b", "main")
+    first = commit(22)
+    second = commit(2222)
+
+    def port() -> int:
+        target = next(t for t in admin_client.get_targets() if t.name == name)
+        assert target.provider == "00000000-0000-0000-0000-000000000000"
+        return target.options.actual_instance.port
+
+    # Raw JSON: clearing needs an explicit null, which the generated client
+    # drops along with every other None field
+    session = requests.Session()
+    session.verify = False
+    session.headers["X-Warpgate-Token"] = "token-value"
+    parameters = f"https://localhost:{pg_wg.http_port}/@warpgate/admin/api/parameters"
+
+    source = {"kind": "Git", "url": f"file://{repo}", "reference": "main", "path": "warpgate"}
+    assert session.put(parameters, json={"gitops_source": source}).status_code // 100 == 2
+    try:
+        head = admin_client.sync_gitops(sdk.SyncGitopsRequest())
+        assert (head.status, head.revision, head.error) == ("Applied", second, None)
+        assert port() == 2222
+        assert f"file://{repo}@main" in head.source
+
+        again = admin_client.sync_gitops(sdk.SyncGitopsRequest())
+        assert again.id == head.id, "an unchanged sync extends the latest row"
+        assert [row.revision for row in admin_client.get_gitops_syncs().items[:1]] == [second]
+
+        webhook = f"https://localhost:{pg_wg.http_port}/@warpgate/api/gitops/webhook"
+        body = b'{"ref": "refs/heads/main"}'
+
+        def deliver(secret: bytes) -> int:
+            signature = hmac.new(secret, body, hashlib.sha256).hexdigest()
+            return requests.post(
+                webhook,
+                data=body,
+                headers={"X-Hub-Signature-256": f"sha256={signature}"},
+                verify=False,
+            ).status_code
+
+        secret = b"webhook-secret-0123"
+        assert deliver(secret) == 404, "no webhook secret configured"
+        assert (
+            session.put(
+                parameters, json={"gitops_webhook_secret": secret.decode()}
+            ).status_code
+            // 100
+            == 2
+        )
+        assert deliver(b"wrong-secret-0123") == 401
+        assert deliver(secret) == 202
+        deadline = time.monotonic() + 30
+        while (latest := admin_client.get_gitops_syncs().items[0]).triggered_by != "Webhook":
+            assert time.monotonic() < deadline, "the webhook never synced"
+            time.sleep(0.5)
+        assert (latest.status, latest.revision) == ("Applied", second)
+        assert port() == 2222
+    finally:
+        cleared = {"gitops_source": None, "gitops_webhook_secret": None}
+        assert session.put(parameters, json=cleared).status_code // 100 == 2
+
+    with pytest.raises(sdk.ApiException) as err:
+        admin_client.sync_gitops(sdk.SyncGitopsRequest())
+    assert err.value.status == 400
 
 
 def test_approval_parameters_can_be_cleared_and_reject_nonsense(

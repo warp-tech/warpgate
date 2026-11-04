@@ -1,15 +1,18 @@
 <script lang="ts">
-    import { faBriefcase, faLock } from '@fortawesome/free-solid-svg-icons'
+    import { faBriefcase } from '@fortawesome/free-solid-svg-icons'
     import { Tooltip } from '@sveltestrap/sveltestrap'
+    import AsyncButton from 'common/AsyncButton.svelte'
     import { uuid } from 'common/helpers'
     import Fa from 'svelte-fa'
 
     interface Props {
         provider?: string
         class?: string
+        /// Offers to hand the row back to manual editing
+        onRelease?: () => Promise<unknown>
     }
 
-    let { provider, class: className = undefined }: Props = $props()
+    let { provider, class: className = undefined, onRelease }: Props = $props()
 
     const GITOPS = '00000000-0000-0000-0000-000000000000'
 
@@ -25,7 +28,12 @@
         {#if provider === GITOPS}
             GitOps
         {:else}
-            provider ${provider}
+            provider {provider}
         {/if}
     </Tooltip>
+    {#if onRelease}
+        <AsyncButton color="link" class="p-0" click={onRelease}>
+            Release
+        </AsyncButton>
+    {/if}
 {/if}

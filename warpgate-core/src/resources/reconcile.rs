@@ -17,7 +17,7 @@ use super::roles::{self, RoleDataRequest};
 use super::ssh_client_keys::{self, KeyMaterial, SshClientKeyDataRequest};
 use super::target_groups::{self, TargetGroupDataRequest};
 use super::targets::{self, TargetDataRequest};
-use super::{Actor, ResourceError};
+use super::{Actor, AdmittedSessions, ResourceError};
 
 /// The rows a plan is computed against, with references by name. Inline
 /// credentials come back decrypted so they compare with a file's literals:
@@ -164,18 +164,26 @@ impl From<DbErr> for ApplyError {
 /// so exactly what was shown gets written; a change made after that still
 /// rolls everything back, through the unique names and the ownership checks.
 /// `secrets` resolves the references of client keys, to derive their public keys.
+/// Returns the sessions that deleted targets had admitted, for the caller to
+/// close once the transaction has committed.
 pub async fn apply<C: ConnectionTrait + TransactionTrait>(
     db: &C,
     provider: ProviderId,
     desired: &[Resource],
     confirmed: &Plan,
     secrets: &dyn SecretResolver,
-) -> Result<(), ApplyError> {
+) -> Result<AdmittedSessions, ApplyError> {
     if confirmed.has_errors() {
         return Err(ApplyError::PlanHasErrors);
     }
     let txn = db.begin().await?;
-    if plan(provider, desired, &load_current(&txn).await?) != *confirmed {
+    if plan(
+        provider,
+        desired,
+        &load_current(&txn).await?,
+        confirmed.prune,
+    ) != *confirmed
+    {
         return Err(ApplyError::Stale);
     }
 
@@ -194,6 +202,7 @@ pub async fn apply<C: ConnectionTrait + TransactionTrait>(
             Change::Adopt { id, desired, .. } => (Some(*id), true, desired),
             Change::Unchanged { .. }
             | Change::WouldPrune { .. }
+            | Change::Delete { .. }
             | Change::Collision { .. }
             | Change::Blocked { .. } => continue,
         };
@@ -225,8 +234,31 @@ pub async fn apply<C: ConnectionTrait + TransactionTrait>(
         })?;
     }
 
+    // After the writes, so a replacement client key exists before the last
+    // one goes, and targets drop their references before what they referred
+    // to; in reverse plan order, so targets go before what they refer to
+    let mut admitted = Vec::new();
+    for change in confirmed.changes.iter().rev() {
+        let Change::Delete { kind, id, .. } = change else {
+            continue;
+        };
+        let result = match kind {
+            Kind::Target => targets::delete(&txn, actor, *id)
+                .await
+                .map(|sessions| admitted.extend(sessions.0)),
+            Kind::SshClientKey => ssh_client_keys::delete(&txn, actor, *id).await,
+            Kind::Role => roles::delete(&txn, actor, *id).await,
+            Kind::TargetGroup => target_groups::delete(&txn, actor, *id).await,
+        };
+        result.map_err(|source| ApplyError::Resource {
+            kind: *kind,
+            name: change.name().to_owned(),
+            source,
+        })?;
+    }
+
     txn.commit().await?;
-    Ok(())
+    Ok(AdmittedSessions(admitted))
 }
 
 /// One create, update or adoption. `id` is the row an update or adoption
@@ -571,7 +603,7 @@ impl Names {
 mod tests {
     use serde_json::json;
     use warpgate_common::{ProviderId, Secret, SecretError, SecretRef, SshHostKeyKind};
-    use warpgate_gitops::plan::{Change, plan};
+    use warpgate_gitops::plan::{Change, Prune, plan};
     use warpgate_gitops::types::Resource;
 
     use super::*;
@@ -652,7 +684,7 @@ mod tests {
         })
         .collect();
 
-        let plan = plan(ProviderId::GITOPS, &desired, &current);
+        let plan = plan(ProviderId::GITOPS, &desired, &current, Prune::Off);
         assert!(
             plan.changes
                 .iter()
@@ -679,24 +711,18 @@ mod tests {
     }
 
     async fn plan_against<C: ConnectionTrait>(db: &C, desired: &[Resource]) -> Plan {
-        plan(GITOPS, desired, &load_current(db).await.unwrap())
+        plan(
+            GITOPS,
+            desired,
+            &load_current(db).await.unwrap(),
+            Prune::Off,
+        )
     }
 
     fn summary(plan: &Plan) -> Vec<String> {
         plan.changes
             .iter()
-            .map(|change| {
-                let action = match change {
-                    Change::Create(_) => "create",
-                    Change::Update { .. } => "update",
-                    Change::Adopt { .. } => "adopt",
-                    Change::Unchanged { .. } => "unchanged",
-                    Change::Collision { .. } => "collision",
-                    Change::Blocked { .. } => "blocked",
-                    Change::WouldPrune { .. } => "would_prune",
-                };
-                format!("{action} {}", change.name())
-            })
+            .map(|change| format!("{} {}", change.action(), change.name()))
             .collect()
     }
 
@@ -709,7 +735,7 @@ mod tests {
         let first = plan_against(&db, &desired).await;
         assert!(first.changes.iter().all(|c| matches!(c, Change::Create(_))));
 
-        apply(&db, GITOPS, &desired, &first, &Keys).await.unwrap();
+        let _ = apply(&db, GITOPS, &desired, &first, &Keys).await.unwrap();
 
         let again = plan_against(&db, &desired).await;
         assert!(
@@ -736,7 +762,7 @@ mod tests {
             ))
         };
         let before = fileset(22, "dba, ops");
-        apply(
+        let _ = apply(
             &db,
             GITOPS,
             &before,
@@ -760,7 +786,7 @@ mod tests {
             summary(&plan),
             ["unchanged dba", "unchanged ops", "update web"]
         );
-        apply(&db, GITOPS, &after, &plan, &Keys).await.unwrap();
+        let _ = apply(&db, GITOPS, &after, &plan, &Keys).await.unwrap();
 
         let target = Target::Entity::find().one(&db).await.unwrap().unwrap();
         assert_eq!(target.options["ssh"]["port"], 2222);
@@ -814,7 +840,7 @@ mod tests {
         let annotated = role(", annotations: {warpgate.dev/adopt-existing: \"true\"}");
         let adopting = plan_against(&db, &annotated).await;
         assert_eq!(summary(&adopting), ["adopt legacy"]);
-        apply(&db, GITOPS, &annotated, &adopting, &Keys)
+        let _ = apply(&db, GITOPS, &annotated, &adopting, &Keys)
             .await
             .unwrap();
 
@@ -825,6 +851,48 @@ mod tests {
             .unwrap();
         assert_eq!(legacy.provider, Some(GITOPS));
         assert_eq!(legacy.description, "from git");
+    }
+
+    #[tokio::test]
+    async fn pruning_deletes_targets_before_what_they_refer_to() {
+        let db = db().await;
+        let everything = resources(
+            "apiVersion: warpgate/v1\nkind: TargetGroup\nmetadata: {name: prod}\nspec: {}\n---\n\
+             apiVersion: warpgate/v1\nkind: Role\nmetadata: {name: dba}\nspec: {}\n---\n\
+             apiVersion: warpgate/v1\nkind: Role\nmetadata: {name: ops}\nspec: {}\n---\n\
+             apiVersion: warpgate/v1\nkind: Target\nmetadata: {name: web}\n\
+             spec: {group: prod, roles: [ops], options: {ssh: {host: h}}}\n",
+        );
+        let first = plan_against(&db, &everything).await;
+        let _ = apply(&db, GITOPS, &everything, &first, &Keys)
+            .await
+            .unwrap();
+
+        let dba_only =
+            resources("apiVersion: warpgate/v1\nkind: Role\nmetadata: {name: dba}\nspec: {}\n");
+        let current = load_current(&db).await.unwrap();
+        assert!(plan(GITOPS, &dba_only, &current, Prune::On).has_errors());
+        let forced = plan(GITOPS, &dba_only, &current, Prune::Force);
+        assert_eq!(
+            summary(&forced),
+            ["delete prod", "unchanged dba", "delete ops", "delete web"]
+        );
+        let admitted = apply(&db, GITOPS, &dba_only, &forced, &Keys).await.unwrap();
+        assert!(admitted.0.is_empty());
+
+        let roles: Vec<_> = Role::Entity::find().all(&db).await.unwrap();
+        assert_eq!(
+            roles.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
+            ["dba"]
+        );
+        assert!(Target::Entity::find().all(&db).await.unwrap().is_empty());
+        assert!(
+            TargetGroup::Entity::find()
+                .all(&db)
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]

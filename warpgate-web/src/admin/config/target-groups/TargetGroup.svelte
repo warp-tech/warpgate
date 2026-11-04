@@ -74,6 +74,10 @@
         }
     }
 
+    async function release() {
+        group = await api.releaseTargetGroup({ id: groupId })
+    }
+
     async function remove() {
         if (!group || !confirm(`Delete target group "${group.name}"?`)) {
             return
@@ -100,7 +104,12 @@
                 <div>
                     <h1>{group.name}</h1>
                     <div class="text-muted d-flex align-items-center gap-2">
-                        Target group <ManagedIcon provider={group.provider} />
+                        Target group <ManagedIcon
+                            provider={group.provider}
+                            onRelease={$adminPermissions.targetsEdit
+                                ? release
+                                : undefined}
+                        />
                     </div>
                 </div>
             </div>

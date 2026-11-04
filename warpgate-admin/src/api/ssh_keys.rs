@@ -284,10 +284,12 @@ impl Api {
 
         let db = &admin.services().db;
         ssh_client_keys::release(db, id.0).await?;
-        Ok(match SshClientKey::Entity::find_by_id(id.0).one(db).await? {
-            Some(key) => ReleaseSSHClientKeyResponse::Ok(Json(key.into())),
-            None => ReleaseSSHClientKeyResponse::NotFound,
-        })
+        Ok(
+            match SshClientKey::Entity::find_by_id(id.0).one(db).await? {
+                Some(key) => ReleaseSSHClientKeyResponse::Ok(Json(key.into())),
+                None => ReleaseSSHClientKeyResponse::NotFound,
+            },
+        )
     }
 
     #[oai(

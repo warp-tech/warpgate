@@ -203,6 +203,16 @@ async fn probe_undecryptable(db: &DatabaseConnection) -> Result<Vec<String>, War
             undecryptable.push(format!("SSH host key ({kind:?})"));
         }
     }
+    if let Some(mut source) = parameters.gitops_source.clone()
+        && !source.all_decryptable()
+    {
+        undecryptable.push("GitOps source password".into());
+    }
+    if let Some(secret) = &parameters.gitops_webhook_secret
+        && secret.reveal().is_err()
+    {
+        undecryptable.push("GitOps webhook secret".into());
+    }
 
     Ok(undecryptable)
 }
@@ -275,6 +285,18 @@ async fn rewrite_all(db: &DatabaseConnection) -> Result<usize, WarpgateError> {
             *slot = Set(key);
             changed = true;
         }
+    }
+    if let Some(mut source) = parameters.gitops_source.clone()
+        && matches!(source.reencrypt_all(), Ok(true))
+    {
+        model.gitops_source = Set(Some(source));
+        changed = true;
+    }
+    if let Some(mut secret) = parameters.gitops_webhook_secret.clone()
+        && matches!(secret.reencrypt_all(), Ok(true))
+    {
+        model.gitops_webhook_secret = Set(Some(secret));
+        changed = true;
     }
     if changed {
         rewritten += update_unless_deleted(model.update(db).await)?;

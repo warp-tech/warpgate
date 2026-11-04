@@ -1,6 +1,7 @@
 pub mod reconcile;
 pub mod roles;
 pub mod ssh_client_keys;
+pub mod sync;
 pub mod target_groups;
 pub mod targets;
 
@@ -52,11 +53,11 @@ impl From<ResourceError> for WarpgateError {
 }
 
 /// Who is writing. A row is changed only by whoever owns it: an admin for a
-/// row created by hand, the owning provider for a reconciled one. HTTP
-/// handlers always write as [`Actor::Admin`], so a provider's rows stay
-/// read-only through the API until an admin releases them, and a provider never
-/// overwrites a hand-made row unless the resource is annotated
-/// `warpgate.dev/adopt-existing`.
+/// row created by hand, the owning provider for a reconciled one. Admin API
+/// edits write as [`Actor::Admin`], so a provider's rows stay read-only
+/// through the API until an admin releases them; a provider writes only
+/// through [`reconcile::apply`], and never overwrites a hand-made row unless
+/// the resource is annotated `warpgate.dev/adopt-existing`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Actor {
     Admin,

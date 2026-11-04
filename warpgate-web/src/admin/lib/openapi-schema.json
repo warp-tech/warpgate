@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.30.2-13-g67dee72e-modified"
+    "version": "v0.30.2-30-g10446595-modified"
   },
   "servers": [
     {
@@ -506,7 +506,6 @@
     },
     "/role/{id}/release": {
       "post": {
-        "summary": "Hands a managed role back to manual editing",
         "parameters": [
           {
             "name": "id",
@@ -1859,7 +1858,6 @@
     },
     "/targets/{id}/release": {
       "post": {
-        "summary": "Hands a managed target back to manual editing. Its provider then\nreports it as a collision until the target is dropped from its source.",
         "parameters": [
           {
             "name": "id",
@@ -2326,7 +2324,6 @@
     },
     "/target-groups/{id}/release": {
       "post": {
-        "summary": "Hands a managed target group back to manual editing",
         "parameters": [
           {
             "name": "id",
@@ -5236,6 +5233,103 @@
         ],
         "operationId": "get_secret_reference_usage"
       }
+    },
+    "/gitops/sync": {
+      "post": {
+        "summary": "Syncs the GitOps source now and waits for the outcome",
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/SyncGitopsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderSync"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "sync_gitops"
+      }
+    },
+    "/gitops/syncs": {
+      "get": {
+        "summary": "Newest first",
+        "parameters": [
+          {
+            "name": "offset",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "format": "uint64",
+              "maximum": 1000.0
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_ProviderSync"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_gitops_syncs"
+      }
     }
   },
   "components": {
@@ -6007,6 +6101,125 @@
           }
         }
       },
+      "GitopsDirectorySource": {
+        "type": "object",
+        "title": "GitopsDirectorySource",
+        "description": "A directory on the node, such as a mounted ConfigMap or git-sync volume.\nIn a cluster every node must see the same files.",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 1
+          }
+        }
+      },
+      "GitopsGitSource": {
+        "type": "object",
+        "title": "GitopsGitSource",
+        "required": [
+          "url",
+          "reference"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "`https://` URL without credentials; `file://` is for tests",
+            "maxLength": 2048,
+            "pattern": "^(https|file)://[^@/]*(/.*)?$"
+          },
+          "reference": {
+            "type": "string",
+            "description": "Branch, tag, full ref name or commit",
+            "maxLength": 255,
+            "minLength": 1
+          },
+          "username": {
+            "type": "string",
+            "description": "`None` connects anonymously",
+            "maxLength": 255,
+            "minLength": 1
+          },
+          "password": {
+            "type": "string",
+            "description": "Password or access token, inline or a `secret://` reference. The admin\nAPI returns an inline value empty, and an empty one on update keeps the\nstored value while the URL stays the same",
+            "default": ""
+          },
+          "path": {
+            "type": "string",
+            "description": "Directory inside the repository that holds the files; the root if unset.\nRelative, and no segment starts with a dot, so it can't leave the checkout.",
+            "maxLength": 4096,
+            "pattern": "^[^/\\\\.][^/\\\\]*(/[^/\\\\.][^/\\\\]*)*$"
+          }
+        }
+      },
+      "GitopsSource": {
+        "type": "object",
+        "description": "Where the GitOps provider reads resource files from. Serves as both the\nstored and the admin-API representation.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/GitopsSource_GitopsDirectorySource"
+          },
+          {
+            "$ref": "#/components/schemas/GitopsSource_GitopsGitSource"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "Directory": "#/components/schemas/GitopsSource_GitopsDirectorySource",
+            "Git": "#/components/schemas/GitopsSource_GitopsGitSource"
+          }
+        }
+      },
+      "GitopsSource_GitopsDirectorySource": {
+        "description": "Where the GitOps provider reads resource files from. Serves as both the\nstored and the admin-API representation.",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Directory"
+                ],
+                "example": "Directory"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/GitopsDirectorySource"
+          }
+        ]
+      },
+      "GitopsSource_GitopsGitSource": {
+        "description": "Where the GitOps provider reads resource files from. Serves as both the\nstored and the admin-API representation.",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Git"
+                ],
+                "example": "Git"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/GitopsGitSource"
+          }
+        ]
+      },
       "ImportLdapUsersRequest": {
         "type": "object",
         "title": "ImportLdapUsersRequest",
@@ -6531,6 +6744,31 @@
           "ForcedOff"
         ]
       },
+      "PaginatedResponse_ProviderSync": {
+        "type": "object",
+        "title": "PaginatedResponse_ProviderSync",
+        "required": [
+          "items",
+          "offset",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderSync"
+            }
+          },
+          "offset": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "total": {
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
+      },
       "PaginatedResponse_UserSessionSnapshot": {
         "type": "object",
         "title": "PaginatedResponse_UserSessionSnapshot",
@@ -6739,6 +6977,24 @@
           },
           "recordings_storage": {
             "$ref": "#/components/schemas/RecordingsStorageConfig"
+          },
+          "gitops_source": {
+            "$ref": "#/components/schemas/GitopsSource"
+          },
+          "gitops_sync_interval_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Checked every 15 seconds; `null` syncs at startup and on request only",
+            "minimum": 1.0
+          },
+          "gitops_webhook_secret": {
+            "type": "string",
+            "description": "Authenticates pushes to `/@warpgate/api/gitops/webhook`, sent as\n`X-Hub-Signature-256` or `X-Gitlab-Token`. Write-only; `null` turns the\nwebhook off",
+            "maxLength": 255,
+            "minLength": 16
+          },
+          "gitops_prune": {
+            "type": "boolean"
           }
         }
       },
@@ -6783,7 +7039,9 @@
           "analytics_consent",
           "analytics_normal",
           "recordings_enable",
-          "recordings_storage"
+          "recordings_storage",
+          "gitops_webhook_secret_set",
+          "gitops_prune"
         ],
         "properties": {
           "allow_own_credential_management": {
@@ -6944,6 +7202,19 @@
           },
           "recordings_storage": {
             "$ref": "#/components/schemas/RecordingsStorageConfig"
+          },
+          "gitops_source": {
+            "$ref": "#/components/schemas/GitopsSource"
+          },
+          "gitops_sync_interval_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "gitops_webhook_secret_set": {
+            "type": "boolean"
+          },
+          "gitops_prune": {
+            "type": "boolean"
           }
         }
       },
@@ -7004,6 +7275,58 @@
           "3.0",
           "3.2"
         ]
+      },
+      "ProviderSync": {
+        "type": "object",
+        "title": "ProviderSync",
+        "description": "One outcome of syncing a provider. A later sync that reaches the same\nunchanged or failed outcome moves `checked_at` instead of adding a row, so\na row reads \"in this state from `started_at` through `checked_at`\".",
+        "required": [
+          "id",
+          "provider",
+          "triggered_by",
+          "status",
+          "started_at",
+          "checked_at",
+          "source"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provider": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "triggered_by": {
+            "$ref": "#/components/schemas/SyncTrigger"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SyncStatus"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "source": {
+            "type": "string",
+            "description": "Where the files came from, without credentials"
+          },
+          "revision": {
+            "type": "string",
+            "description": "The commit, or a hash of a directory's files"
+          },
+          "plan": {
+            "description": "The plan, as `warpgate config plan --format json` prints it"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
       },
       "RdpTargetAuth": {
         "type": "object",
@@ -8045,6 +8368,34 @@
             "description": "`None` on the admin API means \"keep the stored secret\" (it's never sent\nout); always `Some` in a stored config."
           }
         }
+      },
+      "SyncGitopsRequest": {
+        "type": "object",
+        "title": "SyncGitopsRequest",
+        "properties": {
+          "force_prune": {
+            "type": "boolean",
+            "description": "Deletes what is gone from the source even when that is most of it",
+            "default": false
+          }
+        }
+      },
+      "SyncStatus": {
+        "type": "string",
+        "enum": [
+          "Applied",
+          "Unchanged",
+          "Failed"
+        ]
+      },
+      "SyncTrigger": {
+        "type": "string",
+        "enum": [
+          "Startup",
+          "Interval",
+          "Api",
+          "Webhook"
+        ]
       },
       "Target": {
         "type": "object",

@@ -38,6 +38,12 @@
         '/parameters': wrap({
             asyncComponent: () => import('./Parameters.svelte'),
         }),
+        '/gitops/settings': wrap({
+            asyncComponent: () => import('./GitopsSettings.svelte'),
+        }),
+        '/gitops': wrap({
+            asyncComponent: () => import('./GitopsSyncs.svelte'),
+        }),
         '/policies': wrap({
             asyncComponent: () => import('./Policies.svelte'),
         }),
@@ -161,6 +167,14 @@
             title="Global parameters"
             description="Change instance-wide settings"
             href="/config/parameters"
+            small={sidebarMode}
+        />
+
+        <NavListItem
+            class="mb-2"
+            title="GitOps"
+            description="Sync history and manual syncs"
+            href="/config/gitops"
             small={sidebarMode}
         />
 

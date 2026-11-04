@@ -73,14 +73,21 @@ pub enum Change {
         name: String,
         owner: Option<ProviderId>,
     },
-    /// The row is this provider's, but the change can't be made in place
+    /// The row is this provider's, but the change isn't made
     Blocked {
         kind: Kind,
         name: String,
         reason: String,
     },
-    /// This provider's row that no resource describes any more
+    /// This provider's row that no resource describes any more, kept because
+    /// pruning is off
     WouldPrune {
+        kind: Kind,
+        name: String,
+        id: Uuid,
+    },
+    /// This provider's row that no resource describes any more
+    Delete {
         kind: Kind,
         name: String,
         id: Uuid,
@@ -88,6 +95,20 @@ pub enum Change {
 }
 
 impl Change {
+    /// The change's name in plan output
+    pub const fn action(&self) -> &'static str {
+        match self {
+            Self::Create(_) => "create",
+            Self::Update { .. } => "update",
+            Self::Adopt { .. } => "adopt",
+            Self::Unchanged { .. } => "unchanged",
+            Self::Collision { .. } => "collision",
+            Self::Blocked { .. } => "blocked",
+            Self::WouldPrune { .. } => "would_prune",
+            Self::Delete { .. } => "delete",
+        }
+    }
+
     pub fn kind(&self) -> Kind {
         match self {
             Self::Create(resource)
@@ -100,7 +121,8 @@ impl Change {
             Self::Unchanged { kind, .. }
             | Self::Collision { kind, .. }
             | Self::Blocked { kind, .. }
-            | Self::WouldPrune { kind, .. } => *kind,
+            | Self::WouldPrune { kind, .. }
+            | Self::Delete { kind, .. } => *kind,
         }
     }
 
@@ -116,16 +138,33 @@ impl Change {
             Self::Unchanged { name, .. }
             | Self::Collision { name, .. }
             | Self::Blocked { name, .. }
-            | Self::WouldPrune { name, .. } => name,
+            | Self::WouldPrune { name, .. }
+            | Self::Delete { name, .. } => name,
         }
     }
 }
 
+/// What happens to this provider's rows that no resource describes any more
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Prune {
+    /// Kept, and listed as [`Change::WouldPrune`]
+    #[default]
+    Off,
+    /// Deleted, unless that would delete all of the provider's rows, or more
+    /// than half of them: a source that lost most of its files is more likely
+    /// broken (wrong branch or path) than meant
+    On,
+    /// Deleted however many there are
+    Force,
+}
+
 /// Changes in the order they can be applied: groups, roles and keys before
-/// the targets that reference them
+/// the targets that reference them. Deletes run in the reverse order.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Plan {
     pub changes: Vec<Change>,
+    /// The policy the plan was made with, which applying it re-plans with
+    pub prune: Prune,
 }
 
 impl Plan {
@@ -139,7 +178,10 @@ impl Plan {
         self.changes.iter().any(|c| {
             matches!(
                 c,
-                Change::Create(_) | Change::Update { .. } | Change::Adopt { .. }
+                Change::Create(_)
+                    | Change::Update { .. }
+                    | Change::Adopt { .. }
+                    | Change::Delete { .. }
             )
         })
     }
@@ -159,7 +201,7 @@ struct LiveRow<'a> {
     compared: Compared,
 }
 
-pub fn plan(provider: ProviderId, desired: &[Resource], current: &Current) -> Plan {
+pub fn plan(provider: ProviderId, desired: &[Resource], current: &Current, prune: Prune) -> Plan {
     let canonical = canonical_names(desired);
     let rows: HashMap<Kind, Vec<LiveRow<'_>>> = [
         (Kind::TargetGroup, live_rows(&current.groups, plain)),
@@ -239,16 +281,33 @@ pub fn plan(provider: ProviderId, desired: &[Resource], current: &Current) -> Pl
         });
     }
 
-    for (kind, rows) in &rows {
-        for row in rows {
-            if row.provider == Some(provider) && !matched.contains(&row.id) {
-                changes.push(Change::WouldPrune {
-                    kind: *kind,
-                    name: row.name.to_owned(),
-                    id: row.id,
-                });
-            }
-        }
+    let owned: Vec<(Kind, &LiveRow<'_>)> = rows
+        .iter()
+        .flat_map(|(kind, rows)| rows.iter().map(|row| (*kind, row)))
+        .filter(|(_, row)| row.provider == Some(provider))
+        .collect();
+    let orphans: Vec<_> = owned
+        .iter()
+        .filter(|(_, row)| !matched.contains(&row.id))
+        .collect();
+    let deleting = orphans.len();
+    let guard_trips = prune == Prune::On
+        && deleting > 0
+        && (deleting == owned.len() || deleting > (owned.len() / 2).max(1));
+    for (kind, row) in orphans {
+        let (kind, name, id) = (*kind, row.name.to_owned(), row.id);
+        changes.push(match prune {
+            Prune::Off => Change::WouldPrune { kind, name, id },
+            Prune::On if guard_trips => Change::Blocked {
+                kind,
+                name,
+                reason: format!(
+                    "removed from the source, but deleting {deleting} of {} managed resources at once needs a forced sync",
+                    owned.len()
+                ),
+            },
+            Prune::On | Prune::Force => Change::Delete { kind, name, id },
+        });
     }
 
     changes.sort_by(|a, b| {
@@ -256,7 +315,7 @@ pub fn plan(provider: ProviderId, desired: &[Resource], current: &Current) -> Pl
             .cmp(&apply_order(b.kind()))
             .then_with(|| a.name().cmp(b.name()))
     });
-    Plan { changes }
+    Plan { changes, prune }
 }
 
 const fn apply_order(kind: Kind) -> u8 {
@@ -490,21 +549,19 @@ pub fn format_plan(plan: &Plan) -> String {
                 }
             }
             Change::Unchanged { .. } => {}
-            Change::Collision { owner, .. } => {
-                let _ = writeln!(
-                    out,
-                    "collision {kind:?} {name}: {}",
-                    collision_reason(*owner)
-                );
+            Change::Collision { .. } | Change::Blocked { .. } => {
+                if let Some(line) = error_line(change) {
+                    let _ = writeln!(out, "{line}");
+                }
             }
-            Change::Blocked { reason, .. } => {
-                let _ = writeln!(out, "blocked {kind:?} {name}: {reason}");
+            Change::Delete { .. } => {
+                let _ = writeln!(out, "delete {kind:?} {name}");
             }
             Change::WouldPrune { .. } => pruned.push(format!("{kind:?} {name}")),
         }
     }
     if !pruned.is_empty() {
-        let _ = writeln!(out, "\nwould prune (disabled in this phase):");
+        let _ = writeln!(out, "\nwould prune (pruning is off):");
         for line in pruned {
             let _ = writeln!(out, "    {line}");
         }
@@ -512,14 +569,39 @@ pub fn format_plan(plan: &Plan) -> String {
     let count = |f: fn(&Change) -> bool| plan.changes.iter().filter(|c| f(c)).count();
     let _ = writeln!(
         out,
-        "\n{} to create, {} to update, {} to adopt, {} unchanged, {} errors",
+        "\n{} to create, {} to update, {} to adopt, {} to delete, {} unchanged, {} errors",
         count(|c| matches!(c, Change::Create(_))),
         count(|c| matches!(c, Change::Update { .. })),
         count(|c| matches!(c, Change::Adopt { .. })),
+        count(|c| matches!(c, Change::Delete { .. })),
         count(|c| matches!(c, Change::Unchanged { .. })),
         count(|c| matches!(c, Change::Collision { .. } | Change::Blocked { .. })),
     );
     out
+}
+
+/// The collisions and blocked changes alone, one line each
+pub fn format_errors(plan: &Plan) -> String {
+    plan.changes
+        .iter()
+        .filter_map(error_line)
+        .fold(String::new(), |mut out, line| {
+            // writing to a String cannot fail
+            let _ = writeln!(out, "{line}");
+            out
+        })
+}
+
+fn error_line(change: &Change) -> Option<String> {
+    let (kind, name) = (change.kind(), change.name());
+    match change {
+        Change::Collision { owner, .. } => Some(format!(
+            "collision {kind:?} {name}: {}",
+            collision_reason(*owner)
+        )),
+        Change::Blocked { reason, .. } => Some(format!("blocked {kind:?} {name}: {reason}")),
+        _ => None,
+    }
 }
 
 pub fn format_plan_json(plan: &Plan) -> Value {
@@ -528,21 +610,21 @@ pub fn format_plan_json(plan: &Plan) -> Value {
         .map(|change| {
             let mut entry =
                 json!({ "kind": format!("{:?}", change.kind()), "name": change.name() });
-            let (action, extra) = match change {
-                Change::Create(_) => ("create", json!({})),
-                Change::Update { fields, .. } => {
-                    ("update", json!({ "fields": fields_json(fields) }))
+            let extra = match change {
+                Change::Update { fields, .. } | Change::Adopt { fields, .. } => {
+                    json!({ "fields": fields_json(fields) })
                 }
-                Change::Adopt { fields, .. } => ("adopt", json!({ "fields": fields_json(fields) })),
-                Change::Unchanged { .. } => ("unchanged", json!({})),
                 Change::Collision { owner, .. } => {
-                    ("collision", json!({ "reason": collision_reason(*owner) }))
+                    json!({ "reason": collision_reason(*owner) })
                 }
-                Change::Blocked { reason, .. } => ("blocked", json!({ "reason": reason })),
-                Change::WouldPrune { .. } => ("would_prune", json!({})),
+                Change::Blocked { reason, .. } => json!({ "reason": reason }),
+                Change::Create(_)
+                | Change::Unchanged { .. }
+                | Change::WouldPrune { .. }
+                | Change::Delete { .. } => json!({}),
             };
             if let (Value::Object(entry), Value::Object(extra)) = (&mut entry, extra) {
-                entry.insert("action".into(), Value::String(action.into()));
+                entry.insert("action".into(), Value::String(change.action().into()));
                 entry.extend(extra);
             }
             entry
@@ -650,18 +732,7 @@ mod tests {
     fn summary(plan: &Plan) -> Vec<String> {
         plan.changes
             .iter()
-            .map(|change| {
-                let action = match change {
-                    Change::Create(_) => "create",
-                    Change::Update { .. } => "update",
-                    Change::Adopt { .. } => "adopt",
-                    Change::Unchanged { .. } => "unchanged",
-                    Change::Collision { .. } => "collision",
-                    Change::Blocked { .. } => "blocked",
-                    Change::WouldPrune { .. } => "would_prune",
-                };
-                format!("{action} {:?} {}", change.kind(), change.name())
-            })
+            .map(|change| format!("{} {:?} {}", change.action(), change.kind(), change.name()))
             .collect()
     }
 
@@ -693,7 +764,7 @@ mod tests {
             role("dba"),
             manifest("TargetGroup", "prod", json!({})),
         ];
-        let plan = plan(GITOPS, &desired, &Current::default());
+        let plan = plan(GITOPS, &desired, &Current::default(), Prune::Off);
         assert_eq!(
             summary(&plan),
             [
@@ -712,7 +783,7 @@ mod tests {
         let live = current(&[(&before[0], Some(GITOPS)), (&before[1], Some(GITOPS))]);
         let desired = [ssh("web", 2222, &["ops", "dba"]), role("dba"), role("ops")];
 
-        let plan = plan(GITOPS, &desired, &live);
+        let plan = plan(GITOPS, &desired, &live, Prune::Off);
         assert_eq!(
             summary(&plan),
             ["unchanged Role dba", "create Role ops", "update Target web"]
@@ -731,10 +802,20 @@ mod tests {
         let before = [ssh("web", 22, &["dba"]), role("dba")];
         let live = current(&[(&before[0], Some(GITOPS)), (&before[1], Some(GITOPS))]);
 
-        let plan_ = plan(GITOPS, &[ssh("web", 22, &["DBA"]), role("dba")], &live);
+        let plan_ = plan(
+            GITOPS,
+            &[ssh("web", 22, &["DBA"]), role("dba")],
+            &live,
+            Prune::Off,
+        );
         assert!(!plan_.has_pending(), "{:?}", summary(&plan_));
 
-        let plan_ = plan(GITOPS, &[ssh("Web", 22, &["dba"]), role("dba")], &live);
+        let plan_ = plan(
+            GITOPS,
+            &[ssh("Web", 22, &["dba"]), role("dba")],
+            &live,
+            Prune::Off,
+        );
         assert_eq!(
             fields(&plan_, "Web"),
             [value(&["name"], json!("web"), json!("Web"))]
@@ -753,10 +834,10 @@ mod tests {
         let before = with_password("old-secret");
         let live = current(&[(&before, Some(GITOPS))]);
 
-        let plan_ = plan(GITOPS, &[with_password("old-secret")], &live);
+        let plan_ = plan(GITOPS, &[with_password("old-secret")], &live, Prune::Off);
         assert!(!plan_.has_pending());
 
-        let plan_ = plan(GITOPS, &[with_password("new-secret")], &live);
+        let plan_ = plan(GITOPS, &[with_password("new-secret")], &live, Prune::Off);
         assert_eq!(
             fields(&plan_, "db"),
             [FieldChange {
@@ -782,7 +863,7 @@ mod tests {
         };
         let before = with("old-secret");
         let live = current(&[(&before, Some(GITOPS))]);
-        let plan_ = plan(GITOPS, &[with("new-secret")], &live);
+        let plan_ = plan(GITOPS, &[with("new-secret")], &live, Prune::Off);
         assert_eq!(
             fields(&plan_, "web")
                 .iter()
@@ -804,7 +885,7 @@ mod tests {
         let live = current(&[(&legacy, None), (&adoptable, None), (&theirs, Some(other))]);
         let desired = [legacy, adopting(adoptable), adopting(theirs)];
 
-        let plan = plan(GITOPS, &desired, &live);
+        let plan = plan(GITOPS, &desired, &live, Prune::Off);
         assert_eq!(
             summary(&plan),
             [
@@ -829,9 +910,61 @@ mod tests {
             (&mine, None),
             (&theirs, Some(ProviderId(Uuid::new_v4()))),
         ]);
-        let plan = plan(GITOPS, &[], &live);
+        let plan = plan(GITOPS, &[], &live, Prune::Off);
         assert_eq!(summary(&plan), ["would_prune Role old"]);
         assert!(!plan.has_pending());
+    }
+
+    #[test]
+    fn prune_deletes_only_its_own_rows() {
+        let (kept, gone, mine, theirs) = (role("kept"), role("gone"), role("mine"), role("theirs"));
+        let live = current(&[
+            (&kept, Some(GITOPS)),
+            (&gone, Some(GITOPS)),
+            (&mine, None),
+            (&theirs, Some(ProviderId(Uuid::new_v4()))),
+        ]);
+        let plan = plan(GITOPS, &[kept], &live, Prune::On);
+        assert_eq!(summary(&plan), ["delete Role gone", "unchanged Role kept"]);
+        assert!(plan.has_pending());
+        assert!(!plan.has_errors());
+    }
+
+    #[test]
+    fn prune_refuses_to_delete_most_rows_unless_forced() {
+        let (a, b, c) = (role("a"), role("b"), role("c"));
+        let live = current(&[(&a, Some(GITOPS)), (&b, Some(GITOPS)), (&c, Some(GITOPS))]);
+
+        let blocked = plan(GITOPS, &[a.clone()], &live, Prune::On);
+        assert_eq!(
+            summary(&blocked),
+            ["unchanged Role a", "blocked Role b", "blocked Role c"]
+        );
+        assert!(blocked.has_errors());
+
+        let forced = plan(GITOPS, &[a], &live, Prune::Force);
+        assert_eq!(
+            summary(&forced),
+            ["unchanged Role a", "delete Role b", "delete Role c"]
+        );
+        assert!(!forced.has_errors());
+    }
+
+    #[test]
+    fn the_last_managed_rows_are_never_pruned_unless_forced() {
+        let only = role("only");
+        let live = current(&[(&only, Some(GITOPS))]);
+        assert!(plan(GITOPS, &[], &live, Prune::On).has_errors());
+        let replaced = plan(GITOPS, &[role("other")], &live, Prune::On);
+        assert!(replaced.has_errors(), "{:?}", summary(&replaced));
+        assert_eq!(
+            format_errors(&replaced),
+            "blocked Role only: removed from the source, but deleting 1 of 1 managed resources at once needs a forced sync\n"
+        );
+        assert_eq!(
+            summary(&plan(GITOPS, &[], &live, Prune::Force)),
+            ["delete Role only"]
+        );
     }
 
     #[test]
@@ -843,7 +976,7 @@ mod tests {
             "web",
             json!({"options": {"http": {"url": "https://web"}}}),
         );
-        let plan = plan(GITOPS, &[http], &live);
+        let plan = plan(GITOPS, &[http], &live, Prune::Off);
         assert_eq!(summary(&plan), ["blocked Target web"]);
         assert!(plan.has_errors());
     }
@@ -857,7 +990,12 @@ mod tests {
             (&legacy, None),
             (&before, Some(GITOPS)),
         ]);
-        let plan = plan(GITOPS, &[role("new"), legacy, ssh("web", 2222, &[])], &live);
+        let plan = plan(
+            GITOPS,
+            &[role("new"), legacy, ssh("web", 2222, &[])],
+            &live,
+            Prune::Off,
+        );
         assert_eq!(
             format_plan(&plan),
             "collision Role legacy: created by hand; set the warpgate.dev/adopt-existing: \"true\" annotation to take it over\n\
@@ -865,10 +1003,10 @@ mod tests {
              update Target web\n    \
                  spec.options.ssh.port: 22 -> 2222\n\
              \n\
-             would prune (disabled in this phase):\n    \
+             would prune (pruning is off):\n    \
                  Role old\n\
              \n\
-             1 to create, 1 to update, 0 to adopt, 0 unchanged, 1 errors\n"
+             1 to create, 1 to update, 0 to adopt, 0 to delete, 0 unchanged, 1 errors\n"
         );
     }
 
@@ -894,10 +1032,16 @@ mod tests {
             GITOPS,
             &[bastion.clone(), other.clone(), through("BASTION")],
             &live,
+            Prune::Off,
         );
         assert!(!unchanged.has_pending(), "{:?}", summary(&unchanged));
 
-        let moved = plan(GITOPS, &[bastion, other, through("other")], &live);
+        let moved = plan(
+            GITOPS,
+            &[bastion, other, through("other")],
+            &live,
+            Prune::Off,
+        );
         assert_eq!(
             fields(&moved, "app"),
             [value(
@@ -925,7 +1069,7 @@ mod tests {
         let (literal, referenced) = (key("deploy", &pem), key("ci", reference));
         let live = current(&[(&literal, Some(GITOPS)), (&referenced, Some(GITOPS))]);
 
-        let unchanged = plan(GITOPS, &[literal, referenced], &live);
+        let unchanged = plan(GITOPS, &[literal, referenced], &live, Prune::Off);
         assert!(!unchanged.has_pending(), "{:?}", summary(&unchanged));
 
         let changed = plan(
@@ -935,6 +1079,7 @@ mod tests {
                 key("ci", "secret://vault/kv/keys#ci"),
             ],
             &live,
+            Prune::Off,
         );
         let credential = [FieldChange {
             path: path(&["spec", "private_key"]),

@@ -69,6 +69,10 @@
         }
     }
 
+    async function release() {
+        role = await api.releaseRole({ id: params.id })
+    }
+
     async function remove() {
         if (!role) return
         if (confirm(`Delete role ${role.name}?`)) {
@@ -85,7 +89,12 @@
                 <div>
                     <h1>{role.name}</h1>
                     <div class="text-muted d-flex align-items-center gap-2">
-                        role <ManagedIcon provider={role.provider} />
+                        role <ManagedIcon
+                            provider={role.provider}
+                            onRelease={$adminPermissions.accessRolesEdit
+                                ? release
+                                : undefined}
+                        />
                     </div>
                 </div>
             </div>

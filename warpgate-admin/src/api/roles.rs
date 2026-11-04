@@ -147,7 +147,11 @@ impl DetailApi {
         })
     }
 
-    #[oai(path = "/role/:id/release", method = "post", operation_id = "release_role")]
+    #[oai(
+        path = "/role/:id/release",
+        method = "post",
+        operation_id = "release_role"
+    )]
     async fn api_release_role(
         &self,
         admin: AdminContext,

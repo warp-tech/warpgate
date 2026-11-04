@@ -61,3 +61,6 @@ zune-jpeg.workspace = true
 postgres = ["sea-orm/sqlx-postgres"]
 mysql = ["sea-orm/sqlx-mysql"]
 sqlite = ["sea-orm/sqlx-sqlite"]
+
+[dev-dependencies]
+tempfile = "3"

@@ -88,6 +88,10 @@
         }
     }
 
+    async function release() {
+        target = await api.releaseTarget({ id: params.id })
+    }
+
     async function remove() {
         if (!target) return
         if (confirm(`Delete target ${target.name}?`)) {
@@ -209,7 +213,12 @@
                             {#if target.options.kind === 'Kubernetes'}
                                 Kubernetes target
                             {/if}
-                            <ManagedIcon provider={target.provider} />
+                            <ManagedIcon
+                                provider={target.provider}
+                                onRelease={$adminPermissions.targetsEdit
+                                    ? release
+                                    : undefined}
+                            />
                         </div>
                     </div>
                 </div>

@@ -109,6 +109,9 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
             }
         });
     }
+    // After the backfill pass: both rewrite target rows, and a re-encryption
+    // would clobber what a concurrent apply wrote
+    services.start_gitops_sync();
 
     if console::user_attended() {
         info!("--------------------------------------------");

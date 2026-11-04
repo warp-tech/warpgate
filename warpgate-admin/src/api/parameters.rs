@@ -8,10 +8,11 @@ use serde::Serialize;
 use serde_json::Value;
 use warpgate_aws::{S3Credentials, S3Storage};
 use warpgate_common::{
-    AdminPermission, PasswordPolicy, UserRequireCredentialsPolicy, WarpgateError,
+    AdminPermission, PasswordPolicy, StoredSecret, StoredSecrets, UserRequireCredentialsPolicy,
+    WarpgateError,
 };
 use warpgate_db_entities::Parameters;
-use warpgate_db_entities::Parameters::RecordingsStorageConfig;
+use warpgate_db_entities::Parameters::{GitopsSource, RecordingsStorageConfig};
 
 use super::AdminContext;
 
@@ -55,6 +56,27 @@ fn merge_secret(
             .clone_from(&current_creds.secret_access_key);
     }
     incoming
+}
+
+/// An empty inline password keeps the stored one, as long as the URL is the
+/// same: the browser never sees the password, and a stored token must not be
+/// sent to a host the admin only now typed in.
+fn merge_git_password(
+    mut incoming: GitopsSource,
+    current: Option<&GitopsSource>,
+) -> Result<GitopsSource, WarpgateError> {
+    if let GitopsSource::Git(git) = &mut incoming
+        && git
+            .password
+            .inline_mut()
+            .is_some_and(|p| p.stored_value().is_empty())
+        && let Some(GitopsSource::Git(current)) = current
+        && current.url == git.url
+    {
+        git.password = current.password.clone();
+    }
+    incoming.encrypt_all()?;
+    Ok(incoming)
 }
 
 #[derive(Serialize, Object)]
@@ -107,6 +129,10 @@ struct ParameterValues {
     pub analytics_normal: bool,
     pub recordings_enable: bool,
     pub recordings_storage: RecordingsStorageConfig,
+    pub gitops_source: Option<GitopsSource>,
+    pub gitops_sync_interval_seconds: Option<i64>,
+    pub gitops_webhook_secret_set: bool,
+    pub gitops_prune: bool,
 }
 
 #[derive(Serialize, Object)]
@@ -186,6 +212,20 @@ struct ParameterUpdate {
     pub analytics_normal: Option<bool>,
     pub recordings_enable: Option<bool>,
     pub recordings_storage: Option<RecordingsStorageConfig>,
+    #[oai(deserialize_with = "parse_nullable")]
+    pub gitops_source: Option<Option<GitopsSource>>,
+    /// Checked every 15 seconds; `null` syncs at startup and on request only
+    #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
+    pub gitops_sync_interval_seconds: Option<Option<i64>>,
+    /// Authenticates pushes to `/@warpgate/api/gitops/webhook`, sent as
+    /// `X-Hub-Signature-256` or `X-Gitlab-Token`. Write-only; `null` turns the
+    /// webhook off
+    #[oai(
+        deserialize_with = "parse_nullable",
+        validator(min_length = 16, max_length = 255)
+    )]
+    pub gitops_webhook_secret: Option<Option<String>>,
+    pub gitops_prune: Option<bool>,
 }
 
 #[derive(Serialize, Object)]
@@ -284,6 +324,10 @@ impl Api {
             analytics_normal: parameters.analytics_normal,
             recordings_enable: parameters.recordings_enable,
             recordings_storage,
+            gitops_source: parameters.gitops_source.map(|source| source.redacted()),
+            gitops_sync_interval_seconds: parameters.gitops_sync_interval_seconds,
+            gitops_webhook_secret_set: parameters.gitops_webhook_secret.is_some(),
+            gitops_prune: parameters.gitops_prune,
         })))
     }
 
@@ -337,6 +381,19 @@ impl Api {
                 &current.recordings_storage_config()?,
             ))?),
             None => None,
+        };
+        let gitops_source = match body.gitops_source.clone() {
+            Some(Some(incoming)) => Set(Some(merge_git_password(
+                incoming,
+                current.gitops_source.as_ref(),
+            )?)),
+            Some(None) => Set(None),
+            None => NotSet,
+        };
+        let gitops_webhook_secret = match body.gitops_webhook_secret.clone() {
+            Some(Some(secret)) => Set(Some(StoredSecret::encrypted(secret)?)),
+            Some(None) => Set(None),
+            None => NotSet,
         };
         let mut parameters = current.into_active_model();
 
@@ -422,6 +479,11 @@ impl Api {
 
         parameters.recordings_enable = body.recordings_enable.map_or(NotSet, Set);
         parameters.recordings_storage = storage.map_or(NotSet, Set);
+        parameters.gitops_source = gitops_source;
+        parameters.gitops_sync_interval_seconds =
+            body.gitops_sync_interval_seconds.map_or(NotSet, Set);
+        parameters.gitops_webhook_secret = gitops_webhook_secret;
+        parameters.gitops_prune = body.gitops_prune.map_or(NotSet, Set);
 
         Parameters::Entity::update(parameters).exec(db).await?;
 
@@ -472,8 +534,63 @@ impl Api {
 mod tests {
     use poem_openapi::types::ParseFromJSON;
     use serde_json::json;
+    use warpgate_db_entities::Parameters::GitopsSource;
 
-    use super::ParameterUpdate;
+    use super::{ParameterUpdate, merge_git_password};
+
+    fn git(url: &str, password: &str) -> GitopsSource {
+        let update = ParameterUpdate::parse_from_json(Some(json!({ "gitops_source": {
+            "kind": "Git", "url": url, "reference": "main", "username": "ci", "password": password,
+        }})));
+        match update.map(|update| update.gitops_source) {
+            Ok(Some(Some(source))) => source,
+            Ok(other) => panic!("{other:?}"),
+            Err(error) => panic!("{}", error.into_message()),
+        }
+    }
+
+    fn password(source: GitopsSource) -> String {
+        let GitopsSource::Git(mut git) = source else {
+            panic!()
+        };
+        let inline = git.password.inline_mut().unwrap().reveal().unwrap();
+        inline.expose_secret().clone()
+    }
+
+    #[test]
+    fn a_blank_git_password_is_kept_only_for_the_same_url() {
+        let stored = merge_git_password(git("https://git.example.com/a", "token"), None).unwrap();
+        let kept = merge_git_password(git("https://git.example.com/a", ""), Some(&stored)).unwrap();
+        assert_eq!(password(kept), "token");
+        let elsewhere =
+            merge_git_password(git("https://evil.example.com/a", ""), Some(&stored)).unwrap();
+        assert_eq!(password(elsewhere), "");
+    }
+
+    #[test]
+    fn gitops_fields_are_validated() {
+        for invalid in [
+            json!({ "gitops_source": { "kind": "Git", "url": "https://user:pw@git.example.com/a", "reference": "main" } }),
+            json!({ "gitops_source": { "kind": "Git", "url": "http://git.example.com/a", "reference": "main" } }),
+            json!({ "gitops_source": { "kind": "Git", "url": "https://git.example.com/a", "reference": "main", "path": "../etc" } }),
+            json!({ "gitops_source": { "kind": "Git", "url": "https://git.example.com/a", "reference": "main", "path": "/etc" } }),
+            json!({ "gitops_sync_interval_seconds": 0 }),
+            json!({ "gitops_webhook_secret": "short" }),
+        ] {
+            assert!(
+                ParameterUpdate::parse_from_json(Some(invalid.clone())).is_err(),
+                "{invalid}"
+            );
+        }
+        assert!(
+            ParameterUpdate::parse_from_json(Some(json!({
+                "gitops_source": { "kind": "Git", "url": "https://git.example.com/a", "reference": "main", "path": "deploy/warpgate" },
+                "gitops_sync_interval_seconds": null,
+                "gitops_webhook_secret": null,
+            })))
+            .is_ok()
+        );
+    }
 
     fn parse_rate_limit(value: serde_json::Value) -> Option<Option<u32>> {
         match ParameterUpdate::parse_from_json(Some(value)) {

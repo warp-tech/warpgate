@@ -6,6 +6,7 @@
         type SSHClientKeyKind,
         type SSHKnownHost,
     } from 'admin/lib/api'
+    import ManagedIcon from 'admin/lib/ManagedIcon.svelte'
     import { adminPermissions } from 'admin/lib/store'
     import CopyableTextArea from 'common/CopyableTextArea.svelte'
     import { stringifyError } from 'common/errors'
@@ -135,7 +136,13 @@
                             {key.secretBackend}
                         </Badge>
                     {/if}
-                    {#if $adminPermissions.configEdit}
+                    <ManagedIcon
+                        provider={key.provider}
+                        onRelease={$adminPermissions.configEdit
+                            ? () => run(() => api.releaseSshOwnKey(key))
+                            : undefined}
+                    />
+                    {#if $adminPermissions.configEdit && !key.provider}
                         <Button
                             class="ms-auto"
                             color="link px-0"
