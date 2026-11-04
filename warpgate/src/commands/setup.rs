@@ -1,4 +1,4 @@
-use std::fs::{File, create_dir_all};
+use std::fs::create_dir_all;
 use std::io::Write;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
@@ -339,6 +339,21 @@ fn resolve_data_path(config_dir: &Path, data_path: &str) -> Result<PathBuf> {
     Ok(config_dir.join(data_path).canonicalize()?)
 }
 
+fn write_file(path: &Path, contents: &[u8], secure: bool) -> Result<()> {
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    if secure {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    opts.open(path)?.write_all(contents)?;
+    if secure {
+        secure_file(path)?;
+    }
+    Ok(())
+}
+
 async fn bootstrap_database(
     params: &GlobalParams,
     config: &WarpgateConfig,
@@ -458,12 +473,8 @@ fn install_tls(
         .paths_relative_to()
         .join(&config.store.http.certificate);
     let key_path = params.paths_relative_to().join(&config.store.http.key);
-    std::fs::write(&certificate_path, certificate)?;
-    std::fs::write(&key_path, key)?;
-    if params.should_secure_files() {
-        secure_file(&certificate_path)?;
-        secure_file(&key_path)?;
-    }
+    write_file(&certificate_path, &certificate, params.should_secure_files())?;
+    write_file(&key_path, &key, params.should_secure_files())?;
     Ok(())
 }
 
@@ -529,14 +540,19 @@ pub async fn command(
 
     info!("Generated configuration:");
     let yaml = yaml_serde::to_string(&store)?;
-    println!("{yaml}");
+    let mut display_store = store.clone();
+    if display_store.database_url.expose_secret().contains('@') {
+        display_store.database_url = Secret::new("<redacted>".to_string());
+    }
+    let display_yaml = yaml_serde::to_string(&display_store)?;
+    println!("{display_yaml}");
 
     let yaml = format!(
         "# Config generated in version {version}\n# yaml-language-server: $schema=https://raw.githubusercontent.com/warp-tech/warpgate/refs/heads/main/config-schema.json\n\n{yaml}",
         version = warpgate_version()
     );
 
-    File::create(config_path)?.write_all(yaml.as_bytes())?;
+    write_file(config_path, yaml.as_bytes(), params.should_secure_files())?;
     info!("Saved into {}", config_path.display());
 
     let config = load_config(params, true)?;
