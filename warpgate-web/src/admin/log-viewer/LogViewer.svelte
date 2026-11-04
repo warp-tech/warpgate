@@ -578,11 +578,13 @@
                                 </div>
                                 <div class="session">
                                     {#if item.sessionId}
+                                        <!-- Short ID; the full one is in the tooltip -->
                                         <a
                                             href="/status/sessions/{item.sessionId}"
+                                            title={item.sessionId}
                                             use:link
                                         >
-                                            {item.sessionId}
+                                            {item.sessionId.slice(0, 8)}
                                         </a>
                                     {/if}
                                 </div>
@@ -1106,7 +1108,7 @@
         white-space: nowrap;
 
         .timestamp {
-            opacity: .75;
+            color: var(--bs-secondary-color);
         }
 
         .content {
@@ -1126,7 +1128,7 @@
                 gap: .75rem;
 
                 .key {
-                    opacity: .5;
+                    color: var(--bs-secondary-color);
                     font-style: italic;
                 }
 

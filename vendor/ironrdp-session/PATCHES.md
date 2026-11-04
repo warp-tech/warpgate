@@ -50,7 +50,9 @@ Both are in upstream IronRDP after 0.11.0 and drop out on re-vendor:
 
 `Cargo.toml` additionally sets `[lints.rust] warnings = { level = "allow", priority = 1 }`
 so this vendored path dependency's warnings don't surface in Warpgate's builds. This is not
-in `warpgate.patch` (which is source-only); re-apply it by hand on re-vendor.
+in `warpgate.patch` (which is source-only); re-apply it by hand on re-vendor. The same
+goes for its `zstd-safe = "8.2"` requirement (upstream pins `7.2`); the streaming API the
+code uses is unchanged between the two.
 
 [1]: https://github.com/Devolutions/IronRDP/pull/1436
 [2]: https://github.com/Devolutions/IronRDP/pull/1452
@@ -73,3 +75,13 @@ session-side `ResetGraphics` handling from upstream #1874:
 
 Needs `vendor/ironrdp-dvc` (for `DrdynvcClient::get_dvc_mut`) and `vendor/ironrdp-egfx`.
 Drops out on re-vendor from an upstream release that contains #1461 and #1874.
+
+## Pointer decoding
+
+`fast_path.rs` decoded New and Large pointer updates without the session palette, so a
+valid 4bpp or 8bpp cursor failed with `NotSupportedBpp` and ended the session. The fork passes
+`Palette::colors()` to the `_with_palette` decoders in the vendored `ironrdp-graphics`, and
+reports any pointer that still cannot be decoded as `UpdateKind::PointerDefault` instead of
+returning the error. Such a pointer also clears its cache slot (`PointerCache::remove` in
+`pointer.rs`), so a later Cached Pointer Update cannot bring back the shape it replaced. It adds unit tests, which `test = false` in `Cargo.toml` hides from a
+plain `cargo test`: run `cargo test -p ironrdp-session --lib`.

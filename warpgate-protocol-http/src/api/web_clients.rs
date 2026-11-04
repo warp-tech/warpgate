@@ -107,10 +107,10 @@ where
 {
     let owner = web_client_session_owner(ctx, session_id).await?;
     proxy_or_serve(ctx, req, owner, None::<&()>, || async {
-        match manager
-            .lookup_user_session(session_id, ctx.auth.user_id())
-            .await
-        {
+        let Some(user) = ctx.auth.as_full_user() else {
+            return Ok(GetWebClientSessionResponse::NotFound);
+        };
+        match manager.lookup_user_session(session_id, &user).await {
             Some(session) => Ok(GetWebClientSessionResponse::Ok(Json(
                 WebClientSessionInfo {
                     target_name: session.target_name().into(),
@@ -131,8 +131,11 @@ pub async fn delete_web_client_session<S: ManagedSession>(
 ) -> poem::Result<DeleteWebClientSessionResponse> {
     let owner = web_client_session_owner(ctx, session_id).await?;
     proxy_or_serve(ctx, req, owner, None::<&()>, || async {
+        let Some(user) = ctx.auth.as_full_user() else {
+            return Ok(DeleteWebClientSessionResponse::NotFound);
+        };
         if manager
-            .lookup_user_session(session_id, ctx.auth.user_id())
+            .lookup_user_session(session_id, &user)
             .await
             .is_none()
         {

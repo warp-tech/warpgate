@@ -93,3 +93,4 @@ class TestHTTPProto:
         )
 
         assert response.text == 'response', response.text
+        assert response.headers.get("content-encoding") == "gzip"

@@ -59,6 +59,16 @@ async fn frame_bridge(
                 // `data` is ref-counted `Bytes` — moved into the frame, no framebuffer copy.
                 data,
             },
+            DesktopEvent::Cursor { rect, data } => ServerInput::Cursor {
+                // As in RFB, the rect's origin is the hotspot.
+                hotspot_x: rect.x,
+                hotspot_y: rect.y,
+                width: rect.width,
+                height: rect.height,
+                data,
+            },
+            DesktopEvent::CursorDefault => ServerInput::CursorDefault,
+            DesktopEvent::CursorHidden => ServerInput::CursorHidden,
             DesktopEvent::Clipboard(text) => ServerInput::Clipboard(text),
             DesktopEvent::State(DesktopState::Disconnected) => {
                 let _ = server_in.send(ServerInput::Shutdown).await;

@@ -175,9 +175,13 @@ impl MySqlClient {
                         Some(&3) => (),
                         // Server requests full authentication
                         Some(&4) => {
-                            let response =
-                                caching_sha2_full_auth(&mut stream, &nonce, &effective_password)
-                                    .await?;
+                            let response = caching_sha2_full_auth(
+                                &mut stream,
+                                &nonce,
+                                &effective_password,
+                                target.tls.mode,
+                            )
+                            .await?;
                             stream.push(&&response[..], ())?;
                             stream.flush().await?;
                         }
@@ -265,9 +269,16 @@ async fn caching_sha2_full_auth(
     stream: &mut MySqlStream<TcpStream, ClientTlsStream<TcpStream>>,
     nonce: &[u8],
     password: &str,
+    tls_mode: TlsMode,
 ) -> Result<Vec<u8>, MySqlError> {
     if stream.is_tls() {
         return Ok(password_nul(password));
+    }
+    if tls_mode != TlsMode::Disabled {
+        return Err(MySqlError::ProtocolError(
+            "target requests caching_sha2_password full authentication over a plaintext connection"
+                .to_owned(),
+        ));
     }
 
     stream.push(&&[2_u8][..], ())?;

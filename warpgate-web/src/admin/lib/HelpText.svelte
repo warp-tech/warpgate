@@ -24,4 +24,8 @@
         border-left: 2px dashed rgba(var(--bs-secondary-color-rgb), 30%);
         border-left-style: dotted;
     }
+
+    small + :global(small) {
+        margin-top: -1rem;
+    }
 </style>

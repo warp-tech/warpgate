@@ -201,8 +201,12 @@ where
     Ok(())
 }
 
+/// Maximum payload size representable by a 3-byte Tight compact length (22 bits = 4 MiB - 1).
+const MAX_TIGHT_COMPACT_LEN: usize = 0x3f_ffff;
+
 /// Append a Tight "compact length" (1–3 bytes, 7 bits each, little-endian, MSB=continue).
 fn push_tight_compact_len(msg: &mut Vec<u8>, len: usize) {
+    debug_assert!(len <= MAX_TIGHT_COMPACT_LEN);
     msg.push((len & 0x7f) as u8 | if len >= 0x80 { 0x80 } else { 0 });
     if len >= 0x80 {
         msg.push(((len >> 7) & 0x7f) as u8 | if len >= 0x4000 { 0x80 } else { 0 });
@@ -226,6 +230,12 @@ pub async fn write_tight_jpeg_rect<S>(
 where
     S: AsyncWrite + Unpin,
 {
+    if jpeg.len() > MAX_TIGHT_COMPACT_LEN {
+        bail!(
+            "Tight JPEG payload too large ({} bytes, max {MAX_TIGHT_COMPACT_LEN})",
+            jpeg.len()
+        );
+    }
     let mut msg = Vec::with_capacity(20 + jpeg.len());
     push_single_rect_fb_update_header(&mut msg, x, y, w, h, ENCODING_TIGHT);
     msg.push(TIGHT_JPEG_CONTROL);

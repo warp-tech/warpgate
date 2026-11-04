@@ -27,7 +27,7 @@ use tokio_tungstenite::{Connector, client_async_tls_with_config, tungstenite};
 use uuid::Uuid;
 use warpgate_ca::CLUSTER_TLS_SNI_NAME;
 use warpgate_common::helpers::websocket::pump_websocket;
-use warpgate_common::http_headers::may_forward_header;
+use warpgate_common::http_headers::{is_forwarding_header, may_forward_header};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::get_client_ip;
 use warpgate_common_http::{
@@ -298,9 +298,10 @@ fn path_and_query(req: &Request) -> String {
 /// (connection management plus any `x-warpgate-*` credential), plus message
 /// framing — the body is re-streamed, so the original framing headers don't
 /// apply — and the client's cookies: the peer hop is authorized by the node's
-/// TLS identity alone.
+/// TLS identity alone. Forwarding headers pass through so the peer resolves
+/// the same external host and scheme as this node would.
 fn should_forward(name: &HeaderName) -> bool {
-    may_forward_header(name)
+    (may_forward_header(name) || is_forwarding_header(name))
         && name != CONTENT_LENGTH
         && name != TRANSFER_ENCODING
         && name != COOKIE

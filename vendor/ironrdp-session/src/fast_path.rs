@@ -3,7 +3,7 @@ use std::sync::Arc;
 use ironrdp_bulk::BulkCompressor;
 use ironrdp_core::{DecodeErrorKind, ReadCursor, WriteBuf, decode_cursor};
 use ironrdp_graphics::image_processing::PixelFormat;
-use ironrdp_graphics::pointer::{DecodedPointer, PointerBitmapTarget};
+use ironrdp_graphics::pointer::{DecodedPointer, PointerBitmapTarget, PointerError};
 use ironrdp_graphics::rdp6::BitmapStreamDecoder;
 use ironrdp_graphics::rle::RlePixelFormat;
 use ironrdp_pdu::bitmap::BitmapUpdateData;
@@ -339,6 +339,41 @@ impl Processor {
         Ok(vec![update_kind])
     }
 
+    /// Warpgate fork: cache a decoded pointer and hand it to the consumer. A pointer that
+    /// cannot be decoded is reported as the default pointer instead of failing the session:
+    /// a bad cursor is cosmetic, and a valid one can still be unsupported (e.g. a bit depth
+    /// with no decoder).
+    fn apply_decoded_pointer(
+        &mut self,
+        image: &mut DecodedImage,
+        cache_index: u16,
+        decoded_pointer: Result<DecodedPointer, PointerError>,
+        processor_updates: &mut Vec<UpdateKind>,
+    ) -> SessionResult<()> {
+        let decoded_pointer = match decoded_pointer {
+            Ok(pointer) => Arc::new(pointer),
+            Err(error) => {
+                warn!(%error, cache_index, "failed to decode pointer, using the default one");
+                // The slot no longer holds the pointer the server put there.
+                let _ = self.pointer_cache.remove(usize::from(cache_index));
+                processor_updates.push(UpdateKind::PointerDefault);
+                return Ok(());
+            }
+        };
+
+        let _ = self
+            .pointer_cache
+            .insert(usize::from(cache_index), Arc::clone(&decoded_pointer));
+
+        if !self.pointer_software_rendering {
+            processor_updates.push(UpdateKind::PointerBitmap(decoded_pointer));
+        } else if let Some(rect) = image.update_pointer(decoded_pointer)? {
+            processor_updates.push(UpdateKind::Region(rect));
+        }
+
+        Ok(())
+    }
+
     /// Process a pointer update, shared between fast-path and slow-path pipelines.
     pub fn process_pointer_update(
         &mut self,
@@ -387,22 +422,8 @@ impl Processor {
                 }
             }
             PointerUpdateData::Color(pointer) => {
-                let cache_index = pointer.cache_index;
-
-                let decoded_pointer = Arc::new(
-                    DecodedPointer::decode_color_pointer_attribute(&pointer, bitmap_target)
-                        .map_err(|e| SessionError::custom("failed to decode color pointer attribute", e))?,
-                );
-
-                let _ = self
-                    .pointer_cache
-                    .insert(usize::from(cache_index), Arc::clone(&decoded_pointer));
-
-                if !self.pointer_software_rendering {
-                    processor_updates.push(UpdateKind::PointerBitmap(Arc::clone(&decoded_pointer)));
-                } else if let Some(rect) = image.update_pointer(decoded_pointer)? {
-                    processor_updates.push(UpdateKind::Region(rect));
-                }
+                let decoded_pointer = DecodedPointer::decode_color_pointer_attribute(&pointer, bitmap_target);
+                self.apply_decoded_pointer(image, pointer.cache_index, decoded_pointer, &mut processor_updates)?;
             }
             PointerUpdateData::Cached(cached) => {
                 let cache_index = cached.cache_index;
@@ -427,40 +448,20 @@ impl Processor {
                 }
             }
             PointerUpdateData::New(pointer) => {
-                let cache_index = pointer.color_pointer.cache_index;
-
-                let decoded_pointer = Arc::new(
-                    DecodedPointer::decode_pointer_attribute(&pointer, bitmap_target)
-                        .map_err(|e| SessionError::custom("failed to decode pointer attribute", e))?,
+                let decoded_pointer = DecodedPointer::decode_pointer_attribute_with_palette(
+                    &pointer,
+                    bitmap_target,
+                    Some(self.palette.colors()),
                 );
-
-                let _ = self
-                    .pointer_cache
-                    .insert(usize::from(cache_index), Arc::clone(&decoded_pointer));
-
-                if !self.pointer_software_rendering {
-                    processor_updates.push(UpdateKind::PointerBitmap(Arc::clone(&decoded_pointer)));
-                } else if let Some(rect) = image.update_pointer(decoded_pointer)? {
-                    processor_updates.push(UpdateKind::Region(rect));
-                }
+                self.apply_decoded_pointer(image, pointer.color_pointer.cache_index, decoded_pointer, &mut processor_updates)?;
             }
             PointerUpdateData::Large(pointer) => {
-                let cache_index = pointer.cache_index;
-
-                let decoded_pointer: Arc<DecodedPointer> = Arc::new(
-                    DecodedPointer::decode_large_pointer_attribute(&pointer, bitmap_target)
-                        .map_err(|e| SessionError::custom("failed to decode large pointer attribute", e))?,
+                let decoded_pointer = DecodedPointer::decode_large_pointer_attribute_with_palette(
+                    &pointer,
+                    bitmap_target,
+                    Some(self.palette.colors()),
                 );
-
-                let _ = self
-                    .pointer_cache
-                    .insert(usize::from(cache_index), Arc::clone(&decoded_pointer));
-
-                if !self.pointer_software_rendering {
-                    processor_updates.push(UpdateKind::PointerBitmap(Arc::clone(&decoded_pointer)));
-                } else if let Some(rect) = image.update_pointer(decoded_pointer)? {
-                    processor_updates.push(UpdateKind::Region(rect));
-                }
+                self.apply_decoded_pointer(image, pointer.cache_index, decoded_pointer, &mut processor_updates)?;
             }
         };
 
@@ -744,5 +745,85 @@ impl FrameMarkerProcessor {
                 Ok(())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ironrdp_graphics::image_processing::PixelFormat;
+    use ironrdp_pdu::pointer::{
+        CachedPointerAttribute, ColorPointerAttribute, Point16, PointerAttribute, PointerUpdateData,
+    };
+
+    use super::{Processor, ProcessorBuilder, UpdateKind};
+    use crate::image::DecodedImage;
+
+    fn processor() -> Processor {
+        ProcessorBuilder {
+            io_channel_id: 1003,
+            user_channel_id: 1002,
+            share_id: 0,
+            enable_server_pointer: true,
+            pointer_software_rendering: false,
+            bulk_decompressor: None,
+        }
+        .build()
+    }
+
+    fn new_pointer(xor_bpp: u16, xor_mask: &[u8]) -> PointerUpdateData<'_> {
+        PointerUpdateData::New(PointerAttribute {
+            xor_bpp,
+            color_pointer: ColorPointerAttribute {
+                cache_index: 0,
+                hot_spot: Point16 { x: 0, y: 0 },
+                width: 2,
+                height: 2,
+                xor_mask,
+                and_mask: &[],
+            },
+        })
+    }
+
+    /// A palette-indexed cursor is a valid one; it used to fail the whole session.
+    #[test]
+    fn indexed_pointer_is_decoded_with_the_session_palette() {
+        let mut image = DecodedImage::new(PixelFormat::RgbA32, 4, 4);
+        // 8bpp rows are padded to a 2-byte boundary: 2 rows of 2 pixels.
+        let updates = processor()
+            .process_pointer_update(&mut image, new_pointer(8, &[0, 1, 2, 3]))
+            .unwrap();
+
+        assert!(matches!(updates.as_slice(), [UpdateKind::PointerBitmap(pointer)] if pointer.width == 2));
+    }
+
+    #[test]
+    fn undecodable_pointer_falls_back_to_the_default_instead_of_failing() {
+        let mut image = DecodedImage::new(PixelFormat::RgbA32, 4, 4);
+        let updates = processor()
+            .process_pointer_update(&mut image, new_pointer(12, &[0; 8]))
+            .unwrap();
+
+        assert!(matches!(updates.as_slice(), [UpdateKind::PointerDefault]));
+    }
+
+    #[test]
+    fn undecodable_pointer_does_not_leave_the_previous_one_cached() {
+        let mut image = DecodedImage::new(PixelFormat::RgbA32, 4, 4);
+        let mut processor = processor();
+        processor
+            .process_pointer_update(&mut image, new_pointer(32, &[0; 16]))
+            .unwrap();
+        processor
+            .process_pointer_update(&mut image, new_pointer(12, &[0; 8]))
+            .unwrap();
+
+        let updates = processor
+            .process_pointer_update(
+                &mut image,
+                PointerUpdateData::Cached(CachedPointerAttribute { cache_index: 0 }),
+            )
+            .unwrap();
+
+        assert!(updates.is_empty());
     }
 }

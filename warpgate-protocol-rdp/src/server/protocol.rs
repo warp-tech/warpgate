@@ -29,6 +29,16 @@ pub enum Input {
         width: u16,
         height: u16,
     },
+    /// The target's cursor shape: BGRA pixels, top row first, with the hotspot inside them.
+    Cursor {
+        hotspot_x: u16,
+        hotspot_y: u16,
+        width: u16,
+        height: u16,
+        data: Bytes,
+    },
+    CursorDefault,
+    CursorHidden,
     Clipboard(String),
     Shutdown,
 }

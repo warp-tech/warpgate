@@ -98,6 +98,12 @@ pub enum Error {
 
 impl StdError for Box<dyn DatabaseError> {}
 
+impl From<bytes::TryGetError> for Error {
+    fn from(err: bytes::TryGetError) -> Self {
+        Error::protocol(err)
+    }
+}
+
 impl Error {
     #[allow(dead_code)]
     #[inline]

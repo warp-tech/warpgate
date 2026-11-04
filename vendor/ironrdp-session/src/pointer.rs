@@ -18,6 +18,10 @@ impl PointerCache {
         self.cache.get(&id).cloned()
     }
 
+    pub fn remove(&mut self, id: usize) -> Option<Arc<DecodedPointer>> {
+        self.cache.remove(&id)
+    }
+
     pub fn is_cached(&self, id: usize) -> bool {
         self.cache.contains_key(&id)
     }

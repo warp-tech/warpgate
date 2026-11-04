@@ -22,8 +22,14 @@ pub async fn admin_permission_set(
         return Ok(AdminPermissionSet::none());
     };
 
-    let db = &ctx.services().db;
-    let Some(user_model) = User::Entity::find_by_id(full.user_id()).one(db).await? else {
+    user_admin_permission_set(&ctx.services().db, full.user_id()).await
+}
+
+pub async fn user_admin_permission_set(
+    db: &sea_orm::DatabaseConnection,
+    user_id: uuid::Uuid,
+) -> Result<AdminPermissionSet, WarpgateError> {
+    let Some(user_model) = User::Entity::find_by_id(user_id).one(db).await? else {
         return Ok(AdminPermissionSet::none());
     };
 

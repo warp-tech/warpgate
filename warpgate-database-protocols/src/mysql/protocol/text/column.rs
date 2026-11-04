@@ -134,18 +134,18 @@ impl ColumnDefinition {
 
 impl Decode<'_, Capabilities> for ColumnDefinition {
     fn decode_with(mut buf: Bytes, _: Capabilities) -> Result<Self, Error> {
-        let catalog = buf.get_bytes_lenenc();
-        let schema = buf.get_bytes_lenenc();
-        let table_alias = buf.get_bytes_lenenc();
-        let table = buf.get_bytes_lenenc();
-        let alias = buf.get_bytes_lenenc();
-        let name = buf.get_bytes_lenenc();
-        let _next_len = buf.get_uint_lenenc(); // always 0x0c
-        let char_set = buf.get_u16_le();
-        let max_size = buf.get_u32_le();
-        let type_id = buf.get_u8();
-        let flags = buf.get_u16_le();
-        let decimals = buf.get_u8();
+        let catalog = buf.get_bytes_lenenc()?;
+        let schema = buf.get_bytes_lenenc()?;
+        let table_alias = buf.get_bytes_lenenc()?;
+        let table = buf.get_bytes_lenenc()?;
+        let alias = buf.get_bytes_lenenc()?;
+        let name = buf.get_bytes_lenenc()?;
+        let _next_len = buf.get_uint_lenenc()?; // always 0x0c
+        let char_set = buf.try_get_u16_le()?;
+        let max_size = buf.try_get_u32_le()?;
+        let type_id = buf.try_get_u8()?;
+        let flags = buf.try_get_u16_le()?;
+        let decimals = buf.try_get_u8()?;
 
         Ok(Self {
             catalog,

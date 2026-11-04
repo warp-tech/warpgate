@@ -98,7 +98,7 @@
 </script>
 
 <div class="page-summary-bar">
-    <h1>Secret backends</h1>
+    <h1>secret backends</h1>
     {#if $adminPermissions.configEdit}
         <Button class="ms-auto" color="primary" onclick={openCreate}>
             Add a secret backend
@@ -112,9 +112,7 @@
 
 {#key gen}
     <ItemList {load} showSearch={false}>
-        {#snippet item(
-            backend,
-        )}
+        {#snippet item(backend)}
             {const probe = $derived(health.get(backend.id))}
             <div class="list-group-item px-0">
                 <div class="d-flex align-items-center gap-2">

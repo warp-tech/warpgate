@@ -20,9 +20,18 @@ static DONT_FORWARD_HEADERS: LazyLock<HashSet<HeaderName>> = LazyLock::new(|| {
     s
 });
 
+pub fn is_forwarding_header(header_name: &HeaderName) -> bool {
+    header_name == http::header::FORWARDED
+        || header_name == X_FORWARDED_FOR
+        || header_name == X_FORWARDED_HOST
+        || header_name == X_FORWARDED_PROTO
+        || header_name == X_REAL_IP
+}
+
 pub static X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
 pub static X_FORWARDED_HOST: HeaderName = HeaderName::from_static("x-forwarded-host");
 pub static X_FORWARDED_PROTO: HeaderName = HeaderName::from_static("x-forwarded-proto");
+pub static X_REAL_IP: HeaderName = HeaderName::from_static("x-real-ip");
 
 pub static X_WARPGATE_TOKEN: HeaderName = HeaderName::from_static("x-warpgate-token");
 pub static X_WARPGATE_CLUSTER_NODE: HeaderName = HeaderName::from_static("x-warpgate-cluster-node");
@@ -34,5 +43,7 @@ pub static X_WARPGATE_CLUSTER_CLIENT_IP: HeaderName =
     HeaderName::from_static("x-warpgate-cluster-client-ip");
 
 pub fn may_forward_header(header_name: &HeaderName) -> bool {
-    !DONT_FORWARD_HEADERS.contains(header_name) && !header_name.as_str().starts_with("x-warpgate-")
+    !DONT_FORWARD_HEADERS.contains(header_name)
+        && !is_forwarding_header(header_name)
+        && !header_name.as_str().starts_with("x-warpgate-")
 }

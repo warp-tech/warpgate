@@ -117,8 +117,13 @@ pub enum DesktopEvent {
         src_x: u16,
         src_y: u16,
     },
-    /// The mouse cursor shape changed (BGRA pixels for `rect`).
+    /// The mouse cursor shape changed (BGRA pixels, top row first, for `rect`). As in RFB,
+    /// `rect.x` and `rect.y` are the hotspot rather than a position.
     Cursor { rect: DesktopRect, data: Bytes },
+    /// The mouse cursor reverted to the viewer's own default arrow.
+    CursorDefault,
+    /// The mouse cursor was hidden.
+    CursorHidden,
     /// The remote clipboard contents changed.
     Clipboard(String),
     /// The remote rang the bell.

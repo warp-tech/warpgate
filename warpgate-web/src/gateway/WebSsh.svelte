@@ -154,15 +154,22 @@
             return
         }
         switch (msg.type) {
-            case 'state':
+            case 'state': {
+                // the server replays the phase on every attach, so act on transitions only
+                const wasConnected = phase?.phase === 'connected'
                 phase = msg
-                if (msg.phase === 'connected' && channelOrder.length === 0) {
+                if (
+                    msg.phase === 'connected' &&
+                    !wasConnected &&
+                    channelOrder.length === 0
+                ) {
                     requestNewChannel()
                 }
                 if (msg.phase === 'closed') {
                     ws.close()
                 }
                 break
+            }
             case 'channel_opened':
                 openChannel(msg.channel_id)
                 break

@@ -232,14 +232,14 @@ impl russh::server::Handler for ServerHandler {
     async fn auth_publickey_offered(
         &mut self,
         user: &str,
-        key: &russh::keys::PublicKey,
+        offer: russh::server::PublicKeyOffer<'_>,
     ) -> Result<Auth, Self::Error> {
         let user = Secret::new(user.to_string());
         let (tx, rx) = oneshot::channel();
 
         self.send_event(ServerHandlerEvent::AuthPublicKeyOffer(
             user,
-            key.clone(),
+            offer.public_key.clone(),
             tx,
         ))?;
 
@@ -249,12 +249,16 @@ impl russh::server::Handler for ServerHandler {
     async fn auth_publickey(
         &mut self,
         user: &str,
-        key: &russh::keys::PublicKey,
+        key: russh::server::VerifiedPublicKey<'_>,
     ) -> Result<Auth, Self::Error> {
         let user = Secret::new(user.to_string());
         let (tx, rx) = oneshot::channel();
 
-        self.send_event(ServerHandlerEvent::AuthPublicKey(user, key.clone(), tx))?;
+        self.send_event(ServerHandlerEvent::AuthPublicKey(
+            user,
+            key.public_key.clone(),
+            tx,
+        ))?;
 
         let result = rx.await.unwrap_or(Auth::UnsupportedMethod);
         Ok(result)

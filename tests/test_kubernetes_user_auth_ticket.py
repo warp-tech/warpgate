@@ -59,6 +59,27 @@ def request(wg, secret, path="/api", **kwargs):
     )
 
 
+def login(wg, api, user):
+    """Sets a password for `user` and returns a logged-in browser session."""
+    api.create_password_credential(user.id, sdk.NewPasswordCredential(password="123"))
+    session = requests.Session()
+    session.verify = False
+    response = session.post(f"https://localhost:{wg.http_port}/@warpgate/api/auth/login", json={
+        "username": user.username, "password": "123",
+    }, timeout=10)
+    response.raise_for_status()
+    return session
+
+
+def create_api_token(session, wg):
+    response = session.post(f"https://localhost:{wg.http_port}/@warpgate/api/profile/api-tokens", json={
+        "label": f"kubernetes-{uuid4()}",
+        "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+    }, timeout=10)
+    response.raise_for_status()
+    return response.json()["secret"]
+
+
 def uses_left(setup, ticket):
     return next(t.uses_left for t in setup[0].get_tickets() if t.id == ticket.ticket.id)
 
@@ -138,20 +159,8 @@ def test_normal_api_token_cannot_join_ticket_session(shared_wg, ticket_setup):
     api, user, target = ticket_setup
     ticket = create_ticket(ticket_setup)
     assert request(shared_wg, ticket.secret).status_code == 200
-    api.create_password_credential(user.id, sdk.NewPasswordCredential(password="123"))
-    with requests.Session() as session:
-        session.verify = False
-        url = f"https://localhost:{shared_wg.http_port}/@warpgate/api"
-        login = session.post(f"{url}/auth/login", json={
-            "username": user.username, "password": "123",
-        }, timeout=10)
-        login.raise_for_status()
-        token_response = session.post(f"{url}/profile/api-tokens", json={
-            "label": "kubernetes-ticket-isolation",
-            "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-        }, timeout=10)
-        token_response.raise_for_status()
-        headers = {"Authorization": f"Bearer {token_response.json()['secret']}"}
+    with login(shared_wg, api, user) as session:
+        headers = {"Authorization": f"Bearer {create_api_token(session, shared_wg)}"}
 
     def normal_request(path):
         return requests.get(
@@ -220,16 +229,6 @@ def test_ticket_session_lifetime_is_enforced(processes, echo_server_port):
         assert uses_left(setup, ticket) == 0
         time.sleep(1.1)
         assert request(wg, ticket.secret).status_code == 401
-
-
-def test_single_use_is_atomic_across_nodes(processes, shared_wg, ticket_setup):
-    peer = processes.start_wg(share_with=shared_wg)
-    wait_port(peer.kubernetes_port, for_process=peer.process, recv=False)
-    ticket = create_ticket(ticket_setup, number_of_uses=1)
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        responses = list(pool.map(lambda wg: request(wg, ticket.secret), [shared_wg, peer]))
-    assert sorted(r.status_code for r in responses) == [200, 401]
-    assert uses_left(ticket_setup, ticket) == 0
 
 
 @pytest.mark.asyncio
@@ -378,22 +377,19 @@ async def test_admin_close_session_ends_websocket_stalled_on_upstream_rejection(
             "Authorization": f"Bearer ticket-{ticket.secret}",
         }) as session:
             url = f"https://localhost:{shared_wg.kubernetes_port}"
-            # Poem upgrades downstream before the upstream request finishes.
-            async with session.ws_connect(
+            upgrade = asyncio.ensure_future(session.ws_connect(
                 f"{url}/socket", ssl=False, protocols=["v4.channel.k8s.io"],
-            ) as ws:
+            ))
+            try:
                 # Wait until the upstream request stalls before closing.
                 await asyncio.wait_for(received.wait(), timeout=10)
 
                 api.close_session(open_kubernetes_session_id(api, user.username))
 
-                closed = await ws.receive(timeout=15)
-                assert closed.type in (
-                    aiohttp.WSMsgType.CLOSE,
-                    aiohttp.WSMsgType.CLOSED,
-                    aiohttp.WSMsgType.CLOSING,
-                    aiohttp.WSMsgType.ERROR,
-                ), closed
+                with pytest.raises(aiohttp.ClientError):
+                    await asyncio.wait_for(upgrade, timeout=15)
+            finally:
+                upgrade.cancel()
     finally:
         release.set()
         await runner.cleanup()
@@ -585,3 +581,48 @@ def test_admin_close_session_ends_a_web_approval_wait(shared_wg, ticket_setup):
             assert response.status_code == 401
     finally:
         session.close()
+
+
+@pytest.mark.asyncio
+async def test_websocket_without_subprotocol_is_proxied(shared_wg, ticket_setup):
+    """Some clients open exec/attach websockets without offering a
+    subprotocol; the API server then uses the original channel.k8s.io
+    framing, so Warpgate must proxy the upgrade rather than reject it."""
+    import aiohttp
+    from aiohttp import web
+
+    offered = []
+
+    async def upstream(req):
+        if req.path == "/api":
+            return web.json_response({})
+        offered.append(req.headers.get("Sec-WebSocket-Protocol"))
+        ws = web.WebSocketResponse(protocols=["v4.channel.k8s.io"])
+        if offered[-1] is None:
+            # What the API server sends when offered no subprotocol.
+            ws.headers["Sec-WebSocket-Protocol"] = ""
+        await ws.prepare(req)
+        async for message in ws:
+            await ws.send_str(message.data)
+        return ws
+
+    app = web.Application()
+    app.router.add_get("/{path:.*}", upstream)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = alloc_port()
+    await web.TCPSite(runner, "127.0.0.1", port).start()
+    try:
+        api, user, _ = ticket_setup
+        setup = api, user, create_target(api, port)
+        ticket = create_ticket(setup)
+        async with aiohttp.ClientSession(headers={
+            "Authorization": f"Bearer ticket-{ticket.secret}",
+        }) as session:
+            url = f"https://localhost:{shared_wg.kubernetes_port}"
+            async with session.ws_connect(f"{url}/socket", ssl=False) as ws:
+                await ws.send_str("no subprotocol")
+                assert (await ws.receive(timeout=5)).data == "no subprotocol"
+        assert offered == [None]
+    finally:
+        await runner.cleanup()

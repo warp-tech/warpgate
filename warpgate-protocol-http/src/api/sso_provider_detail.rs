@@ -11,7 +11,7 @@ use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_sso::{SsoClient, SsoLoginRequest, SsoReturnUrlDomainPreference};
 
-use crate::common::{host_is_subdomain_of_or_equal, is_localhost_host};
+use crate::common::host_is_subdomain_of_or_equal;
 
 pub struct Api;
 
@@ -78,7 +78,6 @@ impl Api {
             SsoReturnUrlDomainPreference::ExternalHost
         ) && let (Some(request_host), Some(external_host)) =
             (ctx.trusted_hostname(req), config.external_host_name())
-            && !is_localhost_host(&request_host)
             && !host_is_subdomain_of_or_equal(&request_host, &external_host)
         {
             warn!(
