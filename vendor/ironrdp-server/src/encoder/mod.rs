@@ -137,21 +137,20 @@ impl UpdateEncoder {
                 }
                 #[cfg(feature = "qoi")]
                 UpdateEncoderCodecs { qoi: Some(id), .. } => BitmapUpdater::Qoi(QoiHandler::new(id)),
-                UpdateEncoderCodecs {
-                    remotefx: Some((algo, id)),
-                    ..
-                } => BitmapUpdater::RemoteFx(RemoteFxHandler::new(algo, id, desktop_size)),
-                // NSCodec is the lowest-priority codec because it predates
-                // RemoteFX and produces larger output. It's relevant mainly
-                // for clients (notably macOS Microsoft Remote Desktop /
-                // Windows App) whose legacy bitmap-codec list advertises
-                // only NSCodec — those clients would otherwise fall through
-                // to raw/RLE BitmapUpdate at much higher bandwidth.
+                // NSCodec acima do RemoteFX: o mstsc não decoda o RemoteFX do
+                // ironrdp (tela preta #2606/#2681), mas decoda NSCodec. Clientes
+                // que suportam QOI (web) já foram escolhidos acima e não chegam
+                // aqui; quem tem NSCodec (mstsc, FreeRDP) usa NSCodec comprimido
+                // em vez de cair no RemoteFX preto / raw.
                 #[cfg(feature = "nscodec")]
                 UpdateEncoderCodecs {
                     nscodec: Some((id, cll)),
                     ..
                 } => BitmapUpdater::NsCodec(NsCodecHandler::new(id, cll)),
+                UpdateEncoderCodecs {
+                    remotefx: Some((algo, id)),
+                    ..
+                } => BitmapUpdater::RemoteFx(RemoteFxHandler::new(algo, id, desktop_size)),
                 _ => BitmapUpdater::None(NoneHandler),
             }
         } else {

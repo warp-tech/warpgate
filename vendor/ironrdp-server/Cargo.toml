@@ -45,6 +45,7 @@ default = [
     "rayon",
     "qoi",
     "qoiz",
+    "nscodec",
 ]
 egfx = ["dep:ironrdp-egfx"]
 helper = [

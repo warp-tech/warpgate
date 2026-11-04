@@ -858,6 +858,20 @@ List of codecs:
         });
     }
 
+    // NSCodec: codec padrão suportado por clientes Microsoft (mstsc) que não
+    // decodam o RemoteFX do ironrdp (tela preta). Anunciar permite usá-lo como
+    // alternativa comprimida. Ligado por padrão; desligar com "nscodec:off".
+    if config.remove("nscodec").unwrap_or(true) {
+        codecs.push(Codec {
+            id: 1,
+            property: CodecProperty::NsCodec(NsCodec {
+                is_dynamic_fidelity_allowed: true,
+                is_subsampling_allowed: true,
+                color_loss_level: 3,
+            }),
+        });
+    }
+
     #[cfg(feature = "qoi")]
     if config.remove("qoi").unwrap_or(true) {
         codecs.push(Codec {
