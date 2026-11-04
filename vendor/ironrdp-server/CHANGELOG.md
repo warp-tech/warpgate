@@ -6,6 +6,152 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [[0.14.0](https://github.com/Devolutions/IronRDP/compare/ironrdp-server-v0.13.0...ironrdp-server-v0.14.0)] - 2026-10-27
+
+### <!-- 0 -->Security
+
+- Add `RdpServer::enable_heartbeat` and `HeartbeatConfig` to send periodic Server Heartbeat PDUs ([#1842](https://github.com/Devolutions/IronRDP/issues/1842)) ([8f57691a9a](https://github.com/Devolutions/IronRDP/commit/8f57691a9a6e497388dc2824bffe93eeed7bb698))
+
+- Log the Initiate Multitransport Response at debug level instead of warning about an unhandled message channel PDU ([#1964](https://github.com/Devolutions/IronRDP/issues/1964)) ([6aebe6d0b1](https://github.com/Devolutions/IronRDP/commit/6aebe6d0b11c4aa3c99252bd986e138e43756a6d))
+
+- Add `RdpServerBuilder::with_udp_transport` to offer UDP multitransport under TLS or Hybrid security and move EGFX traffic to it ([#1954](https://github.com/Devolutions/IronRDP/issues/1954)) ([73dfa30e38](https://github.com/Devolutions/IronRDP/commit/73dfa30e3831e51cf8aa58f93e27b1b00102a7ec))
+
+- Add `ConnectionSource`, `IncomingConnection`, `RdpServer::serve` and `RdpServer::serve_connection`, which apply the connection policy to connections the embedder accepts ([#2116](https://github.com/Devolutions/IronRDP/issues/2116)) ([350520684c](https://github.com/Devolutions/IronRDP/commit/350520684c028f9d50343f64f6afb93475b7ac33))
+
+- [**breaking**] Add `ServerRedirectionHandle` (`RdpServer::server_redirection_handle`) to send a Server Redirection PDU, and `ConnectionInfo::routing_token`, `redirected_session_id` and `password_cookie` ([#2208](https://github.com/Devolutions/IronRDP/issues/2208)) ([485657a6ec](https://github.com/Devolutions/IronRDP/commit/485657a6eca682a0356e100a9fda229342861fd7))
+
+### <!-- 1 -->Features
+
+- Add `StaticChannelFactory` and `RdpServerBuilder::with_static_channel_factory` to create static channel processors for each connection, and re-export `Acceptor` ([#1633](https://github.com/Devolutions/IronRDP/issues/1633)) ([e48b29c017](https://github.com/Devolutions/IronRDP/commit/e48b29c0173096c1718c9f657bed3a59926aa97c))
+
+- Report the measured round-trip time and bandwidth to the client in Network Characteristics Results ([#1470](https://github.com/Devolutions/IronRDP/issues/1470)) ([224e8db7ce](https://github.com/Devolutions/IronRDP/commit/224e8db7cec2dad39032aac097f550a6600e742c))
+
+- Add `RdpServerBuilder::with_remotefx_quant` to set the RemoteFX quantization table ([#1685](https://github.com/Devolutions/IronRDP/issues/1685)) ([925e7c0f7c](https://github.com/Devolutions/IronRDP/commit/925e7c0f7cb7ae937a92ec93d4cb758289594cc0))
+
+- [**breaking**] Add `ConnectionInfo` with the client's keyboard layout, type and IME file name, passed to the new `ConnectionHandler::on_connection_info` ([#1691](https://github.com/Devolutions/IronRDP/issues/1691)) ([393869b30b](https://github.com/Devolutions/IronRDP/commit/393869b30b1078da7204c6bf20e8a5472e419070))
+
+- Add `RdpServer::autodetect_baseline_rtt_handle` and `RdpServerBuilder::with_autodetect_baseline_rtt_handle` for the lowest round-trip time of the session ([#1737](https://github.com/Devolutions/IronRDP/issues/1737)) ([ac7800c989](https://github.com/Devolutions/IronRDP/commit/ac7800c989dd5926eef2a1adf983458ad0aec9ee))
+
+- [**breaking**] `MouseEvent` button and scroll events carry the pointer position, and the new `MouseButton` covers X1 and X2 ([#1769](https://github.com/Devolutions/IronRDP/issues/1769)) ([e9c5b1c54a](https://github.com/Devolutions/IronRDP/commit/e9c5b1c54a1153e5d7116d7fadf636bd551020ea))
+
+- Add `RdpeiServerFactory` and `RdpServerBuilder::with_rdpei_factory` for MS-RDPEI multitouch and pen input ([#1773](https://github.com/Devolutions/IronRDP/issues/1773)) ([aa260fef9e](https://github.com/Devolutions/IronRDP/commit/aa260fef9ebbc0a420b17e796616d710fb41e702))
+
+- Add `RdpServerBuilder::with_usb_factory` for MS-RDPEUSB USB redirection ([#1417](https://github.com/Devolutions/IronRDP/issues/1417)) ([4755faec5e](https://github.com/Devolutions/IronRDP/commit/4755faec5efb1649e2cb839f553c8aaae7534aad))
+
+- [**breaking**] Add `ServerError`, `ServerErrorKind` and `ServerResult` for the public API ([#1242](https://github.com/Devolutions/IronRDP/issues/1242)) ([b5b9558eae](https://github.com/Devolutions/IronRDP/commit/b5b9558eae164a3500ace069b4db12be25eba7bd))
+
+- [**breaking**] `ConnectionHandler::on_disconnected` receives a `ServerError` instead of an `anyhow::Error` ([#1244](https://github.com/Devolutions/IronRDP/issues/1244)) ([b919a41932](https://github.com/Devolutions/IronRDP/commit/b919a419320dfabe4b932c0d3d623386883b072f))
+
+- [**breaking**] The display traits return `ServerResult` instead of `anyhow::Result`, and `anyhow` is no longer a dependency ([#1245](https://github.com/Devolutions/IronRDP/issues/1245)) ([9abd6eb482](https://github.com/Devolutions/IronRDP/commit/9abd6eb482d8e7bcc64d578fc0a97bb12b6c82d9))
+
+- Add `RdpServer::autodetect_bandwidth_handle` and `RdpServerBuilder::with_autodetect_bandwidth_handle` for the measured bandwidth ([#1734](https://github.com/Devolutions/IronRDP/issues/1734)) ([e01839bfd8](https://github.com/Devolutions/IronRDP/commit/e01839bfd84ff5a392ca81ae80c0350bf457f7b1))
+
+- Add `RdpdrServerFactory` and `RdpServerBuilder::with_rdpdr_factory` for device redirection ([#1784](https://github.com/Devolutions/IronRDP/issues/1784)) ([695af5a6e8](https://github.com/Devolutions/IronRDP/commit/695af5a6e814badb3daa60184a8d2048d0e66716))
+
+- Add `ServerEvent::Disconnect` and `ErrorInfoDisconnectHandle` (`RdpServer::error_info_disconnect_handle`) to disconnect a client with a Set Error Info PDU ([#1798](https://github.com/Devolutions/IronRDP/issues/1798)) ([f7253861fa](https://github.com/Devolutions/IronRDP/commit/f7253861faa430d28c9dbce29d3e9e930c54748f))
+
+- [**breaking**] Support the Large Pointer Capability Set and add the `LargePointer` display update ([#1787](https://github.com/Devolutions/IronRDP/issues/1787)) ([bde5824213](https://github.com/Devolutions/IronRDP/commit/bde5824213bfbc59d83c8fb3d2cfbc69ad9dab77))
+
+- Log EGFX flow-control changes and frame acknowledgements at debug level, and warn on an acknowledgement for an unknown frame ([#1834](https://github.com/Devolutions/IronRDP/issues/1834)) ([8d1e91eb32](https://github.com/Devolutions/IronRDP/commit/8d1e91eb3256e0ba007e909512bbaf84cb76d67b))
+
+- Add `RdpServerBuilder::with_preempt_existing_session` to let an authenticated connection replace the active session ([#1476](https://github.com/Devolutions/IronRDP/issues/1476)) ([5198cde0f7](https://github.com/Devolutions/IronRDP/commit/5198cde0f73485f3fbd999ea7c49293c86b80387))
+
+- Add `ConnectionPolicy` and `RdpServerBuilder::with_connection_policy` to queue or reject a connection that arrives during a session ([#1913](https://github.com/Devolutions/IronRDP/issues/1913)) ([f7732a1639](https://github.com/Devolutions/IronRDP/commit/f7732a16392b5857a698182ffd37221da1010a2a))
+
+- Add `RdpeaiServerFactory` and `RdpServerBuilder::with_rdpeai_factory` for MS-RDPEAI audio input ([#1946](https://github.com/Devolutions/IronRDP/issues/1946)) ([5b139ba3df](https://github.com/Devolutions/IronRDP/commit/5b139ba3df92b05154bcedc5bc13b2c0b61866d8))
+
+- Add `RdpServer::autodetect_bandwidth_generation_handle` and `RdpServerBuilder::with_autodetect_bandwidth_generation_handle`, which count completed bandwidth measurements ([#1963](https://github.com/Devolutions/IronRDP/issues/1963)) ([ded2caa118](https://github.com/Devolutions/IronRDP/commit/ded2caa1184fd3b2671b9725ff26052383a0be16))
+
+- Add `RdpServerDisplay::monitor_count`, reported in the Display Control capabilities ([#1918](https://github.com/Devolutions/IronRDP/issues/1918)) ([25331598f3](https://github.com/Devolutions/IronRDP/commit/25331598f37f49573205c54ee45c878d291317f2))
+
+- `ConnectionPolicy` defaults to `Preempt` under Hybrid security, where CredSSP authenticates every takeover; `ConnectionPolicy::default_for` returns the default for a security mode ([#1934](https://github.com/Devolutions/IronRDP/issues/1934)) ([9cb20336f6](https://github.com/Devolutions/IronRDP/commit/9cb20336f6f586cd5c9c06b6907d1b3f2e51b405))
+
+- [**breaking**] Add `ConnectionBinder` and `RdpServerBuilder::with_connection_binder` to bind an authenticated connection to a per-user display and input handler ([#1413](https://github.com/Devolutions/IronRDP/issues/1413)) ([15bed4ee0e](https://github.com/Devolutions/IronRDP/commit/15bed4ee0ebef4b851c024edfcd4b1675d6e9ee8))
+
+- Add `RdpServerBuilder::with_auto_reconnect_on_request` and `RdpServer::set_auto_reconnect_on_request` to issue auto-reconnect cookies only once the embedder authenticates the user ([#2046](https://github.com/Devolutions/IronRDP/issues/2046)) ([bf019ca502](https://github.com/Devolutions/IronRDP/commit/bf019ca502d1e52616853a5ded68c885cec1e322))
+
+- Add `RdpServerDisplay::offers_display_control` to decline the Display Control channel ([#1985](https://github.com/Devolutions/IronRDP/issues/1985)) ([7b976a6965](https://github.com/Devolutions/IronRDP/commit/7b976a6965c96c76ff949313e174ea55dada8c44))
+
+- Add `ConnectionInfo::client_monitors` with the client's monitors ([#2129](https://github.com/Devolutions/IronRDP/issues/2129)) ([da166aa488](https://github.com/Devolutions/IronRDP/commit/da166aa4883a4868638d3c65ecf44b8b3895acfb))
+
+- Measure bandwidth on the UDP tunnel once EGFX uses it ([#2031](https://github.com/Devolutions/IronRDP/issues/2031)) ([cb7ca37680](https://github.com/Devolutions/IronRDP/commit/cb7ca3768092fcc43a09a1b401cdd8abb873db42))
+
+### <!-- 4 -->Bug Fixes
+
+- Add `RdpServerBuilder::with_remotefx_entropy_coder`, and pick the first entropy coder the client offers instead of the last one ([#1686](https://github.com/Devolutions/IronRDP/issues/1686)) ([185f312019](https://github.com/Devolutions/IronRDP/commit/185f3120199f0373a11c7e21cecfac77b7be56af))
+
+- `run_connection` releases the static channels when the connection ends ([#1721](https://github.com/Devolutions/IronRDP/issues/1721)) ([8b1f0dab08](https://github.com/Devolutions/IronRDP/commit/8b1f0dab088c2205ec1d9e8cb1b49bf902971b23))
+
+- [**breaking**] Remove the `tokio` and `tokio_rustls` re-exports ([#1796](https://github.com/Devolutions/IronRDP/issues/1796)) ([cac7bd6f37](https://github.com/Devolutions/IronRDP/commit/cac7bd6f37120711570b0156dd87c8ce6145fad6))
+
+- Use New Pointer Updates only within the pointer cache size the client advertises ([#1786](https://github.com/Devolutions/IronRDP/issues/1786)) ([e01cc76116](https://github.com/Devolutions/IronRDP/commit/e01cc76116fc0b238bca25acccce03eadb158550))
+
+- Disable Nagle's algorithm on accepted connections ([#1799](https://github.com/Devolutions/IronRDP/issues/1799)) ([915e681845](https://github.com/Devolutions/IronRDP/commit/915e681845d9c27198776d735952c272e19566b9))
+
+- USB redirection requests a zero maximum packet size for each pipe instead of one derived from the device speed ([#1871](https://github.com/Devolutions/IronRDP/issues/1871)) ([6a5d7c23fe](https://github.com/Devolutions/IronRDP/commit/6a5d7c23fe312b6c7b01f25c6a8e4c436309df00))
+
+- Time out connection finalization after 30 seconds, so a client that stops responding cannot hold the server ([#1890](https://github.com/Devolutions/IronRDP/issues/1890)) ([a8b4b2a7ed](https://github.com/Devolutions/IronRDP/commit/a8b4b2a7ed6f86a16a31e304538823520db0d830))
+
+- A clipboard failure no longer ends the session ([#1980](https://github.com/Devolutions/IronRDP/issues/1980)) ([124406d881](https://github.com/Devolutions/IronRDP/commit/124406d881af377cb339e8c131831f69e3cf7e45))
+
+- Drop RDPSND waves and volume changes that arrive before the channel negotiates, which failed the next connection ([#1990](https://github.com/Devolutions/IronRDP/issues/1990)) ([2e872b085b](https://github.com/Devolutions/IronRDP/commit/2e872b085b504cf3b9ce9994237270f71a35d13a))
+
+- Keep calling `ConnectionHandler::on_connection_info` for the live connection while a `Preempt` candidate negotiates ([#2065](https://github.com/Devolutions/IronRDP/issues/2065)) ([458545e6d5](https://github.com/Devolutions/IronRDP/commit/458545e6d5c5963a3673e7f686c0bdee3848b58b))
+
+- Drop the previous session's queued events before every connection ([#2034](https://github.com/Devolutions/IronRDP/issues/2034)) ([2c08bda7c5](https://github.com/Devolutions/IronRDP/commit/2c08bda7c5f9ad490e01f123b3be5521cf3c6e9d))
+
+- [**breaking**] Remove `RdpServer::rtt_snapshot`, `get_svc_processor` and `get_channel_id_by_type`, as channels and auto-detect state now belong to each connection; the baseline round-trip time no longer carries over between connections ([#2059](https://github.com/Devolutions/IronRDP/issues/2059)) ([0e9dc1f712](https://github.com/Devolutions/IronRDP/commit/0e9dc1f71237c75ba1f856b1996f5994931dd31e))
+
+- Respect the client's frame acknowledgement limit for EGFX frames ([#2102](https://github.com/Devolutions/IronRDP/issues/2102)) ([e4143f2630](https://github.com/Devolutions/IronRDP/commit/e4143f26306a6639a889d80c1c484ca69c365a8f))
+
+- Measure bandwidth across a single large EGFX write instead of a fixed window that timed idle traffic ([#2021](https://github.com/Devolutions/IronRDP/issues/2021)) ([b5bbd8a598](https://github.com/Devolutions/IronRDP/commit/b5bbd8a59829450cb85ca834836b2e030fb53dde))
+
+- Send an AND mask with 32 bpp pointers, which Windows App for macOS requires ([#2108](https://github.com/Devolutions/IronRDP/issues/2108)) ([fb25b47c0c](https://github.com/Devolutions/IronRDP/commit/fb25b47c0ce22233b4992ec0e70560fb56b8f200))
+
+- Drive the clipboard channel timeouts, which released locks and failed abandoned file contents requests ([#1979](https://github.com/Devolutions/IronRDP/issues/1979)) ([3db08ba869](https://github.com/Devolutions/IronRDP/commit/3db08ba86983ce35c9d36ad33f59ceb4b607dce8))
+
+- [**breaking**] `RdpServerDisplay::updates` takes a `DisplayContext` for the connection ([#2073](https://github.com/Devolutions/IronRDP/issues/2073)) ([9e85975616](https://github.com/Devolutions/IronRDP/commit/9e85975616c14fc2f4ad422d3a53255a4fbee345))
+
+- [**breaking**] `GfxServerFactory` build methods take a `GfxContext`, and `DisplayContext::gfx_handle` replaces `RdpServer::gfx_handle` ([#2104](https://github.com/Devolutions/IronRDP/issues/2104)) ([7bca756755](https://github.com/Devolutions/IronRDP/commit/7bca756755ef856bd5aaaff97612bea875dbad5c))
+
+- Advertise horizontal mouse wheel input, which mstsc otherwise does not send ([#2236](https://github.com/Devolutions/IronRDP/issues/2236)) ([2110ab2572](https://github.com/Devolutions/IronRDP/commit/2110ab25728ca0b2f1ad79aa90b834af2d3de5c6))
+
+- Add `RdpServerBuilder::with_egfx_core_frame_ack_limit` and `RdpServer::set_egfx_core_frame_ack_limit`; the core frame acknowledgement limit no longer caps the EGFX window by default ([#2238](https://github.com/Devolutions/IronRDP/issues/2238)) ([0de133426b](https://github.com/Devolutions/IronRDP/commit/0de133426b8f7423f78dd6c63d8eba4f4d2365eb))
+
+- Send RemoteFX in Stream Surface Bits when the client supports it, and prefer RemoteFX over ImageRemoteFX ([#2229](https://github.com/Devolutions/IronRDP/issues/2229)) ([e20a214703](https://github.com/Devolutions/IronRDP/commit/e20a2147038b8226701d9cf6b59d2c895fa51480))
+
+### <!-- 7 -->Build
+
+- [**breaking**] Update `ironrdp-acceptor` public dependency to 0.12
+
+- [**breaking**] Update `ironrdp-cliprdr` public dependency to 0.9
+
+- [**breaking**] Update `ironrdp-connector` public dependency to 0.12
+
+- [**breaking**] Update `ironrdp-displaycontrol` public dependency to 0.10
+
+- [**breaking**] Update `ironrdp-dvc` public dependency to 0.10
+
+- [**breaking**] Update `ironrdp-echo` public dependency to 0.6
+
+- [**breaking**] Update `ironrdp-graphics` public dependency to 0.11
+
+- [**breaking**] Update `ironrdp-pdu` public dependency to 0.11
+
+- [**breaking**] Update `ironrdp-rdpdr` public dependency to 0.9
+
+- [**breaking**] Update `ironrdp-rdpeai` public dependency to 0.2
+
+- [**breaking**] Update `ironrdp-rdpei` public dependency to 0.3
+
+- [**breaking**] Update `ironrdp-rdpeudp-tokio` public dependency to 0.2
+
+- [**breaking**] Update `ironrdp-rdpsnd` public dependency to 0.11
+
+- [**breaking**] Update `ironrdp-svc` public dependency to 0.10
+
+
+
 ## [[0.13.0](https://github.com/Devolutions/IronRDP/compare/ironrdp-server-v0.12.0...ironrdp-server-v0.13.0)] - 2026-07-10
 
 ### <!-- 0 -->Security
