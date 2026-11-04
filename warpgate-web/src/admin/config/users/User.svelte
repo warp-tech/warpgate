@@ -152,7 +152,7 @@
         }
         if (confirm(`Delete user ${user.username}?`)) {
             await api.deleteUser(user)
-            replace('/config/users')
+            replace('/manage/users')
         }
     }
 

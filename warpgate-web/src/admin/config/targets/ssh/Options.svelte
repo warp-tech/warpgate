@@ -181,7 +181,7 @@
         </FormGroup>
         <a
             class="btn btn-link mb-3 d-flex align-items-center"
-            href="/@warpgate/admin#/config/ssh"
+            href="/@warpgate/admin#/manage/ssh"
             target="_blank"
         >
             <Fa fw icon={faExternalLink} />

@@ -40,7 +40,7 @@
         <h1>roles</h1>
         <a
             class="btn btn-primary ms-auto"
-            href="/config/access-roles/create"
+            href="/manage/access-roles/create"
             class:disabled={!$adminPermissions.accessRolesCreate}
             use:link
         >
@@ -52,7 +52,7 @@
         {#snippet item(role)}
             <a
                 class="list-group-item list-group-item-action"
-                href="/config/access-roles/{role.id}"
+                href="/manage/access-roles/{role.id}"
                 use:link
             >
                 <div>

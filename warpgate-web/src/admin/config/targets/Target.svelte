@@ -93,7 +93,7 @@
         if (!target) return
         if (confirm(`Delete target ${target.name}?`)) {
             await api.deleteTarget(target)
-            replace('/config/targets')
+            replace('/manage/targets')
         }
     }
 

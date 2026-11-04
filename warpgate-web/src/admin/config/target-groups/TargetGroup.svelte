@@ -83,7 +83,7 @@
         try {
             await api.deleteTargetGroup({ id: groupId })
             // Redirect to groups list
-            replace('/config/target-groups')
+            replace('/manage/target-groups')
         } catch (e) {
             error = await stringifyError(e)
             throw e

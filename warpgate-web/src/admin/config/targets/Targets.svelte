@@ -167,7 +167,7 @@
             {/if}
             <a
                 class="btn btn-primary"
-                href="/config/targets/create"
+                href="/manage/targets/create"
                 class:disabled={!$adminPermissions.targetsCreate}
                 use:link
             >
@@ -205,7 +205,7 @@
             {#snippet item(target, cells)}
                 <a
                     class="list-group-item list-group-item-action"
-                    href="/config/targets/{target.id}"
+                    href="/manage/targets/{target.id}"
                     use:link
                 >
                     {@render cells(target)}

@@ -308,7 +308,7 @@
             </DropdownItem>
             {#if canEditTargets}
                 <DropdownItem
-                    href={`/@warpgate/admin#/config/targets/${target.id}`}
+                    href={`/@warpgate/admin#/manage/targets/${target.id}`}
                     onclick={e => e.stopPropagation()}
                 >
                     Edit target

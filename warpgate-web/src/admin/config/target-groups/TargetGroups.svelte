@@ -71,7 +71,7 @@
         <h1>target groups</h1>
         <a
             class="btn btn-primary ms-auto"
-            href="/config/target-groups/create"
+            href="/manage/target-groups/create"
             class:disabled={!$adminPermissions.targetsCreate}
             use:link
         >
@@ -97,7 +97,7 @@
         {#snippet item(group, cells)}
             <a
                 class="list-group-item list-group-item-action"
-                href="/config/target-groups/{group.id}"
+                href="/manage/target-groups/{group.id}"
                 use:link
             >
                 {@render cells(group)}

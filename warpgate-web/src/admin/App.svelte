@@ -90,9 +90,16 @@
                 filterKind: 'admin-role',
             },
         }),
+        '/manage': wrap({
+            component: Redirect,
+            props: { to: '/manage/targets' },
+        }),
+        '/manage/*': wrap({
+            asyncComponent: () => import('./config/Manage.svelte'),
+        }),
         '/config': wrap({
             component: Redirect,
-            props: { to: '/config/targets' },
+            props: { to: '/config/parameters' },
         }),
         '/config/*': wrap({
             asyncComponent: () => import('./config/Config.svelte'),
@@ -131,6 +138,7 @@
             </a>
             {#if $serverInfo?.username}
                 <a
+                    class="navlink"
                     use:link
                     use:active={{ path: /^\/status\// }}
                     href="/status/sessions"
@@ -138,14 +146,22 @@
                     Status
                 </a>
                 <a
+                    class="navlink"
                     use:link
-                    use:active
+                    use:active={{ path: /^\/manage\// }}
+                    href="/manage"
+                >
+                    Manage
+                </a>
+                <a
+                    class="navlink"
+                    use:link
                     use:active={{ path: /^\/config\// }}
                     href="/config"
                 >
                     Config
                 </a>
-                <a use:link use:active href="/log">Log</a>
+                <a class="navlink" use:link use:active href="/log">Log</a>
             {/if}
             <span class="ms-3"></span>
             <div class="ms-auto d-flex align-items-center">
@@ -231,6 +247,12 @@
         min-width: 0;
     }
 
+    .navlink {
+        margin-bottom: 2px;
+        font-size: 1.25rem;
+        margin-right: 15px;
+    }
+
     main {
         flex: 1 0 0;
         min-width: 0;
@@ -244,9 +266,5 @@
         padding: 7px 0;
         margin: 10px 0 20px;
 
-        a {
-            font-size: 1.5rem;
-            margin-right: 15px;
-        }
     }
 </style>

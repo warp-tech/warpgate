@@ -74,7 +74,7 @@
         if (!role) return
         if (confirm(`Delete role ${role.name}?`)) {
             await api.deleteRole(role)
-            replace('/config/access-roles')
+            replace('/manage/access-roles')
         }
     }
 </script>
@@ -148,7 +148,7 @@
         {#snippet item(user)}
             <a
                 class="list-group-item list-group-item-action"
-                href="/config/users/{user.id}"
+                href="/manage/users/{user.id}"
                 use:link
             >
                 <div>
@@ -174,7 +174,7 @@
         {#snippet item(target)}
             <a
                 class="list-group-item list-group-item-action"
-                href="/config/targets/{target.id}"
+                href="/manage/targets/{target.id}"
                 use:link
             >
                 <div class="me-auto">

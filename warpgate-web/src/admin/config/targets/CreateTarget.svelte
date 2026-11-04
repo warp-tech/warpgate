@@ -126,7 +126,7 @@
                     ticketRequireApproval: false,
                 },
             })
-            replace(`/config/targets/${target.id}`)
+            replace(`/manage/targets/${target.id}`)
         } catch (err) {
             error = await stringifyError(err)
         }
