@@ -401,7 +401,8 @@ mod tests {
     /// where setup configured it.
     #[tokio::test]
     async fn connect_to_db_creates_the_configured_file() {
-        let base = std::env::temp_dir().join(format!("warpgate-db-path-{}", Uuid::new_v4()));
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
         let params = GlobalParams::new(base.join("warpgate.yaml"), true).unwrap();
         for dir in ["my data/db", "caf\u{e9}/db", "%25/x#y"] {
             for dir in [PathBuf::from(dir), base.join(dir)] {
@@ -417,6 +418,5 @@ mod tests {
                 assert!(expected.is_file(), "no {expected:?}");
             }
         }
-        std::fs::remove_dir_all(&base).unwrap();
     }
 }

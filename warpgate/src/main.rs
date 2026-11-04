@@ -4,7 +4,7 @@ mod listener_supervisor;
 mod logging;
 
 use std::net::IpAddr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{ArgAction, Parser};
@@ -12,7 +12,7 @@ use logging::init_logging;
 use tracing::error;
 use warpgate_common::helpers::fs::ensure_files_can_be_secured;
 use warpgate_common::version::warpgate_version;
-use warpgate_common::{GlobalParams, LogFormat, Secret, WarpgateConfig};
+use warpgate_common::{GlobalParams, LogFormat, Secret};
 
 use crate::config::load_config;
 
@@ -204,10 +204,19 @@ async fn _main() -> Result<()> {
 
     // Everything else reads or writes the config and data files
     if !matches!(cli.command, Commands::Version | Commands::Healthcheck) {
-        ensure_files_can_be_secured(
-            &params,
-            data_dir(&cli.command, &params, config.as_ref()).as_deref(),
-        )?;
+        ensure_files_can_be_secured(&params)?;
+
+        // Log forwarding uses a Unix datagram socket. Refuse a configured one
+        // rather than drop the logs it would have carried.
+        #[cfg(windows)]
+        if config
+            .as_ref()
+            .is_some_and(|config| config.store.log.send_to.is_some())
+        {
+            anyhow::bail!(
+                "log.send_to is not supported on Windows (log forwarding uses a Unix datagram socket); remove it from the config"
+            );
+        }
     }
 
     #[allow(clippy::unwrap_used)]
@@ -283,22 +292,6 @@ async fn _main() -> Result<()> {
             crate::commands::copy_database::command(&params, target_url).await
         }
     }
-}
-
-/// The data directory a command works in, where it is known before it runs:
-/// the one unattended setup is told to create, or the one setup put the TLS
-/// key in.
-fn data_dir(
-    command: &Commands,
-    params: &GlobalParams,
-    config: Option<&WarpgateConfig>,
-) -> Option<PathBuf> {
-    let relative = match command {
-        Commands::UnattendedSetup(args) => Path::new(&args.data_path),
-        Commands::Setup(_) => return None,
-        _ => Path::new(&config?.store.http.key).parent()?,
-    };
-    Some(params.paths_relative_to().join(relative))
 }
 
 #[tokio::main]

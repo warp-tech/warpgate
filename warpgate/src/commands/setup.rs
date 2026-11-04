@@ -582,7 +582,6 @@ pub async fn command(
 #[cfg(test)]
 mod tests {
     use clap::Parser;
-    use uuid::Uuid;
 
     use crate::{Cli, Commands};
 
@@ -591,7 +590,8 @@ mod tests {
     /// the path holds.
     #[tokio::test]
     async fn unattended_setup_creates_a_new_data_dir() {
-        let base = std::env::temp_dir().join(format!("warpgate-setup-{}", Uuid::new_v4()));
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
         let data_path = "new data/caf\u{e9} #1";
         let cli = Cli::try_parse_from([
             "warpgate".into(),
@@ -616,7 +616,5 @@ mod tests {
             .unwrap();
 
         assert!(base.join(data_path).join("db/db.sqlite3").is_file());
-        // Best effort: on Windows the database may still be open
-        let _ = std::fs::remove_dir_all(&base);
     }
 }
