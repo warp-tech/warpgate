@@ -34,7 +34,9 @@ use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::approvals::{GateOutcome, GatedConnection};
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
-use warpgate_core::recordings::{self, TerminalRecorder, TrafficConnectionParams, TrafficRecorder};
+use warpgate_core::recordings::{
+    self, ConnectionRecorder, TerminalRecorder, TrafficConnectionParams, TrafficRecorder,
+};
 use warpgate_core::{
     AdmittedTarget, ApprovedTarget, AuthorizedIdentity, ConfigProvider, Services,
     TargetAuthorization, TargetSessionStart, WarpgateServerHandle, authorize_and_spend_ticket,
@@ -939,7 +941,7 @@ impl ServerSession {
                             // with the open they were waiting on, and the
                             // target's eventual Close reply must find no
                             // Opening entry to be deferred onto.
-                            self.channels.close(id);
+                            self.close_channel(id);
                             let _ =
                                 self.send_command(RCCommand::Channel(id, ChannelOperation::Close));
                             self.replay_deferred_server_events().await?;
@@ -1363,7 +1365,7 @@ impl ServerSession {
                         debug!(%channel, ?error, "Target closed a channel already gone from the registry");
                     }
                 }
-                self.channels.close(channel);
+                self.close_channel(channel);
             }
             RCEvent::Eof(channel) => {
                 if let Some((handle, id)) = self.client_channel(&channel)? {
@@ -1424,12 +1426,13 @@ impl ServerSession {
                             .await
                     });
 
+                    let key = TrafficRecorderKey::Tcp(
+                        params.originator_address.clone(),
+                        params.originator_port,
+                    );
                     let recorder = self
                         .traffic_recorder_for(
-                            TrafficRecorderKey::Tcp(
-                                params.originator_address.clone(),
-                                params.originator_port,
-                            ),
+                            key.clone(),
                             SshRecordingMetadata::ForwardedTcpIp {
                                 host: params.originator_address,
                                 port: params.originator_port as u16,
@@ -1447,9 +1450,7 @@ impl ServerSession {
                         if let Err(error) = recorder.write_connection_setup().await {
                             error!(channel=%id, ?error, "Failed to record connection setup");
                         }
-                        if let Some(channel_state) = self.channels.get_mut(&id) {
-                            channel_state.traffic_recorder = Some(recorder);
-                        }
+                        self.attach_traffic_recorder(id, key, recorder);
                     }
                 }
             }
@@ -1462,9 +1463,10 @@ impl ServerSession {
                             .await
                     });
 
+                    let key = TrafficRecorderKey::Socket(params.socket_path.clone());
                     let recorder = self
                         .traffic_recorder_for(
-                            TrafficRecorderKey::Socket(params.socket_path.clone()),
+                            key.clone(),
                             SshRecordingMetadata::ForwardedSocket {
                                 path: params.socket_path.clone(),
                             },
@@ -1478,9 +1480,7 @@ impl ServerSession {
                         if let Err(error) = recorder.write_connection_setup().await {
                             error!(channel=%id, ?error, "Failed to record connection setup");
                         }
-                        if let Some(channel_state) = self.channels.get_mut(&id) {
-                            channel_state.traffic_recorder = Some(recorder);
-                        }
+                        self.attach_traffic_recorder(id, key, recorder);
                     }
                 }
             }
@@ -1660,15 +1660,13 @@ impl ServerSession {
                 // The recorder is attached before the deferred output is
                 // replayed, so the target's first bytes are recorded too.
                 if let Some((key, metadata, connection_params)) = recording {
-                    let recorder = self.traffic_recorder_for(key, metadata).await;
+                    let recorder = self.traffic_recorder_for(key.clone(), metadata).await;
                     if let Some(recorder) = recorder {
                         let mut recorder = recorder.connection(connection_params);
                         if let Err(error) = recorder.write_connection_setup().await {
                             error!(%channel, ?error, "Failed to record connection setup");
                         }
-                        if let Some(channel_state) = self.channels.get_mut(&uuid) {
-                            channel_state.traffic_recorder = Some(recorder);
-                        }
+                        self.attach_traffic_recorder(uuid, key, recorder);
                     }
                 }
 
@@ -1677,13 +1675,13 @@ impl ServerSession {
             }
             Err(SshClientError::Russh(russh::Error::ChannelOpenFailure(_))) => {
                 open_handle.reject(ChannelOpenFailure::ConnectFailed).await;
-                self.channels.close(uuid);
+                self.close_channel(uuid);
                 Ok(())
             }
             // Dropping `open_handle` auto-rejects the open, so the client always
             // gets a reply even on unexpected errors.
             Err(x) => {
-                self.channels.close(uuid);
+                self.close_channel(uuid);
                 Err(x.into())
             }
         }
@@ -1901,6 +1899,48 @@ impl ServerSession {
             }
         }
         self.traffic_recorders.get_mut(&key)
+    }
+
+    /// Give a channel its connection in the traffic recording for `key`. The
+    /// recorder was started across an await, so the channel may have closed
+    /// before it could claim the recorder, and then nothing else releases it.
+    fn attach_traffic_recorder(
+        &mut self,
+        channel_id: Uuid,
+        key: TrafficRecorderKey,
+        recorder: ConnectionRecorder,
+    ) {
+        if let Some(channel_state) = self.channels.get_mut(&channel_id) {
+            channel_state.traffic_recorder = Some(recorder);
+            channel_state.traffic_recorder_key = Some(key);
+        } else {
+            drop(recorder);
+            self.release_traffic_recorder_if_unused(&key);
+        }
+    }
+
+    /// Tear a channel down, along with its traffic recorder once no other
+    /// channel writes to it. The recorder holds the recording file open, so
+    /// keeping it for the rest of the session leaks a file per forwarded
+    /// destination, until the process runs out of descriptors (#2680).
+    fn close_channel(&mut self, channel_id: Uuid) {
+        if let Some(key) = self
+            .channels
+            .close(channel_id)
+            .and_then(|channel| channel.traffic_recorder_key)
+        {
+            self.release_traffic_recorder_if_unused(&key);
+        }
+    }
+
+    fn release_traffic_recorder_if_unused(&mut self, key: &TrafficRecorderKey) {
+        let in_use = self
+            .channels
+            .values()
+            .any(|channel| channel.traffic_recorder_key.as_ref() == Some(key));
+        if !in_use {
+            self.traffic_recorders.remove(key);
+        }
     }
 
     pub async fn _channel_subsystem_request(
@@ -2571,7 +2611,7 @@ impl ServerSession {
         debug!(channel=%channel_id, "Closing channel");
         self.send_command_and_wait(RCCommand::Channel(channel_id, ChannelOperation::Close))
             .await?;
-        self.channels.close(channel_id);
+        self.close_channel(channel_id);
         Ok(())
     }
 
