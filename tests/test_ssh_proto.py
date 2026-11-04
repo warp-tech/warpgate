@@ -144,6 +144,46 @@ class Test:
         assert ssh_target.name.encode() in output
         assert b"hello\r\n" in output
 
+    # https://github.com/warp-tech/warpgate/issues/2777
+    def test_window_change_while_connecting_reaches_the_target(
+        self,
+        processes: ProcessManager,
+        wg_c_ed25519_pubkey,
+        shared_wg: WarpgateProcess,
+        timeout,
+    ):
+        # Some clients (e.g. Tabby) request the PTY at a default size and send
+        # their real size right after the shell request, while Warpgate is
+        # still connecting to the target. That resize must not be lost.
+        user, ssh_target = setup_user_and_target(
+            processes, shared_wg, wg_c_ed25519_pubkey
+        )
+
+        transport = paramiko.Transport(("localhost", shared_wg.ssh_port))
+        try:
+            transport.connect(
+                username=f"{user.username}:{ssh_target.name}", password="123"
+            )
+            channel = transport.open_session()
+            channel.settimeout(timeout)
+            channel.get_pty(width=80, height=24)
+            channel.invoke_shell()
+            channel.resize_pty(width=235, height=54)
+            channel.sendall(b"stty size; exit\n")
+
+            output = b""
+            while b"54 235" not in output:
+                try:
+                    chunk = channel.recv(4096)
+                except socket.timeout:
+                    break
+                if not chunk:
+                    break
+                output += chunk
+            assert b"54 235" in output, output
+        finally:
+            transport.close()
+
     def test_unknown_host_key_prompts_before_the_target_is_reached(
         self,
         processes: ProcessManager,
