@@ -1,0 +1,114 @@
+name: Auto-label issues
+
+on:
+  issues:
+    types: [opened, reopened]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  add-pro-label:
+    if: github.event.issue.pull_request == null
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Add pro label to eligible issue authors
+        uses: actions/github-script@v7.1.0
+        env:
+          TARGET_USERS: mba965
+          TARGET_ORGS: zerodha
+          LABEL_NAME: pro
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue = context.payload.issue;
+            const labelName = process.env.LABEL_NAME;
+
+            const directUsers = new Set(
+              (process.env.TARGET_USERS || '')
+                .split(',')
+                .map((value) => value.trim().toLowerCase())
+                .filter(Boolean)
+            );
+
+            const orgAllowlist = new Set(
+              (process.env.TARGET_ORGS || '')
+                .split(',')
+                .map((value) => value.trim().toLowerCase().replace(/^@/, ''))
+                .filter(Boolean)
+            );
+
+            const existingLabels = new Set((issue.labels || []).map((label) => label.name.toLowerCase()));
+            if (existingLabels.has(labelName.toLowerCase())) {
+              core.info(`Issue #${issue.number} already has the ${labelName} label; skipping.`);
+              return;
+            }
+
+            const author = issue.user.login;
+
+            async function ensureLabel(name) {
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                await github.rest.issues.createLabel({
+                  owner,
+                  repo,
+                  name,
+                  color: 'BFD4F2',
+                  description: 'Eligible premium support issue',
+                });
+              }
+            }
+
+            if (directUsers.has(author.toLowerCase())) {
+              await ensureLabel(labelName);
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: issue.number,
+                labels: [labelName],
+              });
+              core.info(`Added ${labelName} to issue #${issue.number} because author ${author} is in the direct user allowlist.`);
+              return;
+            }
+
+            const result = await github.graphql(
+              `
+              query($login: String!) {
+                user(login: $login) {
+                  organizations(first: 100) {
+                    nodes {
+                      login
+                    }
+                  }
+                }
+              }
+              `,
+              { login: author }
+            );
+
+            const orgLogins = new Set(
+              ((result.user && result.user.organizations && result.user.organizations.nodes) || [])
+                .map((org) => String(org.login).toLowerCase())
+            );
+
+            const matchedOrg = [...orgAllowlist].find((org) => orgLogins.has(org));
+            if (!matchedOrg) {
+              core.info(`User ${author} is not in an eligible org (${[...orgAllowlist].join(', ') || 'none'}).`);
+              return;
+            }
+
+            await ensureLabel(labelName);
+            await github.rest.issues.addLabels({
+              owner,
+              repo,
+              issue_number: issue.number,
+              labels: [labelName],
+            });
+
+            core.info(`Added ${labelName} to issue #${issue.number} because author ${author} belongs to ${matchedOrg}.`);

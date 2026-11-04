@@ -71,9 +71,7 @@
             </Alert>
         {/if}
         <Loadable promise={initPromise}>
-            {#snippet children(
-                parameters,
-            )}
+            {#snippet children(parameters)}
                 {#if parameters}
                     <form
                         bind:this={formEl}

@@ -18,6 +18,7 @@
 //! - Input into a main-screen REPL (python, psql, …) is logged as a command.
 //! - Multi-command paste in a single burst captures only the first command.
 //! - A command that wraps past the bottom of the screen may be skipped.
+//! - Text right of the cursor containing a wide run of spaces is cut there.
 
 use warpgate_core::sane_terminal_size as sane_size;
 
@@ -29,6 +30,12 @@ const ETX: u8 = 0x03; // Ctrl-C
 /// this many output bytes, so a shell that never echoes one cannot wedge the
 /// detector on a single line forever.
 const MAX_PENDING_OUTPUT: usize = 2048;
+
+/// A run of this many blank cells on the last input row marks the end of the
+/// input; anything after it (a zsh RPROMPT) is not part of the command.
+/// ponytail: a command whose text right of the cursor holds this many
+/// consecutive spaces loses its tail; raise if that ever shows up in practice.
+const RPROMPT_GAP: u16 = 8;
 
 #[derive(Clone, Copy)]
 enum State {
@@ -174,17 +181,45 @@ impl CommandDetector {
         }
     }
 
-    /// Read the typed text between the prompt boundary and the cursor. The
-    /// prompt (before `col`) and any zsh RPROMPT (right of the cursor) fall
-    /// outside the range; soft-wrapped continuation rows are joined without a
-    /// newline. A password prompt echoes nothing, so the range is empty.
+    /// Read the typed text from the prompt boundary to the end of the input.
+    /// The end is found on the screen, not from the cursor: readline accepts a
+    /// line without moving the cursor, so after Home/←+Enter the cursor can be
+    /// anywhere in the input. Soft-wrapped continuation rows are followed and
+    /// joined without a newline. On the last row the input ends at the first
+    /// run of `RPROMPT_GAP` blank cells, which keeps a zsh RPROMPT out; the
+    /// cursor still counts as inside the input, so a shell that moves it to
+    /// the end (zsh) is read exactly. A password prompt echoes nothing, so the
+    /// range is empty.
     fn extract(&self, row: u16, col: u16) -> Option<String> {
         let screen = self.parser.screen();
+        let (rows, cols) = screen.size();
+        let mut last_row = row;
+        while last_row.saturating_add(1) < rows && screen.row_wrapped(last_row) {
+            last_row = last_row.saturating_add(1);
+        }
+        let start = if last_row == row { col } else { 0 };
+        let mut end = start;
+        let mut blanks = 0;
+        for c in start..cols {
+            let blank = !screen
+                .cell(last_row, c)
+                .is_some_and(vt100::Cell::has_contents);
+            blanks = if blank { blanks + 1 } else { 0 };
+            if blanks >= RPROMPT_GAP {
+                break;
+            }
+            if !blank {
+                end = c.saturating_add(1);
+            }
+        }
         let (cur_row, cur_col) = screen.cursor_position();
-        if cur_row < row || (cur_row == row && cur_col <= col) {
+        if cur_row == last_row {
+            end = end.max(cur_col);
+        }
+        if end <= start {
             return None;
         }
-        let text = screen.contents_between(row, col, cur_row, cur_col);
+        let text = screen.contents_between(row, col, last_row, end);
         let trimmed = text.trim();
         if trimmed.is_empty() {
             None
@@ -298,6 +333,52 @@ mod tests {
         // zsh RPROMPT is painted to the right of the cursor before Enter.
         assert!(d.on_output(b"\x1b7\x1b[75G12:00\x1b8").is_none());
         assert_eq!(enter(&mut d).as_deref(), Some("date"));
+    }
+
+    #[test]
+    fn cursor_moved_left_reads_whole_line() {
+        let mut d = CommandDetector::new(80, 24);
+        prompt(&mut d, "$ ");
+        typed(&mut d, "ls /tmp");
+        // Four ← presses: readline echoes a cursor move, nothing else.
+        d.on_input(b"\x1b[D\x1b[D\x1b[D\x1b[D");
+        assert!(d.on_output(b"\x1b[4D").is_none());
+        assert_eq!(enter(&mut d).as_deref(), Some("ls /tmp"));
+    }
+
+    #[test]
+    fn cursor_at_line_start_reads_whole_line() {
+        let mut d = CommandDetector::new(80, 24);
+        prompt(&mut d, "$ ");
+        typed(&mut d, "ls /tmp");
+        d.on_input(b"\x01");
+        assert!(d.on_output(b"\x1b[3G").is_none());
+        assert_eq!(enter(&mut d).as_deref(), Some("ls /tmp"));
+    }
+
+    #[test]
+    fn rprompt_is_excluded_with_cursor_mid_line() {
+        let mut d = CommandDetector::new(80, 24);
+        prompt(&mut d, "$ ");
+        typed(&mut d, "date");
+        assert!(d.on_output(b"\x1b7\x1b[75G12:00\x1b8").is_none());
+        d.on_input(b"\x1b[D\x1b[D");
+        assert!(d.on_output(b"\x1b[2D").is_none());
+        assert_eq!(enter(&mut d).as_deref(), Some("date"));
+    }
+
+    #[test]
+    fn wrapped_command_with_cursor_on_first_row() {
+        let mut d = CommandDetector::new(10, 24);
+        prompt(&mut d, "$ ");
+        typed(&mut d, "echo abc");
+        typed(&mut d, "defghij");
+        // Cursor back up onto the first row; readline's accept-line then only
+        // prints newlines to get below the input.
+        d.on_input(b"\x1b[A");
+        assert!(d.on_output(b"\x1b[A").is_none());
+        d.on_input(b"\r");
+        assert_eq!(d.on_output(b"\n\r\n").as_deref(), Some("echo abcdefghij"));
     }
 
     #[test]

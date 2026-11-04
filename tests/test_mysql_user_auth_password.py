@@ -23,7 +23,7 @@ class Test:
             )
             api.add_user_role(user.id, role.id)
 
-            targets = []
+            targets = {}
             # Separate targets to cover both the plaintext-over-TLS and the
             # RSA-encrypted caching_sha2_password full authentication paths
             for tls_mode in (sdk.TlsMode.PREFERRED, sdk.TlsMode.DISABLED):
@@ -54,18 +54,18 @@ class Test:
                     )
                 )
                 api.add_target_role(target.id, role.id)
-                targets.append(target)
+                targets[tls_mode] = target
 
         wait_mysql_port(db_port)
         wait_port(shared_wg.mysql_port, recv=False)
 
-        for target in targets:
-            client = processes.start(
+        def connect(target, password):
+            return processes.start(
                 [
                     "mysql",
                     "--user",
                     f"{user.username}#{target.name}",
-                    "-p123",
+                    f"-p{password}",
                     "--host",
                     "127.0.0.1",
                     "--port",
@@ -77,6 +77,9 @@ class Test:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
             )
+
+        for target in targets.values():
+            client = connect(target, "123")
             # The empty-string first column produces a row packet starting
             # with 0x00; the following query proves the result-set framing
             # doesn't mistake it for an OK packet and desync the session
@@ -89,22 +92,6 @@ class Test:
             assert b"marker2" in output
             assert client.returncode == 0
 
-            client = processes.start(
-                [
-                    "mysql",
-                    "--user",
-                    f"{user.username}#{target.name}",
-                    "-pwrong",
-                    "--host",
-                    "127.0.0.1",
-                    "--port",
-                    str(shared_wg.mysql_port),
-                    *mysql_client_opts,
-                    mysql_client_ssl_opt,
-                    "db",
-                ],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-            )
+            client = connect(target, "wrong")
             client.communicate(b"show schemas;", timeout=timeout)
             assert client.returncode != 0
