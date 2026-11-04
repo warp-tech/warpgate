@@ -62,7 +62,7 @@
     <h1>gitops syncs</h1>
     {#if $adminPermissions.configEdit}
         <div class="ms-auto d-flex align-items-center gap-3">
-            <a href="/config/gitops/settings" use:link>Settings</a>
+            <a href="/config/gitops" use:link>Settings</a>
             <Input
                 type="switch"
                 label="Force prune"

@@ -320,6 +320,12 @@ impl AdminPermissionSet {
         self.0 & perm.bit() != 0
     }
 
+    /// Every permission in `other` is also in `self`.
+    #[must_use]
+    pub const fn is_superset_of(self, other: Self) -> bool {
+        other.0 & !self.0 == 0
+    }
+
     /// Holding any permission at all makes the principal an administrator.
     #[must_use]
     pub const fn is_admin(self) -> bool {
@@ -388,6 +394,20 @@ mod admin_permission_set_tests {
         for perm in AdminPermission::iter() {
             assert!(all.contains(perm), "missing {perm:?}");
         }
+    }
+
+    #[test]
+    fn superset_requires_every_permission() {
+        let mut narrow = empty_role();
+        narrow.users_edit = true;
+        let mut broad = narrow.clone();
+        broad.config_edit = true;
+        let narrow = AdminPermissionSet::from_roles([narrow]);
+        let broad = AdminPermissionSet::from_roles([broad]);
+        assert!(broad.is_superset_of(narrow));
+        assert!(!narrow.is_superset_of(broad));
+        assert!(narrow.is_superset_of(narrow));
+        assert!(narrow.is_superset_of(AdminPermissionSet::none()));
     }
 
     #[test]

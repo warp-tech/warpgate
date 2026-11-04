@@ -17,6 +17,7 @@
     import { stringifyError } from 'common/errors'
     import GroupColorIcon from 'common/GroupColorIcon.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import { setCurrentSidebarSubtitle } from 'common/sidebarState.svelte'
     import { replace } from 'svelte-spa-router'
     import { VALID_CHOICES } from './common'
 
@@ -28,6 +29,7 @@
     let groupId = $derived(params.id)
 
     let group: TargetGroup | undefined = $state()
+    setCurrentSidebarSubtitle(() => group?.name)
     let error: string | undefined = $state()
     let saving = $state(false)
 
@@ -86,7 +88,7 @@
         try {
             await api.deleteTargetGroup({ id: groupId })
             // Redirect to groups list
-            replace('/config/target-groups')
+            replace('/manage/target-groups')
         } catch (e) {
             error = await stringifyError(e)
             throw e
@@ -104,7 +106,8 @@
                 <div>
                     <h1>{group.name}</h1>
                     <div class="text-muted d-flex align-items-center gap-2">
-                        Target group <ManagedIcon
+                        Target group
+                        <ManagedIcon
                             provider={group.provider}
                             onRelease={$adminPermissions.targetsEdit
                                 ? release

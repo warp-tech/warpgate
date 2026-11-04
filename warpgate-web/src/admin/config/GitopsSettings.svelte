@@ -76,7 +76,7 @@
 <div class="container-max-md">
     <div class="page-summary-bar">
         <h1>gitops settings</h1>
-        <a class="ms-auto" href="/config/gitops" use:link>Sync history</a>
+        <a class="ms-auto" href="/manage/gitops" use:link>Sync history</a>
     </div>
 
     <PermissionGate

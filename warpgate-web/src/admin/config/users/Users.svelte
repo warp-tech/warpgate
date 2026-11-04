@@ -55,7 +55,7 @@
         <h1>users</h1>
         <a
             class="btn btn-primary ms-auto"
-            href="/config/users/create"
+            href="/manage/users/create"
             class:disabled={!$adminPermissions.usersCreate}
             use:link
         >
@@ -84,7 +84,7 @@
         {#snippet item(user)}
             <a
                 class="list-group-item list-group-item-action"
-                href="/config/users/{user.id}"
+                href="/manage/users/{user.id}"
                 use:link
             >
                 <div>

@@ -14,5 +14,5 @@
 
 <Badge {color} class="d-flex align-items-center">
     <Fa icon={faCog} class="me-2" />
-    <a href="/config/{path}/{id}" use:link>{name}</a>
+    <a href="/manage/{path}/{id}" use:link>{name}</a>
 </Badge>

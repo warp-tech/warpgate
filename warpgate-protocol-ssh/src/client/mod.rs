@@ -749,6 +749,8 @@ impl Connector {
                     kex::DH_G16_SHA512,
                     kex::DH_G14_SHA256,
                     kex::DH_GEX_SHA256,
+                    kex::DH_GEX_SHA1,
+                    kex::DH_G14_SHA1,
                     kex::DH_G1_SHA1,
                     kex::EXTENSION_SUPPORT_AS_CLIENT,
                     kex::EXTENSION_SUPPORT_AS_SERVER,

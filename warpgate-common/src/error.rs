@@ -79,6 +79,8 @@ pub enum WarpgateError {
     NoAdminAccess,
     #[error("admin permission required: {0:?}")]
     NoAdminPermission(AdminPermission),
+    #[error("cannot modify a user with admin permissions you do not hold")]
+    TargetUserOutranksAdmin,
     #[error("AWS: {0}")]
     Aws(AwsError),
     #[error("IP address {0} is not in the allowed range for user {1}")]
@@ -123,6 +125,7 @@ impl UserFacingReason for WarpgateError {
             | Self::UserSessionEnded
             | Self::NoAdminAccess
             | Self::NoAdminPermission(_)
+            | Self::TargetUserOutranksAdmin
             | Self::IpAddrNotAllowed(..)
             | Self::InvalidNetworkAddress(_)
             | Self::SessionLimitReached
@@ -213,7 +216,9 @@ impl ResponseError for WarpgateError {
             | Self::IpAddrNotAllowed(..) => poem::http::StatusCode::UNAUTHORIZED,
             Self::UserAlreadyExists(_) => poem::http::StatusCode::CONFLICT,
             Self::InvalidRequest(_) => poem::http::StatusCode::BAD_REQUEST,
-            Self::NoAdminAccess | Self::NoAdminPermission(_) => poem::http::StatusCode::FORBIDDEN,
+            Self::NoAdminAccess | Self::NoAdminPermission(_) | Self::TargetUserOutranksAdmin => {
+                poem::http::StatusCode::FORBIDDEN
+            }
             Self::SessionLimitReached => poem::http::StatusCode::TOO_MANY_REQUESTS,
             Self::SessionNotApproved => poem::http::StatusCode::FORBIDDEN,
             Self::ClusterPeerUnreachable(_) => poem::http::StatusCode::BAD_GATEWAY,

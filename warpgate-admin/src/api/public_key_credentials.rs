@@ -10,7 +10,7 @@ use warpgate_common::{AdminPermission, UserPublicKeyCredential, WarpgateError};
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_db_entities::{PublicKeyCredential, User};
 
-use super::AdminContext;
+use super::{AdminContext, guard_user_mutation};
 
 async fn check_user_ldap_linked(
     db: &DatabaseConnection,
@@ -132,7 +132,8 @@ impl ListApi {
     #[oai(
         path = "/users/:user_id/credentials/public-keys",
         method = "post",
-        operation_id = "create_public_key_credential"
+        operation_id = "create_public_key_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_create(
         &self,
@@ -199,7 +200,8 @@ impl DetailApi {
     #[oai(
         path = "/users/:user_id/credentials/public-keys/:id",
         method = "put",
-        operation_id = "update_public_key_credential"
+        operation_id = "update_public_key_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_update(
         &self,
@@ -250,7 +252,8 @@ impl DetailApi {
     #[oai(
         path = "/users/:user_id/credentials/public-keys/:id",
         method = "delete",
-        operation_id = "delete_public_key_credential"
+        operation_id = "delete_public_key_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_delete(
         &self,

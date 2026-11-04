@@ -39,7 +39,7 @@
             </div>
             <a
                 class="btn btn-primary ms-auto"
-                href="/config/admin-roles/create"
+                href="/manage/admin-roles/create"
                 use:link
             >
                 Create
@@ -50,7 +50,7 @@
             {#snippet item(role)}
                 <a
                     class="list-group-item list-group-item-action d-flex align-items-center"
-                    href="/config/admin-roles/{role.id}"
+                    href="/manage/admin-roles/{role.id}"
                     use:link
                 >
                     <div>
