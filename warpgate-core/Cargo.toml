@@ -57,10 +57,10 @@ warpgate-tls = { path = "../warpgate-tls" }
 webpki = { version = "0.22", default-features = false }
 zune-jpeg.workspace = true
 
+[dev-dependencies]
+tempfile = "3"
+
 [features]
 postgres = ["sea-orm/sqlx-postgres"]
 mysql = ["sea-orm/sqlx-mysql"]
 sqlite = ["sea-orm/sqlx-sqlite"]
-
-[dev-dependencies]
-tempfile = "3"
