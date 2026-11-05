@@ -564,6 +564,22 @@ impl ServerSession {
             .map(|handle| (handle, server_channel_id.0)))
     }
 
+    fn release_held_eof(
+        &mut self,
+        channel: &Uuid,
+        handle: &russh::server::Handle,
+        id: ChannelId,
+    ) -> Result<()> {
+        if self
+            .channels
+            .get_mut(channel)
+            .is_some_and(Channel::release_eof)
+        {
+            self.channel_writer.eof(handle.clone(), id)?;
+        }
+        Ok(())
+    }
+
     /// Opens a server->client channel in the background and delivers the
     /// resulting channel id back into the event loop as an event. Awaiting
     /// the client's confirmation inline would deadlock: the russh session
@@ -1355,7 +1371,10 @@ impl ServerSession {
             }
             RCEvent::Close(channel) => {
                 match self.client_channel(&channel) {
-                    Ok(Some((handle, id))) => self.channel_writer.close(handle, id)?,
+                    Ok(Some((handle, id))) => {
+                        self.release_held_eof(&channel, &handle, id)?;
+                        self.channel_writer.close(handle, id)?;
+                    }
                     Ok(None) => {}
                     Err(error) => {
                         // Not necessarily a bug: this is reached from both
@@ -1366,13 +1385,18 @@ impl ServerSession {
                 self.channels.close(channel);
             }
             RCEvent::Eof(channel) => {
-                if let Some((handle, id)) = self.client_channel(&channel)? {
+                let held = self
+                    .channels
+                    .get_mut(&channel)
+                    .is_some_and(Channel::hold_eof);
+                if !held && let Some((handle, id)) = self.client_channel(&channel)? {
                     self.channel_writer.eof(handle, id)?;
                 }
             }
             RCEvent::ExitStatus(channel, code) => {
                 if let Some((handle, id)) = self.client_channel(&channel)? {
-                    self.channel_writer.exit_status(handle, id, code)?;
+                    self.channel_writer.exit_status(handle.clone(), id, code)?;
+                    self.release_held_eof(&channel, &handle, id)?;
                 }
             }
             RCEvent::ExitSignal {
@@ -1384,13 +1408,14 @@ impl ServerSession {
             } => {
                 if let Some((handle, id)) = self.client_channel(&channel)? {
                     self.channel_writer.exit_signal(
-                        handle,
+                        handle.clone(),
                         id,
                         signal_name,
                         core_dumped,
                         error_message,
                         lang_tag,
                     )?;
+                    self.release_held_eof(&channel, &handle, id)?;
                 }
             }
             RCEvent::ExtendedData { channel, data, ext } => {
@@ -1648,7 +1673,8 @@ impl ServerSession {
         )>,
         open_handle: ChannelOpenHandle,
     ) -> Result<()> {
-        let uuid = self.channels.begin_client_open(channel);
+        let session = matches!(operation, ChannelOperation::OpenShell);
+        let uuid = self.channels.begin_client_open(channel, session);
 
         match self
             .send_command_and_wait(RCCommand::Channel(uuid, operation))
