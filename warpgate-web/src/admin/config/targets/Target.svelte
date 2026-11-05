@@ -26,6 +26,7 @@
     import RateLimitInput from 'common/RateLimitInput.svelte'
     import SecretRefInput from 'common/SecretRefInput.svelte'
     import StickyActionBar from 'common/StickyActionBar.svelte'
+    import { setCurrentSidebarSubtitle } from 'common/sidebarState.svelte'
     import { TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import {
@@ -49,6 +50,7 @@
     let error: string | undefined = $state()
     let selectedUsername: string | undefined = $state($serverInfo?.username)
     let target: Target | undefined = $state()
+    setCurrentSidebarSubtitle(() => target?.name)
     let roleIsAllowed: Record<string, boolean> = $state({})
     let connectionsInstructionsModalOpen = $state(false)
     let groups: TargetGroup[] = $state([])
@@ -91,7 +93,7 @@
         if (!target) return
         if (confirm(`Delete target ${target.name}?`)) {
             await api.deleteTarget(target)
-            replace('/config/targets')
+            replace('/manage/targets')
         }
     }
 
@@ -127,9 +129,7 @@
 </script>
 
 <Loadable promise={init()} bind:value={target}>
-    {#snippet children(
-        target,
-    )}
+    {#snippet children(target)}
         <div class="main-container container-max-lg">
             <div class="flex-grow-1">
                 <Modal
@@ -144,9 +144,7 @@
                             target.options.kind === 'Postgres' ||
                             target.options.kind === 'Kubernetes'}
                             <Loadable promise={api.getUsers()}>
-                                {#snippet children(
-                                    users,
-                                )}
+                                {#snippet children(users)}
                                     <FormGroup floating label="Select a user">
                                         <select
                                             bind:value={selectedUsername}
@@ -454,9 +452,7 @@
                         bodyTitle="Allow access for roles"
                     >
                         <Loadable promise={loadRolesPromise}>
-                            {#snippet children(
-                                roles,
-                            )}
+                            {#snippet children(roles)}
                                 <div class="list-group list-group-flush mb-3">
                                     {#each roles as role (role.id)}
                                         <label

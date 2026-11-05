@@ -11,7 +11,7 @@ mod secret_backends;
 #[allow(dead_code)]
 mod admin_scheme;
 pub(crate) mod common;
-pub(crate) use admin_scheme::{AdminContext, ClusterOrAdminContext};
+pub(crate) use admin_scheme::{AdminContext, ClusterOrAdminContext, guard_user_mutation};
 pub use common::admin_permission_set;
 mod known_hosts_detail;
 mod known_hosts_list;

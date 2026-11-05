@@ -1,19 +1,23 @@
 <script lang="ts">
+    import { faLock } from '@fortawesome/free-solid-svg-icons'
     import {
         Alert,
         Dropdown,
         DropdownItem,
         DropdownMenu,
         DropdownToggle,
+        Tooltip,
     } from '@sveltestrap/sveltestrap'
     import { api, type Target, type TargetGroup } from 'admin/lib/api'
-    import { autosave } from 'common/autosave'
+    import { targetAddress } from 'admin/lib/targetAddress'
     import CollapsibleGroupHeader from 'common/CollapsibleGroupHeader.svelte'
     import EmptyState from 'common/EmptyState.svelte'
     import { stringifyError } from 'common/errors'
     import GroupColorIcon from 'common/GroupColorIcon.svelte'
     import { orderForGroupedList, resolveGroup } from 'common/groups'
+    import { uuid } from 'common/helpers'
     import ItemList, {
+        type Column,
         type LoadOptions,
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
@@ -21,17 +25,13 @@
     import { TARGET_KIND_LABELS } from 'common/targetKinds'
     import { compare as naturalCompareFactory } from 'natural-orderby'
     import { from, map, type Observable } from 'rxjs'
+    import Fa from 'svelte-fa'
     import { link } from 'svelte-spa-router'
     import { adminPermissions } from '../../lib/store'
 
     let error: string | undefined = $state()
     let groups: TargetGroup[] = $state([])
     let selectedGroup: TargetGroup | undefined = $state()
-
-    const [collapsedGroups] = autosave<string[]>(
-        'admin-target-list:collapsed-groups',
-        [],
-    )
 
     const groupsPromise = api
         .listTargetGroups()
@@ -45,6 +45,35 @@
             error = await stringifyError(err)
             groups = []
         })
+
+    const columns: Column<Target>[] = [
+        { id: 'name', cell: nameCell },
+        {
+            id: 'requiresAdminApproval',
+            label: 'Requires admin approval',
+            cell: requiresApprovalCell,
+        },
+        {
+            id: 'address',
+            label: 'Address',
+            hiddenByDefault: true,
+            cell: addressCell,
+            class: 'text-muted small font-monospace',
+        },
+        {
+            id: 'description',
+            label: 'Description',
+            cell: descriptionCell,
+            grow: true,
+            class: 'text-truncate text-muted small',
+        },
+        {
+            id: 'kind',
+            label: 'Type',
+            cell: kindCell,
+            class: 'text-muted small text-end',
+        },
+    ]
 
     function getTargets(
         options: LoadOptions,
@@ -78,6 +107,30 @@
         return resolveGroup(groups.find(g => g.id === target.groupId))
     }
 </script>
+
+{#snippet nameCell(target: Target)}
+    <strong>{target.name}</strong>
+{/snippet}
+
+{#snippet addressCell(target: Target)}
+    {targetAddress(target.options)}
+{/snippet}
+
+{#snippet descriptionCell(target: Target)}
+    {target.description}
+{/snippet}
+
+{#snippet kindCell(target: Target)}
+    {TARGET_KIND_LABELS[target.options.kind]}
+{/snippet}
+
+{#snippet requiresApprovalCell(target: Target)}
+    {const id = uuid()}
+    {#if target.requireApproval}
+        <Fa icon={faLock} {id}></Fa>
+    {/if}
+    <Tooltip target={id} delay="500"> Requires admin approval </Tooltip>
+{/snippet}
 
 <div>
     <div class="page-summary-bar">
@@ -114,7 +167,7 @@
             {/if}
             <a
                 class="btn btn-primary"
-                href="/config/targets/create"
+                href="/manage/targets/create"
                 class:disabled={!$adminPermissions.targetsCreate}
                 use:link
             >
@@ -130,17 +183,15 @@
     {#key selectedGroup}
         <ItemList
             load={getTargets}
+            {columns}
+            storageKey="admin-targets"
             showSearch={true}
             groupObject={groupInfoFromTarget}
             groupKey={group => group.id}
             virtual
-            bind:collapsedGroups={$collapsedGroups}
         >
-            {#snippet header(
-                _items,
-                groupControls,
-            )}
-                <ListOverflowMenu {groupControls} />
+            {#snippet header(_items, groupControls, columnControls)}
+                <ListOverflowMenu {groupControls} {columnControls} />
             {/snippet}
             {#snippet empty()}
                 <EmptyState
@@ -148,44 +199,18 @@
                     hint="Targets are destinations on the internal network that your users will connect to"
                 />
             {/snippet}
-            {#snippet groupHeader(
-                group,
-                state,
-            )}
+            {#snippet groupHeader(group, state)}
                 <CollapsibleGroupHeader {group} {state} />
             {/snippet}
-            {#snippet item(
-                target,
-            )}
+            {#snippet item(target, cells)}
                 <a
                     class="list-group-item list-group-item-action"
-                    href="/config/targets/{target.id}"
+                    href="/manage/targets/{target.id}"
                     use:link
                 >
-                    <div class="me-auto">
-                        <div class="d-flex align-items-center gap-2">
-                            <strong>
-                                {target.name}
-                            </strong>
-                        </div>
-                        {#if target.description}
-                            <small class="d-block text-muted"
-                                >{target.description}</small
-                            >
-                        {/if}
-                    </div>
-                    <small class="text-muted ms-auto">
-                        {TARGET_KIND_LABELS[target.options.kind]}
-                    </small>
+                    {@render cells(target)}
                 </a>
             {/snippet}
         </ItemList>
     {/key}
 </div>
-
-<style lang="scss">
-    .list-group-item {
-        display: flex;
-        align-items: center;
-    }
-</style>

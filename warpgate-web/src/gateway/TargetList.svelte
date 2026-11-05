@@ -1,8 +1,10 @@
 <script lang="ts">
     import 'core-js/actual/map/group-by'
 
+    import { faClipboard } from '@fortawesome/free-regular-svg-icons'
     import {
         faArrowRight,
+        faDesktop,
         faEllipsisV,
         faTerminal,
     } from '@fortawesome/free-solid-svg-icons'
@@ -26,10 +28,12 @@
     import GettingStarted from 'common/GettingStarted.svelte'
     import { orderForGroupedList, resolveGroup } from 'common/groups'
     import ItemList, {
+        type Column,
         type LoadOptions,
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
     import ListOverflowMenu from 'common/ListOverflowMenu.svelte'
+    import { TARGET_KIND_LABELS } from 'common/targetKinds'
     import {
         api,
         TargetClickAction,
@@ -40,7 +44,6 @@
     import { get } from 'svelte/store'
     import Fa from 'svelte-fa'
     import {
-        collapsedTargetGroups,
         openTargetsInNewTab,
         openTargetsInNewTabForced,
         serverInfo,
@@ -93,32 +96,69 @@
         }
     }
 
-    function selectTarget(target: TargetSnapshot) {
+    let defaultConnectableTargetAction = $derived.by(() => {
+        const targetClickAction = $serverInfo?.targetClickAction
+        if (
+            !webClientsEnabled ||
+            targetClickAction === TargetClickAction.ShowInstructions
+        ) {
+            return 'instructions' as const
+        } else {
+            return 'open' as const
+        }
+    })
+
+    function defaultTargetAction(target: TargetSnapshot): {
+        action: () => void
+        kind: 'instructions' | 'open'
+    } {
+        function instructions() {
+            return {
+                action: () => {
+                    instructionsTarget = target
+                },
+                kind: 'instructions' as const,
+            }
+        }
         if (target.kind === TargetKind.Http) {
-            // biome-ignore lint/style/noNonNullAssertion: .
-            loadURL(urlForTarget(target)!)
+            return {
+                action: () => {
+                    // biome-ignore lint/style/noNonNullAssertion: .
+                    loadURL(urlForTarget(target)!)
+                },
+                kind: 'open',
+            }
         } else if (target.kind === TargetKind.Ssh) {
-            const targetClickAction = $serverInfo?.targetClickAction
-            if (
-                !webClientsEnabled ||
-                targetClickAction === TargetClickAction.ShowInstructions
-            ) {
-                instructionsTarget = target
+            if (defaultConnectableTargetAction === 'instructions') {
+                return instructions()
             } else {
-                void openInBrowser(target, () => openWebSshSession(target.id))
+                return {
+                    action: () =>
+                        openInBrowser(target, () =>
+                            openWebSshSession(target.id),
+                        ),
+                    kind: 'open',
+                }
             }
         } else if (
             target.kind === TargetKind.Vnc ||
             target.kind === TargetKind.Rdp
         ) {
-            if (!webClientsEnabled) {
-                instructionsTarget = target
+            if (defaultConnectableTargetAction === 'instructions') {
+                return instructions()
             } else {
-                openWebDesktopSession(target.id)
+                return {
+                    action: () => openWebDesktopSession(target.id),
+                    kind: 'open',
+                }
             }
         } else {
-            instructionsTarget = target
+            return instructions()
         }
+    }
+
+    function selectTarget(target: TargetSnapshot) {
+        defaultTargetAction(target).action()
     }
 
     // A target that needs administrator approval holds this until someone
@@ -157,7 +197,126 @@
     function groupInfoFromTarget(target: TargetSnapshot) {
         return resolveGroup(target.group)
     }
+
+    const columns: Column<TargetSnapshot>[] = [
+        { id: 'name', cell: nameCell, grow: true },
+        {
+            id: 'kind',
+            label: 'Type',
+            cell: kindCell,
+            class: 'text-muted small text-end',
+        },
+        {
+            id: 'action',
+            label: 'Default action',
+            cell: actionCell,
+            hiddenByDefault: true,
+            class: 'small',
+        },
+        { id: 'menu', cell: menuCell, class: 'ps-0' },
+    ]
 </script>
+
+{#snippet nameCell(target: TargetSnapshot)}
+    <div class="d-flex align-items-center gap-2">
+        {target.name}
+    </div>
+    {#if target.description}
+        <small class="d-block text-muted">
+            {target.description}
+        </small>
+    {/if}
+{/snippet}
+
+{#snippet actionCell(target: TargetSnapshot)}
+    {const kind = defaultTargetAction(target).kind}
+    <div class="d-flex align-items-center gap-1">
+        {#if kind === 'instructions'}
+            <Fa icon={faClipboard} fw />
+            Instructions
+        {/if}
+        {#if kind === 'open'}
+            {#if target.kind === TargetKind.Http}
+                <Fa icon={faArrowRight} fw />
+                Open
+            {/if}
+            {#if target.kind === TargetKind.Ssh}
+                <Fa icon={faTerminal} fw />
+                Open terminal
+            {/if}
+            {#if target.kind === TargetKind.Rdp ||
+                target.kind === TargetKind.Vnc}
+                <Fa icon={faDesktop} fw />
+                Open desktop
+            {/if}
+        {/if}
+    </div>
+{/snippet}
+
+{#snippet kindCell(target: TargetSnapshot)}
+    {TARGET_KIND_LABELS[target.kind]}
+{/snippet}
+
+{#snippet menuCell(target: TargetSnapshot)}
+    <Dropdown>
+        <DropdownToggle
+            color="link"
+            size="sm"
+            aria-label={`More actions for ${target.name}`}
+            onclick={e => {
+                e.preventDefault()
+                e.stopPropagation()
+            }}
+        >
+            <Fa icon={faEllipsisV} fw />
+        </DropdownToggle>
+        <DropdownMenu end>
+            {#if target.kind === TargetKind.Ssh && webClientsEnabled}
+                <DropdownItem
+                    onclick={e => {
+                        void openInBrowser(target, () =>
+                            openWebSshSession(target.id),
+                        )
+                        e.preventDefault()
+                        e.stopPropagation()
+                    }}
+                >
+                    Web terminal
+                </DropdownItem>
+            {/if}
+            {#if (target.kind === TargetKind.Vnc ||
+                target.kind === TargetKind.Rdp) &&
+                webClientsEnabled}
+                <DropdownItem
+                    onclick={e => {
+                        openWebDesktopSession(target.id)
+                        e.preventDefault()
+                        e.stopPropagation()
+                    }}
+                >
+                    Web desktop
+                </DropdownItem>
+            {/if}
+            <DropdownItem
+                onclick={e => {
+                    showInstructions(target)
+                    e.preventDefault()
+                    e.stopPropagation()
+                }}
+            >
+                Connection instructions
+            </DropdownItem>
+            {#if canEditTargets}
+                <DropdownItem
+                    href={`/@warpgate/admin#/manage/targets/${target.id}`}
+                    onclick={e => e.stopPropagation()}
+                >
+                    Edit target
+                </DropdownItem>
+            {/if}
+        </DropdownMenu>
+    </Dropdown>
+{/snippet}
 
 {#if $serverInfo?.setupState}
     <GettingStarted setupState={$serverInfo?.setupState} />
@@ -179,15 +338,13 @@
     showSearch={true}
     groupObject={groupInfoFromTarget}
     groupKey={group => group.id}
-    bind:collapsedGroups={$collapsedTargetGroups}
+    storageKey="gateway-targets"
+    {columns}
     virtual
 >
-    {#snippet header(
-        items,
-        groupControls,
-    )}
+    {#snippet header(items, groupControls, columnControls)}
         {#if items?.length}
-            <ListOverflowMenu {groupControls}>
+            <ListOverflowMenu {groupControls} {columnControls}>
                 <div class="dropdown-header">Preferences</div>
                 <DropdownItem>
                     <!-- A disabled input doesn't emit the pointer events the
@@ -225,15 +382,10 @@
             hint={`Ask an administrator to give ${$serverInfo?.username ?? 'your account'} a role with the targets you need.`}
         />
     {/snippet}
-    {#snippet groupHeader(
-        group,
-        state,
-    )}
+    {#snippet groupHeader(group, state)}
         <CollapsibleGroupHeader {group} {state} />
     {/snippet}
-    {#snippet item(
-        target,
-    )}
+    {#snippet item(target, cells)}
         {@const url = urlForTarget(target)}
         <a
             class="list-group-item list-group-item-action target-item gap-3"
@@ -263,99 +415,7 @@
                 }
             }}
         >
-            <span class="me-auto">
-                <div class="d-flex align-items-center gap-2">
-                    {target.name}
-                </div>
-                {#if target.description}
-                    <small class="d-block text-muted"
-                        >{target.description}</small
-                    >
-                {/if}
-            </span>
-            <small class="protocol text-muted ms-auto">
-                {#if target.kind === TargetKind.MySql}
-                    MySQL
-                {/if}
-                {#if target.kind === TargetKind.Postgres}
-                    PostgreSQL
-                {/if}
-                {#if target.kind === TargetKind.Kubernetes}
-                    Kubernetes
-                {/if}
-                {#if target.kind === TargetKind.Ssh}
-                    SSH
-                {/if}
-                {#if target.kind === TargetKind.Vnc}
-                    VNC
-                {/if}
-                {#if target.kind === TargetKind.Rdp}
-                    RDP
-                {/if}
-            </small>
-            {#if target.kind === TargetKind.Http}
-                <Button color="link" size="sm" tabindex={-1}>
-                    <Fa icon={faArrowRight} fw />
-                </Button>
-            {/if}
-            <Dropdown>
-                <DropdownToggle
-                    color="link"
-                    size="sm"
-                    aria-label={`More actions for ${target.name}`}
-                    onclick={e => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                    }}
-                >
-                    <Fa icon={faEllipsisV} fw />
-                </DropdownToggle>
-                <DropdownMenu end>
-                    {#if target.kind === TargetKind.Ssh && webClientsEnabled}
-                        <DropdownItem
-                            onclick={e => {
-                                void openInBrowser(target, () =>
-                                    openWebSshSession(target.id),
-                                )
-                                e.preventDefault()
-                                e.stopPropagation()
-                            }}
-                        >
-                            Web terminal
-                        </DropdownItem>
-                    {/if}
-                    {#if (target.kind === TargetKind.Vnc ||
-                        target.kind === TargetKind.Rdp) &&
-                        webClientsEnabled}
-                        <DropdownItem
-                            onclick={e => {
-                                openWebDesktopSession(target.id)
-                                e.preventDefault()
-                                e.stopPropagation()
-                            }}
-                        >
-                            Web desktop
-                        </DropdownItem>
-                    {/if}
-                    <DropdownItem
-                        onclick={e => {
-                            showInstructions(target)
-                            e.preventDefault()
-                            e.stopPropagation()
-                        }}
-                    >
-                        Connection instructions
-                    </DropdownItem>
-                    {#if canEditTargets}
-                        <DropdownItem
-                            href={`/@warpgate/admin#/config/targets/${target.id}`}
-                            onclick={e => e.stopPropagation()}
-                        >
-                            Edit target
-                        </DropdownItem>
-                    {/if}
-                </DropdownMenu>
-            </Dropdown>
+            {@render cells(target)}
         </a>
     {/snippet}
 </ItemList>

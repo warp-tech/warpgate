@@ -6,9 +6,11 @@
     import { autosave } from 'common/autosave'
     import GettingStarted from 'common/GettingStarted.svelte'
     import ItemList, {
+        type Column,
         type LoadOptions,
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
+    import ListOverflowMenu from 'common/ListOverflowMenu.svelte'
     import RelativeDate from 'common/RelativeDate.svelte'
     import { formatDistance } from 'date-fns'
     import { serverInfo } from 'gateway/lib/store'
@@ -82,23 +84,88 @@
         await api.closeAllSessions()
     }
 
-    function describeSession(session: UserSessionSnapshot): string {
-        let user =
-            session.username ??
-            (session.ended ? '<not logged in>' : '<logging in>')
-        let activeTargets = session.targetSessions.filter(
-            target => !target.ended,
-        )
-        if (!activeTargets.length) {
-            return user
-        }
-        return `${user} on ${activeTargets.map(x => x.target?.name).join(', ')}`
+    function describeTargets(session: UserSessionSnapshot): string {
+        let eligible = session.ended
+            ? session.targetSessions
+            : session.targetSessions.filter(target => !target.ended)
+        return eligible.map(x => x.target?.name).join(', ')
     }
 
     _reloadSessions()
     const interval = setInterval(_reloadSessions, 1000000)
     onDestroy(() => clearInterval(interval))
+
+    const columns: Column<UserSessionSnapshot>[] = [
+        { id: 'icon', cell: iconCell },
+        {
+            id: 'protocol',
+            label: 'Protocol',
+            cell: protocolCell,
+            class: 'text-muted small text-end',
+        },
+        { id: 'username', cell: usernameCell },
+        { id: 'targets', label: 'Targets', cell: targetsCell },
+        {
+            id: 'sourceAddress',
+            label: 'Source IP',
+            cell: sourceAddressCell,
+            hiddenByDefault: true,
+            class: 'ms-3',
+        },
+        {
+            id: 'duration',
+            label: 'Duration',
+            cell: durationCell,
+            class: 'ms-3',
+        },
+        {
+            id: 'startTime',
+            label: 'Start time',
+            cell: startTimeCell,
+            grow: true,
+            class: 'text-end',
+        },
+    ]
 </script>
+
+{#snippet iconCell(session: UserSessionSnapshot)}
+    <div class="icon" class:text-success={!session.ended}>
+        {#if !session.ended}
+            <Fa icon={iconActive} fw />
+        {/if}
+    </div>
+{/snippet}
+{#snippet protocolCell(session: UserSessionSnapshot)}
+    <div class="text-muted me-2">
+        {session.protocol}
+    </div>
+{/snippet}
+{#snippet sourceAddressCell(session: UserSessionSnapshot)}
+    <div class="meta">
+        {session.remoteAddress.replace(/:\d+$/, '').replace(/^\[(.*)\]$/, '$1')}
+    </div>
+{/snippet}
+{#snippet usernameCell(session: UserSessionSnapshot)}
+    <strong>
+        {session.username ??
+            (session.ended ? '<not logged in>' : '<logging in>')}
+    </strong>
+{/snippet}
+{#snippet targetsCell(session: UserSessionSnapshot)}
+    {describeTargets(session)}
+{/snippet}
+{#snippet durationCell(session: UserSessionSnapshot)}
+    {#if session.ended}
+        <div class="meta ms-auto">
+            {formatDistance(new Date(session.started), new Date(session.ended))}
+        </div>
+    {/if}
+{/snippet}
+{#snippet startTimeCell(session: UserSessionSnapshot)}
+    <div class="meta ms-auto">
+        <RelativeDate date={session.started} />
+    </div>
+{/snippet}
 
 {#if $serverInfo?.setupState}
     <GettingStarted setupState={$serverInfo?.setupState} />
@@ -128,8 +195,13 @@
         </div>
     {/if}
 
-    <ItemList load={loadSessions} pageSize={100}>
-        {#snippet header()}
+    <ItemList
+        load={loadSessions}
+        pageSize={100}
+        {columns}
+        storageKey="admin-sessions"
+    >
+        {#snippet header(_items, groupControls, columnControls)}
             <div class="d-flex align-items-center mb-1 w-100">
                 <div class="ms-auto"></div>
                 <Input
@@ -144,43 +216,17 @@
                     label="Logged in only"
                     bind:checked={$showLoggedInOnly}
                 />
+                <ListOverflowMenu {groupControls} {columnControls} />
             </div>
         {/snippet}
 
-        {#snippet item(
-            session,
-        )}
+        {#snippet item(session, cells)}
             <a
                 class="list-group-item list-group-item-action"
                 href="/status/sessions/{session.id}"
                 use:link
             >
-                <div class="main">
-                    <div class="icon" class:text-success={!session.ended}>
-                        {#if !session.ended}
-                            <Fa icon={iconActive} fw />
-                        {/if}
-                    </div>
-                    <div class="protocol text-muted me-2">
-                        {session.protocol}
-                    </div>
-                    <strong>
-                        {describeSession(session)}
-                    </strong>
-
-                    <div class="meta">
-                        {#if session.ended}
-                            {formatDistance(
-                                new Date(session.started),
-                                new Date(session.ended),
-                            )}
-                        {/if}
-                    </div>
-
-                    <div class="meta ms-auto">
-                        <RelativeDate date={session.started} />
-                    </div>
-                </div>
+                {@render cells(session)}
             </a>
         {/snippet}
     </ItemList>
@@ -188,22 +234,6 @@
 
 <style lang="scss">
     .list-group-item {
-        .icon {
-            display: flex;
-            align-items: center;
-            margin-right: 5px;
-            width: 20px;
-        }
-
-        .main {
-            display: flex;
-            align-items: center;
-        }
-
-        .protocol {
-            min-width: 3.5rem;
-        }
-
         .meta {
             opacity: .75;
             margin-left: 25px;

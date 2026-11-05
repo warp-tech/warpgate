@@ -29,7 +29,7 @@
                 },
             })
             // Redirect to groups list
-            replace('/config/target-groups')
+            replace('/manage/target-groups')
         } catch (e) {
             error = await stringifyError(e)
             throw e
@@ -88,7 +88,7 @@
 
         <div class="d-flex gap-2 mt-5">
             <AsyncButton click={save} color="primary">Create</AsyncButton>
-            <a class="btn btn-secondary" href="/config/target-groups" use:link>
+            <a class="btn btn-secondary" href="/manage/target-groups" use:link>
                 Cancel
             </a>
         </div>

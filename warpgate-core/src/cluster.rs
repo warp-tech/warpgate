@@ -277,7 +277,11 @@ impl Cluster {
         tokio::spawn({
             let this = Arc::clone(self);
             async move {
-                let mut interval = tokio::time::interval(HEARTBEAT_INTERVAL);
+                // The first beat was sent above, so skip the interval's immediate tick.
+                let mut interval = tokio::time::interval_at(
+                    tokio::time::Instant::now() + HEARTBEAT_INTERVAL,
+                    HEARTBEAT_INTERVAL,
+                );
                 loop {
                     interval.tick().await;
                     if let Err(error) = this.heartbeat().await {

@@ -11,16 +11,17 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use ironrdp::displaycontrol::pdu::{DisplayControlMonitorLayout, MonitorLayoutEntry};
-use ironrdp_server::tokio_rustls::TlsAcceptor;
-use ironrdp_server::tokio_rustls::rustls::ServerConfig as TlsServerConfig;
+use ironrdp_displaycontrol::pdu::{DisplayControlMonitorLayout, MonitorLayoutEntry};
 use ironrdp_server::{
     BitmapUpdate, CredentialDecision, CredentialValidationError, CredentialValidator, Credentials,
-    DesktopSize, DisplayUpdate, KeyboardEvent, MouseEvent, PixelFormat, RGBAPointer, RdpServer,
-    RdpServerDisplay, RdpServerDisplayUpdates, RdpServerInputHandler,
+    DesktopSize, DisplayContext, DisplayUpdate, KeyboardEvent, MouseButton, MouseEvent,
+    PixelFormat, RGBAPointer, RdpServer, RdpServerDisplay, RdpServerDisplayUpdates,
+    RdpServerInputHandler, ServerResult,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio_rustls::TlsAcceptor;
+use tokio_rustls::rustls::ServerConfig as TlsServerConfig;
 use tracing::{Instrument as _, Span, debug, warn};
 use warpgate_core::{DesktopInput, Scancode};
 #[cfg(test)]
@@ -28,9 +29,9 @@ use warpgate_desktop_ui::DEFAULT_SIZE;
 
 use super::clipboard::ViewerClipboard;
 use super::protocol::{AuthVerdict, Event, Input};
-use crate::desktop_size::bound_desktop_size;
+use crate::desktop_size::{MAX_DESKTOP_DIM, bound_desktop_size};
 #[cfg(test)]
-use crate::desktop_size::{MAX_DESKTOP_DIM, MAX_FRAME_BYTES, MIN_DESKTOP_DIM};
+use crate::desktop_size::{MAX_FRAME_BYTES, MIN_DESKTOP_DIM};
 
 /// Run the RDP server on a dedicated thread, resolving to its result.
 ///
@@ -85,8 +86,7 @@ where
 {
     // `ironrdp-server` pulls in tokio-rustls with the aws-lc-rs provider (its default);
     // install it as the process default so `ServerConfig::builder()` works.
-    let _ = ironrdp_server::tokio_rustls::rustls::crypto::aws_lc_rs::default_provider()
-        .install_default();
+    let _ = tokio_rustls::rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     let tls = build_tls_acceptor(&cert_pem, &key_pem)?;
 
@@ -137,7 +137,10 @@ where
         .with_display_handler(display)
         // Opt in to calling `request_initial_size`; without it the acceptor ignores the
         // viewer's requested resolution and pins the session to `size()`'s seed.
-        .with_honor_client_desktop_size(true)
+        .with_honor_client_desktop_size(Some(DesktopSize {
+            width: MAX_DESKTOP_DIM,
+            height: MAX_DESKTOP_DIM,
+        }))
         .with_credential_validator(Some(validator))
         .with_cliprdr_factory(Some(Box::new(clipboard)))
         .build();
@@ -399,7 +402,10 @@ impl RdpServerDisplay for DisplayHandler {
         size
     }
 
-    async fn updates(&mut self) -> Result<Box<dyn RdpServerDisplayUpdates>> {
+    async fn updates(
+        &mut self,
+        _ctx: DisplayContext,
+    ) -> ServerResult<Box<dyn RdpServerDisplayUpdates>> {
         // Hand out a fresh view over the shared receiver. Only one is active at a time
         // (the previous is dropped when its client loop ends before reactivation).
         Ok(Box::new(DisplayUpdatesReceiver {
@@ -430,7 +436,7 @@ struct DisplayUpdatesReceiver {
 
 #[async_trait::async_trait]
 impl RdpServerDisplayUpdates for DisplayUpdatesReceiver {
-    async fn next_update(&mut self) -> Result<Option<DisplayUpdate>> {
+    async fn next_update(&mut self) -> ServerResult<Option<DisplayUpdate>> {
         // `mpsc::Receiver::recv` is cancellation-safe, as this trait requires; the guard
         // is released on cancel and no message is lost. `Resize` and the frames that follow
         // it share this one ordered channel, so the encoder is always resized before it is
@@ -535,16 +541,26 @@ impl RdpServerInputHandler for InputHandler {
                 self.y = y;
                 self.emit_pointer();
             }
-            MouseEvent::LeftPressed => self.set_button(0, true),
-            MouseEvent::LeftReleased => self.set_button(0, false),
-            MouseEvent::MiddlePressed => self.set_button(1, true),
-            MouseEvent::MiddleReleased => self.set_button(1, false),
-            MouseEvent::RightPressed => self.set_button(2, true),
-            MouseEvent::RightReleased => self.set_button(2, false),
-            MouseEvent::Button4Pressed => self.set_button(3, true),
-            MouseEvent::Button4Released => self.set_button(3, false),
-            MouseEvent::Button5Pressed => self.set_button(4, true),
-            MouseEvent::Button5Released => self.set_button(4, false),
+            MouseEvent::Button {
+                x,
+                y,
+                button,
+                pressed,
+            } => {
+                self.x = x;
+                self.y = y;
+                self.set_button(button_bit(button), pressed);
+            }
+            MouseEvent::ButtonRel {
+                x,
+                y,
+                button,
+                pressed,
+            } => {
+                self.x = self.x.saturating_add_signed(clamp_to_i16(x));
+                self.y = self.y.saturating_add_signed(clamp_to_i16(y));
+                self.set_button(button_bit(button), pressed);
+            }
             MouseEvent::VerticalScroll { value } => {
                 let _ = self.out.send(Event::Input(DesktopInput::Wheel {
                     x: self.x,
@@ -570,6 +586,8 @@ impl RdpServerInputHandler for InputHandler {
                 self.y = self.y.saturating_add_signed(clamp_to_i16(y));
                 self.emit_pointer();
             }
+            // `MouseEvent` is non-exhaustive; input kinds added upstream have no viewer mapping.
+            _ => {}
         }
     }
 }
@@ -586,6 +604,19 @@ const fn wheel_notches(value: i16) -> i16 {
     }
 }
 
+/// Bit index of `button` in the viewer-side button mask (matches the browser's
+/// `MouseEvent.buttons` order).
+fn button_bit(button: MouseButton) -> u8 {
+    match button {
+        MouseButton::Left => 0,
+        MouseButton::Middle => 1,
+        MouseButton::Right => 2,
+        MouseButton::X1 => 3,
+        MouseButton::X2 => 4,
+        _ => 5,
+    }
+}
+
 fn clamp_to_i16(value: i32) -> i16 {
     value.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16
 }
@@ -594,7 +625,7 @@ fn clamp_to_i16(value: i32) -> i16 {
 mod desktop_size_tests {
     use std::sync::Arc;
 
-    use ironrdp::displaycontrol::pdu::{DisplayControlMonitorLayout, MonitorLayoutEntry};
+    use ironrdp_displaycontrol::pdu::{DisplayControlMonitorLayout, MonitorLayoutEntry};
     use tokio::sync::{Mutex, mpsc};
 
     use super::{
@@ -728,8 +759,8 @@ mod desktop_size_tests {
 
 #[cfg(test)]
 mod cursor_tests {
-    use ironrdp::graphics::pointer::{DecodedPointer, PointerBitmapTarget};
-    use ironrdp::pdu::pointer::{ColorPointerAttribute, Point16, PointerAttribute};
+    use ironrdp_graphics::pointer::{DecodedPointer, PointerBitmapTarget};
+    use ironrdp_pdu::pointer::{ColorPointerAttribute, Point16, PointerAttribute};
     use ironrdp_server::DisplayUpdate;
 
     use super::{MAX_CURSOR_DIM, cursor_to_update};
@@ -813,7 +844,7 @@ mod cursor_tests {
 mod framed_tests {
     use std::time::Duration;
 
-    use ironrdp::pdu::X224_HINT;
+    use ironrdp_pdu::X224_HINT;
     use ironrdp_tokio::TokioFramed;
     use tokio::io::AsyncWriteExt as _;
 
