@@ -538,6 +538,15 @@ impl DetailApi {
             return Ok(UpdateLdapServerResponse::NotFound);
         };
 
+        let endpoint_or_bind_changed =
+            server.host != body.host || server.port != body.port || server.bind_dn != body.bind_dn;
+        if endpoint_or_bind_changed && body.bind_password.is_none() {
+            return Err(WarpgateError::InvalidRequest(
+                "The bind password is required when changing the LDAP host, port, or bind DN"
+                    .into(),
+            ));
+        }
+
         let mut model: LdapServer::ActiveModel = server.into();
 
         // Update fields
