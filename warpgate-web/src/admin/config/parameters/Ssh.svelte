@@ -100,9 +100,8 @@
                 </div>
             </label>
             <HelpText>
-                Shows a scannable QR code in the
-                terminal when web authentication is
-                required.
+                Shows a scannable QR code in the terminal when web
+                authentication is required.
             </HelpText>
         </Section>
     {/snippet}
