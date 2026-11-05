@@ -1,5 +1,9 @@
 <script lang="ts">
     import { Alert, FormGroup, Input, Tooltip } from '@sveltestrap/sveltestrap'
+    import {
+        adminAccessWarning,
+        confirmWithWarning,
+    } from 'admin/lib/adminAccess'
     import { type AdminRole, api, type User } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
@@ -126,6 +130,16 @@
         if (!role) return
         try {
             normalizePermissions(role)
+            const warning = await adminAccessWarning({
+                kind: 'updateRole',
+                role,
+            })
+            if (
+                warning &&
+                !confirmWithWarning(`Save admin role ${role.name}?`, warning)
+            ) {
+                return
+            }
             role = await api.updateAdminRole({
                 id: params.id,
                 adminRoleDataRequest: role,
@@ -137,7 +151,11 @@
 
     async function remove() {
         if (!role) return
-        if (confirm(`Delete admin role ${role.name}?`)) {
+        const warning = await adminAccessWarning({
+            kind: 'deleteRole',
+            roleId: role.id,
+        })
+        if (confirmWithWarning(`Delete admin role ${role.name}?`, warning)) {
             await api.deleteAdminRole(role)
             replace('/manage/admin-roles')
         }
