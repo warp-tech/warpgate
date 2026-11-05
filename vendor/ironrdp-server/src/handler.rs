@@ -24,21 +24,59 @@ pub enum KeyboardEvent {
 /// Describes a mouse event received from the client
 ///
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum MouseEvent {
-    Move { x: u16, y: u16 },
-    RightPressed,
-    RightReleased,
-    LeftPressed,
-    LeftReleased,
-    MiddlePressed,
-    MiddleReleased,
-    Button4Pressed,
-    Button4Released,
-    Button5Pressed,
-    Button5Released,
-    VerticalScroll { value: i16 },
-    Scroll { x: i32, y: i32 },
-    RelMove { x: i32, y: i32 },
+    Move {
+        x: u16,
+        y: u16,
+    },
+    /// A button press or release at the absolute position the event source
+    /// carries (`MousePdu`, `MouseXPdu`, `ainput::MousePdu`).
+    Button {
+        x: u16,
+        y: u16,
+        button: MouseButton,
+        pressed: bool,
+    },
+    /// A button press or release with a relative motion delta instead of an
+    /// absolute position. Per MS-RDPBCGR 2.2.8.1.1.3.1.1.7, a `MouseRelPdu`
+    /// button flag reports the press or release at the position produced by
+    /// applying `x`/`y` to the previous position, so the delta belongs to
+    /// this event and is not a separate `RelMove`.
+    ButtonRel {
+        x: i32,
+        y: i32,
+        button: MouseButton,
+        pressed: bool,
+    },
+    VerticalScroll {
+        value: i16,
+    },
+    HorizontalScroll {
+        value: i16,
+    },
+    Scroll {
+        x: i32,
+        y: i32,
+    },
+    RelMove {
+        x: i32,
+        y: i32,
+    },
+}
+
+/// Mouse button identity, shared by [`MouseEvent::Button`] and
+/// [`MouseEvent::ButtonRel`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MouseButton {
+    Left,
+    Right,
+    Middle,
+    /// Extended button 1, also known as button 4 or the "back" button.
+    X1,
+    /// Extended button 2, also known as button 5 or the "forward" button.
+    X2,
 }
 
 /// Input Event Handler for an RDP server
@@ -148,91 +186,137 @@ impl From<SyncToggleFlags> for KeyboardEvent {
 
 impl From<MousePdu> for MouseEvent {
     fn from(value: MousePdu) -> Self {
-        if value.flags.contains(PointerFlags::LEFT_BUTTON) {
-            if value.flags.contains(PointerFlags::DOWN) {
-                MouseEvent::LeftPressed
-            } else {
-                MouseEvent::LeftReleased
-            }
-        } else if value.flags.contains(PointerFlags::RIGHT_BUTTON) {
-            if value.flags.contains(PointerFlags::DOWN) {
-                MouseEvent::RightPressed
-            } else {
-                MouseEvent::RightReleased
-            }
-        } else if value.flags.contains(PointerFlags::VERTICAL_WHEEL) {
+        let x = value.x_position;
+        let y = value.y_position;
+        let pressed = value.flags.contains(PointerFlags::DOWN);
+
+        // Per MS-RDPBCGR 2.2.8.1.2.2.3: "If both PTRFLAGS_WHEEL and
+        // PTRFLAGS_HWHEEL are specified, then PTRFLAGS_WHEEL takes
+        // precedence." xPos/yPos are spec-defined as unreliable on wheel
+        // events ("SHOULD be ignored by the server"), so wheel variants
+        // stay position-less rather than carrying this PDU's x/y.
+        if value.flags.contains(PointerFlags::VERTICAL_WHEEL) {
             MouseEvent::VerticalScroll {
                 value: value.number_of_wheel_rotation_units,
             }
-        } else {
-            MouseEvent::Move {
-                x: value.x_position,
-                y: value.y_position,
+        } else if value.flags.contains(PointerFlags::HORIZONTAL_WHEEL) {
+            MouseEvent::HorizontalScroll {
+                value: value.number_of_wheel_rotation_units,
             }
+        } else if value.flags.contains(PointerFlags::LEFT_BUTTON) {
+            MouseEvent::Button {
+                x,
+                y,
+                button: MouseButton::Left,
+                pressed,
+            }
+        } else if value.flags.contains(PointerFlags::RIGHT_BUTTON) {
+            MouseEvent::Button {
+                x,
+                y,
+                button: MouseButton::Right,
+                pressed,
+            }
+        } else if value.flags.contains(PointerFlags::MIDDLE_BUTTON_OR_WHEEL) {
+            MouseEvent::Button {
+                x,
+                y,
+                button: MouseButton::Middle,
+                pressed,
+            }
+        } else {
+            // PTRFLAGS_MOVE, or no recognized flag at all: every reference
+            // server implementation studied (FreeRDP, xrdp, KDE krdp, GNOME
+            // Remote Desktop) treats this the same way, a move to whatever
+            // position the PDU carries.
+            MouseEvent::Move { x, y }
         }
     }
 }
 
 impl From<MouseXPdu> for MouseEvent {
     fn from(value: MouseXPdu) -> Self {
+        let x = value.x_position;
+        let y = value.y_position;
+        let pressed = value.flags.contains(PointerXFlags::DOWN);
+
+        // Per MS-RDPBCGR 2.2.8.1.2.2.4: PTRXFLAGS_BUTTON1 is "Extended mouse
+        // button 1 (also referred to as button 4)", PTRXFLAGS_BUTTON2 is
+        // "Extended mouse button 2 (also referred to as button 5)" — the
+        // X1/X2 side buttons, not primary left/right. This PDU's pointerFlags
+        // carries no other semantics (no move/wheel bits exist for it), so
+        // the fallback genuinely always means Move, unlike MousePdu.
         if value.flags.contains(PointerXFlags::BUTTON1) {
-            if value.flags.contains(PointerXFlags::DOWN) {
-                MouseEvent::LeftPressed
-            } else {
-                MouseEvent::LeftReleased
+            MouseEvent::Button {
+                x,
+                y,
+                button: MouseButton::X1,
+                pressed,
             }
         } else if value.flags.contains(PointerXFlags::BUTTON2) {
-            if value.flags.contains(PointerXFlags::DOWN) {
-                MouseEvent::RightPressed
-            } else {
-                MouseEvent::RightReleased
+            MouseEvent::Button {
+                x,
+                y,
+                button: MouseButton::X2,
+                pressed,
             }
         } else {
-            MouseEvent::Move {
-                x: value.x_position,
-                y: value.y_position,
-            }
+            MouseEvent::Move { x, y }
         }
     }
 }
 
 impl From<MouseRelPdu> for MouseEvent {
     fn from(value: MouseRelPdu) -> Self {
+        // Per MS-RDPBCGR 2.2.8.1.1.3.1.1.7, xDelta/yDelta are present on every
+        // relative event, including button events: PTRFLAGS_DOWN is defined as
+        // the press occurring at the position produced by applying this same
+        // delta to the previous position. So a button flag never discards it.
+        let x = value.x_delta.into();
+        let y = value.y_delta.into();
+        let pressed = value.flags.contains(PointerRelFlags::DOWN);
+
         if value.flags.contains(PointerRelFlags::BUTTON1) {
-            if value.flags.contains(PointerRelFlags::DOWN) {
-                MouseEvent::LeftPressed
-            } else {
-                MouseEvent::LeftReleased
+            MouseEvent::ButtonRel {
+                x,
+                y,
+                button: MouseButton::Left,
+                pressed,
             }
         } else if value.flags.contains(PointerRelFlags::BUTTON2) {
-            if value.flags.contains(PointerRelFlags::DOWN) {
-                MouseEvent::RightPressed
-            } else {
-                MouseEvent::RightReleased
+            MouseEvent::ButtonRel {
+                x,
+                y,
+                button: MouseButton::Right,
+                pressed,
             }
         } else if value.flags.contains(PointerRelFlags::BUTTON3) {
-            if value.flags.contains(PointerRelFlags::DOWN) {
-                MouseEvent::MiddlePressed
-            } else {
-                MouseEvent::MiddleReleased
+            MouseEvent::ButtonRel {
+                x,
+                y,
+                button: MouseButton::Middle,
+                pressed,
             }
         } else if value.flags.contains(PointerRelFlags::XBUTTON1) {
-            if value.flags.contains(PointerRelFlags::DOWN) {
-                MouseEvent::Button4Pressed
-            } else {
-                MouseEvent::Button4Released
+            MouseEvent::ButtonRel {
+                x,
+                y,
+                button: MouseButton::X1,
+                pressed,
             }
         } else if value.flags.contains(PointerRelFlags::XBUTTON2) {
-            if value.flags.contains(PointerRelFlags::DOWN) {
-                MouseEvent::Button5Pressed
-            } else {
-                MouseEvent::Button5Released
+            MouseEvent::ButtonRel {
+                x,
+                y,
+                button: MouseButton::X2,
+                pressed,
             }
         } else {
-            MouseEvent::RelMove {
-                x: value.x_delta.into(),
-                y: value.y_delta.into(),
-            }
+            // PTRRELFLAGS_MOVE, or no recognized flag: a relative delta is
+            // additive rather than a teleport, so applying whatever delta
+            // the PDU carries is a safe default even for an unrecognized
+            // flag combination.
+            MouseEvent::RelMove { x, y }
         }
     }
 }
@@ -241,34 +325,46 @@ impl From<ainput::MousePdu> for MouseEvent {
     fn from(value: ainput::MousePdu) -> Self {
         use ainput::MouseEventFlags;
 
+        // Unlike MousePdu/MouseXPdu, this PDU carries x/y on every event
+        // regardless of which flag is set, including button events — so
+        // buttons get position here too, not just Move.
+        let pos = || -> (u16, u16) {
+            // assume positions are 0 <= u16::MAX
+            (value.x.try_into().unwrap_or(0), value.y.try_into().unwrap_or(0))
+        };
+        let pressed = value.flags.contains(MouseEventFlags::DOWN);
+
         if value.flags.contains(MouseEventFlags::BUTTON1) {
-            if value.flags.contains(MouseEventFlags::DOWN) {
-                MouseEvent::LeftPressed
-            } else {
-                MouseEvent::LeftReleased
+            let (x, y) = pos();
+            MouseEvent::Button {
+                x,
+                y,
+                button: MouseButton::Left,
+                pressed,
             }
         } else if value.flags.contains(MouseEventFlags::BUTTON2) {
-            if value.flags.contains(MouseEventFlags::DOWN) {
-                MouseEvent::RightPressed
-            } else {
-                MouseEvent::RightReleased
+            let (x, y) = pos();
+            MouseEvent::Button {
+                x,
+                y,
+                button: MouseButton::Right,
+                pressed,
             }
         } else if value.flags.contains(MouseEventFlags::BUTTON3) {
-            if value.flags.contains(MouseEventFlags::DOWN) {
-                MouseEvent::MiddlePressed
-            } else {
-                MouseEvent::MiddleReleased
+            let (x, y) = pos();
+            MouseEvent::Button {
+                x,
+                y,
+                button: MouseButton::Middle,
+                pressed,
             }
         } else if value.flags.contains(MouseEventFlags::WHEEL) {
             MouseEvent::Scroll { x: value.x, y: value.y }
         } else if value.flags.contains(MouseEventFlags::REL) {
             MouseEvent::RelMove { x: value.x, y: value.y }
         } else if value.flags.contains(MouseEventFlags::MOVE) {
-            // assume moves are 0 <= u16::MAX
-            MouseEvent::Move {
-                x: value.x.try_into().unwrap_or(0),
-                y: value.y.try_into().unwrap_or(0),
-            }
+            let (x, y) = pos();
+            MouseEvent::Move { x, y }
         } else {
             MouseEvent::Move { x: 0, y: 0 }
         }
