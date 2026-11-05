@@ -55,7 +55,7 @@
             <NavListItem
                 title={TARGET_KIND_LABELS[kind.value]}
                 description={kind.description}
-                href={`/config/targets/create/${kind.value}`}
+                href={`/manage/targets/create/${kind.value}`}
             >
                 {#snippet addonSnippet()}
                     {#if kind.experimental}

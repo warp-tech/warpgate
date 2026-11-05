@@ -11,7 +11,7 @@ use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_core::oracle_verifier::{delete_oracle_verifier, sync_oracle_verifier_from_password};
 use warpgate_db_entities::{PasswordCredential, User};
 
-use super::AdminContext;
+use super::{AdminContext, guard_user_mutation};
 
 #[derive(Object)]
 struct ExistingPasswordCredential {
@@ -76,7 +76,8 @@ impl ListApi {
     #[oai(
         path = "/users/:user_id/credentials/passwords",
         method = "post",
-        operation_id = "create_password_credential"
+        operation_id = "create_password_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_create(
         &self,
@@ -148,7 +149,8 @@ impl DetailApi {
     #[oai(
         path = "/users/:user_id/credentials/passwords/:id",
         method = "delete",
-        operation_id = "delete_password_credential"
+        operation_id = "delete_password_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_delete(
         &self,

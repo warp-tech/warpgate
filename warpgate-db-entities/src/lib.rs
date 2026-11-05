@@ -14,6 +14,7 @@ macro_rules! with_every_entity {
             HttpSession,
             IpBlock,
             KnownHost,
+            KubernetesSession,
             LdapServer,
             LogEntry,
             Node,

@@ -507,9 +507,10 @@ async fn user_for_api_token(
         return Ok(None);
     }
 
-    let Some(user) = services.config_provider.validate_api_token(token).await? else {
+    let Some(token) = services.config_provider.validate_api_token(token).await? else {
         return Ok(None);
     };
+    let user = token.user;
 
     if !vet_credential_bearer(&services.login_protection, &user, remote_ip).await? {
         return Ok(None);

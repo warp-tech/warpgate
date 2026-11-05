@@ -97,7 +97,7 @@
             />
         {/if}
 
-        <a class="btn btn-secondary" href="/config/tickets" use:link>Done</a>
+        <a class="btn btn-secondary" href="/manage/tickets" use:link>Done</a>
     {:else}
         <div class="narrow-page">
             <div class="page-summary-bar">
