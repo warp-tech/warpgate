@@ -55,19 +55,20 @@
             cell: requiresApprovalCell,
         },
         {
+            id: 'description',
+            label: 'Description',
+            cell: descriptionCell,
+            class: 'text-truncate text-muted small',
+        },
+        { id: 'spacer', spacer: true },
+        {
             id: 'address',
             label: 'Address',
             hiddenByDefault: true,
             cell: addressCell,
             class: 'text-muted small font-monospace',
         },
-        {
-            id: 'description',
-            label: 'Description',
-            cell: descriptionCell,
-            grow: true,
-            class: 'text-truncate text-muted small',
-        },
+        { id: 'spacer2', spacer: true },
         { id: 'managed', label: 'Managed status', cell: managedCell },
         {
             id: 'kind',
@@ -134,8 +135,8 @@
     {const id = uuid()}
     {#if target.requireApproval}
         <Fa icon={faLock} {id}></Fa>
+        <Tooltip target={id} delay="500"> Requires admin approval </Tooltip>
     {/if}
-    <Tooltip target={id} delay="500"> Requires admin approval </Tooltip>
 {/snippet}
 
 <div>
