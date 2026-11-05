@@ -20,7 +20,7 @@ use warpgate_common::{
     WarpgateConfigStore,
 };
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
-use warpgate_core::db::connect_to_db_and_migrate;
+use warpgate_core::db::{connect_to_db_and_migrate, sqlite_url};
 use warpgate_db_entities::Parameters::{RecordingsDiskConfig, RecordingsStorageConfig};
 use warpgate_db_entities::{Parameters, Role, User, UserRoleAssignment};
 
@@ -137,12 +137,14 @@ impl Answers {
         } else {
             info!(
                 "* Paths can be either absolute or relative to {}.",
-                config_dir.canonicalize()?.display()
+                dunce::canonicalize(config_dir)?.display()
             );
             #[cfg(target_os = "linux")]
             let default_data_path = "/var/lib/warpgate";
             #[cfg(target_os = "macos")]
             let default_data_path = "/usr/local/var/lib/warpgate";
+            #[cfg(windows)]
+            let default_data_path = r"C:\ProgramData\warpgate";
             dialoguer::Input::with_theme(&theme)
                 .default(default_data_path.to_string())
                 .with_prompt("Directory to store app data (up to a few MB) in")
@@ -208,10 +210,10 @@ impl Answers {
     }
 
     fn config(&self, db_path: &Path) -> WarpgateConfigStore {
-        let database_url = self.database_url.clone().unwrap_or_else(|| {
-            let db_path = db_path.to_string_lossy();
-            format!("sqlite:{}", db_path.strip_suffix("./").unwrap_or(&db_path))
-        });
+        let database_url = self
+            .database_url
+            .clone()
+            .unwrap_or_else(|| sqlite_url(db_path));
         let mut store = WarpgateConfigStore {
             database_url: Secret::new(database_url),
             ..Default::default()
@@ -335,8 +337,13 @@ fn config_dir(params: &GlobalParams) -> &Path {
     }
 }
 
+/// Creates the directory first, as `canonicalize` fails for a path that does
+/// not exist yet. `dunce` leaves out the verbatim `\\?\` prefix Windows would
+/// otherwise add, which would end up in the config.
 fn resolve_data_path(config_dir: &Path, data_path: &str) -> Result<PathBuf> {
-    Ok(config_dir.join(data_path).canonicalize()?)
+    let data_path = config_dir.join(data_path);
+    create_dir_all(&data_path)?;
+    Ok(dunce::canonicalize(data_path)?)
 }
 
 async fn bootstrap_database(
@@ -556,13 +563,58 @@ pub async fn command(
         );
     } else {
         info!(
-            "  {} --config {} run",
+            "  {}{} --config {} run",
             std::env::args()
                 .next()
                 .unwrap_or_else(|| "warpgate".to_string()),
+            if params.should_secure_files() {
+                ""
+            } else {
+                " --skip-securing-files"
+            },
             config_path.display()
         );
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use crate::{Cli, Commands};
+
+    /// Setup creates a data directory that does not exist yet, and the
+    /// database URL it writes opens the database in it, whatever characters
+    /// the path holds.
+    #[tokio::test]
+    async fn unattended_setup_creates_a_new_data_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
+        let data_path = "new data/caf\u{e9} #1";
+        let cli = Cli::try_parse_from([
+            "warpgate".into(),
+            "--config".into(),
+            base.join("warpgate.yaml").into_os_string(),
+            "unattended-setup".into(),
+            "--data-path".into(),
+            data_path.into(),
+            "--http-port".into(),
+            "8888".into(),
+            "--admin-password".into(),
+            "password".into(),
+        ])
+        .unwrap();
+        let Commands::UnattendedSetup(args) = &cli.command else {
+            unreachable!()
+        };
+        let params = cli.into_global_params().unwrap();
+
+        super::command(&params, &args.common, Some(args))
+            .await
+            .unwrap();
+
+        assert!(base.join(data_path).join("db/db.sqlite3").is_file());
+    }
 }

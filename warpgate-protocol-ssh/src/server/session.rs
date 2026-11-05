@@ -45,6 +45,7 @@ use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
 
 use super::channel_registry::{Channel, ChannelRegistry};
 use super::channel_writer::ChannelWriter;
+use super::client_closer::ClientCloser;
 use super::event_intake::EventIntake;
 use super::russh_handler::ServerHandlerEvent;
 use super::service_output::ServiceOutput;
@@ -183,10 +184,9 @@ pub struct ServerSession {
     allowed_auth_methods: MethodSet,
     /// Track the state of a client snooping around pre-auth
     probe: ProbeState,
-    /// A duplicate of the client's socket descriptor, shut down at teardown
-    /// so the connection ends with the session rather than with russh's
-    /// inactivity timer. `None` once used.
-    client_socket: Option<std::net::TcpStream>,
+    /// Closes the client connection at teardown so it ends with the session
+    /// rather than with russh's inactivity timer. `None` once used.
+    client_closer: Option<ClientCloser>,
 }
 
 fn session_debug_tag(id: &UserSessionId, remote_address: &SocketAddr) -> String {
@@ -261,7 +261,7 @@ impl ServerSession {
         server_handle: Arc<Mutex<WarpgateServerHandle>>,
         mut session_handle_rx: UnboundedReceiver<SessionHandleCommand>,
         mut handler_event_rx: UnboundedReceiver<ServerHandlerEvent>,
-        client_socket: std::net::TcpStream,
+        client_closer: ClientCloser,
     ) -> Result<impl Future<Output = Result<()>> + use<>> {
         let id = server_handle.lock().await.user_session_id();
 
@@ -307,7 +307,7 @@ impl ServerSession {
             cached_successful_ticket_auth: None,
             allowed_auth_methods: get_allowed_auth_methods(services).await?,
             probe: ProbeState::NoAttempt,
-            client_socket: Some(client_socket),
+            client_closer: Some(client_closer),
         };
 
         let mut so_rx = this.service_output.subscribe();
@@ -2682,7 +2682,7 @@ impl ServerSession {
             .await
             .is_ok();
 
-        if let Some(socket) = self.client_socket.take() {
+        if let Some(closer) = self.client_closer.take() {
             // A flush only proves the messages reached russh's queue, so a
             // client that is reading gets a moment to receive them; one that
             // is not gets nothing more and is cut immediately. Spawned rather
@@ -2713,7 +2713,7 @@ impl ServerSession {
                     .await;
                 }
                 tokio::time::sleep(delay.saturating_sub(DISCONNECT_NOTICE_GAP)).await;
-                let _ = socket.shutdown(std::net::Shutdown::Both);
+                closer.close();
             });
         }
 

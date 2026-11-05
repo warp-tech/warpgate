@@ -26,7 +26,6 @@ git-version = { version = "0.3.9", default-features = false }
 governor.workspace = true
 humantime-serde = { version = "1.1", default-features = false }
 ipnet.workspace = true
-nix = { version = "0.31", features = ["user"] }
 nucleo-matcher = "0.3.1"
 password-hash.workspace = true
 poem.workspace = true
@@ -67,3 +66,6 @@ warpgate-sso = { path = "../warpgate-sso" }
 warpgate-tls = { path = "../warpgate-tls" }
 webpki = { version = "0.22", default-features = false }
 x509-parser = { version = "0.18.1", default-features = false }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.31", features = ["user"] }

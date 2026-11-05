@@ -20,6 +20,7 @@ ipnet.workspace = true
 ldap3.workspace = true
 packet = { version = "0.1", default-features = false }
 password-hash.workspace = true
+percent-encoding = "2"
 png = "0.18"
 poem.workspace = true
 poem-openapi.workspace = true
@@ -55,6 +56,9 @@ warpgate-sso = { path = "../warpgate-sso", default-features = false }
 warpgate-tls = { path = "../warpgate-tls" }
 webpki = { version = "0.22", default-features = false }
 zune-jpeg.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
 
 [features]
 postgres = ["sea-orm/sqlx-postgres"]
