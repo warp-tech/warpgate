@@ -15,7 +15,7 @@
         type Target,
         type TargetGroup,
     } from 'admin/lib/api'
-    import ManagedIcon from 'admin/lib/ManagedIcon.svelte'
+    import ManagedObjectStatus from 'admin/lib/ManagedObjectStatus.svelte'
     import Section from 'admin/lib/Section.svelte'
     import SectionedForm from 'admin/lib/SectionedForm.svelte'
     import { adminPermissions } from 'admin/lib/store'
@@ -215,13 +215,13 @@
                             {#if target.options.kind === 'Kubernetes'}
                                 Kubernetes target
                             {/if}
-                            <ManagedIcon
-                                provider={target.provider}
-                                onRelease={$adminPermissions.targetsEdit
-                                    ? release
-                                    : undefined}
-                            />
                         </div>
+                        <ManagedObjectStatus
+                            provider={target.provider}
+                            onRelease={$adminPermissions.targetsEdit
+                                ? release
+                                : undefined}
+                        />
                     </div>
                 </div>
 

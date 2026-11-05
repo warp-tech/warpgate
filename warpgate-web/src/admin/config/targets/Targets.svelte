@@ -68,7 +68,7 @@
             grow: true,
             class: 'text-truncate text-muted small',
         },
-        { id: 'managed', cell: managedCell },
+        { id: 'managed', label: 'Managed status', cell: managedCell },
         {
             id: 'kind',
             label: 'Type',

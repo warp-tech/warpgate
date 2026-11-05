@@ -61,12 +61,12 @@
                         {role.name}
                     </strong>
                     {#if role.description}
-                        <small class="d-block text-muted"
-                            >{role.description}</small
-                        >
+                        <small class="d-block text-muted">
+                            {role.description}
+                        </small>
                     {/if}
                 </div>
-                <ManagedIcon provider={role.provider} />
+                <ManagedIcon provider={role.provider} class="ms-auto" />
             </a>
         {/snippet}
     </ItemList>

@@ -2,10 +2,12 @@
     import { Alert, FormGroup, Input } from '@sveltestrap/sveltestrap'
     import { api, type Role, type Target, type User } from 'admin/lib/api'
     import ManagedIcon from 'admin/lib/ManagedIcon.svelte'
+    import ManagedObjectStatus from 'admin/lib/ManagedObjectStatus.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
     import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import StickyActionBar from 'common/StickyActionBar.svelte'
     import { setCurrentSidebarSubtitle } from 'common/sidebarState.svelte'
     import * as rx from 'rxjs'
     import { link, replace } from 'svelte-spa-router'
@@ -92,13 +94,13 @@
                     <h1>{role.name}</h1>
                     <div class="text-muted d-flex align-items-center gap-2">
                         role
-                        <ManagedIcon
-                            provider={role.provider}
-                            onRelease={$adminPermissions.accessRolesEdit
-                                ? release
-                                : undefined}
-                        />
                     </div>
+                    <ManagedObjectStatus
+                        provider={role.provider}
+                        onRelease={$adminPermissions.accessRolesEdit
+                            ? release
+                            : undefined}
+                    />
                 </div>
             </div>
 
@@ -128,34 +130,6 @@
     {#if error}
         <Alert color="danger">{error}</Alert>
     {/if}
-
-    <div class="d-flex">
-        <a
-            href="/log/access-role/{params.id}"
-            use:link
-            class="btn btn-secondary"
-        >
-            Audit log
-        </a>
-
-        <AsyncButton
-            color="primary"
-            disabled={!$adminPermissions.accessRolesEdit || !!role?.provider}
-            class="ms-auto"
-            click={update}
-        >
-            Update
-        </AsyncButton>
-
-        <AsyncButton
-            class="ms-2"
-            disabled={!$adminPermissions.accessRolesDelete || !!role?.provider}
-            color="danger"
-            click={remove}
-        >
-            Remove
-        </AsyncButton>
-    </div>
 
     <h4 class="mt-5">Assigned users</h4>
 
@@ -208,4 +182,38 @@
             <Alert color="info">This role has no targets assigned to it</Alert>
         {/snippet}
     </ItemList>
+
+    <StickyActionBar>
+        {#snippet start()}
+            <a
+                href="/log/access-role/{params.id}"
+                use:link
+                class="btn btn-secondary"
+            >
+                Audit log
+            </a>
+        {/snippet}
+
+        {#snippet children()}
+            <AsyncButton
+                color="primary"
+                disabled={!$adminPermissions.accessRolesEdit ||
+                    !!role?.provider}
+                class="ms-auto"
+                click={update}
+            >
+                Update
+            </AsyncButton>
+
+            <AsyncButton
+                class="ms-2"
+                disabled={!$adminPermissions.accessRolesDelete ||
+                    !!role?.provider}
+                color="danger"
+                click={remove}
+            >
+                Remove
+            </AsyncButton>
+        {/snippet}
+    </StickyActionBar>
 </div>

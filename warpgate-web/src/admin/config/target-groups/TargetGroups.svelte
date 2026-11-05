@@ -42,7 +42,7 @@
 
     const columns: Column<TargetGroup>[] = [
         { id: 'icon', cell: iconCell },
-        { id: 'name', cell: nameCell },
+        { id: 'name', cell: nameCell, grow: true },
         {
             id: 'description',
             label: 'Description',

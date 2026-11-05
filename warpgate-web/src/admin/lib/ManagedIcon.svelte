@@ -12,18 +12,18 @@
         onRelease?: () => Promise<unknown>
     }
 
-    let { provider, class: className = undefined, onRelease }: Props = $props()
+    let { provider, class: className, onRelease }: Props = $props()
 
     const GITOPS = '00000000-0000-0000-0000-000000000000'
 
-    const id = uuid()
+    let wrapper: HTMLElement | null = $state(null)
 </script>
 
 {#if provider}
-    <div class={className} {id}>
+    <div class={className} bind:this={wrapper}>
         <Fa icon={faBriefcase} fw class="text-secondary" />
     </div>
-    <Tooltip target={id} delay={500}>
+    <Tooltip target={wrapper} delay={500} placement="top">
         Managed by
         {#if provider === GITOPS}
             GitOps

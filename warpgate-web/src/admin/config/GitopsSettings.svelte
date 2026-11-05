@@ -4,6 +4,8 @@
     import HelpText from 'admin/lib/HelpText.svelte'
     import PermissionGate from 'admin/lib/PermissionGate.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
+    import CopyableTextArea from 'common/CopyableTextArea.svelte'
+    import CopyButton from 'common/CopyButton.svelte'
     import DurationInput from 'common/DurationInput.svelte'
     import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
@@ -15,6 +17,7 @@
     let intervalSeconds: number | undefined = $state()
     let prune = $state(false)
     let webhookSecretSet = $state(false)
+
     // undefined keeps the stored secret, null removes it
     let webhookSecret: string | null | undefined = $state()
 
@@ -96,7 +99,7 @@
                     save()
                 }}
             >
-                <FormGroup floating label="Source">
+                <FormGroup floating label="Configuration source">
                     <select
                         class="form-select"
                         value={source?.kind ?? ''}
@@ -104,7 +107,7 @@
                     >
                         <option value="">Off</option>
                         <option value="Git">Git repository</option>
-                        <option value="Directory">Directory</option>
+                        <option value="Directory">Local directory</option>
                     </select>
                 </FormGroup>
 
@@ -119,7 +122,7 @@
                             bind:value={dir.path}
                         >
                     </FormGroup>
-                    <HelpText>Must hold the same files on every node.</HelpText>
+                    <HelpText>Must be mounted on every node</HelpText>
                 {:else if source?.kind === 'Git'}
                     {@const git = source}
                     <FormGroup floating label="URL">
@@ -128,7 +131,7 @@
                             class="form-control"
                             required
                             maxlength="2048"
-                            pattern="(https|file)://[^@/]*(/.*)?"
+                            pattern="(https|file)://[^@\/]*(/.*)?"
                             placeholder="https://git.example.com/infra.git"
                             bind:value={git.url}
                         >
@@ -142,25 +145,24 @@
                             bind:value={git.reference}
                         >
                     </FormGroup>
-                    <FormGroup
-                        floating
-                        label="Path in the repository (blank = root)"
-                    >
+                    <FormGroup floating label="Path within the repository">
                         <input
                             type="text"
                             class="form-control"
                             maxlength="4096"
                             pattern="[^\/\\.][^\/\\]*(\/[^\/\\.][^\/\\]*)*"
+                            placeholder="Repository root"
                             value={git.path ?? ''}
                             oninput={e =>
                                 (git.path = e.currentTarget.value || undefined)}
                         >
                     </FormGroup>
-                    <FormGroup floating label="Username (blank = anonymous)">
+                    <FormGroup floating label="Username">
                         <input
                             type="text"
                             class="form-control"
                             autocomplete="off"
+                            placeholder="Anonymous"
                             maxlength="255"
                             value={git.username ?? ''}
                             oninput={e =>
@@ -172,13 +174,26 @@
                         bind:value={git.password}
                         inlineLabel="Password or token"
                     />
-                    <HelpText
-                        >Blank keeps the stored password while the URL stays the
-                        same.</HelpText
-                    >
                 {/if}
 
                 {#if source}
+                    <label
+                        for="gitopsPrune"
+                        class="d-flex align-items-center mb-4"
+                    >
+                        <Input
+                            id="gitopsPrune"
+                            class="mb-0 me-2"
+                            type="switch"
+                            bind:checked={prune}
+                        />
+                        <div>
+                            Delete objects that are no longer present in the
+                            config
+                        </div>
+                    </label>
+
+                    <h4>Automatic sync</h4>
                     <DurationInput
                         label="Sync interval (blank = no periodic sync)"
                         seconds={intervalSeconds}
@@ -187,24 +202,14 @@
                         }}
                     />
 
-                    <label
-                        for="gitopsPrune"
-                        class="d-flex align-items-center mb-2"
-                    >
-                        <Input
-                            id="gitopsPrune"
-                            class="mb-0 me-2"
-                            type="switch"
-                            bind:checked={prune}
-                        />
-                        <div>Delete resources removed from the source</div>
-                    </label>
                     <HelpText>
-                        A sync that would delete more than half of the managed
-                        resources applies nothing until forced from the sync
-                        history.
+                        For added safety, if more than half of the managed
+                        objects are deleted in the config, a manual sync will be
+                        required
                     </HelpText>
 
+                    <h4>Webhook</h4>
+                    <CopyableTextArea label="Webhook URL" value={webhookUrl} />
                     <div class="d-flex align-items-center">
                         <FormGroup
                             floating
@@ -238,9 +243,7 @@
                         {/if}
                     </div>
                     <HelpText>
-                        Pushes go to <code>{webhookUrl}</code>, signed with
-                        <code>X-Hub-Signature-256</code>
-                        or sent as <code>X-Gitlab-Token</code>.
+                        GitHub and GitLab webhook formats are supported
                     </HelpText>
                 {/if}
 

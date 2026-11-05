@@ -5,7 +5,7 @@ use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
 use warpgate_common::{AdminPermission, ProviderId, WarpgateError};
 use warpgate_common_http::errors::bad_request;
 use warpgate_core::resources::sync::SyncError;
-use warpgate_db_entities::ProviderSync::{self, SyncTrigger};
+use warpgate_db_entities::ProviderSync::{self, SyncStatus, SyncTrigger};
 
 use super::AdminContext;
 use super::pagination::PaginatedResponse;
@@ -28,9 +28,20 @@ enum SyncGitopsResponse {
 }
 
 #[derive(ApiResponse)]
-enum GetGitopsSyncsResponse {
+enum GetGitopsHistoryResponse {
     #[oai(status = 200)]
     Ok(Json<PaginatedResponse<ProviderSync::Model>>),
+}
+
+#[derive(Object)]
+struct GitopsHistoryLatest {
+    latest: Option<ProviderSync::Model>,
+}
+
+#[derive(ApiResponse)]
+enum GetGitopsHistoryLatestResponse {
+    #[oai(status = 200)]
+    Ok(Json<GitopsHistoryLatest>),
 }
 
 #[OpenApi]
@@ -58,18 +69,17 @@ impl Api {
         }
     }
 
-    /// Newest first
     #[oai(
-        path = "/gitops/syncs",
+        path = "/gitops/history",
         method = "get",
-        operation_id = "get_gitops_syncs"
+        operation_id = "get_gitops_history"
     )]
-    async fn api_get_syncs(
+    async fn api_get_history(
         &self,
         admin: AdminContext,
         offset: Query<Option<u64>>,
         #[oai(validator(maximum(value = "1000")))] limit: Query<Option<u64>>,
-    ) -> Result<GetGitopsSyncsResponse, WarpgateError> {
+    ) -> Result<GetGitopsHistoryResponse, WarpgateError> {
         let db = &admin.services().db;
         let query = ProviderSync::Entity::find()
             .filter(ProviderSync::Column::Provider.eq(ProviderId::GITOPS))
@@ -82,8 +92,35 @@ impl Api {
             .limit(limit.unwrap_or(100))
             .all(db)
             .await?;
-        Ok(GetGitopsSyncsResponse::Ok(Json(
+        Ok(GetGitopsHistoryResponse::Ok(Json(
             PaginatedResponse::from_parts(items, offset, total),
+        )))
+    }
+
+    #[oai(
+        path = "/gitops/history/latest",
+        method = "get",
+        operation_id = "get_gitops_history_latest"
+    )]
+    async fn api_get_history_latest(
+        &self,
+        admin: AdminContext,
+    ) -> Result<GetGitopsHistoryLatestResponse, WarpgateError> {
+        let db = &admin.services().db;
+        let query = ProviderSync::Entity::find()
+            .filter(ProviderSync::Column::Provider.eq(ProviderId::GITOPS))
+            .filter(
+                ProviderSync::Column::Status
+                    .eq(SyncStatus::Applied)
+                    .or(ProviderSync::Column::Status.eq(SyncStatus::Unchanged)),
+            )
+            .order_by_desc(ProviderSync::Column::StartedAt)
+            .order_by_desc(ProviderSync::Column::Id);
+        let latest = query.limit(1).all(db).await?;
+        Ok(GetGitopsHistoryLatestResponse::Ok(Json(
+            GitopsHistoryLatest {
+                latest: latest.first().cloned(),
+            },
         )))
     }
 }

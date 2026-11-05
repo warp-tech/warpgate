@@ -35,7 +35,7 @@
             asyncComponent: () => import('./users/Users.svelte'),
         }),
         '/gitops': wrap({
-            asyncComponent: () => import('./GitopsSyncs.svelte'),
+            asyncComponent: () => import('./GitopsHistory.svelte'),
         }),
         '/policies': wrap({
             asyncComponent: () => import('./Policies.svelte'),

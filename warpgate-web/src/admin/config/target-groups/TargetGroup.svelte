@@ -11,12 +11,13 @@
         type BootstrapThemeColor,
         type TargetGroup,
     } from 'admin/lib/api'
-    import ManagedIcon from 'admin/lib/ManagedIcon.svelte'
+    import ManagedObjectStatus from 'admin/lib/ManagedObjectStatus.svelte'
     import { adminPermissions } from 'admin/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
     import GroupColorIcon from 'common/GroupColorIcon.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import StickyActionBar from 'common/StickyActionBar.svelte'
     import { setCurrentSidebarSubtitle } from 'common/sidebarState.svelte'
     import { replace } from 'svelte-spa-router'
     import { VALID_CHOICES } from './common'
@@ -107,13 +108,13 @@
                     <h1>{group.name}</h1>
                     <div class="text-muted d-flex align-items-center gap-2">
                         Target group
-                        <ManagedIcon
-                            provider={group.provider}
-                            onRelease={$adminPermissions.targetsEdit
-                                ? release
-                                : undefined}
-                        />
                     </div>
+                    <ManagedObjectStatus
+                        provider={group.provider}
+                        onRelease={$adminPermissions.targetsEdit
+                            ? release
+                            : undefined}
+                    />
                 </div>
             </div>
 
@@ -169,26 +170,26 @@
                             {/each}
                         </div>
                     </FormGroup>
-
-                    <div class="d-flex gap-2 mt-5">
-                        <AsyncButton
-                            click={update}
-                            color="primary"
-                            disabled={!$adminPermissions.targetsEdit}
-                        >
-                            Update
-                        </AsyncButton>
-                        <Button
-                            color="danger"
-                            onclick={remove}
-                            disabled={!$adminPermissions.targetsDelete}
-                        >
-                            Remove
-                        </Button>
-                    </div>
                 </fieldset>
             </form>
         </div>
+
+        <StickyActionBar>
+            <AsyncButton
+                click={update}
+                color="primary"
+                disabled={!$adminPermissions.targetsEdit}
+            >
+                Update
+            </AsyncButton>
+            <Button
+                color="danger"
+                onclick={remove}
+                disabled={!$adminPermissions.targetsDelete}
+            >
+                Remove
+            </Button>
+        </StickyActionBar>
     {/if}
 </Loadable>
 

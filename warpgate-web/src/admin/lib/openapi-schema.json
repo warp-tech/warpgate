@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.30.2-30-g10446595-modified"
+    "version": "v0.30.3-50-gc4716022-modified"
   },
   "servers": [
     {
@@ -5280,9 +5280,8 @@
         "operationId": "sync_gitops"
       }
     },
-    "/gitops/syncs": {
+    "/gitops/history": {
       "get": {
-        "summary": "Newest first",
         "parameters": [
           {
             "name": "offset",
@@ -5328,7 +5327,32 @@
             "CookieSecurityScheme": []
           }
         ],
-        "operationId": "get_gitops_syncs"
+        "operationId": "get_gitops_history"
+      }
+    },
+    "/gitops/history/latest": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitopsHistoryLatest"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_gitops_history_latest"
       }
     }
   },
@@ -6152,6 +6176,15 @@
             "description": "Directory inside the repository that holds the files; the root if unset.\nRelative, and no segment starts with a dot, so it can't leave the checkout.",
             "maxLength": 4096,
             "pattern": "^[^/\\\\.][^/\\\\]*(/[^/\\\\.][^/\\\\]*)*$"
+          }
+        }
+      },
+      "GitopsHistoryLatest": {
+        "type": "object",
+        "title": "GitopsHistoryLatest",
+        "properties": {
+          "latest": {
+            "$ref": "#/components/schemas/ProviderSync"
           }
         }
       },
