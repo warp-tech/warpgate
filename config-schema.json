@@ -712,6 +712,21 @@
         }
       ]
     },
+    "SsoMatchBy": {
+      "description": "Which claim identifies a Warpgate user at this provider. One rule per provider,\nso the outcome never depends on login history.",
+      "oneOf": [
+        {
+          "description": "Match the `email` claim against the SSO credential's e-mail (the behaviour\nbefore this option existed).",
+          "type": "string",
+          "const": "email"
+        },
+        {
+          "description": "Match the immutable `sub` claim against the SSO credential's subject, for\nthis provider only. The e-mail is neither required nor used for matching.",
+          "type": "string",
+          "const": "subject"
+        }
+      ]
+    },
     "SsoProviderConfig": {
       "type": "object",
       "properties": {
@@ -744,6 +759,11 @@
             "string",
             "null"
           ]
+        },
+        "match_by": {
+          "description": "Which claim identifies a user: `email` (default) or `subject`.",
+          "$ref": "#/$defs/SsoMatchBy",
+          "default": "email"
         },
         "name": {
           "type": "string"

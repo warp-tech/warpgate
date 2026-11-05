@@ -72,6 +72,9 @@ pub struct UserTotpCredential {
 pub struct UserSsoCredential {
     pub provider: Option<String>,
     pub email: String,
+    /// The IdP's immutable subject (`sub`). When set, this credential is matched
+    /// by (provider, subject); when absent it is matched by e-mail, as before.
+    pub subject: Option<String>,
 }
 
 impl UserAuthCredential {
