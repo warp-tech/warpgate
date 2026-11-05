@@ -84,7 +84,12 @@ pub fn connect(
 ) -> Result<DesktopClientHandles, WarpgateError> {
     let target_session_id = admitted.id();
     let (user_info, target) = admitted.into_approved().into_parts();
-    let (target, options) = target.into_parts();
+    let (target, mut options) = target.into_parts();
+
+    // Use the authenticated Warpgate username when no explicit target username is configured.
+    if options.username.is_empty() {
+        options.username = user_info.username.clone();
+    }
     let (event_tx, event_rx) = channel::<DesktopEvent>(1024);
     let (input_tx, input_rx) = channel::<DesktopInput>(DESKTOP_INPUT_CHANNEL_CAPACITY);
     let (abort_tx, abort_rx) = unbounded_channel::<()>();
