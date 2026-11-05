@@ -25,7 +25,7 @@ def _provision(api, otp_key_base64):
         sdk.UserDataRequest(
             username=user.username,
             credential_policy=sdk.UserRequireCredentialsPolicy(
-                rdp=[sdk.CredentialKind.PASSWORD, sdk.CredentialKind.TOTP],
+                rdp=[[sdk.CredentialKind.PASSWORD, sdk.CredentialKind.TOTP]],
             ),
         ),
     )

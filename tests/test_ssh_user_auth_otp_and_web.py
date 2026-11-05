@@ -55,9 +55,11 @@ class Test:
                     username=user.username,
                     credential_policy=sdk.UserRequireCredentialsPolicy(
                         ssh=[
-                            sdk.CredentialKind.PUBLICKEY,
-                            sdk.CredentialKind.TOTP,
-                            sdk.CredentialKind.WEBUSERAPPROVAL,
+                            [
+                                sdk.CredentialKind.PUBLICKEY,
+                                sdk.CredentialKind.TOTP,
+                                sdk.CredentialKind.WEBUSERAPPROVAL,
+                            ],
                         ],
                     ),
                 ),

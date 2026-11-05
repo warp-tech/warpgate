@@ -224,7 +224,7 @@
                 ) {
                     credentialPolicy = {
                         ...(credentialPolicy ?? {}),
-                        [protocol]: [ck, CredentialKind.Totp],
+                        [protocol]: [[ck, CredentialKind.Totp]],
                     }
                 }
             }
