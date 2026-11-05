@@ -10,6 +10,8 @@ export interface ConnectionOptions {
     targetExternalHost?: string
     ticketSecret?: string
     targetDefaultDatabaseName?: string
+    targetServiceName?: string
+    targetTlsEnabled?: boolean
     clientCertificatePem?: string
     clientPrivateKeyPem?: string
     oidcIssuerUrl?: string
@@ -129,6 +131,58 @@ export function makeExamplePostgreSQLURI(opt: ConnectionOptions): string {
     return `postgresql://${makePostgreSQLUsername(opt)}${pwSuffix}@${protocolHost(opt, 'postgres')}:${protocolPortString(opt, 'postgres')}/${dbName}?sslmode=require`
 }
 
+// Oracle selects the target by the connect descriptor's SERVICE_NAME, not by a
+// `#target` username suffix, so the selector is the plain Warpgate username
+// (with the Warpgate password). Ticket auth is unsupported: O5LOGON needs a
+// stored verifier.
+export function makeOracleUsername(opt: ConnectionOptions): string {
+    return opt.username ?? 'username'
+}
+
+export function makeOracleServiceName(opt: ConnectionOptions): string {
+    return opt.targetServiceName?.trim() || 'service-name'
+}
+
+export function oracleHost(opt: ConnectionOptions): string {
+    return protocolHost(opt, 'oracle')
+}
+
+export function oraclePortString(opt: ConnectionOptions): string {
+    return protocolPortString(opt, 'oracle')
+}
+
+// The Oracle listener takes plain TCP and TCPS on the same port. The examples
+// use TCPS only for targets with TLS enabled (TCPS needs the client to trust
+// Warpgate's certificate) and plain TCP otherwise.
+function oracleProtocol(opt: ConnectionOptions): 'tcp' | 'tcps' {
+    return opt.targetTlsEnabled ? 'tcps' : 'tcp'
+}
+
+export function makeExampleOracleDescriptor(opt: ConnectionOptions): string {
+    return `(DESCRIPTION=(ADDRESS=(PROTOCOL=${oracleProtocol(opt)})(HOST=${oracleHost(opt)})(PORT=${oraclePortString(opt)}))(CONNECT_DATA=(SERVICE_NAME=${makeOracleServiceName(opt)})))`
+}
+
+// Plain EZConnect works with every client; TCPS has no EZConnect form before
+// 18c clients, so it is given as a full descriptor.
+function makeOracleConnectString(opt: ConnectionOptions): string {
+    if (opt.targetTlsEnabled) {
+        return makeExampleOracleDescriptor(opt)
+    }
+    return `//${oracleHost(opt)}:${oraclePortString(opt)}/${makeOracleServiceName(opt)}`
+}
+
+export function makeExampleOracleCommand(opt: ConnectionOptions): string {
+    // Given only the username, sqlplus prompts for the password.
+    return shellEscape([
+        'sqlplus',
+        `${makeOracleUsername(opt)}@${makeOracleConnectString(opt)}`,
+    ])
+}
+
+export function makeExampleOracleJdbcURL(opt: ConnectionOptions): string {
+    return `jdbc:oracle:thin:@${makeOracleConnectString(opt)}`
+}
+
 export function makeTargetURL(opt: ConnectionOptions): string {
     const host = `${opt.targetExternalHost ?? protocolHost(opt, 'http')}:${protocolPort(opt, 'http') ?? 443}`
 
@@ -155,6 +209,7 @@ export const possibleCredentials: Record<string, Set<CredentialKind>> = {
         CredentialKind.Password,
         CredentialKind.WebUserApproval,
     ]),
+    oracle: new Set([CredentialKind.Password]),
     kubernetes: new Set([
         CredentialKind.Certificate,
         CredentialKind.WebUserApproval,
@@ -315,6 +370,7 @@ export const PROTOCOL_PROPERTIES: Record<string, ProtocolProperties> = {
     HTTP: { sessionsCanBeClosed: true },
     MySQL: { sessionsCanBeClosed: true },
     PostgreSQL: { sessionsCanBeClosed: true },
+    Oracle: { sessionsCanBeClosed: true },
     Kubernetes: { sessionsCanBeClosed: false },
     VNC: { sessionsCanBeClosed: true },
     RDP: { sessionsCanBeClosed: true },
@@ -325,6 +381,7 @@ export type ProtocolID =
     | 'ssh'
     | 'mysql'
     | 'postgres'
+    | 'oracle'
     | 'kubernetes'
     | 'vnc'
     | 'rdp'

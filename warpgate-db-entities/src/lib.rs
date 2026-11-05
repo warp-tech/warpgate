@@ -18,6 +18,7 @@ macro_rules! with_every_entity {
             LdapServer,
             LogEntry,
             Node,
+            OracleCredential,
             OtpCredential,
             Parameters,
             PasswordCredential,

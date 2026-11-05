@@ -64,6 +64,18 @@
         "proxy_protocol": false
       }
     },
+    "oracle": {
+      "$ref": "#/$defs/OracleConfig",
+      "default": {
+        "certificate": "",
+        "enable": false,
+        "external_host": null,
+        "external_port": null,
+        "key": "",
+        "listen": "[::]:51521",
+        "proxy_protocol": false
+      }
+    },
     "postgres": {
       "$ref": "#/$defs/PostgresConfig",
       "default": {
@@ -313,6 +325,49 @@
         "listen": {
           "$ref": "#/$defs/ListenEndpoint",
           "default": "[::]:33306"
+        },
+        "proxy_protocol": {
+          "description": "Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "OracleConfig": {
+      "type": "object",
+      "properties": {
+        "certificate": {
+          "type": "string",
+          "default": ""
+        },
+        "enable": {
+          "type": "boolean",
+          "default": false
+        },
+        "external_host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "external_port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "default": null,
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "key": {
+          "type": "string",
+          "default": ""
+        },
+        "listen": {
+          "$ref": "#/$defs/ListenEndpoint",
+          "default": "[::]:51521"
         },
         "proxy_protocol": {
           "description": "Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.",

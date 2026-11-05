@@ -870,6 +870,15 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         expected_statuses={200},
     ),
     AdminApiTestCase(
+        id="test_oracle_connection",
+        permission="targets_edit",
+        # The shared target is an SSH one, which the endpoint refuses.
+        call=lambda api, r: api.test_oracle_connection_with_http_info(
+            sdk.TestOracleConnectionRequest(target_id=r["target_id"]),
+        ),
+        expected_statuses={400},
+    ),
+    AdminApiTestCase(
         id="get_certificate_credentials",
         permission="users_edit",
         call=lambda api, r: api.get_certificate_credentials_with_http_info(

@@ -4085,6 +4085,61 @@
         "operationId": "check_ssh_host_key"
       }
     },
+    "/oracle/test-connection": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/TestOracleConnectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestOracleConnectionResponseBody"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The target does not exist, or it is not an Oracle target.",
+            "content": {
+              "text/plain; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The test itself failed (unreachable, TLS, unknown service, or bad\ncredentials); the body carries a message for the operator.",
+            "content": {
+              "text/plain; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "test_oracle_connection"
+      }
+    },
     "/login-protection/blocked-ips": {
       "get": {
         "summary": "List all currently blocked IPs.",
@@ -8045,6 +8100,9 @@
             "$ref": "#/components/schemas/TargetOptions_TargetPostgresOptions"
           },
           {
+            "$ref": "#/components/schemas/TargetOptions_TargetOracleOptions"
+          },
+          {
             "$ref": "#/components/schemas/TargetOptions_TargetVncOptions"
           },
           {
@@ -8059,6 +8117,7 @@
             "Kubernetes": "#/components/schemas/TargetOptions_TargetKubernetesOptions",
             "MySql": "#/components/schemas/TargetOptions_TargetMySqlOptions",
             "Postgres": "#/components/schemas/TargetOptions_TargetPostgresOptions",
+            "Oracle": "#/components/schemas/TargetOptions_TargetOracleOptions",
             "Vnc": "#/components/schemas/TargetOptions_TargetVncOptions",
             "Rdp": "#/components/schemas/TargetOptions_TargetRdpOptions"
           }
@@ -8127,6 +8186,28 @@
           },
           {
             "$ref": "#/components/schemas/TargetMySqlOptions"
+          }
+        ]
+      },
+      "TargetOptions_TargetOracleOptions": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Oracle"
+                ],
+                "example": "Oracle"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/TargetOracleOptions"
           }
         ]
       },
@@ -8217,6 +8298,43 @@
             "$ref": "#/components/schemas/TargetVncOptions"
           }
         ]
+      },
+      "TargetOracleOptions": {
+        "type": "object",
+        "title": "TargetOracleOptions",
+        "required": [
+          "host",
+          "port",
+          "username",
+          "auth",
+          "tls"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 1.0
+          },
+          "username": {
+            "type": "string"
+          },
+          "auth": {
+            "$ref": "#/components/schemas/DatabaseTargetAuth"
+          },
+          "tls": {
+            "$ref": "#/components/schemas/Tls"
+          },
+          "idle_timeout": {
+            "type": "string"
+          },
+          "service_name": {
+            "type": "string",
+            "description": "Oracle service name (TNS `CONNECT_DATA` `SERVICE_NAME`), e.g. `FREEPDB1`."
+          }
+        }
       },
       "TargetPostgresOptions": {
         "type": "object",
@@ -8470,6 +8588,31 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "TestOracleConnectionRequest": {
+        "type": "object",
+        "title": "TestOracleConnectionRequest",
+        "required": [
+          "target_id"
+        ],
+        "properties": {
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "TestOracleConnectionResponseBody": {
+        "type": "object",
+        "title": "TestOracleConnectionResponseBody",
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
           }
         }
       },
@@ -8901,6 +9044,12 @@
             }
           },
           "postgres": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "oracle": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CredentialKind"

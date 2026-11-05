@@ -90,6 +90,10 @@
                 selectedTarget.options.kind === TargetKind.Postgres
                     ? selectedTarget.options.defaultDatabaseName
                     : undefined}
+                targetServiceName={selectedTarget.options.kind ===
+                TargetKind.Oracle
+                    ? selectedTarget.options.serviceName
+                    : undefined}
             />
         {/if}
 

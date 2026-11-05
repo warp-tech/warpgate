@@ -16,6 +16,9 @@
         makeExampleKubectlCommand,
         makeExampleMySQLCommand,
         makeExampleMySQLURI,
+        makeExampleOracleCommand,
+        makeExampleOracleDescriptor,
+        makeExampleOracleJdbcURL,
         makeExamplePostgreSQLCommand,
         makeExamplePostgreSQLURI,
         makeExampleSCPCommand,
@@ -23,8 +26,12 @@
         makeKubeconfig,
         makeMySQLUsername,
         makeOidcKubeconfig,
+        makeOracleServiceName,
+        makeOracleUsername,
         makePostgreSQLUsername,
         makeTargetURL,
+        oracleHost,
+        oraclePortString,
         protocolHost,
         protocolPortString,
     } from 'common/protocols'
@@ -50,6 +57,8 @@
         username?: string
         ticketSecret?: string
         targetDefaultDatabaseName?: string
+        targetServiceName?: string
+        targetTlsEnabled?: boolean
     }
 
     let {
@@ -59,6 +68,8 @@
         username,
         ticketSecret = undefined,
         targetDefaultDatabaseName = undefined,
+        targetServiceName = undefined,
+        targetTlsEnabled = false,
     }: Props = $props()
 
     let clientCertificatePem: string | undefined = $state()
@@ -185,6 +196,8 @@
         ticketSecret,
         targetExternalHost,
         targetDefaultDatabaseName,
+        targetServiceName,
+        targetTlsEnabled,
         clientCertificatePem,
         clientPrivateKeyPem,
         oidcIssuerUrl: selectedOidc?.issuerUrl,
@@ -304,6 +317,58 @@
     <Alert color="info" class="mt-3">
         Make sure you've set your client to require TLS and allowed cleartext
         password authentication.
+    </Alert>
+{/if}
+
+{#if targetKind === TargetKind.Oracle && ticketSecret}
+    <Alert color="warning">
+        Oracle targets cannot be reached with a ticket: Oracle clients log in
+        with a Warpgate username and password.
+    </Alert>
+{:else if targetKind === TargetKind.Oracle}
+    <CopyableTextArea
+        label="Example SQL*Plus command"
+        value={makeExampleOracleCommand(opts)}
+    />
+    <CopyableTextArea
+        label="JDBC URL (DBeaver, SQL Developer, other JDBC clients)"
+        value={makeExampleOracleJdbcURL(opts)}
+    />
+    <CollapsibleBlock
+        label="Advanced"
+        persistKey="connectionInstructionsAdvancedOpen"
+    >
+        <div class="mt-3">
+            <CopyableTextArea label="Oracle host" value={oracleHost(opts)} />
+            <CopyableTextArea
+                label="Oracle port"
+                value={oraclePortString(opts)}
+            />
+            <CopyableTextArea
+                label="Service name"
+                value={makeOracleServiceName(opts)}
+            />
+            <CopyableTextArea
+                label="Oracle username"
+                value={makeOracleUsername(opts)}
+            />
+            <CopyableTextArea
+                label="Connect descriptor"
+                value={makeExampleOracleDescriptor(opts)}
+            />
+        </div>
+    </CollapsibleBlock>
+
+    <Alert color="info" class="mt-3">
+        Log in with your Warpgate username and password; the target is selected
+        by its service name.
+        {#if targetTlsEnabled}
+            The connection uses TCPS: the client has to trust the Warpgate
+            certificate (wallet or truststore).
+        {:else}
+            The connection uses plain TCP, so the session traffic is not
+            encrypted.
+        {/if}
     </Alert>
 {/if}
 

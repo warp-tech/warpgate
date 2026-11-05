@@ -15,8 +15,8 @@ use uuid::Uuid;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{
-    GlobalParams, HttpConfig, KubernetesConfig, ListenEndpoint, MySqlConfig, PostgresConfig,
-    RdpConfig, Secret, SshConfig, SshHostKeyVerificationMode, VncConfig, WarpgateConfig,
+    GlobalParams, HttpConfig, KubernetesConfig, ListenEndpoint, MySqlConfig, OracleConfig,
+    PostgresConfig, RdpConfig, Secret, SshConfig, SshHostKeyVerificationMode, VncConfig, WarpgateConfig,
     WarpgateConfigStore,
 };
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
@@ -94,6 +94,7 @@ struct Answers {
     ssh: Listener,
     mysql: Listener,
     postgres: Listener,
+    oracle: Listener,
     kubernetes: Listener,
     vnc: Listener,
     rdp: Listener,
@@ -119,6 +120,7 @@ impl Answers {
             ssh: listener(args.ssh_port, SshConfig::default().listen),
             mysql: listener(args.mysql_port, MySqlConfig::default().listen),
             postgres: listener(args.postgres_port, PostgresConfig::default().listen),
+            oracle: listener(args.oracle_port, OracleConfig::default().listen),
             kubernetes: listener(args.kubernetes_port, KubernetesConfig::default().listen),
             vnc: listener(args.vnc_port, VncConfig::default().listen),
             rdp: listener(args.rdp_port, RdpConfig::default().listen),
@@ -169,6 +171,7 @@ impl Answers {
         let mysql = prompt_listener(&theme, "MySQL", MySqlConfig::default().listen, true)?;
         let postgres =
             prompt_listener(&theme, "PostgreSQL", PostgresConfig::default().listen, true)?;
+        let oracle = prompt_listener(&theme, "Oracle", OracleConfig::default().listen, false)?;
         let kubernetes = prompt_listener(
             &theme,
             "Kubernetes",
@@ -197,6 +200,7 @@ impl Answers {
             ssh,
             mysql,
             postgres,
+            oracle,
             kubernetes,
             vnc,
             rdp,
@@ -231,6 +235,11 @@ impl Answers {
                 &mut store.postgres.listen,
             ),
             (
+                &self.oracle,
+                &mut store.oracle.enable,
+                &mut store.oracle.listen,
+            ),
+            (
                 &self.kubernetes,
                 &mut store.kubernetes.enable,
                 &mut store.kubernetes.listen,
@@ -256,6 +265,7 @@ impl Answers {
             (&mut store.http.certificate, &mut store.http.key),
             (&mut store.mysql.certificate, &mut store.mysql.key),
             (&mut store.postgres.certificate, &mut store.postgres.key),
+            (&mut store.oracle.certificate, &mut store.oracle.key),
             (&mut store.kubernetes.certificate, &mut store.kubernetes.key),
             (&mut store.vnc.certificate, &mut store.vnc.key),
             (&mut store.rdp.certificate, &mut store.rdp.key),

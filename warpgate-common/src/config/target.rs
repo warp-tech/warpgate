@@ -6,7 +6,7 @@ use uuid::Uuid;
 use warpgate_tls::TlsMode;
 
 use super::defaults::{
-    _default_empty_string, _default_empty_vec, _default_mysql_port,
+    _default_empty_string, _default_empty_vec, _default_mysql_port, _default_oracle_port,
     _default_postgres_idle_timeout_str, _default_postgres_port, _default_rdp_port,
     _default_ssh_ca_mount, _default_ssh_port, _default_username, _default_vnc_port,
 };
@@ -233,6 +233,32 @@ pub struct TargetPostgresOptions {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
+pub struct TargetOracleOptions {
+    #[serde(default = "_default_empty_string")]
+    pub host: String,
+
+    #[serde(default = "_default_oracle_port")]
+    #[oai(validator(minimum(value = "1")))]
+    pub port: u16,
+
+    #[serde(default = "_default_username")]
+    pub username: String,
+
+    #[serde(default)]
+    pub auth: DatabaseTargetAuth,
+
+    #[serde(default)]
+    pub tls: Tls,
+
+    #[serde(default = "_default_postgres_idle_timeout_str")]
+    pub idle_timeout: Option<String>,
+
+    /// Oracle service name (TNS `CONNECT_DATA` `SERVICE_NAME`), e.g. `FREEPDB1`.
+    #[serde(default)]
+    pub service_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct TargetVncOptions {
     #[serde(default = "_default_empty_string")]
     pub host: String,
@@ -435,6 +461,8 @@ pub enum TargetOptions {
     MySql(TargetMySqlOptions),
     #[serde(rename = "postgres")]
     Postgres(TargetPostgresOptions),
+    #[serde(rename = "oracle")]
+    Oracle(TargetOracleOptions),
     #[serde(rename = "vnc")]
     Vnc(TargetVncOptions),
     #[serde(rename = "rdp")]
@@ -458,6 +486,7 @@ impl TargetOptions {
             TargetOptions::Kubernetes(_) => Protocol::Kubernetes,
             TargetOptions::MySql(_) => Protocol::MySql,
             TargetOptions::Postgres(_) => Protocol::Postgres,
+            TargetOptions::Oracle(_) => Protocol::Oracle,
             TargetOptions::Vnc(_) => Protocol::Vnc,
             TargetOptions::Rdp(_) => Protocol::Rdp,
         }
@@ -476,8 +505,23 @@ impl TargetOptions {
         match self {
             Self::MySql(options) => options.default_database_name.as_deref(),
             Self::Postgres(options) => options.default_database_name.as_deref(),
+            Self::Oracle(options) => options.service_name.as_deref(),
             _ => None,
         }
+    }
+
+    /// Whether the target's TLS mode is anything but `Disabled` (`false` for
+    /// kinds without a TLS mode). Oracle instructions use TCPS only when set.
+    pub fn tls_enabled(&self) -> bool {
+        let tls = match self {
+            Self::Http(options) => &options.tls,
+            Self::MySql(options) => &options.tls,
+            Self::Postgres(options) => &options.tls,
+            Self::Oracle(options) => &options.tls,
+            Self::Kubernetes(options) => &options.tls,
+            _ => return false,
+        };
+        tls.mode != TlsMode::Disabled
     }
 }
 
@@ -552,6 +596,12 @@ impl TargetSecrets for TargetPostgresOptions {
     }
 }
 
+impl TargetSecrets for TargetOracleOptions {
+    fn secrets_mut(&mut self) -> Vec<&mut MaybeSecretRef> {
+        self.auth.secrets_mut()
+    }
+}
+
 impl TargetSecrets for TargetVncOptions {
     fn secrets_mut(&mut self) -> Vec<&mut MaybeSecretRef> {
         match &mut self.auth {
@@ -576,6 +626,7 @@ impl TargetSecrets for TargetOptions {
             TargetOptions::Kubernetes(o) => o.secrets_mut(),
             TargetOptions::MySql(o) => o.secrets_mut(),
             TargetOptions::Postgres(o) => o.secrets_mut(),
+            TargetOptions::Oracle(o) => o.secrets_mut(),
             TargetOptions::Vnc(o) => o.secrets_mut(),
             TargetOptions::Rdp(o) => o.secrets_mut(),
         }
