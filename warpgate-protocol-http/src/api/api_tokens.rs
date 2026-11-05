@@ -7,6 +7,7 @@ use uuid::Uuid;
 use warpgate_common::WarpgateError;
 use warpgate_common::helpers::hash::{generate_ticket_secret, hash_secret};
 use warpgate_common_http::errors::bad_request;
+use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_db_entities::ApiToken;
 
 use super::common::get_user;
@@ -144,6 +145,16 @@ impl Api {
         .await
         .map_err(WarpgateError::from)?;
 
+        AuditEvent::CredentialCreated {
+            credential_type: "api_token".to_string(),
+            credential_name: Some(object.label.clone()),
+            via: CredentialChangedVia::SelfService,
+            user_id: user_model.id,
+            username: user_model.username.clone(),
+            actor_user_id: user_model.id,
+        }
+        .emit();
+
         Ok(CreateApiTokenResponse::Created(Json(TokenAndSecret {
             token: object.into(),
             secret: secret.expose_secret().clone(),
@@ -179,7 +190,19 @@ impl Api {
             return Ok(DeleteApiTokenResponse::NotFound);
         };
 
+        let credential_name = model.label.clone();
         model.delete(db).await?;
+
+        AuditEvent::CredentialDeleted {
+            credential_type: "api_token".to_string(),
+            credential_name: Some(credential_name),
+            via: CredentialChangedVia::SelfService,
+            user_id: user_model.id,
+            username: user_model.username.clone(),
+            actor_user_id: user_model.id,
+        }
+        .emit();
+
         Ok(DeleteApiTokenResponse::Deleted)
     }
 }
