@@ -95,9 +95,7 @@
                     type="switch"
                     bind:checked={parameters.sshShowQrCode}
                 />
-                <div>
-                    Display QR code for login URLs
-                </div>
+                <div>Display QR code for login URLs</div>
             </label>
             <HelpText>
                 Shows a scannable QR code in the terminal when web
