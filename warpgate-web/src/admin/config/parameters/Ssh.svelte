@@ -85,10 +85,7 @@
         </Section>
 
         <Section id="terminal" title="Terminal display">
-            <label
-                for="sshShowQrCode"
-                class="d-flex align-items-center"
-            >
+            <label for="sshShowQrCode" class="d-flex align-items-center">
                 <Input
                     id="sshShowQrCode"
                     class="mb-0 me-2"
