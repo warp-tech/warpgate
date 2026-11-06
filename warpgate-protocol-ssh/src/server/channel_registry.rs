@@ -48,16 +48,22 @@ pub struct Channel {
     pub audit: ChannelAudit,
     pub pty_size: Option<PtyRequest>,
     pub traffic_recorder: Option<ConnectionRecorder>,
+    /// A session channel holds the target's EOF back until the exit status:
+    /// an OpenSSH ControlMaster closes on EOF and would miss it (#2872).
+    awaits_exit: bool,
+    held_eof: bool,
 }
 
 impl Channel {
-    fn new(id: Uuid, server_id: Option<ServerChannelId>) -> Self {
+    fn new(id: Uuid, server_id: Option<ServerChannelId>, awaits_exit: bool) -> Self {
         Self {
             server_id,
             state: ChannelState::default(),
             audit: ChannelAudit::new(id),
             pty_size: None,
             traffic_recorder: None,
+            awaits_exit,
+            held_eof: false,
         }
     }
 
@@ -98,6 +104,19 @@ impl Channel {
         }
     }
 
+    /// Whether the target's EOF has to wait for the exit status.
+    pub const fn hold_eof(&mut self) -> bool {
+        self.held_eof = self.awaits_exit;
+        self.held_eof
+    }
+
+    /// Whether an EOF held by [`Self::hold_eof`] is due now that the exit
+    /// status or the close has been sent on.
+    pub const fn release_eof(&mut self) -> bool {
+        self.awaits_exit = false;
+        std::mem::replace(&mut self.held_eof, false)
+    }
+
     fn confirm_open(&mut self) -> Vec<RCEvent> {
         match &mut self.state {
             ChannelState::Opening { deferred } => {
@@ -122,10 +141,10 @@ impl ChannelRegistry {
 
     /// Register a client-initiated open (session, direct-tcpip, streamlocal):
     /// the client id is known upfront, the target-side id is minted here.
-    pub fn begin_client_open(&mut self, server_id: ServerChannelId) -> Uuid {
+    pub fn begin_client_open(&mut self, server_id: ServerChannelId, session: bool) -> Uuid {
         let uuid = Uuid::new_v4();
         self.channels
-            .insert(uuid, Channel::new(uuid, Some(server_id)));
+            .insert(uuid, Channel::new(uuid, Some(server_id), session));
         uuid
     }
 
@@ -135,7 +154,7 @@ impl ChannelRegistry {
     pub fn begin_server_open(&mut self, id: Uuid) {
         self.channels
             .entry(id)
-            .or_insert_with(|| Channel::new(id, None));
+            .or_insert_with(|| Channel::new(id, None, false));
     }
 
     /// Attach the client id the confirmation resolved to. `false` means the
