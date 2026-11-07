@@ -35,6 +35,7 @@ Warpgate is a smart & fully transparent SSH, HTTPS, Kubernetes, MySQL, PostgreSQ
 * Browser-based SSH, RDP and VNC access is built in; native clients continue to work.
 * Not a jump host - forwards connection straight to the target in a way that's fully transparent to the client.
 * Native 2FA and SSO support (TOTP & OpenID Connect)
+* SCIM 2.0 provisioning: let your identity provider create, disable and delete users and manage access roles
 * Built-in brute-force protection with IP blocking and user lockout
 * Single binary with no dependencies.
 * Written in 100% safe Rust.
@@ -60,6 +61,25 @@ Full documentation is available at [warpgate.null.page](https://warpgate.null.pa
 
 For `warpgate.yaml` file options, see the [configuration schema](config-schema.json).
 Setup-generated config files include a `yaml-language-server` schema reference for editor completion and validation.
+
+## SCIM provisioning
+
+Warpgate is a SCIM 2.0 service provider (RFC 7643 / RFC 7644), so an identity provider such as Okta or Microsoft Entra ID can create, update, deactivate and delete users and manage their access roles.
+
+**Setting it up**
+
+1. In the admin UI open *Config → SCIM provisioning* and create a token. Creating one needs the *configuration edit*, *users delete* and *access roles delete* permissions, because the token can do all of that. The secret is shown once.
+2. In your identity provider's SCIM integration use the tenant URL `https://<your warpgate host>/@warpgate/scim/v2` and the secret as an **OAuth bearer token** (Okta: "HTTP Header" authentication; Entra ID: "Secret Token").
+3. Optionally pick an **SSO provider** on the token. Each provisioned user's primary email is then kept as an SSO credential for that provider, so they can log in through it straight away.
+
+**What maps to what**
+
+* A SCIM *User* is a Warpgate user: `userName` is the username (it cannot contain `:` or `#`, which the SSH and database connection syntax uses), `externalId` is stored, `active: false` disables the account, and every other attribute (`name`, `emails`, the enterprise extension, …) is stored and returned unchanged. New users get the default credential policy and the default roles.
+* A SCIM *Group* is an **access role**. Groups are matched to roles by name, so you can create a role with its target assignments first and let the provider manage its members. Adding a member grants the role, removing one revokes it, and **deleting the group deletes the role, including its target assignments**.
+* Deactivating or deleting a user ends their open sessions at once and refuses every login path: SSH, HTTP, database protocols, tickets, API tokens and SSO. The account can also be re-enabled from the user's page in the admin UI, and `warpgate recover-access` re-enables an account if the provider ever disables every administrator.
+* Supported: filtering (`userName eq "…"`, `externalId eq "…"`, `displayName eq "…"` and the full filter grammar), pagination, sorting, PATCH including the request shapes Okta and Entra ID send, `/ServiceProviderConfig`, `/ResourceTypes` and `/Schemas`. Not supported: bulk operations, password management, ETags.
+
+Every change made over SCIM is written to the audit log, tagged with the token's label.
 
 ## How is Warpgate different from a jump host / VPN / Teleport?
 

@@ -2,8 +2,11 @@ use poem_openapi::Object;
 use sea_orm::entity::prelude::*;
 use sea_orm::{ColumnTrait, QueryFilter};
 use serde::Serialize;
+use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::Role;
+
+use crate::User::stamp_timestamps;
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Object)]
 #[sea_orm(table_name = "roles")]
@@ -15,6 +18,11 @@ pub struct Model {
     #[sea_orm(column_type = "Text")]
     pub description: String,
     pub is_default: bool,
+    /// The identity provider's own id for this role (SCIM Group `externalId`).
+    pub scim_external_id: Option<String>,
+    /// Stamped by `before_save`; `None` only for rows older than the column.
+    pub created_at: Option<OffsetDateTime>,
+    pub updated_at: Option<OffsetDateTime>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -47,7 +55,16 @@ impl Related<super::User::Entity> for Entity {
     }
 }
 
-impl ActiveModelBehavior for ActiveModel {}
+#[async_trait::async_trait]
+impl ActiveModelBehavior for ActiveModel {
+    async fn before_save<C>(mut self, _db: &C, insert: bool) -> Result<Self, DbErr>
+    where
+        C: ConnectionTrait,
+    {
+        stamp_timestamps(&mut self.created_at, &mut self.updated_at, insert);
+        Ok(self)
+    }
+}
 
 impl Entity {
     pub async fn get_default_roles(db: &DatabaseConnection) -> Result<Vec<Model>, DbErr> {
@@ -78,6 +95,8 @@ impl From<Model> for Role {
             name: model.name,
             description: model.description,
             is_default: model.is_default,
+            created_at: model.created_at,
+            updated_at: model.updated_at,
         }
     }
 }

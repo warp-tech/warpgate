@@ -51,6 +51,9 @@
             asyncComponent: () =>
                 import('./secret-backends/SecretBackends.svelte'),
         }),
+        '/scim': wrap({
+            asyncComponent: () => import('./scim/ScimTokens.svelte'),
+        }),
     }
 
     useSidebar(() => [
@@ -89,6 +92,10 @@
         {
             title: 'LDAP servers',
             href: '/config/ldap-servers',
+        },
+        {
+            title: 'SCIM provisioning',
+            href: '/config/scim',
         },
         {
             title: 'Installation counter',

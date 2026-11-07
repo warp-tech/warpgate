@@ -537,6 +537,11 @@ mod tests {
             ldap_server_id: Set(None),
             ldap_object_uuid: Set(None),
             allowed_ip_ranges: Set(serde_json::Value::Null),
+            enabled: Set(true),
+            scim_external_id: Set(None),
+            scim_attributes: Set(None),
+            created_at: Set(None),
+            updated_at: Set(None),
         }
         .insert(&db)
         .await
