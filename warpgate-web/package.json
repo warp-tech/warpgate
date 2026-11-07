@@ -22,7 +22,7 @@
         "openapi": "npm run openapi:schema:admin && npm run openapi:schema:gateway && npm run openapi:client:admin && npm run openapi:client:gateway"
     },
     "devDependencies": {
-        "@biomejs/biome": "^2.6.3",
+        "@biomejs/biome": "^2.6.5",
         "@fontsource/poppins": "^5.3.0",
         "@fontsource/work-sans": "^5.3.0",
         "@fortawesome/free-brands-svg-icons": "^7.3.1",
@@ -51,14 +51,14 @@
         "sass": "1.78",
         "snarkdown": "^2.0.0",
         "svelte": "^5.57.3",
-        "svelte-check": "^4.7.7",
+        "svelte-check": "^4.7.8",
         "svelte-fa": "^4.0.4",
         "svelte-intersection-observer": "^1.2.0",
         "svelte-observable": "^0.4.0",
         "svelte-preprocess": "^6.0.5",
         "svelte-spa-router": "^5",
         "thenby": "^1.4.1",
-        "tslib": "^2.8.0",
+        "tslib": "^2.9.1",
         "typescript": "^5.9.3",
         "ua-parser-js": "^2.0.10",
         "vite": "^8.3.5",
@@ -70,7 +70,7 @@
         }
     },
     "dependencies": {
-        "@tanstack/svelte-virtual": "^3.13.49",
+        "@tanstack/svelte-virtual": "^3.13.52",
         "core-js": "^3.51.0",
         "natural-orderby": "^5.0.0"
     }
