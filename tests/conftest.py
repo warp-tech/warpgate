@@ -26,7 +26,7 @@ from typing import List, Optional
 
 from deepmerge import always_merger
 
-from .util import _wait_timeout, alloc_port, port_owners, wait_port
+from .util import _wait_timeout, alloc_port, port_owners, wait_port, wait_until
 from .test_http_common import echo_server_port  # noqa
 
 
@@ -1370,3 +1370,26 @@ logging.basicConfig(level=logging.DEBUG)
 requests.packages.urllib3.disable_warnings()
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 subprocess.call("chmod 600 ssh-keys/id*", shell=True)
+
+
+def wait_for_open_session(wg: WarpgateProcess, username: str, since, timeout=30):
+    """Until Warpgate records a session for `username` that started at or
+    after `since` and is still open; returns it. Proves a client got in
+    without waiting a fixed time for it not to exit, and `since` keeps a
+    session that is still winding down from an earlier connection from
+    counting."""
+    url = f"https://localhost:{wg.http_port}"
+
+    def open_session():
+        with _admin_client_context(url) as api:
+            page = api.get_sessions(username=username, active_only=True)
+        return next(
+            (s for s in page.items if s.ended is None and s.started >= since), None
+        )
+
+    return wait_until(
+        open_session, lambda: f"no open session for {username}", timeout=timeout
+    )
+
+
+# ----

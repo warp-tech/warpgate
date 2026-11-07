@@ -1,0 +1,25 @@
+[package]
+name = "warpgate-scim"
+version = "0.30.2"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+poem.workspace = true
+sea-orm.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+time = { workspace = true, features = ["formatting", "macros"] }
+tracing.workspace = true
+uuid.workspace = true
+warpgate-common = { path = "../warpgate-common" }
+warpgate-common-http = { path = "../warpgate-common-http" }
+warpgate-core = { path = "../warpgate-core" }
+warpgate-db-entities = { path = "../warpgate-db-entities" }
+
+[dev-dependencies]
+poem = { workspace = true, features = ["test"] }
+sea-orm = { workspace = true, features = ["sqlx-sqlite"] }
+tokio.workspace = true
+warpgate-db-migrations = { path = "../warpgate-db-migrations", features = ["sqlite"] }

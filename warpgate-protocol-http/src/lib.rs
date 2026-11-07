@@ -201,6 +201,9 @@ impl ProtocolServer for HTTPProtocolServer {
                     "/admin/api",
                     endpoint_auth(admin_api_app).with(cache_bust()),
                 )
+                // Identity providers provision users and roles here; the app
+                // brings its own bearer-token gate (see warpgate-scim).
+                .nest("/scim/v2", warpgate_scim::http::scim_app().with(cache_bust()))
                 .at(
                     // Served unauthenticated like the gateway shell: the admin API is
                     // auth-gated, and the SPA redirects to login client-side so the login
