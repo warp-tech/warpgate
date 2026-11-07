@@ -217,6 +217,31 @@ pub enum AuditEvent {
         privileged: bool,
         response_status: u16,
     },
+    /// A provider synced from its source. A sync that applies nothing and
+    /// repeats the previous outcome is not logged.
+    ProviderSynced {
+        sync_id: Uuid,
+        provider: String,
+        trigger: String,
+        status: String,
+        source: String,
+        revision: Option<String>,
+        /// The admin who requested the sync
+        actor_user_id: Option<Uuid>,
+    },
+    /// A resource that a provider sync created, changed or deleted
+    ProviderResourceChanged {
+        sync_id: Uuid,
+        provider: String,
+        /// `Create`, `Update`, `Adopt` or `Delete`
+        action: String,
+        kind: String,
+        id: Uuid,
+        name: String,
+        /// The changed fields as a JSON array, without credential values
+        fields: Option<String>,
+        actor_user_id: Option<Uuid>,
+    },
 }
 
 impl AuditEvent {
@@ -680,6 +705,54 @@ impl AuditEvent {
                     privileged = %privileged,
                     response_status = %response_status,
                     "Kubernetes pod created"
+                );
+            }
+            Self::ProviderSynced {
+                sync_id,
+                provider,
+                trigger,
+                status,
+                source,
+                revision,
+                actor_user_id,
+            } => {
+                let related_users = actor_user_id.map(|id| format_related_ids(&[id]));
+                info!(
+                    target: "audit",
+                    _type = "ProviderSynced1",
+                    sync_id = %sync_id,
+                    provider = %provider,
+                    trigger = %trigger,
+                    status = %status,
+                    source = %source,
+                    revision = revision.as_deref(),
+                    related_users = related_users.as_deref(),
+                    "Provider synced"
+                );
+            }
+            Self::ProviderResourceChanged {
+                sync_id,
+                provider,
+                action,
+                kind,
+                id,
+                name,
+                fields,
+                actor_user_id,
+            } => {
+                let related_users = actor_user_id.map(|id| format_related_ids(&[id]));
+                info!(
+                    target: "audit",
+                    _type = "ProviderResourceChanged1",
+                    sync_id = %sync_id,
+                    provider = %provider,
+                    action = %action,
+                    kind = %kind,
+                    id = %id,
+                    name = %name,
+                    fields = fields.as_deref(),
+                    related_users = related_users.as_deref(),
+                    "Provider sync changed a resource"
                 );
             }
         }

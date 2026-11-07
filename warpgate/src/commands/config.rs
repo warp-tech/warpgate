@@ -8,8 +8,9 @@ use warpgate_common::{GlobalParams, ProviderId, WarpgateError, warnings};
 use warpgate_core::SecretBackendRegistry;
 use warpgate_core::db::{connect_to_db, has_pending_migrations};
 use warpgate_core::resources::reconcile::{ApplyError, apply, load_current};
+use warpgate_db_entities::ProviderSync::SyncPlan;
 use warpgate_gitops::diagnostic::Diagnostic;
-use warpgate_gitops::plan::{Plan, Prune, format_plan, format_plan_json, plan};
+use warpgate_gitops::plan::{Plan, Prune, format_plan, plan};
 use warpgate_gitops::types::Resource;
 use warpgate_gitops::validate::check_files;
 use warpgate_gitops::{format_json, format_text, json_schema, read_files};
@@ -161,10 +162,7 @@ async fn plan_command(
     let (_, _, plan) = prepare(params, paths, format).await?;
     match format {
         OutputFormat::Text => print!("{}", format_plan(&plan)),
-        OutputFormat::Json => println!(
-            "{}",
-            serde_json::to_string_pretty(&format_plan_json(&plan))?
-        ),
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&SyncPlan::from(&plan))?),
     }
     if plan.has_errors() {
         exit(1);

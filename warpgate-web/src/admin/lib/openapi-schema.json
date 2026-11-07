@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.30.3-50-gc4716022-modified"
+    "version": "v0.30.3-52-gfebbda54-modified"
   },
   "servers": [
     {
@@ -5280,6 +5280,52 @@
         "operationId": "sync_gitops"
       }
     },
+    "/gitops/dry-run": {
+      "post": {
+        "summary": "Fetches and plans the GitOps source like a sync, without applying anything",
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/SyncGitopsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/DryRun"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "dry_run_gitops"
+      }
+    },
     "/gitops/history": {
       "get": {
         "parameters": [
@@ -5962,6 +6008,33 @@
           }
         }
       },
+      "DryRun": {
+        "type": "object",
+        "title": "DryRun",
+        "description": "What a sync would do",
+        "required": [
+          "source"
+        ],
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "plan": {
+            "type": "array",
+            "title": "A sync's plan, one entry per resource",
+            "items": {
+              "$ref": "#/components/schemas/PlannedChange"
+            }
+          },
+          "error": {
+            "type": "string",
+            "description": "Why the sync would fail"
+          }
+        }
+      },
       "ExistingCertificateCredential": {
         "type": "object",
         "title": "ExistingCertificateCredential",
@@ -6184,6 +6257,9 @@
         "title": "GitopsHistoryLatest",
         "properties": {
           "latest": {
+            "$ref": "#/components/schemas/ProviderSync"
+          },
+          "latest_success": {
             "$ref": "#/components/schemas/ProviderSync"
           }
         }
@@ -7302,6 +7378,73 @@
           "MissingSpecial"
         ]
       },
+      "PlanAction": {
+        "type": "string",
+        "enum": [
+          "create",
+          "update",
+          "adopt",
+          "unchanged",
+          "collision",
+          "blocked",
+          "would_prune",
+          "delete"
+        ]
+      },
+      "PlannedChange": {
+        "type": "object",
+        "title": "PlannedChange",
+        "description": "One resource in a plan",
+        "required": [
+          "kind",
+          "name",
+          "action",
+          "fields"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "action": {
+            "$ref": "#/components/schemas/PlanAction"
+          },
+          "fields": {
+            "type": "array",
+            "description": "For an update or adoption",
+            "items": {
+              "$ref": "#/components/schemas/PlannedField"
+            }
+          },
+          "reason": {
+            "type": "string",
+            "description": "For a collision or a blocked change"
+          }
+        }
+      },
+      "PlannedField": {
+        "type": "object",
+        "title": "PlannedField",
+        "description": "A changed field of a resource",
+        "required": [
+          "path",
+          "credential"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Where in the resource, e.g. `spec.options.ssh.port`"
+          },
+          "credential": {
+            "type": "boolean",
+            "description": "Set for a credential. Its values are never in a plan, so `from` and\n`to` are absent."
+          },
+          "from": {},
+          "to": {}
+        }
+      },
       "PostgresProtocolVersion": {
         "type": "string",
         "enum": [
@@ -7354,7 +7497,12 @@
             "description": "The commit, or a hash of a directory's files"
           },
           "plan": {
-            "description": "The plan, as `warpgate config plan --format json` prints it"
+            "type": "array",
+            "title": "A sync's plan, one entry per resource",
+            "description": "Same JSON as `warpgate config plan --format json`",
+            "items": {
+              "$ref": "#/components/schemas/PlannedChange"
+            }
           },
           "error": {
             "type": "string"

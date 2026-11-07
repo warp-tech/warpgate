@@ -1,7 +1,8 @@
-use poem_openapi::{Enum, Object};
+use poem_openapi::{Enum, NewType, Object};
+use sea_orm::FromJsonQueryResult;
 use sea_orm::entity::prelude::*;
-use sea_orm::query::JsonValue;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::ProviderId;
@@ -30,6 +31,69 @@ pub enum SyncStatus {
     Failed,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Enum)]
+#[serde(rename_all = "snake_case")]
+#[oai(rename_all = "snake_case")]
+pub enum PlanAction {
+    Create,
+    Update,
+    /// Takes over a row created by hand; the resource has the adopt annotation
+    Adopt,
+    Unchanged,
+    /// A row with this name exists, and the provider doesn't own it
+    Collision,
+    /// The provider owns the row but may not make this change; `reason` says why
+    Blocked,
+    /// Gone from the source, but kept because pruning is off
+    WouldPrune,
+    Delete,
+}
+
+impl PlanAction {
+    /// Whether applying the plan writes this change
+    pub const fn is_pending(self) -> bool {
+        matches!(
+            self,
+            Self::Create | Self::Update | Self::Adopt | Self::Delete
+        )
+    }
+}
+
+/// A changed field of a resource
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Object)]
+pub struct PlannedField {
+    /// Where in the resource, e.g. `spec.options.ssh.port`
+    pub path: String,
+    /// Set for a credential. Its values are never in a plan, so `from` and
+    /// `to` are absent.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub credential: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<Value>,
+}
+
+/// One resource in a plan
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Object)]
+pub struct PlannedChange {
+    pub kind: String,
+    pub name: String,
+    pub action: PlanAction,
+    /// For an update or adoption
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<PlannedField>,
+    /// For a collision or a blocked change
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// A sync's plan, one entry per resource
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, NewType, FromJsonQueryResult)]
+#[serde(transparent)]
+#[oai(from_parameter = false, from_multipart = false, to_header = false)]
+pub struct SyncPlan(pub Vec<PlannedChange>);
+
 /// One outcome of syncing a provider. A later sync that reaches the same
 /// unchanged or failed outcome moves `checked_at` instead of adding a row, so
 /// a row reads "in this state from `started_at` through `checked_at`".
@@ -50,9 +114,9 @@ pub struct Model {
     /// The commit, or a hash of a directory's files
     #[sea_orm(column_type = "Text", nullable)]
     pub revision: Option<String>,
-    /// The plan, as `warpgate config plan --format json` prints it
+    /// Same JSON as `warpgate config plan --format json`
     #[sea_orm(column_type = "Json", nullable)]
-    pub plan: Option<JsonValue>,
+    pub plan: Option<SyncPlan>,
     #[sea_orm(column_type = "Text", nullable)]
     pub error: Option<String>,
 }

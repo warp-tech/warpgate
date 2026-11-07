@@ -136,6 +136,16 @@ fn name_of(names: &HashMap<Uuid, String>, id: Uuid) -> String {
     names.get(&id).cloned().unwrap_or_else(|| id.to_string())
 }
 
+/// What [`apply`] committed
+#[derive(Debug)]
+#[must_use]
+pub struct Applied<'p> {
+    /// Each written change with its row ID, in write order
+    pub changes: Vec<(&'p Change, Uuid)>,
+    /// Sessions that deleted targets had admitted, for the caller to close
+    pub admitted: AdmittedSessions,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ApplyError {
     #[error("the plan has collisions or blocked changes")]
@@ -164,15 +174,13 @@ impl From<DbErr> for ApplyError {
 /// so exactly what was shown gets written; a change made after that still
 /// rolls everything back, through the unique names and the ownership checks.
 /// `secrets` resolves the references of client keys, to derive their public keys.
-/// Returns the sessions that deleted targets had admitted, for the caller to
-/// close once the transaction has committed.
-pub async fn apply<C: ConnectionTrait + TransactionTrait>(
+pub async fn apply<'p, C: ConnectionTrait + TransactionTrait>(
     db: &C,
     provider: ProviderId,
     desired: &[Resource],
-    confirmed: &Plan,
+    confirmed: &'p Plan,
     secrets: &dyn SecretResolver,
-) -> Result<AdmittedSessions, ApplyError> {
+) -> Result<Applied<'p>, ApplyError> {
     if confirmed.has_errors() {
         return Err(ApplyError::PlanHasErrors);
     }
@@ -191,6 +199,7 @@ pub async fn apply<C: ConnectionTrait + TransactionTrait>(
     // Plans list groups, roles and keys before the targets that refer to them
     // by name, so the names are read once all of those are in place
     let mut names = None;
+    let mut written = Vec::new();
     let (targets, others): (Vec<&Change>, Vec<&Change>) = confirmed
         .changes
         .iter()
@@ -227,11 +236,12 @@ pub async fn apply<C: ConnectionTrait + TransactionTrait>(
                 write.target(manifest, names).await
             }
         };
-        result.map_err(|source| ApplyError::Resource {
+        let id = result.map_err(|source| ApplyError::Resource {
             kind: change.kind(),
             name: change.name().to_owned(),
             source,
         })?;
+        written.push((change, id));
     }
 
     // After the writes, so a replacement client key exists before the last
@@ -255,10 +265,14 @@ pub async fn apply<C: ConnectionTrait + TransactionTrait>(
             name: change.name().to_owned(),
             source,
         })?;
+        written.push((change, *id));
     }
 
     txn.commit().await?;
-    Ok(AdmittedSessions(admitted))
+    Ok(Applied {
+        changes: written,
+        admitted: AdmittedSessions(admitted),
+    })
 }
 
 /// One create, update or adoption. `id` is the row an update or adoption
@@ -379,18 +393,17 @@ impl<C: ConnectionTrait> Write<'_, C> {
         Ok(id)
     }
 
-    async fn group(&self, manifest: &Manifest<TargetGroupSpec>) -> Result<(), ResourceError> {
+    async fn group(&self, manifest: &Manifest<TargetGroupSpec>) -> Result<Uuid, ResourceError> {
         let TargetGroupSpec { description, color } = &manifest.spec;
         let data = TargetGroupDataRequest {
             name: manifest.metadata.name.clone(),
             description: Some(description.clone()),
             color: color.clone(),
         };
-        self.save::<TargetGroupSpec>(data).await?;
-        Ok(())
+        self.save::<TargetGroupSpec>(data).await
     }
 
-    async fn role(&self, manifest: &Manifest<RoleSpec>) -> Result<(), ResourceError> {
+    async fn role(&self, manifest: &Manifest<RoleSpec>) -> Result<Uuid, ResourceError> {
         let RoleSpec {
             description,
             is_default,
@@ -400,15 +413,14 @@ impl<C: ConnectionTrait> Write<'_, C> {
             description: Some(description.clone()),
             is_default: Some(*is_default),
         };
-        self.save::<RoleSpec>(data).await?;
-        Ok(())
+        self.save::<RoleSpec>(data).await
     }
 
     async fn client_key(
         &self,
         manifest: &Manifest<SshClientKeySpec>,
         secrets: &dyn SecretResolver,
-    ) -> Result<(), ResourceError> {
+    ) -> Result<Uuid, ResourceError> {
         let SshClientKeySpec {
             private_key,
             is_default,
@@ -418,15 +430,14 @@ impl<C: ConnectionTrait> Write<'_, C> {
             label: manifest.metadata.name.clone(),
             is_default: *is_default,
         };
-        self.save::<SshClientKeySpec>((data, material)).await?;
-        Ok(())
+        self.save::<SshClientKeySpec>((data, material)).await
     }
 
     async fn target(
         &self,
         manifest: &Manifest<TargetSpec>,
         names: &mut Names,
-    ) -> Result<(), ResourceError> {
+    ) -> Result<Uuid, ResourceError> {
         let TargetSpec {
             description,
             group,
@@ -492,7 +503,7 @@ impl<C: ConnectionTrait> Write<'_, C> {
         for role in assigned.difference(&wanted) {
             targets::remove_role(self.db, self.actor, id, *role).await?;
         }
-        Ok(())
+        Ok(id)
     }
 }
 
@@ -722,7 +733,10 @@ mod tests {
     fn summary(plan: &Plan) -> Vec<String> {
         plan.changes
             .iter()
-            .map(|change| format!("{} {}", change.action(), change.name()))
+            .map(|change| {
+                let action = serde_json::to_value(change.action()).unwrap();
+                format!("{} {}", action.as_str().unwrap(), change.name())
+            })
             .collect()
     }
 
@@ -877,8 +891,8 @@ mod tests {
             summary(&forced),
             ["delete prod", "unchanged dba", "delete ops", "delete web"]
         );
-        let admitted = apply(&db, GITOPS, &dba_only, &forced, &Keys).await.unwrap();
-        assert!(admitted.0.is_empty());
+        let applied = apply(&db, GITOPS, &dba_only, &forced, &Keys).await.unwrap();
+        assert!(applied.admitted.0.is_empty());
 
         let roles: Vec<_> = Role::Entity::find().all(&db).await.unwrap();
         assert_eq!(

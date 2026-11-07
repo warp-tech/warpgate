@@ -2,6 +2,9 @@
     import { Alert, Badge } from '@sveltestrap/sveltestrap'
     import {
         api,
+        type DryRun,
+        type GitopsHistoryLatest,
+        PlanAction,
         type ProviderSync,
         SyncStatus,
         SyncTrigger,
@@ -15,6 +18,7 @@
     import RelativeDate from 'common/RelativeDate.svelte'
     import { from } from 'rxjs'
     import { link } from 'svelte-spa-router'
+    import GitopsDryRunModal from './GitopsDryRunModal.svelte'
 
     const TRIGGERS: Record<SyncTrigger, string> = {
         [SyncTrigger.Startup]: 'On startup',
@@ -25,9 +29,10 @@
 
     let error: string | undefined = $state()
     let gen = $state(0)
+    let dryRunResult: DryRun | undefined = $state()
 
-    async function loadLatest(): Promise<ProviderSync | undefined> {
-        return (await api.getGitopsHistoryLatest()).latest
+    async function loadLatest(): Promise<GitopsHistoryLatest> {
+        return api.getGitopsHistoryLatest()
     }
 
     function load(opt: LoadOptions) {
@@ -45,8 +50,7 @@
             if (
                 !forcePrune &&
                 result.status === SyncStatus.Failed &&
-                // biome-ignore lint/suspicious/noExplicitAny: -
-                result.plan.some((x: any) => x.action === 'blocked')
+                result.plan?.some(c => c.action === PlanAction.Blocked)
             ) {
                 if (
                     confirm(
@@ -61,15 +65,21 @@
         gen++
     }
 
-    function summarizeDiff(row: ProviderSync): {
-        create?: number
-        updated?: number
-        blocked?: number
-        delete?: number
-    } {
-        const counts = new Map<string, number>()
-        for (const { action } of (row.plan ?? []) as { action: string }[]) {
-            if (action !== 'unchanged') {
+    async function dryRun(): Promise<void> {
+        error = undefined
+        try {
+            dryRunResult = await api.dryRunGitops({ syncGitopsRequest: {} })
+        } catch (err) {
+            error = await stringifyError(err)
+        }
+    }
+
+    function summarizeDiff(
+        row: ProviderSync,
+    ): Partial<Record<PlanAction, number>> {
+        const counts = new Map<PlanAction, number>()
+        for (const { action } of row.plan ?? []) {
+            if (action !== PlanAction.Unchanged) {
                 counts.set(action, (counts.get(action) ?? 0) + 1)
             }
         }
@@ -84,10 +94,13 @@
             <a class="btn btn-link" href="/config/gitops" use:link>
                 Configure
             </a>
+            <AsyncButton color="link" click={dryRun}>Dry run</AsyncButton>
             <AsyncButton color="primary" click={sync}>Sync now</AsyncButton>
         </div>
     {/if}
 </div>
+
+<GitopsDryRunModal bind:dryRun={dryRunResult} {sync} />
 
 {#if error}
     <Alert color="danger">{error}</Alert>
@@ -113,8 +126,8 @@
                     {#if diff.create}
                         <Badge color="success"> +{diff.create} </Badge>
                     {/if}
-                    {#if diff.updated}
-                        <Badge color="warning"> •{diff.updated} </Badge>
+                    {#if diff.update}
+                        <Badge color="warning"> •{diff.update} </Badge>
                     {/if}
                     {#if diff.blocked}
                         <Badge color="danger"> &times;{diff.blocked} </Badge>
@@ -143,10 +156,16 @@
 
 {#key gen}
     <Loadable promise={loadLatest()}>
-        {#snippet children(latest)}
-            {#if latest}
+        {#snippet children(state)}
+            {#if state.latest || state.latestSuccess}
                 <h2>Current</h2>
-                {@render entry(latest)}
+            {/if}
+            {#if state.latest}
+                {@render entry(state.latest)}
+                <div class="mb-4"></div>
+            {/if}
+            {#if state.latestSuccess && state.latestSuccess.id !== state.latest?.id}
+                {@render entry(state.latestSuccess)}
                 <div class="mb-4"></div>
             {/if}
         {/snippet}

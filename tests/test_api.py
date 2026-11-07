@@ -841,9 +841,21 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         expected_statuses={200, 400},
     ),
     AdminApiTestCase(
-        id="get_gitops_syncs",
+        id="dry_run_gitops",
+        permission="config_edit",
+        call=lambda api, r: api.dry_run_gitops_with_http_info(sdk.SyncGitopsRequest()),
+        expected_statuses={200, 400},
+    ),
+    AdminApiTestCase(
+        id="get_gitops_history",
         permission=None,
-        call=lambda api, r: api.get_gitops_syncs_with_http_info(),
+        call=lambda api, r: api.get_gitops_history_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_gitops_history_latest",
+        permission=None,
+        call=lambda api, r: api.get_gitops_history_latest_with_http_info(),
         expected_statuses={200},
     ),
     AdminApiTestCase(
@@ -1532,8 +1544,20 @@ spec:
         return git("rev-parse", "HEAD")
 
     git("init", "-q", "-b", "main")
-    first = commit(22)
+    commit(22)
     second = commit(2222)
+
+    def audited(sync_id: str, count: int) -> list[dict]:
+        deadline = time.monotonic() + 10
+        while True:
+            entries = [
+                entry.values or {}
+                for entry in admin_client.get_logs(sdk.GetLogsRequest(limit=500))
+                if (entry.values or {}).get("sync_id") == str(sync_id)
+            ]
+            if len(entries) >= count or time.monotonic() > deadline:
+                return entries
+            time.sleep(0.5)
 
     def port() -> int:
         target = next(t for t in admin_client.get_targets() if t.name == name)
@@ -1550,14 +1574,29 @@ spec:
     source = {"kind": "Git", "url": f"file://{repo}", "reference": "main", "path": "warpgate"}
     assert session.put(parameters, json={"gitops_source": source}).status_code // 100 == 2
     try:
+        dry = admin_client.dry_run_gitops(sdk.SyncGitopsRequest())
+        assert (dry.revision, dry.error) == (second, None)
+        assert sorted((c.action, c.kind) for c in dry.plan) == [
+            ("create", "Role"),
+            ("create", "Target"),
+        ]
+        assert all(t.name != name for t in admin_client.get_targets()), "a dry run applies nothing"
+
         head = admin_client.sync_gitops(sdk.SyncGitopsRequest())
         assert (head.status, head.revision, head.error) == ("Applied", second, None)
         assert port() == 2222
         assert f"file://{repo}@main" in head.source
+        entries = audited(head.id, 3)
+        assert {(e["_type"], e.get("action"), e.get("kind"), e.get("name")) for e in entries} == {
+            ("ProviderSynced1", None, None, None),
+            ("ProviderResourceChanged1", "Create", "Role", name),
+            ("ProviderResourceChanged1", "Create", "Target", name),
+        }
 
         again = admin_client.sync_gitops(sdk.SyncGitopsRequest())
         assert again.id == head.id, "an unchanged sync extends the latest row"
-        assert [row.revision for row in admin_client.get_gitops_syncs().items[:1]] == [second]
+        assert [row.revision for row in admin_client.get_gitops_history().items[:1]] == [second]
+        assert len(audited(head.id, 4)) == 3, "an unchanged sync is not audited again"
 
         webhook = f"https://localhost:{pg_wg.http_port}/@warpgate/api/gitops/webhook"
         body = b'{"ref": "refs/heads/main"}'
@@ -1581,19 +1620,26 @@ spec:
             == 2
         )
         assert deliver(b"wrong-secret-0123") == 401
+        third = commit(2200)
         assert deliver(secret) == 202
         deadline = time.monotonic() + 30
-        while (latest := admin_client.get_gitops_syncs().items[0]).triggered_by != "Webhook":
+        while (latest := admin_client.get_gitops_history().items[0]).triggered_by != "Webhook":
             assert time.monotonic() < deadline, "the webhook never synced"
             time.sleep(0.5)
-        assert (latest.status, latest.revision) == ("Applied", second)
-        assert port() == 2222
+        assert (latest.status, latest.revision) == ("Applied", third)
+        assert port() == 2200
+        [update] = [e for e in audited(latest.id, 2) if e["_type"] == "ProviderResourceChanged1"]
+        assert (update["action"], update["kind"], update["name"]) == ("Update", "Target", name)
+        assert '"from":2222' in update["fields"] and '"to":2200' in update["fields"]
     finally:
         cleared = {"gitops_source": None, "gitops_webhook_secret": None}
         assert session.put(parameters, json=cleared).status_code // 100 == 2
 
     with pytest.raises(sdk.ApiException) as err:
         admin_client.sync_gitops(sdk.SyncGitopsRequest())
+    assert err.value.status == 400
+    with pytest.raises(sdk.ApiException) as err:
+        admin_client.dry_run_gitops(sdk.SyncGitopsRequest())
     assert err.value.status == 400
 
 

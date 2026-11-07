@@ -5,21 +5,22 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use poem_openapi::Object;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel, QueryFilter,
     QueryOrder, Set,
 };
-use serde_json::Value;
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 use uuid::Uuid;
 use warpgate_common::{ProviderId, SecretResolver, WarpgateError};
 use warpgate_db_entities::Parameters::{self, GitopsSource};
-use warpgate_db_entities::ProviderSync::{self, SyncStatus, SyncTrigger};
+use warpgate_db_entities::ProviderSync::{self, PlannedChange, SyncPlan, SyncStatus, SyncTrigger};
 use warpgate_gitops::format_text;
-use warpgate_gitops::plan::{Prune, format_errors, format_plan_json, plan};
+use warpgate_gitops::plan::{Plan, Prune, format_errors, plan};
 use warpgate_gitops::source::checkout;
+use warpgate_gitops::types::Resource;
 use warpgate_gitops::validate::check_files;
 
 use super::AdmittedSessions;
@@ -27,6 +28,7 @@ use super::reconcile::{apply, load_current};
 use crate::Services;
 use crate::cluster::alive_nodes;
 use crate::helpers::i64_seconds_to_duration;
+use crate::logging::AuditEvent;
 
 const PROVIDER: ProviderId = ProviderId::GITOPS;
 
@@ -62,42 +64,125 @@ impl From<sea_orm::DbErr> for SyncError {
     }
 }
 
-/// What one sync reached, before it is recorded
-#[derive(Default)]
-struct Attempt {
-    revision: Option<String>,
-    plan: Option<Value>,
+/// What asked for a sync
+#[derive(Clone, Copy, Debug)]
+pub enum SyncRequest {
+    Startup,
+    Interval,
+    Webhook,
+    /// `force_prune` deletes what the source dropped, past the mass-deletion guard
+    Admin {
+        user_id: Uuid,
+        force_prune: bool,
+    },
 }
 
-/// Syncs once and records the outcome. `force_prune` deletes what is gone
-/// from the source however much that is. Returns the sessions that deleted targets had
-/// admitted, for the caller to close.
+impl SyncRequest {
+    const fn trigger(self) -> SyncTrigger {
+        match self {
+            Self::Startup => SyncTrigger::Startup,
+            Self::Interval => SyncTrigger::Interval,
+            Self::Webhook => SyncTrigger::Webhook,
+            Self::Admin { .. } => SyncTrigger::Api,
+        }
+    }
+
+    const fn admin(self) -> Option<Uuid> {
+        match self {
+            Self::Admin { user_id, .. } => Some(user_id),
+            Self::Startup | Self::Interval | Self::Webhook => None,
+        }
+    }
+}
+
+/// The source's revision and plan, kept for the history when a later step fails
+#[derive(Default)]
+struct Reached {
+    revision: Option<String>,
+    plan: Option<SyncPlan>,
+}
+
+/// One sync before it is recorded
+struct Attempt {
+    /// The history row's ID
+    id: Uuid,
+    /// The admin who requested the sync
+    admin: Option<Uuid>,
+    reached: Reached,
+}
+
+/// What a sync would do
+#[derive(Object)]
+pub struct DryRun {
+    pub source: String,
+    pub revision: Option<String>,
+    pub plan: Option<SyncPlan>,
+    /// Why the sync would fail
+    pub error: Option<String>,
+}
+
+/// Fetches and plans like [`sync`] for `request`. Writes nothing.
+pub async fn dry_run(
+    db: &DatabaseConnection,
+    secrets: &dyn SecretResolver,
+    request: SyncRequest,
+) -> Result<DryRun, SyncError> {
+    let (source, prune) = configured(db, request).await?;
+    let mut reached = Reached::default();
+    let error = fetch_and_plan(db, secrets, &source, prune, &mut reached)
+        .await
+        .err();
+    Ok(DryRun {
+        source: source.describe(),
+        revision: reached.revision,
+        plan: reached.plan,
+        error,
+    })
+}
+
+/// The configured source and the prune policy for `request`
+async fn configured(
+    db: &DatabaseConnection,
+    request: SyncRequest,
+) -> Result<(GitopsSource, Prune), SyncError> {
+    let parameters = Parameters::Entity::get(db).await?;
+    let source = parameters.gitops_source.ok_or(SyncError::NotConfigured)?;
+    let prune = match (request, parameters.gitops_prune) {
+        (
+            SyncRequest::Admin {
+                force_prune: true, ..
+            },
+            _,
+        ) => Prune::Force,
+        (_, true) => Prune::On,
+        (_, false) => Prune::Off,
+    };
+    Ok((source, prune))
+}
+
+/// Syncs once and records the outcome. Returns the sessions that deleted
+/// targets had admitted, for the caller to close.
 pub async fn sync(
     db: &DatabaseConnection,
     secrets: &dyn SecretResolver,
-    trigger: SyncTrigger,
-    force_prune: bool,
+    request: SyncRequest,
 ) -> Result<(ProviderSync::Model, AdmittedSessions), SyncError> {
     let _running = RUNNING.lock().await;
-    sync_locked(db, secrets, trigger, force_prune).await
+    sync_locked(db, secrets, request).await
 }
 
 /// [`sync`] for a caller that holds [`RUNNING`]
 async fn sync_locked(
     db: &DatabaseConnection,
     secrets: &dyn SecretResolver,
-    trigger: SyncTrigger,
-    force_prune: bool,
+    request: SyncRequest,
 ) -> Result<(ProviderSync::Model, AdmittedSessions), SyncError> {
-    let parameters = Parameters::Entity::get(db).await?;
-    let source = parameters.gitops_source.ok_or(SyncError::NotConfigured)?;
-    let prune = match (force_prune, parameters.gitops_prune) {
-        (true, _) => Prune::Force,
-        (false, true) => Prune::On,
-        (false, false) => Prune::Off,
+    let (source, prune) = configured(db, request).await?;
+    let mut attempt = Attempt {
+        id: Uuid::new_v4(),
+        admin: request.admin(),
+        reached: Reached::default(),
     };
-
-    let mut attempt = Attempt::default();
     let result = attempt_sync(db, secrets, &source, prune, &mut attempt).await;
     let (status, error, admitted) = match result {
         Ok(Some(admitted)) => (SyncStatus::Applied, None, admitted),
@@ -109,15 +194,15 @@ async fn sync_locked(
         ),
     };
     let row = ProviderSync::Model {
-        id: Uuid::new_v4(),
+        id: attempt.id,
         provider: PROVIDER,
-        triggered_by: trigger,
+        triggered_by: request.trigger(),
         status,
         started_at: OffsetDateTime::now_utc(),
         checked_at: OffsetDateTime::now_utc(),
         source: source.describe(),
-        revision: attempt.revision,
-        plan: attempt.plan,
+        revision: attempt.reached.revision,
+        plan: attempt.reached.plan,
         error,
     };
     match &row.error {
@@ -126,7 +211,21 @@ async fn sync_locked(
             info!(source = %row.source, revision = ?row.revision, status = ?row.status, "GitOps sync")
         }
     }
-    Ok((record(db, row).await?, admitted))
+    let recorded = record(db, row).await?;
+    // A different ID means `record` extended an earlier row; repeats aren't audited
+    if recorded.id == attempt.id {
+        AuditEvent::ProviderSynced {
+            sync_id: recorded.id,
+            provider: PROVIDER.label(),
+            trigger: format!("{:?}", recorded.triggered_by),
+            status: format!("{:?}", recorded.status),
+            source: recorded.source.clone(),
+            revision: recorded.revision.clone(),
+            actor_user_id: attempt.admin,
+        }
+        .emit();
+    }
+    Ok((recorded, admitted))
 }
 
 /// `Some` when it applied changes, with the sessions deleted targets admitted
@@ -137,6 +236,43 @@ async fn attempt_sync(
     prune: Prune,
     attempt: &mut Attempt,
 ) -> Result<Option<AdmittedSessions>, String> {
+    let (resources, plan) =
+        fetch_and_plan(db, secrets, source, prune, &mut attempt.reached).await?;
+    if !plan.has_pending() {
+        return Ok(None);
+    }
+    let applied = apply(db, PROVIDER, &resources, &plan, secrets)
+        .await
+        .map_err(|e| e.to_string())?;
+    for (change, id) in &applied.changes {
+        let change = PlannedChange::from(*change);
+        let fields = (!change.fields.is_empty())
+            .then(|| serde_json::to_string(&change.fields).ok())
+            .flatten();
+        AuditEvent::ProviderResourceChanged {
+            sync_id: attempt.id,
+            provider: PROVIDER.label(),
+            action: format!("{:?}", change.action),
+            kind: change.kind,
+            id: *id,
+            name: change.name,
+            fields,
+            actor_user_id: attempt.admin,
+        }
+        .emit();
+    }
+    Ok(Some(applied.admitted))
+}
+
+/// Fetches and validates the source, and plans it against the database. A
+/// plan with collisions or blocked changes is an error.
+async fn fetch_and_plan(
+    db: &DatabaseConnection,
+    secrets: &dyn SecretResolver,
+    source: &GitopsSource,
+    prune: Prune,
+    reached: &mut Reached,
+) -> Result<(Vec<Resource>, Plan), String> {
     let password = match source {
         GitopsSource::Git(git) if git.username.is_some() => Some(
             git.password
@@ -164,23 +300,17 @@ async fn attempt_sync(
             ));
         }
     };
-    attempt.revision = Some(checkout.revision);
+    reached.revision = Some(checkout.revision);
 
     let resources =
         check_files(&checkout.files).map_err(|diagnostics| format_text(&diagnostics))?;
     let current = load_current(db).await.map_err(|e| e.to_string())?;
     let plan = plan(PROVIDER, &resources, &current, prune);
-    attempt.plan = Some(format_plan_json(&plan));
+    reached.plan = Some(SyncPlan::from(&plan));
     if plan.has_errors() {
         return Err(format_errors(&plan));
     }
-    if !plan.has_pending() {
-        return Ok(None);
-    }
-    apply(db, PROVIDER, &resources, &plan, secrets)
-        .await
-        .map(Some)
-        .map_err(|e| e.to_string())
+    Ok((resources, plan))
 }
 
 /// A sync that applied nothing and reached what the latest row already says
@@ -216,20 +346,17 @@ impl Services {
     /// See [`sync`]; also closes the sessions of deleted targets
     pub async fn sync_gitops(
         &self,
-        trigger: SyncTrigger,
-        force_prune: bool,
+        request: SyncRequest,
     ) -> Result<ProviderSync::Model, SyncError> {
         let _running = RUNNING.lock().await;
-        self.sync_gitops_locked(trigger, force_prune).await
+        self.sync_gitops_locked(request).await
     }
 
     async fn sync_gitops_locked(
         &self,
-        trigger: SyncTrigger,
-        force_prune: bool,
+        request: SyncRequest,
     ) -> Result<ProviderSync::Model, SyncError> {
-        let (row, admitted) =
-            sync_locked(&self.db, &*self.secret_backends, trigger, force_prune).await?;
+        let (row, admitted) = sync_locked(&self.db, &*self.secret_backends, request).await?;
         self.close_admitted_sessions(admitted).await?;
         Ok(row)
     }
@@ -244,10 +371,7 @@ impl Services {
         tokio::spawn(async move {
             let _running = RUNNING.lock().await;
             WEBHOOK_QUEUED.store(false, Ordering::SeqCst);
-            if let Err(error) = services
-                .sync_gitops_locked(SyncTrigger::Webhook, false)
-                .await
-            {
+            if let Err(error) = services.sync_gitops_locked(SyncRequest::Webhook).await {
                 warn!("GitOps sync: {error}");
             }
         });
@@ -268,8 +392,8 @@ impl Services {
                 tick.tick().await;
                 let scheduled = services.scheduled_sync(last).await;
                 last.get_or_insert_with(Instant::now);
-                let trigger = match scheduled {
-                    Ok(Some(trigger)) => trigger,
+                let request = match scheduled {
+                    Ok(Some(request)) => request,
                     Ok(None) => continue,
                     Err(error) => {
                         warn!("Could not check the GitOps sync schedule: {error}");
@@ -277,7 +401,7 @@ impl Services {
                     }
                 };
                 last = Some(Instant::now());
-                if let Err(error) = services.sync_gitops(trigger, false).await {
+                if let Err(error) = services.sync_gitops(request).await {
                     warn!("GitOps sync: {error}");
                 }
             }
@@ -287,7 +411,7 @@ impl Services {
     async fn scheduled_sync(
         &self,
         last: Option<Instant>,
-    ) -> Result<Option<SyncTrigger>, WarpgateError> {
+    ) -> Result<Option<SyncRequest>, WarpgateError> {
         let parameters = Parameters::Entity::get(&self.db).await?;
         if parameters.gitops_source.is_none() {
             return Ok(None);
@@ -295,9 +419,9 @@ impl Services {
         let interval = parameters
             .gitops_sync_interval_seconds
             .and_then(i64_seconds_to_duration);
-        let trigger = match (last, interval) {
-            (None, _) => SyncTrigger::Startup,
-            (Some(last), Some(interval)) if last.elapsed() >= interval => SyncTrigger::Interval,
+        let request = match (last, interval) {
+            (None, _) => SyncRequest::Startup,
+            (Some(last), Some(interval)) if last.elapsed() >= interval => SyncRequest::Interval,
             _ => return Ok(None),
         };
         let lowest = alive_nodes(&self.db)
@@ -307,7 +431,7 @@ impl Services {
             .min();
         Ok(lowest
             .is_none_or(|id| id == self.cluster.node_id)
-            .then_some(trigger))
+            .then_some(request))
     }
 }
 
@@ -318,6 +442,7 @@ mod tests {
     use sea_orm::PaginatorTrait;
     use warpgate_common::{Secret, SecretError, SecretRef};
     use warpgate_db_entities::Parameters::GitopsDirectorySource;
+    use warpgate_db_entities::ProviderSync::PlanAction;
     use warpgate_db_entities::Role;
 
     use super::*;
@@ -348,10 +473,7 @@ mod tests {
     }
 
     async fn run(db: &DatabaseConnection) -> ProviderSync::Model {
-        sync(db, &NoSecrets, SyncTrigger::Api, false)
-            .await
-            .unwrap()
-            .0
+        sync(db, &NoSecrets, SyncRequest::Interval).await.unwrap().0
     }
 
     async fn rows(db: &DatabaseConnection) -> u64 {
@@ -362,7 +484,7 @@ mod tests {
     async fn records_applied_runs_and_extends_unchanged_ones() {
         let db = db().await;
         assert!(matches!(
-            sync(&db, &NoSecrets, SyncTrigger::Api, false).await,
+            sync(&db, &NoSecrets, SyncRequest::Interval).await,
             Err(SyncError::NotConfigured)
         ));
 
@@ -386,6 +508,23 @@ mod tests {
         let again = run(&db).await;
         assert_eq!(again.id, failed.id, "the same failure extends its row");
         assert_eq!(rows(&db).await, 2);
+    }
+
+    #[tokio::test]
+    async fn a_dry_run_plans_and_writes_nothing() {
+        let db = db().await;
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("roles.yaml"), ROLES).unwrap();
+        configure(&db, dir.path(), false).await;
+
+        let dry = dry_run(&db, &NoSecrets, SyncRequest::Interval)
+            .await
+            .unwrap();
+        assert!(dry.error.is_none());
+        let actions: Vec<_> = dry.plan.unwrap().0.iter().map(|c| c.action).collect();
+        assert_eq!(actions, [PlanAction::Create, PlanAction::Create]);
+        assert_eq!(Role::Entity::find().count(&db).await.unwrap(), 0);
+        assert_eq!(rows(&db).await, 0);
     }
 
     #[tokio::test]
@@ -420,7 +559,11 @@ mod tests {
         );
         assert_eq!(Role::Entity::find().count(&db).await.unwrap(), 3);
 
-        let (forced, _) = sync(&db, &NoSecrets, SyncTrigger::Api, true).await.unwrap();
+        let request = SyncRequest::Admin {
+            user_id: Uuid::nil(),
+            force_prune: true,
+        };
+        let (forced, _) = sync(&db, &NoSecrets, request).await.unwrap();
         assert_eq!(forced.status, SyncStatus::Applied);
         assert_eq!(Role::Entity::find().count(&db).await.unwrap(), 1);
     }

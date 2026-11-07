@@ -10,6 +10,7 @@ use uuid::Uuid;
 use warpgate_common::{
     MaybeSecretRef, ProviderId, StoredSecrets, TargetOptions, public_key_of_pem,
 };
+use warpgate_db_entities::ProviderSync::{PlanAction, PlannedChange, PlannedField, SyncPlan};
 
 use crate::diagnostic::{Path, Segment};
 use crate::types::{
@@ -95,17 +96,16 @@ pub enum Change {
 }
 
 impl Change {
-    /// The change's name in plan output
-    pub const fn action(&self) -> &'static str {
+    pub const fn action(&self) -> PlanAction {
         match self {
-            Self::Create(_) => "create",
-            Self::Update { .. } => "update",
-            Self::Adopt { .. } => "adopt",
-            Self::Unchanged { .. } => "unchanged",
-            Self::Collision { .. } => "collision",
-            Self::Blocked { .. } => "blocked",
-            Self::WouldPrune { .. } => "would_prune",
-            Self::Delete { .. } => "delete",
+            Self::Create(_) => PlanAction::Create,
+            Self::Update { .. } => PlanAction::Update,
+            Self::Adopt { .. } => PlanAction::Adopt,
+            Self::Unchanged { .. } => PlanAction::Unchanged,
+            Self::Collision { .. } => PlanAction::Collision,
+            Self::Blocked { .. } => PlanAction::Blocked,
+            Self::WouldPrune { .. } => PlanAction::WouldPrune,
+            Self::Delete { .. } => PlanAction::Delete,
         }
     }
 
@@ -175,15 +175,7 @@ impl Plan {
     }
 
     pub fn has_pending(&self) -> bool {
-        self.changes.iter().any(|c| {
-            matches!(
-                c,
-                Change::Create(_)
-                    | Change::Update { .. }
-                    | Change::Adopt { .. }
-                    | Change::Delete { .. }
-            )
-        })
+        self.changes.iter().any(|c| c.action().is_pending())
     }
 }
 
@@ -604,46 +596,48 @@ fn error_line(change: &Change) -> Option<String> {
     }
 }
 
-pub fn format_plan_json(plan: &Plan) -> Value {
-    plan.changes
-        .iter()
-        .map(|change| {
-            let mut entry =
-                json!({ "kind": format!("{:?}", change.kind()), "name": change.name() });
-            let extra = match change {
-                Change::Update { fields, .. } | Change::Adopt { fields, .. } => {
-                    json!({ "fields": fields_json(fields) })
-                }
-                Change::Collision { owner, .. } => {
-                    json!({ "reason": collision_reason(*owner) })
-                }
-                Change::Blocked { reason, .. } => json!({ "reason": reason }),
-                Change::Create(_)
-                | Change::Unchanged { .. }
-                | Change::WouldPrune { .. }
-                | Change::Delete { .. } => json!({}),
-            };
-            if let (Value::Object(entry), Value::Object(extra)) = (&mut entry, extra) {
-                entry.insert("action".into(), Value::String(change.action().into()));
-                entry.extend(extra);
-            }
-            entry
-        })
-        .collect()
+impl From<&Plan> for SyncPlan {
+    fn from(plan: &Plan) -> Self {
+        Self(plan.changes.iter().map(PlannedChange::from).collect())
+    }
 }
 
-fn fields_json(fields: &[FieldChange]) -> Value {
-    fields
-        .iter()
-        .map(|field| match &field.change {
-            ValueChange::Value { from, to } => {
-                json!({ "path": field.path.to_string(), "from": from, "to": to })
+impl From<&Change> for PlannedChange {
+    fn from(change: &Change) -> Self {
+        let (fields, reason) = match change {
+            Change::Update { fields, .. } | Change::Adopt { fields, .. } => {
+                (fields.iter().map(PlannedField::from).collect(), None)
             }
-            ValueChange::Credential => {
-                json!({ "path": field.path.to_string(), "credential": true })
-            }
-        })
-        .collect()
+            Change::Collision { owner, .. } => (vec![], Some(collision_reason(*owner))),
+            Change::Blocked { reason, .. } => (vec![], Some(reason.clone())),
+            Change::Create(_)
+            | Change::Unchanged { .. }
+            | Change::WouldPrune { .. }
+            | Change::Delete { .. } => (vec![], None),
+        };
+        Self {
+            kind: format!("{:?}", change.kind()),
+            name: change.name().to_owned(),
+            action: change.action(),
+            fields,
+            reason,
+        }
+    }
+}
+
+impl From<&FieldChange> for PlannedField {
+    fn from(field: &FieldChange) -> Self {
+        let (credential, from, to) = match &field.change {
+            ValueChange::Value { from, to } => (false, Some(from.clone()), Some(to.clone())),
+            ValueChange::Credential => (true, None, None),
+        };
+        Self {
+            path: field.path.to_string(),
+            credential,
+            from,
+            to,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -729,10 +723,33 @@ mod tests {
         current
     }
 
+    #[test]
+    fn stored_plans_load_and_print_unchanged() {
+        let stored = json!([
+            {"kind": "Target", "name": "db", "action": "update", "fields": [
+                {"path": "spec.options.ssh.port", "from": 22, "to": 2222},
+                {"path": "spec.options.mysql.auth.password", "credential": true},
+            ]},
+            {"kind": "Role", "name": "dba", "action": "create"},
+            {"kind": "Role", "name": "ops", "action": "blocked", "reason": "removed"},
+            {"kind": "Role", "name": "old", "action": "would_prune"},
+        ]);
+        let plan: SyncPlan = serde_json::from_value(stored.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&plan).unwrap(), stored);
+    }
+
     fn summary(plan: &Plan) -> Vec<String> {
         plan.changes
             .iter()
-            .map(|change| format!("{} {:?} {}", change.action(), change.kind(), change.name()))
+            .map(|change| {
+                let action = serde_json::to_value(change.action()).unwrap();
+                format!(
+                    "{} {:?} {}",
+                    action.as_str().unwrap(),
+                    change.kind(),
+                    change.name()
+                )
+            })
             .collect()
     }
 
@@ -845,7 +862,11 @@ mod tests {
                 change: ValueChange::Credential,
             }]
         );
-        let rendered = format!("{}{}", format_plan(&plan_), format_plan_json(&plan_));
+        let rendered = format!(
+            "{}{}",
+            format_plan(&plan_),
+            serde_json::to_string(&SyncPlan::from(&plan_)).unwrap()
+        );
         assert!(!rendered.contains("secret"), "{rendered}");
     }
 
@@ -874,7 +895,11 @@ mod tests {
                 "spec.options.http.url"
             ]
         );
-        let rendered = format!("{}{}", format_plan(&plan_), format_plan_json(&plan_));
+        let rendered = format!(
+            "{}{}",
+            format_plan(&plan_),
+            serde_json::to_string(&SyncPlan::from(&plan_)).unwrap()
+        );
         assert!(!rendered.contains("secret"), "{rendered}");
     }
 
@@ -1087,7 +1112,11 @@ mod tests {
         }];
         assert_eq!(fields(&changed, "deploy"), credential);
         assert_eq!(fields(&changed, "ci"), credential);
-        let rendered = format!("{}{}", format_plan(&changed), format_plan_json(&changed));
+        let rendered = format!(
+            "{}{}",
+            format_plan(&changed),
+            serde_json::to_string(&SyncPlan::from(&changed)).unwrap()
+        );
         assert!(!rendered.contains("PRIVATE"), "{rendered}");
         assert!(!rendered.contains("ssh-ed25519"), "{rendered}");
         assert!(!rendered.contains("secret://"), "{rendered}");
