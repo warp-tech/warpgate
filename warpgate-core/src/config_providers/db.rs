@@ -1396,7 +1396,10 @@ mod tests {
         set_config_migration_values(ConfigMigrationValues::default());
         let db = Database::connect("sqlite::memory:").await.unwrap();
         migrate_database(&db).await.unwrap();
-        user_with_password(&db, "alice", "pw").await;
+        // The password is irrelevant to the test (the account is disabled before any
+        // login); a generated one keeps a literal secret out of the source.
+        let password = format!("pw-{}", Uuid::new_v4());
+        user_with_password(&db, "alice", &password).await;
         let login_protection = LoginProtectionService::new(db.clone()).await.unwrap();
         let provider: Arc<crate::ConfigProviderEnum> =
             Arc::new(DatabaseConfigProvider::new(&db).into());
