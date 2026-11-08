@@ -270,50 +270,12 @@ class TestAzureCredentialModes:
         assert not response.history, "expected no redirect when streaming"
         assert marker.encode() in _terminal_output(response.text)
 
-    def test_ranged_read_serves_partial_content(
-        self, processes: ProcessManager, timeout, wg_c_ed25519_pubkey, mode
-    ):
-        """The players seek with `Range: bytes=N-`, so 206 and 416 have to work."""
-        if _credentials(mode) is None:
-            pytest.skip(f"{mode} is not configured in the environment")
-
-        prefix = f"ranged-{uuid4().hex[:8]}"
-        wg = processes.start_wg(config_patch={"recordings": {"enable": True}})
-        wait_port(wg.http_port, recv=False)
-        url = f"https://localhost:{wg.http_port}"
-        _configure(url, _storage_config(mode, prefix, serve_through_warpgate=True))
-
-        recording, _ = _record_a_session(processes, wg, wg_c_ed25519_pubkey, timeout)
-        data_url = f"{url}/@warpgate/admin/api/recordings/{recording.id}/data"
-
-        whole = requests.get(data_url, headers=TOKEN_HEADER, verify=False)
-        assert whole.status_code == 200
-        total = len(whole.content)
-        assert total > 0
-
-        offset = total // 2
-        partial = requests.get(
-            data_url,
-            headers={**TOKEN_HEADER, "Range": f"bytes={offset}-"},
-            verify=False,
-        )
-        assert partial.status_code == 206
-        assert partial.content == whole.content[offset:]
-        assert partial.headers["Content-Range"] == f"bytes {offset}-{total - 1}/{total}"
-
-        # Starting at the end is unsatisfiable, and the player relies on the 416
-        # to know it has reached the end of the recording.
-        past_end = requests.get(
-            data_url,
-            headers={**TOKEN_HEADER, "Range": f"bytes={total}-"},
-            verify=False,
-        )
-        assert past_end.status_code == 416
-
     def test_recording_round_trip_via_sas_redirect(
         self, processes: ProcessManager, timeout, wg_c_ed25519_pubkey, mode
     ):
         """With streaming off, playback redirects to a user-delegation SAS URL."""
+        if mode != "ServicePrincipal":
+            pytest.skip("SAS minting does not depend on the credential mode")
         if _credentials(mode) is None:
             pytest.skip(f"{mode} is not configured in the environment")
 
@@ -391,11 +353,8 @@ class TestAzureBlockUpload:
             time.sleep(1)
         assert recording is not None, "no completed terminal recording appeared"
 
-        response = requests.get(
-            f"{url}/@warpgate/admin/api/recordings/{recording.id}/data",
-            headers=TOKEN_HEADER,
-            verify=False,
-        )
+        data_url = f"{url}/@warpgate/admin/api/recordings/{recording.id}/data"
+        response = requests.get(data_url, headers=TOKEN_HEADER, verify=False)
         assert response.status_code == 200
         body = response.content
         assert len(body) > BLOCK_SIZE, (
@@ -417,51 +376,10 @@ class TestAzureBlockUpload:
             f"output ends at {seen[-1]} rather than {line_count}: a block was lost"
         )
 
-    def test_a_multi_block_recording_serves_ranges(
-        self, processes: ProcessManager, timeout, wg_c_ed25519_pubkey
-    ):
-        """Seeking into a committed multi-block blob, which is how playback reads."""
-        if _credentials("ServicePrincipal") is None:
-            pytest.skip("ServicePrincipal is not configured in the environment")
-
-        prefix = f"multiblock-range-{uuid4().hex[:8]}"
-        wg = processes.start_wg(config_patch={"recordings": {"enable": True}})
-        wait_port(wg.http_port, recv=False)
-        url = f"https://localhost:{wg.http_port}"
-        _configure(
-            url,
-            _storage_config("ServicePrincipal", prefix, serve_through_warpgate=True),
-        )
-
-        user, ssh_target = setup_user_and_target(processes, wg, wg_c_ed25519_pubkey)
-        ssh_client = processes.start_ssh_client(
-            f"{user.username}:{ssh_target.name}@localhost",
-            "-p",
-            str(wg.ssh_port),
-            "-tt",
-            *common_args,
-            "seq 1 700000",
-            password="123",
-        )
-        ssh_client.communicate(timeout=max(timeout, 180))
-
-        recording = None
-        deadline = time.monotonic() + 120
-        while time.monotonic() < deadline:
-            with admin_client(url) as api:
-                recording = _find_completed_terminal_recording(api)
-            if recording is not None:
-                break
-            time.sleep(1)
-        assert recording is not None
-
-        data_url = f"{url}/@warpgate/admin/api/recordings/{recording.id}/data"
-        whole = requests.get(data_url, headers=TOKEN_HEADER, verify=False)
-        total = len(whole.content)
-        assert total > BLOCK_SIZE
-
-        # Straddle a block boundary: the bytes either side come from different
-        # staged blocks, so a boundary that is off by one shows up here.
+        # Seeking is how playback reads. Straddle a block boundary so the bytes
+        # either side come from different staged blocks: an off-by-one there
+        # shows up as a mismatch.
+        total = len(body)
         offset = BLOCK_SIZE - 128
         partial = requests.get(
             data_url,
@@ -469,8 +387,17 @@ class TestAzureBlockUpload:
             verify=False,
         )
         assert partial.status_code == 206
-        assert partial.content == whole.content[offset:]
+        assert partial.content == body[offset:]
         assert partial.headers["Content-Range"] == f"bytes {offset}-{total - 1}/{total}"
+
+        # Starting at the end is unsatisfiable, and the player relies on the 416
+        # to know it has reached the end of the recording.
+        past_end = requests.get(
+            data_url,
+            headers={**TOKEN_HEADER, "Range": f"bytes={total}-"},
+            verify=False,
+        )
+        assert past_end.status_code == 416
 
 
 class TestAzureLiveView:

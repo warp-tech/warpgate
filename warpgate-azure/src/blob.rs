@@ -199,6 +199,12 @@ const DELEGATION_KEY_TTL: time::Duration = time::Duration::days(7);
 /// never signed with a key that lapses mid-playback.
 const DELEGATION_KEY_MARGIN: time::Duration = time::Duration::hours(1);
 
+// Azure refuses a delegation key valid for longer than seven days.
+const _: () = assert!(
+    DELEGATION_KEY_TTL.whole_seconds() <= 7 * 24 * 3600
+        && DELEGATION_KEY_MARGIN.whole_seconds() < DELEGATION_KEY_TTL.whole_seconds()
+);
+
 /// A user-delegation key together with the moment it stops being usable.
 struct CachedDelegationKey {
     key: UserDelegationKey,
@@ -260,11 +266,7 @@ impl AzureBlobStorage {
     }
 
     fn blob_name(&self, path: &str) -> String {
-        if self.prefix.is_empty() {
-            path.to_owned()
-        } else {
-            format!("{}/{}", self.prefix.trim_end_matches('/'), path)
-        }
+        blob_name(&self.prefix, path)
     }
 
     fn block_blob_client(&self, path: &str) -> BlockBlobClient {
@@ -513,6 +515,14 @@ fn block_id(index: usize) -> Vec<u8> {
     format!("{index:0BLOCK_ID_WIDTH$}").into_bytes()
 }
 
+fn blob_name(prefix: &str, path: &str) -> String {
+    if prefix.is_empty() {
+        path.to_owned()
+    } else {
+        format!("{}/{}", prefix.trim_end_matches('/'), path)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -528,31 +538,33 @@ mod tests {
         }
     }
 
+    /// The origin goes into the admin CSP, so a custom endpoint (sovereign
+    /// cloud, emulator) has to replace the public one rather than add to it.
     #[test]
-    fn browser_origin_defaults_to_the_public_endpoint() {
-        assert_eq!(
-            config(None).browser_origin().as_deref(),
-            Some("https://acct.blob.core.windows.net")
-        );
-    }
-
-    #[test]
-    fn browser_origin_follows_a_custom_endpoint() {
-        assert_eq!(
-            config(Some("http://127.0.0.1:10000/devstoreaccount1"))
-                .browser_origin()
-                .as_deref(),
-            Some("http://127.0.0.1:10000")
-        );
+    fn browser_origin_follows_the_endpoint() {
+        for (endpoint, expected) in [
+            (None, "https://acct.blob.core.windows.net"),
+            (
+                Some("http://127.0.0.1:10000/devstoreaccount1"),
+                "http://127.0.0.1:10000",
+            ),
+        ] {
+            assert_eq!(
+                config(endpoint).browser_origin().as_deref(),
+                Some(expected),
+                "{endpoint:?}"
+            );
+        }
     }
 
     /// Azure rejects a commit whose block IDs differ in decoded length, so every
-    /// ID this produces must be the same width no matter how many blocks precede it.
+    /// index the block limit permits must produce the same width.
     #[test]
-    fn block_ids_are_fixed_width() {
-        assert_eq!(block_id(0).len(), block_id(9).len());
-        assert_eq!(block_id(9).len(), block_id(10).len());
-        assert_eq!(block_id(0).len(), block_id(49_999).len());
+    fn block_ids_are_fixed_width_up_to_the_block_limit() {
+        let width = block_id(0).len();
+        for index in [9, 10, 49_999, MAX_BLOCKS - 1] {
+            assert_eq!(block_id(index).len(), width, "block {index}");
+        }
     }
 
     /// Block IDs are handed to the SDK raw; it base64-encodes them. Encoding here
@@ -562,22 +574,9 @@ mod tests {
         assert_eq!(block_id(7), b"00000000000000000007".to_vec());
     }
 
-    #[test]
-    fn block_ids_are_ordered() {
-        assert!(block_id(2) < block_id(10));
-    }
-
-    /// The padding has to stay wide enough for every index the limit permits,
-    /// or the last blocks of a maximal recording would be a different width.
-    #[test]
-    fn block_id_width_covers_the_block_limit() {
-        assert!(BLOCK_ID_WIDTH >= MAX_BLOCKS.to_string().len());
-        assert_eq!(block_id(MAX_BLOCKS - 1).len(), block_id(0).len());
-    }
-
     /// Only the service principal carries something Warpgate stores. The other
-    /// three resolve from the environment, so the admin API has nothing to
-    /// redact on the way out or refill on the way back in.
+    /// three resolve from the environment, so there is nothing to encrypt,
+    /// redact or refill.
     #[test]
     fn only_the_service_principal_carries_a_stored_secret() {
         assert!(
@@ -606,96 +605,52 @@ mod tests {
         );
     }
 
-    /// The discriminator is what the stored JSON and the admin API agree on, so
-    /// a renamed variant silently orphans every existing configuration.
+    /// Pins the stored form. A round trip would still pass after a variant or
+    /// field rename, while every configuration already saved stopped loading.
     #[test]
-    fn credential_modes_serialise_under_their_discriminator() {
-        let json = serde_json::to_string(&AzureCredentials::WorkloadIdentity(
-            WorkloadIdentityCredentials {},
-        ))
-        .unwrap();
-        assert!(json.contains(r#""mode":"WorkloadIdentity""#), "{json}");
-    }
-
-    /// Every mode survives the trip through stored JSON.
-    ///
-    /// The discriminator is the contract between what is written to the
-    /// parameters row and what is read back, so a renamed variant orphans
-    /// every configuration already saved under the old name.
-    #[test]
-    fn every_credential_mode_round_trips_through_json() {
-        for original in [
-            AzureCredentials::ManagedIdentity(ManagedIdentityCredentials { client_id: None }),
-            AzureCredentials::ManagedIdentity(ManagedIdentityCredentials {
-                client_id: Some("a-user-assigned-id".into()),
-            }),
-            AzureCredentials::WorkloadIdentity(WorkloadIdentityCredentials {}),
-            AzureCredentials::DeveloperTools(DeveloperToolsCredentials {}),
-            AzureCredentials::ServicePrincipal(ServicePrincipalCredentials {
-                tenant_id: "t".into(),
-                client_id: "c".into(),
-                client_secret: "s".to_owned().into(),
-            }),
+    fn saved_credentials_keep_loading() {
+        for (json, expected) in [
+            (
+                r#"{"mode":"ManagedIdentity"}"#,
+                AzureCredentials::ManagedIdentity(ManagedIdentityCredentials { client_id: None }),
+            ),
+            (
+                r#"{"mode":"ManagedIdentity","client_id":"a-user-assigned-id"}"#,
+                AzureCredentials::ManagedIdentity(ManagedIdentityCredentials {
+                    client_id: Some("a-user-assigned-id".into()),
+                }),
+            ),
+            (
+                r#"{"mode":"WorkloadIdentity"}"#,
+                AzureCredentials::WorkloadIdentity(WorkloadIdentityCredentials {}),
+            ),
+            (
+                r#"{"mode":"DeveloperTools"}"#,
+                AzureCredentials::DeveloperTools(DeveloperToolsCredentials {}),
+            ),
+            (
+                r#"{"mode":"ServicePrincipal","tenant_id":"t","client_id":"c","client_secret":"s"}"#,
+                AzureCredentials::ServicePrincipal(ServicePrincipalCredentials {
+                    tenant_id: "t".into(),
+                    client_id: "c".into(),
+                    client_secret: "s".to_owned().into(),
+                }),
+            ),
         ] {
-            let json = serde_json::to_string(&original).expect("serialising");
             let parsed: AzureCredentials =
-                serde_json::from_str(&json).unwrap_or_else(|e| panic!("{json} did not parse: {e}"));
-            assert_eq!(parsed, original, "round trip changed {json}");
+                serde_json::from_str(json).unwrap_or_else(|e| panic!("{json} did not parse: {e}"));
+            assert_eq!(parsed, expected, "{json}");
         }
-    }
-
-    /// Workload identity takes its whole configuration from the environment.
-    ///
-    /// The credential reads AZURE_TENANT_ID, AZURE_CLIENT_ID and
-    /// AZURE_FEDERATED_TOKEN_FILE itself, so this variant deliberately carries
-    /// no fields. A field appearing here would be one Warpgate has to read,
-    /// validate and keep in step with the SDK, and the reason the AKS path
-    /// needs no coverage of ours is that there is nothing of ours in it.
-    #[test]
-    fn workload_identity_carries_no_configuration() {
-        let json = serde_json::to_string(&AzureCredentials::WorkloadIdentity(
-            WorkloadIdentityCredentials {},
-        ))
-        .expect("serialising");
-        assert_eq!(json, r#"{"mode":"WorkloadIdentity"}"#);
-    }
-
-    /// A key is replaced before it expires, not as it expires. Signing with a
-    /// key that lapses moments later would mint a SAS the service rejects part
-    /// way through a playback.
-    #[test]
-    fn a_key_is_refreshed_before_it_expires() {
-        let now = OffsetDateTime::now_utc();
-        let usable_until = now + DELEGATION_KEY_MARGIN;
-
-        let expiring_inside_the_margin = now + DELEGATION_KEY_MARGIN / 2;
-        assert!(
-            expiring_inside_the_margin <= usable_until,
-            "a key inside the margin must be treated as stale"
-        );
-
-        let fresh = now + DELEGATION_KEY_TTL;
-        assert!(fresh > usable_until, "a newly fetched key must be usable");
-    }
-
-    /// Azure caps a delegation key at seven days; asking for more is refused.
-    #[test]
-    fn the_key_lifetime_is_within_what_azure_allows() {
-        assert!(DELEGATION_KEY_TTL <= time::Duration::days(7));
-        assert!(DELEGATION_KEY_MARGIN < DELEGATION_KEY_TTL);
     }
 
     #[test]
     fn a_prefix_is_applied_to_blob_names() {
-        let storage_prefix = |p: &str| -> String {
-            if p.is_empty() {
-                "rec/1".into()
-            } else {
-                format!("{}/{}", p.trim_end_matches('/'), "rec/1")
-            }
-        };
-        assert_eq!(storage_prefix(""), "rec/1");
-        assert_eq!(storage_prefix("warpgate"), "warpgate/rec/1");
-        assert_eq!(storage_prefix("warpgate/"), "warpgate/rec/1");
+        for (prefix, expected) in [
+            ("", "rec/1"),
+            ("warpgate", "warpgate/rec/1"),
+            ("warpgate/", "warpgate/rec/1"),
+        ] {
+            assert_eq!(blob_name(prefix, "rec/1"), expected, "{prefix:?}");
+        }
     }
 }

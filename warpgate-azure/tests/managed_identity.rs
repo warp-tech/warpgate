@@ -2,9 +2,9 @@
 //!
 //! This is the credential a deployed Warpgate uses, and the one that cannot be
 //! tested anywhere else: it resolves through IMDS, which only answers inside
-//! Azure. Running these anywhere but on an Azure VM with an assigned identity
-//! is pointless, so without the environment below they report that they were
-//! skipped and pass.
+//! Azure. They are `#[ignore]`d so an ordinary `cargo test` reports them as
+//! ignored rather than passed; run them on an Azure VM with an assigned
+//! identity using `cargo test --test managed_identity -- --ignored`.
 //!
 //! Required:
 //!     WARPGATE_AZURE_MI_ACCOUNT     storage account name
@@ -26,10 +26,11 @@ use warpgate_azure::{
 /// Larger than the crate's 4 MiB block so the upload has to stage more than one.
 const PAYLOAD_BYTES: usize = 5 * 1024 * 1024;
 
-fn config() -> Option<AzureBlobConfig> {
-    let account = std::env::var("WARPGATE_AZURE_MI_ACCOUNT").ok()?;
-    let container = std::env::var("WARPGATE_AZURE_MI_CONTAINER").ok()?;
-    Some(AzureBlobConfig {
+fn config() -> AzureBlobConfig {
+    let account = std::env::var("WARPGATE_AZURE_MI_ACCOUNT").expect("WARPGATE_AZURE_MI_ACCOUNT");
+    let container =
+        std::env::var("WARPGATE_AZURE_MI_CONTAINER").expect("WARPGATE_AZURE_MI_CONTAINER");
+    AzureBlobConfig {
         account,
         container,
         endpoint: None,
@@ -38,7 +39,7 @@ fn config() -> Option<AzureBlobConfig> {
         credentials: AzureCredentials::ManagedIdentity(ManagedIdentityCredentials {
             client_id: std::env::var("WARPGATE_AZURE_MI_CLIENT_ID").ok(),
         }),
-    })
+    }
 }
 
 /// A payload whose every 16-byte row states its own offset, so a reassembly
@@ -64,13 +65,9 @@ async fn read_all(mut reader: Box<dyn tokio::io::AsyncRead + Send + Unpin>) -> V
 }
 
 #[tokio::test]
-async fn a_managed_identity_can_complete_a_recordings_round_trip() {
-    let Some(config) = config() else {
-        eprintln!("skipped: WARPGATE_AZURE_MI_ACCOUNT / _CONTAINER are unset");
-        return;
-    };
-
-    let storage = AzureBlobStorage::new(&config)
+#[ignore = "needs IMDS: run on an Azure VM with --ignored"]
+async fn a_managed_identity_can_store_serve_and_delete_a_recording() {
+    let storage = AzureBlobStorage::new(&config())
         .await
         .expect("building a client from a managed identity");
 
@@ -102,28 +99,6 @@ async fn a_managed_identity_can_complete_a_recordings_round_trip() {
     );
     assert_eq!(actual, expected, "the recording came back altered");
 
-    storage.delete(&path).await.expect("deleting the recording");
-}
-
-#[tokio::test]
-async fn a_managed_identity_serves_ranges_and_refuses_impossible_ones() {
-    let Some(config) = config() else {
-        eprintln!("skipped: WARPGATE_AZURE_MI_ACCOUNT / _CONTAINER are unset");
-        return;
-    };
-
-    let storage = AzureBlobStorage::new(&config)
-        .await
-        .expect("building a client");
-    let path = format!("ranges-{}.bin", std::process::id());
-    let expected = payload();
-
-    let mut upload = storage.start_upload(&path);
-    for chunk in expected.chunks(64 * 1024) {
-        upload.push(chunk).await.expect("staging a chunk");
-    }
-    upload.finish().await.expect("committing the block list");
-
     // Straddle the block boundary: the bytes either side were staged separately.
     let offset = (4 * 1024 * 1024) - 128;
     let ranged = storage
@@ -149,16 +124,16 @@ async fn a_managed_identity_serves_ranges_and_refuses_impossible_ones() {
     }
 
     storage.delete(&path).await.expect("deleting the recording");
+    assert!(
+        storage.get_reader_from(&path, 0).await.is_err(),
+        "the recording is still readable after delete"
+    );
 }
 
 #[tokio::test]
+#[ignore = "needs IMDS: run on an Azure VM with --ignored"]
 async fn a_managed_identity_can_mint_a_usable_sas_url() {
-    let Some(config) = config() else {
-        eprintln!("skipped: WARPGATE_AZURE_MI_ACCOUNT / _CONTAINER are unset");
-        return;
-    };
-
-    let storage = AzureBlobStorage::new(&config)
+    let storage = AzureBlobStorage::new(&config())
         .await
         .expect("building a client");
     let path = format!("sas-{}.bin", std::process::id());

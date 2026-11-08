@@ -226,7 +226,7 @@ source "$HOME/.cargo/env"
 cd ~/warpgate
 export CARGO_INCREMENTAL=0
 echo "    toolchain: $(cargo --version 2>&1 | head -1)"
-cargo test -p warpgate-azure --test managed_identity -- --nocapture --test-threads 1
+cargo test -p warpgate-azure --test managed_identity -- --ignored --nocapture --test-threads 1
 REMOTE
 
 echo
