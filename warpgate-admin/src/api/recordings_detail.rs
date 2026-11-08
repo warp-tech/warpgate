@@ -193,6 +193,11 @@ fn parse_byte_range(header: &str) -> Option<(u64, Option<u64>)> {
     } else {
         Some(end.parse().ok()?)
     };
+    // RFC 9110 §14.1.1: a last position before the first makes the range
+    // invalid, and an invalid range is ignored rather than answered with 206.
+    if end.is_some_and(|end| end < start) {
+        return None;
+    }
     Some((start, end))
 }
 
@@ -514,32 +519,35 @@ mod tests {
 
     use super::*;
 
-    /// The shape the players actually send (`rangeStream.ts`): an open-ended
-    /// range from the offset it wants to resume at.
+    /// `bytes=N-` is what the players send (`rangeStream.ts`). Only the first
+    /// range of a set is honoured: the players never ask for multipart.
     #[test]
-    fn an_open_ended_range_is_read_as_a_start_offset() {
-        assert_eq!(parse_byte_range("bytes=0-"), Some((0, None)));
-        assert_eq!(parse_byte_range("bytes=4096-"), Some((4096, None)));
+    fn a_valid_range_is_read() {
+        for (header, expected) in [
+            ("bytes=0-", (0, None)),
+            ("bytes=4096-", (4096, None)),
+            ("bytes=10-19", (10, Some(19))),
+            ("bytes=5-5", (5, Some(5))),
+            ("bytes=0-9,20-29", (0, Some(9))),
+        ] {
+            assert_eq!(parse_byte_range(header), Some(expected), "{header}");
+        }
     }
 
+    /// Declining means serving the whole file with 200, which RFC 9110 allows
+    /// for any range the server does not support.
     #[test]
-    fn a_closed_range_keeps_its_inclusive_end() {
-        assert_eq!(parse_byte_range("bytes=10-19"), Some((10, Some(19))));
-    }
-
-    /// Only the first range is honoured; a multipart response is not something
-    /// the players ask for, so the rest is ignored rather than mishandled.
-    #[test]
-    fn only_the_first_range_of_a_set_is_taken() {
-        assert_eq!(parse_byte_range("bytes=0-9,20-29"), Some((0, Some(9))));
-    }
-
-    #[test]
-    fn a_malformed_range_is_declined_rather_than_guessed() {
-        assert_eq!(parse_byte_range("items=0-9"), None);
-        assert_eq!(parse_byte_range("bytes=abc-"), None);
-        assert_eq!(parse_byte_range("bytes="), None);
-        assert_eq!(parse_byte_range(""), None);
+    fn an_unusable_range_is_declined_rather_than_guessed() {
+        for header in [
+            "items=0-9",
+            "bytes=abc-",
+            "bytes=",
+            "",
+            "bytes=9-3",
+            "bytes=-500",
+        ] {
+            assert_eq!(parse_byte_range(header), None, "{header}");
+        }
     }
 
     /// `replay_scratch_span_awaiting` replays exactly the complete lines in `sent..target`,
