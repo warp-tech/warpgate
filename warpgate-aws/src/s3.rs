@@ -8,7 +8,7 @@ use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use poem_openapi::{Object, Union};
 use serde::{Deserialize, Serialize};
 use tracing::error;
-use warpgate_common::StoredSecret;
+use warpgate_common::{RangedRead, StoredSecret};
 
 use crate::AwsError;
 
@@ -87,6 +87,13 @@ pub struct S3StorageConfig {
     /// Local directory buffering recordings before upload, resolved against the
     /// config file's directory unless absolute. Defaults to `data/recordings-scratch`.
     pub scratch_path: Option<String>,
+    /// Stream recordings through Warpgate instead of redirecting the browser to
+    /// a presigned URL. Needed when the browser cannot reach the bucket, e.g.
+    /// behind a private endpoint. Off by default, so existing setups keep
+    /// redirecting.
+    #[serde(default)]
+    #[oai(default)]
+    pub serve_through_warpgate: bool,
 }
 
 impl S3StorageConfig {
@@ -115,6 +122,7 @@ pub struct S3Storage {
     client: aws_sdk_s3::Client,
     bucket: String,
     prefix: String,
+    serve_through_warpgate: bool,
 }
 
 impl S3Storage {
@@ -137,7 +145,12 @@ impl S3Storage {
             client: aws_sdk_s3::Client::from_conf(builder.build()),
             bucket: config.bucket.clone(),
             prefix: config.prefix.clone(),
+            serve_through_warpgate: config.serve_through_warpgate,
         })
+    }
+
+    pub const fn serves_through_warpgate(&self) -> bool {
+        self.serve_through_warpgate
     }
 
     fn prefix_no_trailing_slash(&self) -> &str {
@@ -162,6 +175,48 @@ impl S3Storage {
             .await
             .map_err(AwsError::sdk_error)?;
         Ok(Box::new(output.body.into_async_read()))
+    }
+
+    /// Read from `offset` to the end, reporting the object's full size.
+    ///
+    /// The size comes from a HEAD first: S3 answers a range past the end with
+    /// a bare 416, and the caller's 416 has to state the size.
+    pub async fn get_reader_from(&self, path: &str, offset: u64) -> Result<RangedRead, AwsError> {
+        let key = self.key(path);
+        let head = self
+            .client
+            .head_object()
+            .bucket(&self.bucket)
+            .key(&key)
+            .send()
+            .await
+            .map_err(AwsError::sdk_error)?;
+        let total = head.content_length().map_or(0, |len| len.max(0) as u64);
+        if offset >= total {
+            if total == 0 && offset == 0 {
+                return Ok(RangedRead {
+                    reader: Box::new(tokio::io::empty()),
+                    len: 0,
+                    total: 0,
+                });
+            }
+            return Err(AwsError::RangeNotSatisfiable { total });
+        }
+
+        let output = self
+            .client
+            .get_object()
+            .bucket(&self.bucket)
+            .key(&key)
+            .range(format!("bytes={offset}-"))
+            .send()
+            .await
+            .map_err(AwsError::sdk_error)?;
+        Ok(RangedRead {
+            reader: Box::new(output.body.into_async_read()),
+            len: total - offset,
+            total,
+        })
     }
 
     /// Presigned GET URL the browser can fetch directly (supports `Range`).
@@ -348,6 +403,7 @@ mod tests {
             prefix: String::new(),
             credentials: S3Credentials::Auto(AutoCredentials {}),
             scratch_path: None,
+            serve_through_warpgate: false,
         }
     }
 

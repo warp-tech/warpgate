@@ -27,6 +27,10 @@ pub enum AwsError {
     Signing(#[from] SigningError),
     #[error("HTTP: {0}")]
     Http(#[from] http::Error),
+    /// A read starting at or past the end of an object; carries its size for
+    /// the `Content-Range` of an HTTP 416.
+    #[error("range not satisfiable for an object of {total} bytes")]
+    RangeNotSatisfiable { total: u64 },
     #[error(transparent)]
     Other(#[from] Box<dyn Error + Send + Sync>),
 }

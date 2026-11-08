@@ -19,7 +19,7 @@ use poem_openapi::{Object, Union};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::error;
-use warpgate_common::StoredSecret;
+use warpgate_common::{RangedRead, StoredSecret};
 
 use crate::AzureError;
 
@@ -227,16 +227,6 @@ pub struct AzureBlobStorage {
     serve_through_warpgate: bool,
     /// Shared across clones so one fetch serves every session on this node.
     delegation_key: Arc<RwLock<Option<CachedDelegationKey>>>,
-}
-
-/// A ranged read: the bytes from the requested offset, and how big the whole
-/// blob is, which an HTTP 206 needs for its `Content-Range`.
-pub struct RangedRead {
-    pub reader: Box<dyn tokio::io::AsyncRead + Send + Unpin>,
-    /// Bytes in this response.
-    pub len: u64,
-    /// Bytes in the whole blob.
-    pub total: u64,
 }
 
 impl AzureBlobStorage {

@@ -499,6 +499,7 @@ mod tests {
                 secret_access_key: secret.map(|s| s.to_owned().into()),
             }),
             scratch_path: None,
+            serve_through_warpgate: false,
         })
     }
 

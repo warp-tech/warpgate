@@ -16,6 +16,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader};
 use tokio::sync::broadcast;
 use tracing::error;
 use uuid::Uuid;
+use warpgate_aws::AwsError;
 use warpgate_azure::AzureError;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
@@ -220,7 +221,10 @@ async fn stream_recording_file(
     // out costs a round trip either way and only the backend knows for certain.
     let read = match access.open_read_from(start).await {
         Ok(read) => read,
-        Err(RecordingsError::Azure(AzureError::RangeNotSatisfiable { total })) => {
+        Err(
+            RecordingsError::Azure(AzureError::RangeNotSatisfiable { total })
+            | RecordingsError::Aws(AwsError::RangeNotSatisfiable { total }),
+        ) => {
             return Ok(poem::Response::builder()
                 .status(poem::http::StatusCode::RANGE_NOT_SATISFIABLE)
                 .header("content-range", format!("bytes */{total}"))

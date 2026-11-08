@@ -7,9 +7,9 @@ use tokio::fs::File;
 use tokio::io::{AsyncRead, AsyncWriteExt};
 use tracing::error;
 use warpgate_aws::{S3MultipartUpload, S3Storage};
-use warpgate_azure::{AzureBlobStorage, AzureBlockUpload, RangedRead};
+use warpgate_azure::{AzureBlobStorage, AzureBlockUpload};
 use warpgate_common::helpers::fs::secure_file;
-use warpgate_common::{GlobalParams, TargetSessionId};
+use warpgate_common::{GlobalParams, RangedRead, TargetSessionId};
 use warpgate_db_entities::Parameters::RecordingsStorageConfig;
 use warpgate_db_entities::{Parameters, Recording};
 
@@ -129,22 +129,29 @@ impl FileAccess {
 
     /// Read from `offset` to the end, reporting the file's full size.
     ///
-    /// `Some` only where the caller is expected to serve the bytes itself. The
-    /// disk backend is served by the static-file handler and S3 by redirect, so
-    /// both answer `None` and never reach this path.
+    /// `Some` only where the caller is expected to serve the bytes itself: a
+    /// remote backend configured to stream through Warpgate. Disk is served by
+    /// the static-file handler and a redirecting backend by its URL, so both
+    /// answer `None`.
     pub async fn open_read_from(&self, offset: u64) -> Result<Option<RangedRead>> {
         match self {
-            Self::Azure { azure, key } => Ok(Some(azure.get_reader_from(key, offset).await?)),
-            Self::S3 { .. } | Self::Local(_) => Ok(None),
+            Self::S3 { s3, key } if s3.serves_through_warpgate() => {
+                Ok(Some(s3.get_reader_from(key, offset).await?))
+            }
+            Self::Azure { azure, key } if azure.serves_through_warpgate() => {
+                Ok(Some(azure.get_reader_from(key, offset).await?))
+            }
+            Self::S3 { .. } | Self::Azure { .. } | Self::Local(_) => Ok(None),
         }
     }
 
     pub async fn external_access_url(&self) -> Result<Option<String>> {
         match self {
-            Self::S3 { s3, key } => Ok(Some(s3.presign_get(key, PRESIGNED_URL_TTL).await?)),
             // Configured to stream through Warpgate: report no external URL so
             // the caller serves the bytes instead of redirecting.
+            Self::S3 { s3, .. } if s3.serves_through_warpgate() => Ok(None),
             Self::Azure { azure, .. } if azure.serves_through_warpgate() => Ok(None),
+            Self::S3 { s3, key } => Ok(Some(s3.presign_get(key, PRESIGNED_URL_TTL).await?)),
             Self::Azure { azure, key } => Ok(Some(azure.sas_url(key, PRESIGNED_URL_TTL).await?)),
             Self::Local(_) => Ok(None),
         }

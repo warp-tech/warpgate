@@ -633,6 +633,7 @@ mod tests {
                 prefix: "p/".into(),
                 credentials: S3Credentials::Auto(AutoCredentials {}),
                 scratch_path: Some("/var/lib/warpgate/recordings-scratch".into()),
+                serve_through_warpgate: false,
             }),
             RecordingsStorageConfig::S3(S3StorageConfig {
                 bucket: "b".into(),
@@ -645,6 +646,7 @@ mod tests {
                     secret_access_key: Some(String::from("secret").into()),
                 }),
                 scratch_path: None,
+                serve_through_warpgate: false,
             }),
         ] {
             let json = serde_json::to_string(&config).unwrap();
