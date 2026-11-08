@@ -15,10 +15,8 @@ use warpgate_db_entities::{Parameters, Recording};
 
 use super::{RecordingFile, Result};
 
-/// Local directory used to buffer in-progress recordings while the backend is S3.
-const S3_SCRATCH_SUBDIR: &str = "data/recordings-scratch";
-/// Local directory used to buffer in-progress recordings while the backend is Azure.
-const AZURE_SCRATCH_SUBDIR: &str = "data/recordings-scratch-azure";
+/// Local directory used to buffer in-progress recordings while the backend is remote.
+const SCRATCH_SUBDIR: &str = "data/recordings-scratch";
 /// How long a presigned recording URL handed to the browser stays valid.
 const PRESIGNED_URL_TTL: Duration = Duration::from_secs(3600);
 
@@ -181,11 +179,11 @@ impl Storage {
                 Backend::Disk
             }
             RecordingsStorageConfig::S3(s3) => {
-                local_root.push(s3.scratch_path.as_deref().unwrap_or(S3_SCRATCH_SUBDIR));
+                local_root.push(s3.scratch_path.as_deref().unwrap_or(SCRATCH_SUBDIR));
                 Backend::S3(S3Storage::new(&s3).await?)
             }
             RecordingsStorageConfig::Azure(azure) => {
-                local_root.push(AZURE_SCRATCH_SUBDIR);
+                local_root.push(SCRATCH_SUBDIR);
                 Backend::Azure(AzureBlobStorage::new(&azure).await?)
             }
         };
