@@ -61,6 +61,11 @@ trap cleanup EXIT INT TERM
 
 echo "==> Subscription"
 # Pin it for every subsequent call rather than relying on the active default.
+# Built before anything is provisioned: the tests run whatever binary is in
+# target/, so skipping this would test a stale build, or nothing at all.
+echo "==> Building warpgate"
+(cd "$(dirname "$0")/.." && cargo build -p warpgate)
+
 az account set --subscription "$SUBSCRIPTION"
 az account show --query '{name:name, id:id, tenant:tenantId, user:user.name}' -o table
 
