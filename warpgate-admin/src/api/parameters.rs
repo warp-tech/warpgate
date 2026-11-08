@@ -6,10 +6,10 @@ use sea_orm::ActiveValue::NotSet;
 use sea_orm::{EntityTrait, IntoActiveModel, Set};
 use serde::Serialize;
 use serde_json::Value;
-use warpgate_aws::{S3Credentials, S3Storage};
+use warpgate_aws::S3Storage;
 use warpgate_azure::AzureBlobStorage;
 use warpgate_common::{
-    AdminPermission, PasswordPolicy, StoredSecret, UserRequireCredentialsPolicy, WarpgateError,
+    AdminPermission, PasswordPolicy, StoredSecrets, UserRequireCredentialsPolicy, WarpgateError,
 };
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::RecordingsStorageConfig;
@@ -29,54 +29,36 @@ fn parse_nullable<T: ParseFromJSON>(value: Option<Value>) -> ParseResult<Option<
     })
 }
 
-/// The stored backend secret is never sent to the browser.
-fn redact_secret(mut config: RecordingsStorageConfig) -> RecordingsStorageConfig {
-    match &mut config {
-        RecordingsStorageConfig::S3(s3) => {
-            if let S3Credentials::Static(creds) = &mut s3.credentials {
-                creds.secret_access_key = None;
-            }
-        }
-        // Blank rather than absent: the field is required, and blank is what an
-        // untouched form sends back to mean "keep what is stored".
-        RecordingsStorageConfig::Azure(azure) => {
-            if let Some(secret) = azure.credentials.stored_secret_mut() {
-                *secret = StoredSecret::default();
-            }
-        }
-        RecordingsStorageConfig::Disk(_) => {}
-    }
-    config
-}
-
 /// An empty incoming secret keeps the one already stored (the UI never sees it,
 /// so it round-trips the redacted value unless the admin types a new one).
+/// Only within the same backend: a secret never carries across to another one.
 fn merge_secret(
     mut incoming: RecordingsStorageConfig,
     current: &RecordingsStorageConfig,
 ) -> RecordingsStorageConfig {
-    match (&mut incoming, current) {
-        (RecordingsStorageConfig::S3(s3), RecordingsStorageConfig::S3(current_s3)) => {
-            if let S3Credentials::Static(creds) = &mut s3.credentials
-                && creds.secret_access_key.is_none()
-                && let S3Credentials::Static(current_creds) = &current_s3.credentials
-            {
-                creds
-                    .secret_access_key
-                    .clone_from(&current_creds.secret_access_key);
+    if std::mem::discriminant(&incoming) == std::mem::discriminant(current) {
+        let mut current = current.clone();
+        for (secret, stored) in incoming
+            .stored_secrets_mut()
+            .into_iter()
+            .zip(current.stored_secrets_mut())
+        {
+            if secret.stored_value().is_empty() {
+                *secret = stored.clone();
             }
         }
-        (RecordingsStorageConfig::Azure(azure), RecordingsStorageConfig::Azure(current_azure)) => {
-            if let Some(secret) = azure.credentials.stored_secret_mut()
-                && secret.stored_value().is_empty()
-                && let Some(current_secret) = current_azure.credentials.stored_secret()
-            {
-                *secret = current_secret.clone();
-            }
-        }
-        _ => {}
     }
     incoming
+}
+
+/// The serialized config as it goes into the parameters row, secrets encrypted.
+fn storage_to_save(
+    incoming: RecordingsStorageConfig,
+    current: &RecordingsStorageConfig,
+) -> Result<String, WarpgateError> {
+    let mut config = merge_secret(incoming, current);
+    config.encrypt_all()?;
+    Ok(serde_json::to_string(&config)?)
 }
 
 #[derive(Serialize, Object)]
@@ -255,7 +237,7 @@ impl Api {
     #[oai(path = "/parameters", method = "get", operation_id = "get_parameters")]
     async fn api_get(&self, admin: AdminContext) -> Result<GetParametersResponse, WarpgateError> {
         let parameters = admin.parameters().await?.clone();
-        let recordings_storage = redact_secret(parameters.recordings_storage_config()?);
+        let recordings_storage = parameters.recordings_storage_config()?.redacted();
         let logo_etag = parameters.logo_etag();
 
         Ok(GetParametersResponse::Ok(Json(ParameterValues {
@@ -354,10 +336,10 @@ impl Api {
         let db = &services.db;
         let current = admin.parameters().await?.clone();
         let storage = match &body.recordings_storage {
-            Some(incoming) => Some(serde_json::to_string(&merge_secret(
+            Some(incoming) => Some(storage_to_save(
                 incoming.clone(),
                 &current.recordings_storage_config()?,
-            ))?),
+            )?),
             None => None,
         };
         let mut parameters = current.into_active_model();
@@ -498,9 +480,32 @@ impl Api {
 mod tests {
     use poem_openapi::types::ParseFromJSON;
     use serde_json::json;
+    use warpgate_aws::{S3Credentials, S3StorageConfig, StaticCredentials};
     use warpgate_azure::{AzureBlobConfig, AzureCredentials, ServicePrincipalCredentials};
+    use warpgate_common::StoredSecrets;
+    use warpgate_common::encryption::{env_keyring, is_envelope};
 
-    use super::{ParameterUpdate, RecordingsStorageConfig, merge_secret, redact_secret};
+    use super::{ParameterUpdate, RecordingsStorageConfig, merge_secret, storage_to_save};
+
+    fn s3_with_secret(secret: Option<&str>) -> RecordingsStorageConfig {
+        RecordingsStorageConfig::S3(S3StorageConfig {
+            bucket: "b".into(),
+            region: "us-east-1".into(),
+            endpoint: None,
+            path_style: false,
+            prefix: String::new(),
+            credentials: S3Credentials::Static(StaticCredentials {
+                access_key_id: "AKIA".into(),
+                secret_access_key: secret.map(|s| s.to_owned().into()),
+            }),
+            scratch_path: None,
+        })
+    }
+
+    fn secret_of(config: &RecordingsStorageConfig) -> String {
+        let mut config = config.clone();
+        config.stored_secrets_mut()[0].stored_value().to_owned()
+    }
 
     fn azure_with_secret(secret: &str) -> RecordingsStorageConfig {
         RecordingsStorageConfig::Azure(AzureBlobConfig {
@@ -517,54 +522,71 @@ mod tests {
         })
     }
 
-    fn azure_secret_of(config: &RecordingsStorageConfig) -> &str {
-        match config {
-            RecordingsStorageConfig::Azure(azure) => azure
-                .credentials
-                .stored_secret()
-                .expect("a service principal carries a secret")
-                .stored_value(),
-            _ => panic!("expected the Azure variant"),
-        }
-    }
-
-    /// The admin API handed the service-principal secret back in plaintext
-    /// until this was covered: `redact_secret` only knew about S3.
     #[test]
-    fn the_azure_client_secret_never_leaves_the_server() {
-        let redacted = redact_secret(azure_with_secret("real-secret"));
-        assert_eq!(azure_secret_of(&redacted), "");
+    fn stored_secrets_never_leave_the_server() {
+        assert_eq!(secret_of(&azure_with_secret("real-secret").redacted()), "");
+        assert_eq!(
+            secret_of(&s3_with_secret(Some("real-secret")).redacted()),
+            ""
+        );
     }
 
     /// The form posts back what it was given, so an untouched secret arrives
-    /// blank and has to be restored rather than saved over the stored one.
+    /// blank (or, from older clients, absent) and has to be restored rather
+    /// than saved over the stored one.
     #[test]
-    fn a_blank_azure_secret_keeps_the_stored_one() {
+    fn a_blank_secret_keeps_the_stored_one() {
         let merged = merge_secret(azure_with_secret(""), &azure_with_secret("real-secret"));
-        assert_eq!(azure_secret_of(&merged), "real-secret");
+        assert_eq!(secret_of(&merged), "real-secret");
+        for incoming in [None, Some("")] {
+            let merged = merge_secret(
+                s3_with_secret(incoming),
+                &s3_with_secret(Some("real-secret")),
+            );
+            assert_eq!(secret_of(&merged), "real-secret");
+        }
     }
 
     #[test]
-    fn a_supplied_azure_secret_replaces_the_stored_one() {
+    fn a_supplied_secret_replaces_the_stored_one() {
         let merged = merge_secret(
             azure_with_secret("new-secret"),
             &azure_with_secret("old-secret"),
         );
-        assert_eq!(azure_secret_of(&merged), "new-secret");
+        assert_eq!(secret_of(&merged), "new-secret");
     }
 
     /// Switching backends must not carry a secret across from the old one.
     #[test]
     fn merging_across_different_backends_changes_nothing() {
-        let merged = merge_secret(
-            azure_with_secret(""),
-            &RecordingsStorageConfig::Disk(
-                warpgate_db_entities::Parameters::RecordingsDiskConfig {
-                    path: "./data/recordings".into(),
-                },
-            ),
-        );
-        assert_eq!(azure_secret_of(&merged), "");
+        let merged = merge_secret(azure_with_secret(""), &s3_with_secret(Some("s3-secret")));
+        assert_eq!(secret_of(&merged), "");
+    }
+
+    #[test]
+    fn a_saved_secret_is_encrypted_at_rest() {
+        // SAFETY: no other test in this binary reads the keyring, and this runs
+        // before the keyring is first initialised from the environment.
+        unsafe {
+            std::env::set_var(
+                "WARPGATE_ENCRYPTION_KEY",
+                "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+            );
+        }
+        assert!(env_keyring().primary().is_some());
+
+        for config in [
+            azure_with_secret("real-secret"),
+            s3_with_secret(Some("real-secret")),
+        ] {
+            let saved = storage_to_save(config, &RecordingsStorageConfig::default()).unwrap();
+            assert!(!saved.contains("real-secret"));
+
+            let mut loaded: RecordingsStorageConfig = serde_json::from_str(&saved).unwrap();
+            let secret = loaded.stored_secrets_mut()[0].clone();
+            assert!(is_envelope(secret.stored_value()));
+            assert_eq!(secret.reveal().unwrap().expose_secret(), "real-secret");
+        }
     }
 
     fn parse_rate_limit(value: serde_json::Value) -> Option<Option<u32>> {

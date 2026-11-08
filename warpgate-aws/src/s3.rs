@@ -8,6 +8,7 @@ use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use poem_openapi::{Object, Union};
 use serde::{Deserialize, Serialize};
 use tracing::error;
+use warpgate_common::StoredSecret;
 
 use crate::AwsError;
 
@@ -29,23 +30,42 @@ pub struct AutoCredentials {}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Object)]
 pub struct StaticCredentials {
     pub access_key_id: String,
-    /// `None` on the admin API means "keep the stored secret" (it's never sent
-    /// out); always `Some` in a stored config.
-    pub secret_access_key: Option<String>,
+    /// Encrypted at rest. Blank in responses; absent or blank in an update
+    /// keeps the stored secret.
+    pub secret_access_key: Option<StoredSecret>,
 }
 
 impl S3Credentials {
-    #[must_use]
-    pub fn setup_config_loader(&self, loader: ConfigLoader) -> ConfigLoader {
-        match self {
+    pub fn setup_config_loader(&self, loader: ConfigLoader) -> Result<ConfigLoader, AwsError> {
+        Ok(match self {
             Self::Auto(_) => loader,
-            Self::Static(creds) => loader.credentials_provider(Credentials::new(
-                creds.access_key_id.clone(),
-                creds.secret_access_key.clone().unwrap_or_default(),
-                None,
-                None,
-                "warpgate-static",
-            )),
+            Self::Static(creds) => {
+                let secret = match &creds.secret_access_key {
+                    Some(secret) => secret
+                        .reveal()
+                        .map_err(|e| AwsError::Other(Box::new(e)))?
+                        .expose_secret()
+                        .clone(),
+                    None => String::new(),
+                };
+                loader.credentials_provider(Credentials::new(
+                    creds.access_key_id.clone(),
+                    secret,
+                    None,
+                    None,
+                    "warpgate-static",
+                ))
+            }
+        })
+    }
+
+    /// The secret Warpgate stores for this mode, if any. An absent static
+    /// secret is materialised as blank so it can be redacted, restored and
+    /// encrypted like any other.
+    pub fn stored_secret_mut(&mut self) -> Option<&mut StoredSecret> {
+        match self {
+            Self::Auto(_) => None,
+            Self::Static(creds) => Some(creds.secret_access_key.get_or_insert_default()),
         }
     }
 }
@@ -101,7 +121,7 @@ impl S3Storage {
     pub async fn new(config: &S3StorageConfig) -> Result<Self, AwsError> {
         let mut loader = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .region(aws_sdk_s3::config::Region::new(config.region.clone()));
-        loader = config.credentials.setup_config_loader(loader);
+        loader = config.credentials.setup_config_loader(loader)?;
 
         let sdk_config = loader.load().await;
 

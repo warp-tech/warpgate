@@ -12,7 +12,8 @@ use warpgate_aws::S3StorageConfig;
 use warpgate_azure::AzureBlobConfig;
 use warpgate_common::auth::CredentialKind;
 use warpgate_common::{
-    PasswordPolicy, Protocol, StoredSecret, UserAuthCredential, UserRequireCredentialsPolicy,
+    PasswordPolicy, Protocol, StoredSecret, StoredSecrets, UserAuthCredential,
+    UserRequireCredentialsPolicy,
 };
 
 #[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum)]
@@ -135,6 +136,16 @@ pub enum RecordingsStorageConfig {
     Disk(RecordingsDiskConfig),
     S3(S3StorageConfig),
     Azure(AzureBlobConfig),
+}
+
+impl StoredSecrets for RecordingsStorageConfig {
+    fn stored_secrets_mut(&mut self) -> Vec<&mut StoredSecret> {
+        match self {
+            Self::Disk(_) => vec![],
+            Self::S3(s3) => s3.credentials.stored_secret_mut().into_iter().collect(),
+            Self::Azure(azure) => azure.credentials.stored_secret_mut().into_iter().collect(),
+        }
+    }
 }
 
 impl Default for RecordingsStorageConfig {
@@ -631,7 +642,7 @@ mod tests {
                 prefix: String::new(),
                 credentials: S3Credentials::Static(StaticCredentials {
                     access_key_id: "AKIA".into(),
-                    secret_access_key: Some("secret".into()),
+                    secret_access_key: Some(String::from("secret").into()),
                 }),
                 scratch_path: None,
             }),

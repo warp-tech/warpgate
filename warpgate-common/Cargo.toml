@@ -60,7 +60,6 @@ tracing.workspace = true
 tracing-core = { version = "0.1", default-features = false }
 url.workspace = true
 uuid.workspace = true
-warpgate-aws = { path = "../warpgate-aws" }
 warpgate-ca = { path = "../warpgate-ca" }
 warpgate-ldap = { path = "../warpgate-ldap" }
 warpgate-sso = { path = "../warpgate-sso" }

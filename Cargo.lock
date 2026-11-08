@@ -9232,6 +9232,7 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+ "warpgate-common",
  "warpgate-common-cache",
 ]
 
@@ -9328,7 +9329,6 @@ dependencies = [
  "tracing-core",
  "url",
  "uuid",
- "warpgate-aws",
  "warpgate-ca",
  "warpgate-ldap",
  "warpgate-sso",

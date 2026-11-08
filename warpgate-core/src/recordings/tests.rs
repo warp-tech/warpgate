@@ -140,7 +140,7 @@ impl Harness {
                 prefix: String::new(),
                 credentials: S3Credentials::Static(StaticCredentials {
                     access_key_id: "test".into(),
-                    secret_access_key: Some("test".into()),
+                    secret_access_key: Some(String::from("test").into()),
                 }),
                 scratch_path: Some(root.join("scratch").to_string_lossy().into_owned()),
             })

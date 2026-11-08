@@ -105,7 +105,7 @@ impl MySqlClient {
             warpgate_common::DatabaseTargetAuth::IamRole(_) => {
                 warpgate_aws::generate_rds_auth_token(&target.host, target.port, &target.username)
                     .await
-                    .map_err(WarpgateError::Aws)?
+                    .map_err(|e| WarpgateError::Aws(e.into()))?
             }
         };
 
