@@ -19,7 +19,6 @@ humantime-serde = { version = "1.1", default-features = false }
 ipnet.workspace = true
 ldap3.workspace = true
 packet = { version = "0.1", default-features = false }
-password-hash.workspace = true
 png = "0.18"
 poem.workspace = true
 poem-openapi.workspace = true

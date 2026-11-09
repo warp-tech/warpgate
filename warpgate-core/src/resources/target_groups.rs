@@ -5,11 +5,15 @@ use sea_orm::{
     TransactionTrait,
 };
 use uuid::Uuid;
-use warpgate_common::ProviderId;
 use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
 use warpgate_db_entities::{Target, TargetGroup};
 
-use super::{Actor, ResourceError, check_name, name_taken};
+use super::{Actor, OwnedEntity, ResourceError, check_name, name_taken};
+
+impl OwnedEntity for TargetGroup::Entity {
+    const ID: Self::Column = TargetGroup::Column::Id;
+    const PROVIDER: Self::Column = TargetGroup::Column::Provider;
+}
 
 #[derive(Object)]
 pub struct TargetGroupDataRequest {
@@ -55,25 +59,6 @@ pub async fn update<C: ConnectionTrait>(
     let mut model: TargetGroup::ActiveModel = group.into();
     set_data(&mut model, data);
     model.update(db).await.map_err(name_taken)
-}
-
-pub(crate) async fn set_owner<C: ConnectionTrait>(
-    db: &C,
-    id: Uuid,
-    owner: Option<ProviderId>,
-) -> Result<(), ResourceError> {
-    super::set_owner::<TargetGroup::Entity, _>(
-        db,
-        TargetGroup::Column::Provider,
-        TargetGroup::Column::Id,
-        id,
-        owner,
-    )
-    .await
-}
-
-pub async fn release<C: ConnectionTrait>(db: &C, id: Uuid) -> Result<(), ResourceError> {
-    set_owner(db, id, None).await
 }
 
 pub async fn delete<C: ConnectionTrait + TransactionTrait>(

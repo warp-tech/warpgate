@@ -65,6 +65,16 @@ pub fn checkout(
     }
 }
 
+/// Files sent in a request rather than fetched: the documents of one YAML
+/// stream, with a hash of it for revision
+pub fn checkout_text(yaml: String) -> Checkout {
+    let files = vec![(PathBuf::from("request.yaml"), yaml)];
+    Checkout {
+        revision: content_hash(&files),
+        files,
+    }
+}
+
 /// A shallow clone of `reference` into `into`, returning the commit it checked out
 fn clone(
     git: &GitopsGitSource,

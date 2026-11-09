@@ -5,15 +5,24 @@ use std::path::{Path as FilePath, PathBuf};
 use serde_json::Value;
 use warpgate_common::{MaybeSecretRef, TargetOptions, public_key_of_pem};
 
-use crate::diagnostic::{Diagnostic, Location, Path, Segment};
+use crate::diagnostic::{Diagnostic, Level, Location, Path, Segment};
 use crate::parse::{Document, parse};
-use crate::types::{ADOPT_EXISTING, Kind, OptionReferences, Resource};
+use crate::types::{Kind, OptionReferences, Resource};
 
-/// Checks every document of every file, then the names and references across all of them
-/// The resources of a valid fileset, or every problem found in it
+/// A valid fileset
+#[derive(Debug)]
+pub struct Checked<'a> {
+    pub resources: Vec<Resource>,
+    /// References to resources the files don't define, which plan and apply
+    /// look up on the server
+    pub notes: Vec<(&'a FilePath, Diagnostic)>,
+}
+
+/// Checks every document of every file, then the names and references
+/// across all of them. On failure, returns the errors.
 pub fn check_files(
     files: &[(PathBuf, String)],
-) -> Result<Vec<Resource>, Vec<(&FilePath, Diagnostic)>> {
+) -> Result<Checked<'_>, Vec<(&FilePath, Diagnostic)>> {
     let mut diagnostics = Vec::new();
     let mut documents = Vec::new();
     for (file, source) in files {
@@ -33,17 +42,28 @@ pub fn check_files(
 
     // A set with a broken document is rejected as a whole, and checking
     // references into it would only add knock-on errors
+    let mut notes = Vec::new();
     if diagnostics.is_empty() {
         check_names_and_references(&documents, &mut diagnostics);
+        (notes, diagnostics) = diagnostics
+            .into_iter()
+            .partition(|(_, d)| d.level == Level::Note);
     }
 
+    let by_position = |(a, x): &(&FilePath, Diagnostic), (b, y): &(&FilePath, Diagnostic)| {
+        a.cmp(b).then(x.location.cmp(&y.location))
+    };
     if diagnostics.is_empty() {
-        return Ok(documents
-            .into_iter()
-            .map(|(_, _, resource)| resource)
-            .collect());
+        notes.sort_by(by_position);
+        return Ok(Checked {
+            resources: documents
+                .into_iter()
+                .map(|(_, _, resource)| resource)
+                .collect(),
+            notes,
+        });
     }
-    diagnostics.sort_by(|(a, x), (b, y)| a.cmp(b).then(x.location.cmp(&y.location)));
+    diagnostics.sort_by(by_position);
     Err(diagnostics)
 }
 
@@ -81,6 +101,13 @@ fn check_names_and_references<'a>(
 
     // Lowercase target names to the target their jump host names, for SSH targets
     let mut jump_hosts: HashMap<String, Option<String>> = HashMap::new();
+    let targets: HashSet<String> = documents
+        .iter()
+        .filter_map(|(_, _, resource)| match resource {
+            Resource::Target(target) => Some(target.metadata.name.to_lowercase()),
+            _ => None,
+        })
+        .collect();
     for (_, _, resource) in documents {
         if let Resource::Target(target) = resource
             && let TargetOptions::Ssh(_) = target.spec.options
@@ -103,19 +130,30 @@ fn check_names_and_references<'a>(
         };
         if let Some(jump_host) = &target.spec.references.jump_host {
             let path = Path::pointer(&format!("/spec{}", OptionReferences::JUMP_HOST));
-            let problem = if !jump_hosts.contains_key(&jump_host.to_lowercase()) {
-                Some(format!("no SSH target named `{jump_host}`"))
+            let location = doc.value_location(&path);
+            let lowercase = jump_host.to_lowercase();
+            let found = if !targets.contains(&lowercase) {
+                Some(Diagnostic::note(
+                    location,
+                    path,
+                    not_in_files(Kind::Target, jump_host),
+                ))
+            } else if !jump_hosts.contains_key(&lowercase) {
+                Some(Diagnostic::new(
+                    location,
+                    path,
+                    format!("`{jump_host}` is not an SSH target"),
+                ))
             } else if leads_back(&jump_hosts, &target.metadata.name.to_lowercase()) {
-                Some("jump hosts must not form a loop".to_owned())
+                Some(Diagnostic::new(
+                    location,
+                    path,
+                    "jump hosts must not form a loop",
+                ))
             } else {
                 None
             };
-            if let Some(problem) = problem {
-                diagnostics.push((
-                    file,
-                    Diagnostic::new(doc.value_location(&path), path, problem),
-                ));
-            }
+            diagnostics.extend(found.map(|d| (*file, d)));
         }
         let group = target
             .spec
@@ -135,15 +173,15 @@ fn check_names_and_references<'a>(
             if !names.contains_key(&(kind, name.to_lowercase())) {
                 diagnostics.push((
                     file,
-                    Diagnostic::new(
-                        doc.value_location(&path),
-                        path,
-                        format!("unknown {kind:?} `{name}`"),
-                    ),
+                    Diagnostic::note(doc.value_location(&path), path, not_in_files(kind, name)),
                 ));
             }
         }
     }
+}
+
+fn not_in_files(kind: Kind, name: &str) -> String {
+    format!("{kind:?} `{name}` is not in these files and must exist on the server")
 }
 
 /// Whether following jump hosts from `start` comes back to it
@@ -202,17 +240,6 @@ pub fn check_document(doc: &Document) -> (Option<Resource>, Vec<Diagnostic>) {
             doc.value_location(&path),
             path,
             "must not be empty",
-        ));
-    }
-    let adopt_path = Path::keys(&["metadata", "annotations", ADOPT_EXISTING]);
-    if get(&canonical, &["metadata", "annotations", ADOPT_EXISTING])
-        .and_then(Value::as_str)
-        .is_some_and(|value| value != "true" && value != "false")
-    {
-        diagnostics.push(Diagnostic::new(
-            doc.value_location(&adopt_path),
-            adopt_path,
-            "must be \"true\" or \"false\"",
         ));
     }
     let ports = get(&canonical, &["spec", "options"])
@@ -309,149 +336,8 @@ fn get<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diagnostic::test::{at, path};
-    use crate::parse::parse;
 
-    fn check(source: &str) -> Vec<Diagnostic> {
-        let docs = parse(source).unwrap();
-        assert_eq!(docs.len(), 1);
-        docs.iter().flat_map(|doc| check_document(doc).1).collect()
-    }
-
-    const TARGET: &str = "apiVersion: warpgate/v1\nkind: Target\nmetadata:\n  name: a\nspec:\n";
-
-    #[test]
-    fn every_field_is_known() {
-        let docs = parse(include_str!("../tests/fixtures/valid/every-field.yaml")).unwrap();
-        assert_eq!(docs.len(), 18);
-        for doc in &docs {
-            let (resource, diagnostics) = check_document(doc);
-            assert!(resource.is_some());
-            assert_eq!(diagnostics, vec![], "{}", doc.value);
-        }
-    }
-
-    #[test]
-    fn unknown_fields_point_at_their_key() {
-        let diagnostics = check(&format!(
-            "{TARGET}  \
-               options:\n    \
-                 ssh:\n      \
-                   host: h\n      \
-                   usrname: x\n      \
-                   auth:\n        \
-                     kind: password\n        \
-                     password: secret://vault/kv/a#pw\n        \
-                     passwrd: y\n  \
-               labels: {{}}\n"
-        ));
-        let found: Vec<_> = diagnostics
-            .iter()
-            .map(|d| (d.location, d.path.to_string()))
-            .collect();
-        assert_eq!(
-            found,
-            vec![
-                (at(14, 3), "spec.labels".to_owned()),
-                (at(13, 9), "spec.options.ssh.auth.passwrd".to_owned()),
-                (at(9, 7), "spec.options.ssh.usrname".to_owned()),
-            ]
-        );
-        assert!(
-            diagnostics
-                .iter()
-                .all(|d| d.message.starts_with("unknown field"))
-        );
-        assert!(
-            diagnostics[2]
-                .message
-                .contains("expected one of `allow_insecure_algos`, `auth`")
-        );
-    }
-
-    #[test]
-    fn a_type_error_points_at_its_value() {
-        let diagnostics = check(&format!(
-            "{TARGET}  options:\n    ssh:\n      host: h\n      port: \"22\"\n"
-        ));
-        assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].location, at(9, 13));
-        assert_eq!(
-            diagnostics[0].path,
-            path(&["spec", "options", "ssh", "port"])
-        );
-        assert!(
-            diagnostics[0].message.contains("expected u16"),
-            "{}",
-            diagnostics[0].message
-        );
-    }
-
-    #[test]
-    fn an_unknown_kind_is_reported_once() {
-        let diagnostics = check("apiVersion: warpgate/v1\nkind: Pod\nspec: {}\n");
-        assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].location, at(2, 7));
-        assert!(
-            diagnostics[0]
-                .message
-                .contains("expected one of `Target`, `TargetGroup`, `Role`")
-        );
-    }
-
-    #[test]
-    fn an_alias_is_not_reported_again_as_a_type_error() {
-        let diagnostics = check(&format!(
-            "{TARGET}  description: &d x\n  options:\n    ssh:\n      host: h\n      auth:\n        kind: password\n        password: *d\n"
-        ));
-        assert_eq!(
-            diagnostics,
-            vec![Diagnostic::new(
-                at(12, 19),
-                path(&["spec", "options", "ssh", "auth", "password"]),
-                "YAML aliases are not supported",
-            )]
-        );
-    }
-
-    #[test]
-    fn values_out_of_range() {
-        let diagnostics = check(
-            "apiVersion: warpgate/v1\nkind: Target\nmetadata:\n  name: ' '\nspec:\n  \
-               ticket_max_uses: 0\n  \
-               ticket_max_duration_seconds: -5\n  \
-               options:\n    \
-                 ssh:\n      \
-                   host: h\n      \
-                   port: 0\n",
-        );
-        let found: Vec<_> = diagnostics
-            .iter()
-            .map(|d| (d.location, d.path.to_string(), d.message.as_str()))
-            .collect();
-        assert_eq!(
-            found,
-            vec![
-                (at(4, 9), "metadata.name".into(), "must not be empty"),
-                (
-                    at(11, 13),
-                    "spec.options.ssh.port".into(),
-                    "must be at least 1"
-                ),
-                (
-                    at(6, 20),
-                    "spec.ticket_max_uses".into(),
-                    "must be at least 1"
-                ),
-                (
-                    at(7, 32),
-                    "spec.ticket_max_duration_seconds".into(),
-                    "must be at least 1"
-                ),
-            ]
-        );
-    }
-
+    /// The errors of an invalid fileset
     fn check_all(files: &[(&str, &str)]) -> Vec<String> {
         let files: Vec<_> = files
             .iter()
@@ -474,36 +360,6 @@ mod tests {
 
     const ROLE_DBA: &str =
         "apiVersion: warpgate/v1\nkind: Role\nmetadata:\n  name: dba\nspec: {}\n";
-
-    #[test]
-    fn names_and_references_across_files() {
-        let found = check_all(&[
-            (
-                "a.yaml",
-                &format!(
-                    "{ROLE_DBA}---\n\
-                     apiVersion: warpgate/v1\nkind: TargetGroup\nmetadata:\n  name: dba\nspec: {{}}\n"
-                ),
-            ),
-            (
-                "b.yaml",
-                "apiVersion: warpgate/v1\nkind: Role\nmetadata:\n  name: DBA\nspec: {}\n\
-                 ---\n\
-                 apiVersion: warpgate/v1\nkind: Target\nmetadata:\n  name: web\nspec:\n  \
-                   group: prod\n  \
-                   roles: [dba, ops]\n  \
-                   options:\n    ssh:\n      host: h\n",
-            ),
-        ]);
-        assert_eq!(
-            found,
-            vec![
-                "b.yaml:4:9 metadata.name: duplicate Role name `DBA`, first defined at a.yaml:4:9",
-                "b.yaml:12:10 spec.group: unknown TargetGroup `prod`",
-                "b.yaml:13:16 spec.roles[1]: unknown Role `ops`",
-            ]
-        );
-    }
 
     #[test]
     fn a_broken_document_skips_the_cross_document_checks() {

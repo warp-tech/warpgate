@@ -70,8 +70,18 @@ impl From<&serde_path_to_error::Path> for Path {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Level {
+    /// Makes the fileset invalid
+    #[default]
+    Error,
+    /// Worth knowing, but the fileset is still valid
+    Note,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Diagnostic {
+    pub level: Level,
     pub location: Location,
     pub path: Path,
     pub message: String,
@@ -80,9 +90,17 @@ pub struct Diagnostic {
 impl Diagnostic {
     pub fn new(location: Location, path: Path, message: impl Into<String>) -> Self {
         Self {
+            level: Level::Error,
             location,
             path,
             message: message.into(),
+        }
+    }
+
+    pub fn note(location: Location, path: Path, message: impl Into<String>) -> Self {
+        Self {
+            level: Level::Note,
+            ..Self::new(location, path, message)
         }
     }
 }

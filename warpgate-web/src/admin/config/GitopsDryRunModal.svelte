@@ -67,20 +67,28 @@
             {#each changes as change, i (i)}
                 {@const action = ACTIONS[change.action]}
                 <div class="mb-2">
-                    <Badge color={action.color}>{action.label}</Badge>
-                    {change.kind}
-                    <strong>{change.name}</strong>
-                    {#if change.reason}
-                        <div class="text-muted small">{change.reason}</div>
-                    {/if}
+                    <div class="mb-2">
+                        <Badge color={action.color}> {action.label} </Badge>
+                        <Badge color="secondary"> {change.kind} </Badge>
+                        <strong>{change.name}</strong>
+                        {#if change.reason}
+                            <div class="text-muted small">{change.reason}</div>
+                        {/if}
+                    </div>
                     {#each change.fields as field (field.path)}
-                        <div class="small font-monospace ms-3">
+                        <div class="small font-monospace ms-4">
                             {field.path}:
                             {#if field.credential}
-                                changed
+                                <Badge color="warning" class="font-monospace">
+                                    Changed
+                                </Badge>
                             {:else}
-                                {JSON.stringify(field.from ?? null)}
-                                → {JSON.stringify(field.to ?? null)}
+                                <Badge color="success" class="font-monospace">
+                                    + {JSON.stringify(field.to ?? null)}
+                                </Badge>
+                                <Badge color="danger" class="font-monospace">
+                                    - {JSON.stringify(field.from ?? null)}
+                                </Badge>
                             {/if}
                         </div>
                     {/each}
@@ -101,6 +109,7 @@
         {#if pending && !dryRun?.error}
             <AsyncButton
                 color="primary"
+                class="modal-button"
                 click={async () => {
                     await sync()
                     close()

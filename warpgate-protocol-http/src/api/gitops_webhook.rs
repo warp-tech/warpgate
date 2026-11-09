@@ -1,7 +1,11 @@
-//! Lets a git host trigger a GitOps sync on push, signed with the webhook
-//! secret: `X-Hub-Signature-256` (GitHub, Gitea, Forgejo) or `X-Gitlab-Token`.
+//! Lets a git host trigger a GitOps sync on push, authenticated with the
+//! webhook secret:
+//! - an HMAC-SHA256 of the body in `X-Hub-Signature-256` (GitHub, Gitea,
+//!   Forgejo) or `X-Hub-Signature` (Bitbucket)
+//! - the secret itself in `X-Gitlab-Token` (GitLab)
+//! - the secret as the Basic auth password, any username (Azure DevOps)
 
-use data_encoding::HEXLOWER_PERMISSIVE;
+use data_encoding::{BASE64, HEXLOWER_PERMISSIVE};
 use futures::StreamExt;
 use hmac::{Hmac, KeyInit, Mac};
 use poem::http::{HeaderMap, StatusCode};
@@ -40,8 +44,15 @@ async fn is_signed(secret: &[u8], headers: &HeaderMap, body: Body) -> bool {
     if let Some(token) = headers.get("x-gitlab-token") {
         return token.as_bytes().ct_eq(secret).into();
     }
+    if let Some(authorization) = headers.get(poem::http::header::AUTHORIZATION) {
+        return basic_password(authorization.as_bytes())
+            .is_some_and(|password| password.ct_eq(secret).into());
+    }
+    // Bitbucket's `X-Hub-Signature` is SHA-256 too, despite the name GitHub
+    // uses for SHA-1
     let Some(signature) = headers
         .get("x-hub-signature-256")
+        .or_else(|| headers.get("x-hub-signature"))
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("sha256="))
         .and_then(|hex| HEXLOWER_PERMISSIVE.decode(hex.as_bytes()).ok())
@@ -65,6 +76,14 @@ async fn is_signed(secret: &[u8], headers: &HeaderMap, body: Body) -> bool {
         mac.update(&chunk);
     }
     mac.verify_slice(&signature).is_ok()
+}
+
+/// The password of a `Basic` authorization header
+fn basic_password(header: &[u8]) -> Option<Vec<u8>> {
+    let encoded = header.strip_prefix(b"Basic ")?;
+    let decoded = BASE64.decode(encoded).ok()?;
+    let colon = decoded.iter().position(|b| *b == b':')?;
+    decoded.get(colon + 1..).map(<[u8]>::to_vec)
 }
 
 #[cfg(test)]
@@ -98,7 +117,14 @@ mod tests {
         );
         assert!(!check("x-hub-signature-256", &signature).await);
         assert!(!check("x-hub-signature-256", &format!("sha256={}", "0".repeat(64))).await);
+        assert!(check("x-hub-signature", &format!("sha256={signature}")).await);
         assert!(check("x-gitlab-token", "0123456789abcdef").await);
+        let basic = |credentials: &str| format!("Basic {}", BASE64.encode(credentials.as_bytes()));
+        assert!(check("authorization", &basic("azure:0123456789abcdef")).await);
+        assert!(check("authorization", &basic(":0123456789abcdef")).await);
+        assert!(!check("authorization", &basic("azure:0123456789abcde")).await);
+        assert!(!check("authorization", &basic("0123456789abcdef")).await);
+        assert!(!check("authorization", "Bearer 0123456789abcdef").await);
         assert!(!check("x-gitlab-token", "0123456789abcde").await);
         assert!(!is_signed(SECRET, &HeaderMap::new(), Body::from_string(BODY.into())).await);
     }

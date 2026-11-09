@@ -3,6 +3,7 @@ This test runs against Postgres for a better chance to catch
 DB field type related issues that don't surface on SQLite (e.g. timestamp types)
 """
 
+import base64
 import contextlib
 import hashlib
 import hmac
@@ -28,7 +29,7 @@ from .util import wait_port
 @dataclass
 class AdminApiTestCase:
     id: str
-    permission: Optional[str]
+    permission: Optional[str | tuple[str, ...]]
     call: Callable[[sdk.DefaultApi, Dict[str, object]], sdk.ApiResponse]
     expected_statuses: Set[int]
 
@@ -836,15 +837,21 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     ),
     AdminApiTestCase(
         id="sync_gitops",
-        permission="config_edit",
+        permission=("config_edit", "targets_edit", "access_roles_edit"),
         call=lambda api, r: api.sync_gitops_with_http_info(sdk.SyncGitopsRequest()),
         expected_statuses={200, 400},
     ),
     AdminApiTestCase(
         id="dry_run_gitops",
-        permission="config_edit",
+        permission=("config_edit", "targets_edit", "access_roles_edit"),
         call=lambda api, r: api.dry_run_gitops_with_http_info(sdk.SyncGitopsRequest()),
         expected_statuses={200, 400},
+    ),
+    AdminApiTestCase(
+        id="export_gitops_unmanaged",
+        permission=("config_edit", "targets_edit", "access_roles_edit"),
+        call=lambda api, r: api.export_gitops_unmanaged_with_http_info(),
+        expected_statuses={200},
     ),
     AdminApiTestCase(
         id="get_gitops_history",
@@ -1244,8 +1251,11 @@ def test_admin_api_permission_enforcement(
 
     # Base-check endpoints (permission=None) admit any admin. An admin holds at least one
     # permission — a permissionless role is not a real admin — so grant a benign baseline.
+    permissions = (
+        (case.permission,) if isinstance(case.permission, str) else case.permission
+    )
     allow_payload = make_limited_admin_role_payload(
-        **({case.permission: True} if case.permission else {"sessions_view": True})
+        **({p: True for p in permissions} if permissions else {"sessions_view": True})
     )
     allowed_role = _create_admin_role(admin_client, allow_payload)
     allowed_user = _create_user_with_role(admin_client, allowed_role.id)
@@ -1631,6 +1641,14 @@ spec:
         [update] = [e for e in audited(latest.id, 2) if e["_type"] == "ProviderResourceChanged1"]
         assert (update["action"], update["kind"], update["name"]) == ("Update", "Target", name)
         assert '"from":2222' in update["fields"] and '"to":2200' in update["fields"]
+
+        def deliver_with(headers: Dict[str, str]) -> int:
+            return requests.post(webhook, data=body, headers=headers, verify=False).status_code
+
+        bitbucket = hmac.new(secret, body, hashlib.sha256).hexdigest()
+        assert deliver_with({"X-Hub-Signature": f"sha256={bitbucket}"}) == 202
+        assert deliver_with({"Authorization": basic_auth("azure", secret.decode())}) == 202
+        assert deliver_with({"Authorization": basic_auth("azure", "wrong-secret-0123")}) == 401
     finally:
         cleared = {"gitops_source": None, "gitops_webhook_secret": None}
         assert session.put(parameters, json=cleared).status_code // 100 == 2
@@ -1641,6 +1659,57 @@ spec:
     with pytest.raises(sdk.ApiException) as err:
         admin_client.dry_run_gitops(sdk.SyncGitopsRequest())
     assert err.value.status == 400
+
+
+def basic_auth(username: str, password: str) -> str:
+    return "Basic " + base64.b64encode(f"{username}:{password}".encode()).decode()
+
+
+def test_gitops_syncs_request_files_and_exports_unmanaged_rows(
+    admin_client: sdk.DefaultApi, pg_wg: WarpgateProcess
+):
+    session = requests.Session()
+    session.verify = False
+    session.headers["X-Warpgate-Token"] = "token-value"
+    parameters = f"https://localhost:{pg_wg.http_port}/@warpgate/admin/api/parameters"
+    assert session.put(parameters, json={"gitops_source": None}).status_code // 100 == 2
+    assert admin_client.get_parameters().gitops_source is None
+    with pytest.raises(sdk.ApiException) as err:
+        admin_client.sync_gitops(sdk.SyncGitopsRequest())
+    assert err.value.status == 400, "without files or a source there is nothing to sync"
+
+    hand_made = admin_client.create_role(sdk.RoleDataRequest(name=f"by-hand-{uuid4()}"))
+    exported = admin_client.export_gitops_unmanaged()
+    assert f"name: {hand_made.name}" in exported
+    assert "adopt_existing: true" in exported
+
+    name = f"pushed-{uuid4()}"
+    files = f"""apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: {name}
+spec:
+  roles: [{hand_made.name}]
+  options:
+    ssh:
+      host: 127.0.0.1
+      username: user
+"""
+    dry = admin_client.dry_run_gitops(sdk.SyncGitopsRequest(yaml=files))
+    assert (dry.source, dry.error) == ("request", None)
+    assert [(c.action, c.name) for c in dry.plan if c.action == "create"] == [("create", name)]
+
+    synced = admin_client.sync_gitops(sdk.SyncGitopsRequest(yaml=files))
+    assert (synced.status, synced.source, synced.error) == ("Applied", "request", None)
+    target = next(t for t in admin_client.get_targets() if t.name == name)
+    assert [r.name for r in admin_client.get_target_roles(target.id)] == [hand_made.name]
+    role = admin_client.get_role(hand_made.id)
+    assert role.provider is None, "granting a hand-made role does not take it over"
+
+    unknown = files.replace(hand_made.name, f"missing-{uuid4()}")
+    failed = admin_client.sync_gitops(sdk.SyncGitopsRequest(yaml=unknown))
+    assert failed.status == "Failed"
+    assert "unknown Role" in (failed.error or "")
 
 
 def test_approval_parameters_can_be_cleared_and_reject_nonsense(

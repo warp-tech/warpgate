@@ -322,16 +322,6 @@ mod tests {
     }
 
     #[test]
-    fn syntax_errors_fail_the_file() {
-        let error = parse("a: 1\nb: [1, 2\nc: 3\n").unwrap_err();
-        assert_eq!(error.location, at(3, 2));
-
-        let error = parse("a: 1\na: 2\n").unwrap_err();
-        assert_eq!(error.location.line, 2);
-        assert!(error.message.contains("duplicate"), "{}", error.message);
-    }
-
-    #[test]
     fn aliases_are_reported_without_being_expanded() {
         let doc = single("x: &A {k: v}\ny: *A\nz: [*A]\n");
         assert_eq!(doc.value, json!({"x": {"k": "v"}, "y": null, "z": [null]}));

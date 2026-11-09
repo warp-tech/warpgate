@@ -21,7 +21,9 @@ use crate::config::load_config;
 #[derive(clap::Subcommand)]
 pub enum ConfigCommand {
     /// Check resource files offline: syntax, fields, names and references.
-    /// Exits with 1 if any are invalid, 2 if they cannot be read.
+    /// References to resources the files don't define are notes: plan checks
+    /// them against the server. Exits with 1 if any file is invalid, 2 if
+    /// they cannot be read.
     Validate {
         /// Files, and directories to search for *.yaml and *.yml
         #[clap(required = true)]
@@ -100,12 +102,13 @@ fn print_diagnostics(diagnostics: &[(&Path, Diagnostic)], format: OutputFormat) 
 
 fn validate(paths: &[PathBuf], format: OutputFormat) -> Result<()> {
     let files = read_or_exit(paths);
-    let diagnostics = check_files(&files).err().unwrap_or_default();
-    print_diagnostics(&diagnostics, format)?;
-    if !diagnostics.is_empty() {
-        exit(1);
+    match check_files(&files) {
+        Ok(checked) => print_diagnostics(&checked.notes, format),
+        Err(errors) => {
+            print_diagnostics(&errors, format)?;
+            exit(1);
+        }
     }
-    Ok(())
 }
 
 /// Everything a plan needs: the validated files, the database they apply to,
@@ -117,7 +120,11 @@ async fn prepare(
 ) -> Result<(DatabaseConnection, Vec<Resource>, Plan)> {
     let files = read_or_exit(paths);
     let resources = match check_files(&files) {
-        Ok(resources) => resources,
+        Ok(checked) => {
+            // stderr: stdout carries the plan
+            eprint!("{}", format_text(&checked.notes));
+            checked.resources
+        }
         Err(diagnostics) => {
             print_diagnostics(&diagnostics, format)?;
             exit(1);

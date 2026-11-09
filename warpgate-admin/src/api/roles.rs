@@ -9,7 +9,7 @@ use warpgate_common::{
 };
 use warpgate_common_http::errors::invalid_field;
 use warpgate_core::resources::roles::{self as store, RoleDataRequest};
-use warpgate_core::resources::{Actor, ResourceError};
+use warpgate_core::resources::{self as resources, Actor, ResourceError};
 use warpgate_db_entities::{Role, Target, User};
 
 use super::AdminContext;
@@ -158,7 +158,7 @@ impl DetailApi {
         id: Path<Uuid>,
     ) -> Result<GetRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesEdit)?;
-        store::release(&admin.services().db, id.0).await?;
+        resources::release::<Role::Entity, _>(&admin.services().db, id.0).await?;
         self.api_get_role(admin, id).await
     }
 

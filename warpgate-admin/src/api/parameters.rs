@@ -131,7 +131,11 @@ struct ParameterValues {
     pub recordings_storage: RecordingsStorageConfig,
     pub gitops_source: Option<GitopsSource>,
     pub gitops_sync_interval_seconds: Option<i64>,
+    pub gitops_sync_on_startup: bool,
     pub gitops_webhook_secret_set: bool,
+    /// Whether the Git source holds a stored password or token, which the
+    /// redacted `gitops_source` can't show
+    pub gitops_git_password_set: bool,
     pub gitops_prune: bool,
 }
 
@@ -217,6 +221,7 @@ struct ParameterUpdate {
     /// Checked every 15 seconds; `null` syncs at startup and on request only
     #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
     pub gitops_sync_interval_seconds: Option<Option<i64>>,
+    pub gitops_sync_on_startup: Option<bool>,
     /// Authenticates pushes to `/@warpgate/api/gitops/webhook`, sent as
     /// `X-Hub-Signature-256` or `X-Gitlab-Token`. Write-only; `null` turns the
     /// webhook off
@@ -324,8 +329,13 @@ impl Api {
             analytics_normal: parameters.analytics_normal,
             recordings_enable: parameters.recordings_enable,
             recordings_storage,
+            gitops_git_password_set: matches!(
+                &parameters.gitops_source,
+                Some(GitopsSource::Git(git)) if git.password.as_inline().is_some_and(|p| !p.stored_value().is_empty())
+            ),
             gitops_source: parameters.gitops_source.map(|source| source.redacted()),
             gitops_sync_interval_seconds: parameters.gitops_sync_interval_seconds,
+            gitops_sync_on_startup: parameters.gitops_sync_on_startup,
             gitops_webhook_secret_set: parameters.gitops_webhook_secret.is_some(),
             gitops_prune: parameters.gitops_prune,
         })))
@@ -482,6 +492,7 @@ impl Api {
         parameters.gitops_source = gitops_source;
         parameters.gitops_sync_interval_seconds =
             body.gitops_sync_interval_seconds.map_or(NotSet, Set);
+        parameters.gitops_sync_on_startup = body.gitops_sync_on_startup.map_or(NotSet, Set);
         parameters.gitops_webhook_secret = gitops_webhook_secret;
         parameters.gitops_prune = body.gitops_prune.map_or(NotSet, Set);
 

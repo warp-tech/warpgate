@@ -357,8 +357,11 @@ pub struct Model {
     /// Where the GitOps provider syncs from; `None` turns syncing off
     #[sea_orm(column_type = "Json", nullable)]
     pub gitops_source: Option<GitopsSource>,
-    /// How often the source is synced; `None` syncs at startup and on request only
+    /// How often the source is synced; `None` syncs only on request and,
+    /// with `gitops_sync_on_startup`, at startup
     pub gitops_sync_interval_seconds: Option<i64>,
+    /// Whether the source is synced when Warpgate starts
+    pub gitops_sync_on_startup: bool,
     /// Authenticates push webhooks from the repository host
     #[sea_orm(column_type = "Text", nullable)]
     pub gitops_webhook_secret: Option<StoredSecret>,
@@ -585,6 +588,7 @@ mod tests {
             logo: None,
             gitops_source: None,
             gitops_sync_interval_seconds: None,
+            gitops_sync_on_startup: true,
             gitops_webhook_secret: None,
             gitops_prune: false,
         }

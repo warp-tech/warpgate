@@ -9,8 +9,13 @@ use warpgate_db_entities::{
     KnownHost, Target, TargetRoleAssignment, TargetSession, Ticket, TicketRequest,
 };
 
-use super::{Actor, AdmittedSessions, ResourceError, check_name, name_taken};
+use super::{Actor, AdmittedSessions, OwnedEntity, ResourceError, check_name, name_taken};
 use crate::db::is_unique_violation;
+
+impl OwnedEntity for Target::Entity {
+    const ID: Self::Column = Target::Column::Id;
+    const PROVIDER: Self::Column = Target::Column::Provider;
+}
 
 #[derive(Object)]
 pub struct TargetDataRequest {
@@ -146,25 +151,6 @@ async fn target_owner<C: ConnectionTrait>(
         .await?
         .ok_or(ResourceError::NotFound)?
         .provider)
-}
-
-pub(crate) async fn set_owner<C: ConnectionTrait>(
-    db: &C,
-    id: Uuid,
-    owner: Option<ProviderId>,
-) -> Result<(), ResourceError> {
-    super::set_owner::<Target::Entity, _>(
-        db,
-        Target::Column::Provider,
-        Target::Column::Id,
-        id,
-        owner,
-    )
-    .await
-}
-
-pub async fn release<C: ConnectionTrait>(db: &C, id: Uuid) -> Result<(), ResourceError> {
-    set_owner(db, id, None).await
 }
 
 pub async fn add_role<C: ConnectionTrait>(

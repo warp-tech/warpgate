@@ -74,7 +74,12 @@
     }
 
     async function release() {
-        role = await api.releaseRole({ id: params.id })
+        error = null
+        try {
+            role = await api.releaseRole({ id: params.id })
+        } catch (err) {
+            error = await stringifyError(err)
+        }
     }
 
     async function remove() {

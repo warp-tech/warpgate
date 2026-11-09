@@ -15,11 +15,17 @@
 
     let source: GitopsSource | undefined = $state()
     let intervalSeconds: number | undefined = $state()
+    let syncOnStartup = $state(true)
     let prune = $state(false)
     let webhookSecretSet = $state(false)
+    let gitPasswordSet = $state(false)
+    // The URL the stored password belongs to: the server drops it for any other
+    let storedUrl: string | undefined = $state()
 
     // undefined keeps the stored secret, null removes it
     let webhookSecret: string | null | undefined = $state()
+    // Clear was clicked: an emptied input stays null rather than reverting to "keep"
+    let webhookCleared = $state(false)
 
     let formEl: HTMLFormElement | undefined = $state()
     let formValid = $state(true)
@@ -27,12 +33,34 @@
 
     const webhookUrl = `${location.origin}/@warpgate/api/gitops/webhook`
 
-    const initPromise = api.getParameters({}).then(parameters => {
+    async function load() {
+        const parameters = await api.getParameters({})
         source = parameters.gitopsSource
         intervalSeconds = parameters.gitopsSyncIntervalSeconds
+        syncOnStartup = parameters.gitopsSyncOnStartup
         prune = parameters.gitopsPrune
         webhookSecretSet = parameters.gitopsWebhookSecretSet
-    })
+        gitPasswordSet = parameters.gitopsGitPasswordSet
+        storedUrl =
+            parameters.gitopsSource?.kind === 'Git'
+                ? parameters.gitopsSource.url
+                : undefined
+    }
+
+    const initPromise = load()
+
+    let gitPasswordKept = $derived(
+        gitPasswordSet &&
+            source?.kind === 'Git' &&
+            !source.password &&
+            source.url === storedUrl,
+    )
+    let gitPasswordDropped = $derived(
+        gitPasswordSet &&
+            source?.kind === 'Git' &&
+            !source.password &&
+            source.url !== storedUrl,
+    )
 
     function setKind(kind: string): void {
         source =
@@ -62,6 +90,7 @@
             const parameterUpdate = {
                 gitopsSource: source ?? null,
                 gitopsSyncIntervalSeconds: intervalSeconds ?? null,
+                gitopsSyncOnStartup: syncOnStartup,
                 gitopsPrune: prune,
                 gitopsWebhookSecret: webhookSecret,
             } as unknown as ParameterUpdate
@@ -69,7 +98,10 @@
             if (webhookSecret !== undefined) {
                 webhookSecretSet = webhookSecret !== null
                 webhookSecret = undefined
+                webhookCleared = false
             }
+            // Reloads the redacted source, so a saved password shows as stored
+            await load()
         } catch (err) {
             error = await stringifyError(err)
         }
@@ -105,7 +137,7 @@
                         value={source?.kind ?? ''}
                         onchange={e => setKind(e.currentTarget.value)}
                     >
-                        <option value="">Off</option>
+                        <option value="">Off (API only)</option>
                         <option value="Git">Git repository</option>
                         <option value="Directory">Local directory</option>
                     </select>
@@ -174,28 +206,48 @@
                         bind:value={git.password}
                         inlineLabel="Password or token"
                     />
+                    {#if gitPasswordKept}
+                        <HelpText>
+                            A password or token is stored; leave empty to keep
+                            it
+                        </HelpText>
+                    {:else if gitPasswordDropped}
+                        <HelpText>
+                            The stored password or token belongs to {storedUrl}
+                            and will be dropped; enter one for the new URL
+                        </HelpText>
+                    {/if}
                 {/if}
 
+                <h4>Options</h4>
+                <label for="gitopsPrune" class="d-flex align-items-center mb-4">
+                    <Input
+                        id="gitopsPrune"
+                        class="mb-0 me-2"
+                        type="switch"
+                        bind:checked={prune}
+                    />
+                    <div>
+                        Delete objects that are no longer present in the config
+                    </div>
+                </label>
+
                 {#if source}
+                    <h4>Automatic sync</h4>
                     <label
-                        for="gitopsPrune"
-                        class="d-flex align-items-center mb-4"
+                        for="gitopsSyncOnStartup"
+                        class="d-flex align-items-center mb-3"
                     >
                         <Input
-                            id="gitopsPrune"
+                            id="gitopsSyncOnStartup"
                             class="mb-0 me-2"
                             type="switch"
-                            bind:checked={prune}
+                            bind:checked={syncOnStartup}
                         />
-                        <div>
-                            Delete objects that are no longer present in the
-                            config
-                        </div>
+                        <div>Sync once when Warpgate starts</div>
                     </label>
-
-                    <h4>Automatic sync</h4>
                     <DurationInput
-                        label="Sync interval (blank = no periodic sync)"
+                        label="Sync every"
                         seconds={intervalSeconds}
                         onChange={v => {
                             intervalSeconds = v
@@ -222,35 +274,40 @@
                                 autocomplete="off"
                                 minlength="16"
                                 maxlength="255"
-                                placeholder={webhookSecretSet &&
-                                webhookSecret !== null
+                                placeholder={webhookSecretSet && !webhookCleared
                                     ? '********'
                                     : ' '}
                                 value={webhookSecret ?? ''}
                                 oninput={e =>
                                     (webhookSecret =
-                                        e.currentTarget.value || undefined)}
+                                        e.currentTarget.value ||
+                                        (webhookCleared ? null : undefined))}
                             >
                         </FormGroup>
-                        {#if webhookSecretSet && webhookSecret !== null}
+                        {#if webhookSecretSet && !webhookCleared}
                             <Button
                                 color="link"
                                 class="ms-2 mb-3"
-                                onclick={() => (webhookSecret = null)}
+                                onclick={() => {
+                                    webhookSecret = null
+                                    webhookCleared = true
+                                }}
                             >
                                 Clear
                             </Button>
                         {/if}
                     </div>
                     <HelpText>
-                        GitHub and GitLab webhook formats are supported
+                        Supports GitHub, Gitea, Forgejo, GitLab and Bitbucket.
+                        For Azure DevOps, use Basic authentication with any
+                        username and this secret as the password.
                     </HelpText>
                 {/if}
 
                 <StickyActionBar>
                     <AsyncButton
                         type="button"
-                        class="btn btn-primary"
+                        color="primary"
                         disabled={!formValid}
                         click={save}
                     >

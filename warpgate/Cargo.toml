@@ -16,7 +16,6 @@ clap = { version = "4.0", features = [
     "std",
     "usage",
 ], default-features = false }
-config = { version = "0.15", features = ["yaml"], default-features = false }
 console = { version = "0.16", default-features = false }
 console-subscriber = { version = "0.5", optional = true, default-features = false }
 data-encoding.workspace = true

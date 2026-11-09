@@ -144,19 +144,10 @@
     },
     "Metadata": {
       "properties": {
-        "annotations": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "default": {},
-          "type": "object"
-        },
-        "labels": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "default": {},
-          "type": "object"
+        "adopt_existing": {
+          "default": false,
+          "description": "Take over a row of the same name that was created by hand. Without\nit, such a row is a collision.",
+          "type": "boolean"
         },
         "name": {
           "minLength": 1,

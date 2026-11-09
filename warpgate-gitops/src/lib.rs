@@ -4,11 +4,12 @@ use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 
-use diagnostic::Diagnostic;
+use diagnostic::{Diagnostic, Level};
 use serde_json::{Value, json};
 use walkdir::WalkDir;
 
 pub mod diagnostic;
+pub mod emit;
 pub mod parse;
 pub mod plan;
 pub mod source;
@@ -117,10 +118,14 @@ pub fn format_text(diagnostics: &[(&Path, Diagnostic)]) -> String {
             } else {
                 format!(" {}", d.path)
             };
+            let level = match d.level {
+                Level::Error => "",
+                Level::Note => "note: ",
+            };
             // writing to a String cannot fail
             let _ = writeln!(
                 out,
-                "{}:{}{path}: {}",
+                "{}:{}{path}: {level}{}",
                 file.display(),
                 d.location,
                 d.message
@@ -134,6 +139,10 @@ pub fn format_json(diagnostics: &[(&Path, Diagnostic)]) -> Value {
         .iter()
         .map(|(file, d)| {
             json!({
+                "level": match d.level {
+                    Level::Error => "error",
+                    Level::Note => "note",
+                },
                 "file": file.display().to_string(),
                 "line": d.location.line,
                 "column": d.location.column,

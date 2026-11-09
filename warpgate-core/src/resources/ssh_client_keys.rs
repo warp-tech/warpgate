@@ -6,12 +6,17 @@ use sea_orm::{
 };
 use uuid::Uuid;
 use warpgate_common::{
-    MaybeSecretRef, ProviderId, SecretRef, SecretResolver, StoredSecret, WarpgateError,
-    pkcs8_pem_string, public_key_line, public_key_of_pem,
+    MaybeSecretRef, SecretRef, SecretResolver, StoredSecret, WarpgateError, pkcs8_pem_string,
+    public_key_line, public_key_of_pem,
 };
 use warpgate_db_entities::SshClientKey;
 
-use super::{Actor, ResourceError, check_name, name_taken};
+use super::{Actor, OwnedEntity, ResourceError, check_name, name_taken};
+
+impl OwnedEntity for SshClientKey::Entity {
+    const ID: Self::Column = SshClientKey::Column::Id;
+    const PROVIDER: Self::Column = SshClientKey::Column::Provider;
+}
 
 pub struct SshClientKeyDataRequest {
     pub label: String,
@@ -145,25 +150,6 @@ pub async fn delete<C: ConnectionTrait>(
     Ok(())
 }
 
-pub(crate) async fn set_owner<C: ConnectionTrait>(
-    db: &C,
-    id: Uuid,
-    owner: Option<ProviderId>,
-) -> Result<(), ResourceError> {
-    super::set_owner::<SshClientKey::Entity, _>(
-        db,
-        SshClientKey::Column::Provider,
-        SshClientKey::Column::Id,
-        id,
-        owner,
-    )
-    .await
-}
-
-pub async fn release<C: ConnectionTrait>(db: &C, id: Uuid) -> Result<(), ResourceError> {
-    set_owner(db, id, None).await
-}
-
 /// Records the public key a referenced key resolves to now, after a rotation
 /// in its backend. Derived data, so whoever owns the row doesn't matter.
 pub async fn refresh_public_key<C: ConnectionTrait>(
@@ -181,7 +167,7 @@ pub async fn refresh_public_key<C: ConnectionTrait>(
 
 #[cfg(all(test, feature = "sqlite"))]
 mod tests {
-    use warpgate_common::SshHostKeyKind;
+    use warpgate_common::{ProviderId, SshHostKeyKind};
 
     use super::*;
     use crate::resources::tests::db;

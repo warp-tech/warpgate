@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -73,26 +71,14 @@ pub struct Manifest<Spec> {
     pub spec: Spec,
 }
 
-/// Set to `"true"` to let a resource take over a row that was created by hand
-/// under the same name. Without it, such a row is a collision.
-pub const ADOPT_EXISTING: &str = "warpgate.dev/adopt-existing";
-
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct Metadata {
     #[schemars(length(min = 1))]
     pub name: String,
+    /// Take over a row of the same name that was created by hand. Without
+    /// it, such a row is a collision.
     #[serde(default)]
-    pub labels: BTreeMap<String, String>,
-    #[serde(default)]
-    pub annotations: BTreeMap<String, String>,
-}
-
-impl Metadata {
-    pub fn adopts_existing(&self) -> bool {
-        self.annotations
-            .get(ADOPT_EXISTING)
-            .is_some_and(|v| v == "true")
-    }
+    pub adopt_existing: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -231,54 +217,5 @@ mod tests {
             panic!();
         };
         assert!(matches!(auth.password, MaybeSecretRef::Reference(_)));
-    }
-
-    #[test]
-    fn errors_keep_their_path() {
-        let error = |value| Resource::from_value(&value).unwrap_err();
-
-        let e = error(json!({"apiVersion": "warpgate/v1", "kind": "Pod"}));
-        assert_eq!(e.path().to_string(), "kind");
-        assert!(e.inner().to_string().contains("unknown variant `Pod`"));
-
-        let e = error(json!({"apiVersion": "warpgate/v2", "kind": "Role"}));
-        assert_eq!(e.path().to_string(), "apiVersion");
-
-        let e = error(json!({
-            "apiVersion": "warpgate/v1",
-            "kind": "Target",
-            "metadata": {"name": "x"},
-            "spec": {"options": {"ssh": {"host": "h", "port": "22"}}},
-        }));
-        assert_eq!(e.path().to_string(), "spec.options.ssh.port");
-    }
-
-    #[test]
-    fn serializes_with_kind() {
-        let role = Resource::Role(Manifest {
-            api_version: ApiVersion::V1,
-            metadata: Metadata {
-                name: "dba".into(),
-                labels: BTreeMap::new(),
-                annotations: BTreeMap::new(),
-            },
-            spec: RoleSpec {
-                description: String::new(),
-                is_default: false,
-            },
-        });
-        assert_eq!(
-            serde_json::to_value(&role).unwrap(),
-            json!({
-                "apiVersion": "warpgate/v1",
-                "kind": "Role",
-                "metadata": {"name": "dba", "labels": {}, "annotations": {}},
-                "spec": {"description": "", "is_default": false},
-            })
-        );
-        assert_eq!(
-            Resource::from_value(&serde_json::to_value(&role).unwrap()).unwrap(),
-            role
-        );
     }
 }

@@ -3,8 +3,6 @@ apiVersion: warpgate/v1
 kind: Role
 metadata:
   name: dba
-  labels:
-    example.com/team: platform
 spec:
   description: Database admins
   is_default: false
@@ -43,10 +41,7 @@ apiVersion: warpgate/v1
 kind: Target
 metadata:
   name: ssh-password
-  labels:
-    env: prod
-  annotations:
-    warpgate.dev/adopt-existing: "true"
+  adopt_existing: true
 spec:
   description: Bastion
   group: prod

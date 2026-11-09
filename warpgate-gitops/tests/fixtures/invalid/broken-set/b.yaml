@@ -1,10 +1,13 @@
-# Not reported: references are only checked once every document is valid
+# Not reported: names and references are only checked once every document
+# is valid
 apiVersion: warpgate/v1
-kind: Target
+kind: Role
 metadata:
-  name: web
-spec:
-  roles: [ops]
-  options:
-    ssh:
-      host: h
+  name: ops
+spec: {}
+---
+apiVersion: warpgate/v1
+kind: Role
+metadata:
+  name: ops
+spec: {}

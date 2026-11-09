@@ -91,7 +91,12 @@
     }
 
     async function release() {
-        target = await api.releaseTarget({ id: params.id })
+        error = undefined
+        try {
+            target = await api.releaseTarget({ id: params.id })
+        } catch (err) {
+            error = await stringifyError(err)
+        }
     }
 
     async function remove() {

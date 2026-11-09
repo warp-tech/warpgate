@@ -257,6 +257,13 @@ impl MaybeSecretRef {
         matches!(self, Self::Inline(_))
     }
 
+    pub const fn as_inline(&self) -> Option<&StoredSecret> {
+        match self {
+            Self::Inline(v) => Some(v),
+            Self::Reference(_) | Self::Malformed(_) => None,
+        }
+    }
+
     pub const fn inline_mut(&mut self) -> Option<&mut StoredSecret> {
         match self {
             Self::Inline(v) => Some(v),

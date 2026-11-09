@@ -17,7 +17,7 @@ use super::roles::{self, RoleDataRequest};
 use super::ssh_client_keys::{self, KeyMaterial, SshClientKeyDataRequest};
 use super::target_groups::{self, TargetGroupDataRequest};
 use super::targets::{self, TargetDataRequest};
-use super::{Actor, AdmittedSessions, ResourceError};
+use super::{Actor, AdmittedSessions, OwnedEntity, ResourceError, set_owner};
 
 /// The rows a plan is computed against, with references by name. Inline
 /// credentials come back decrypted so they compare with a file's literals:
@@ -173,6 +173,8 @@ impl From<DbErr> for ApplyError {
 /// again inside the transaction and must still be the one that was confirmed,
 /// so exactly what was shown gets written; a change made after that still
 /// rolls everything back, through the unique names and the ownership checks.
+/// A plan that another apply of the same files already carried out (a webhook
+/// delivered to two nodes) has nothing left to write and succeeds empty.
 /// `secrets` resolves the references of client keys, to derive their public keys.
 pub async fn apply<'p, C: ConnectionTrait + TransactionTrait>(
     db: &C,
@@ -185,13 +187,19 @@ pub async fn apply<'p, C: ConnectionTrait + TransactionTrait>(
         return Err(ApplyError::PlanHasErrors);
     }
     let txn = db.begin().await?;
-    if plan(
+    let fresh = plan(
         provider,
         desired,
         &load_current(&txn).await?,
         confirmed.prune,
-    ) != *confirmed
-    {
+    );
+    if fresh != *confirmed {
+        if !fresh.has_pending() && !fresh.has_errors() {
+            return Ok(Applied {
+                changes: vec![],
+                admitted: AdmittedSessions(vec![]),
+            });
+        }
         return Err(ApplyError::Stale);
     }
 
@@ -287,6 +295,7 @@ struct Write<'a, C> {
 
 /// The service layer's writes for one kind of resource, keyed by its spec
 trait Store {
+    type Entity: OwnedEntity;
     type Data;
 
     async fn create<C: ConnectionTrait>(
@@ -301,18 +310,13 @@ trait Store {
         id: Uuid,
         data: Self::Data,
     ) -> Result<(), ResourceError>;
-
-    async fn set_owner<C: ConnectionTrait>(
-        db: &C,
-        id: Uuid,
-        owner: ProviderId,
-    ) -> Result<(), ResourceError>;
 }
 
 /// For a resource module whose `create` and `update` take just the request
 macro_rules! store {
-    ($spec:ty, $module:ident, $data:ty) => {
+    ($spec:ty, $module:ident, $entity:ident, $data:ty) => {
         impl Store for $spec {
+            type Entity = $entity::Entity;
             type Data = $data;
 
             async fn create<C: ConnectionTrait>(
@@ -332,23 +336,21 @@ macro_rules! store {
                 $module::update(db, actor, id, &data).await?;
                 Ok(())
             }
-
-            async fn set_owner<C: ConnectionTrait>(
-                db: &C,
-                id: Uuid,
-                owner: ProviderId,
-            ) -> Result<(), ResourceError> {
-                $module::set_owner(db, id, Some(owner)).await
-            }
         }
     };
 }
 
-store!(TargetGroupSpec, target_groups, TargetGroupDataRequest);
-store!(RoleSpec, roles, RoleDataRequest);
-store!(TargetSpec, targets, TargetDataRequest);
+store!(
+    TargetGroupSpec,
+    target_groups,
+    TargetGroup,
+    TargetGroupDataRequest
+);
+store!(RoleSpec, roles, Role, RoleDataRequest);
+store!(TargetSpec, targets, Target, TargetDataRequest);
 
 impl Store for SshClientKeySpec {
+    type Entity = SshClientKey::Entity;
     type Data = (SshClientKeyDataRequest, KeyMaterial);
 
     async fn create<C: ConnectionTrait>(
@@ -370,14 +372,6 @@ impl Store for SshClientKeySpec {
         ssh_client_keys::update(db, actor, id, &data, Some(material)).await?;
         Ok(())
     }
-
-    async fn set_owner<C: ConnectionTrait>(
-        db: &C,
-        id: Uuid,
-        owner: ProviderId,
-    ) -> Result<(), ResourceError> {
-        ssh_client_keys::set_owner(db, id, Some(owner)).await
-    }
 }
 
 impl<C: ConnectionTrait> Write<'_, C> {
@@ -387,7 +381,7 @@ impl<C: ConnectionTrait> Write<'_, C> {
             return S::create(self.db, self.actor, data).await;
         };
         if self.adopt {
-            S::set_owner(self.db, id, self.provider).await?;
+            set_owner::<S::Entity, _>(self.db, id, Some(self.provider)).await?;
         }
         S::update(self.db, self.actor, id, data).await?;
         Ok(id)
@@ -459,12 +453,12 @@ impl<C: ConnectionTrait> Write<'_, C> {
         if let TargetOptions::Ssh(ssh) = &mut options {
             ssh.jump_host = jump_host
                 .as_deref()
-                .map(|name| names.target(name))
+                .map(|name| names.targets.find(name))
                 .transpose()?;
             if let SSHTargetAuth::PublicKey(auth) = &mut ssh.auth {
                 auth.key_id = client_key
                     .as_deref()
-                    .map(|name| names.client_key(name))
+                    .map(|name| names.client_keys.find(name))
                     .transpose()?;
             }
         }
@@ -475,7 +469,7 @@ impl<C: ConnectionTrait> Write<'_, C> {
             rate_limit_bytes_per_second: *rate_limit_bytes_per_second,
             group_id: group
                 .as_deref()
-                .map(|group| names.group(group))
+                .map(|group| names.groups.find(group))
                 .transpose()?,
             ticket_max_duration_seconds: *ticket_max_duration_seconds,
             ticket_requests_disabled: *ticket_requests_disabled,
@@ -484,11 +478,11 @@ impl<C: ConnectionTrait> Write<'_, C> {
             ticket_max_uses: *ticket_max_uses,
         };
         let id = self.save::<TargetSpec>(data).await?;
-        names.add_target(&manifest.metadata.name, id);
+        names.targets.add(&manifest.metadata.name, id);
 
         let wanted = roles
             .iter()
-            .map(|role| names.role(role))
+            .map(|role| names.roles.find(role))
             .collect::<Result<HashSet<_>, _>>()?;
         let assigned: HashSet<Uuid> = TargetRoleAssignment::Entity::find()
             .filter(TargetRoleAssignment::Column::TargetId.eq(id))
@@ -544,165 +538,70 @@ fn jump_hosts_first(mut pending: Vec<&Change>) -> Vec<&Change> {
     ordered
 }
 
-/// Resolves a target's references the way the plan matches rows: ignoring case,
-/// unless a backend with case-sensitive names holds an exact match
+/// Resolves a target's references the way the plan matches rows: an exact
+/// match, else the first row in table order whose name differs only in case
 struct Names {
-    groups: HashMap<String, Uuid>,
-    roles: HashMap<String, Uuid>,
-    targets: HashMap<String, Uuid>,
-    client_keys: HashMap<String, Uuid>,
+    groups: Ids,
+    roles: Ids,
+    targets: Ids,
+    client_keys: Ids,
 }
 
-impl Names {
-    async fn load<C: ConnectionTrait>(db: &C) -> Result<Self, DbErr> {
-        let mut names = Self {
-            groups: HashMap::new(),
-            roles: HashMap::new(),
-            targets: HashMap::new(),
-            client_keys: HashMap::new(),
-        };
-        for group in TargetGroup::Entity::find().all(db).await? {
-            Self::add(&mut names.groups, &group.name, group.id);
-        }
-        for role in Role::Entity::find().all(db).await? {
-            Self::add(&mut names.roles, &role.name, role.id);
-        }
-        for key in SshClientKey::Entity::find().all(db).await? {
-            Self::add(&mut names.client_keys, &key.label, key.id);
-        }
-        for target in Target::Entity::find().all(db).await? {
-            names.add_target(&target.name, target.id);
-        }
-        Ok(names)
+#[derive(Default)]
+struct Ids {
+    exact: HashMap<String, Uuid>,
+    lowercase: HashMap<String, Uuid>,
+}
+
+impl Ids {
+    fn add(&mut self, name: &str, id: Uuid) {
+        self.exact.insert(name.to_owned(), id);
+        self.lowercase.entry(name.to_lowercase()).or_insert(id);
     }
 
-    fn add_target(&mut self, name: &str, id: Uuid) {
-        Self::add(&mut self.targets, name, id);
-    }
-
-    /// The lowercase entry goes to whichever row comes first
-    fn add(ids: &mut HashMap<String, Uuid>, name: &str, id: Uuid) {
-        ids.entry(name.to_lowercase()).or_insert(id);
-        ids.insert(name.to_owned(), id);
-    }
-
-    fn target(&self, name: &str) -> Result<Uuid, ResourceError> {
-        Self::find(&self.targets, name)
-    }
-
-    fn client_key(&self, name: &str) -> Result<Uuid, ResourceError> {
-        Self::find(&self.client_keys, name)
-    }
-
-    fn group(&self, name: &str) -> Result<Uuid, ResourceError> {
-        Self::find(&self.groups, name)
-    }
-
-    fn role(&self, name: &str) -> Result<Uuid, ResourceError> {
-        Self::find(&self.roles, name)
-    }
-
-    fn find(ids: &HashMap<String, Uuid>, name: &str) -> Result<Uuid, ResourceError> {
-        ids.get(name)
-            .or_else(|| ids.get(&name.to_lowercase()))
+    fn find(&self, name: &str) -> Result<Uuid, ResourceError> {
+        self.exact
+            .get(name)
+            .or_else(|| self.lowercase.get(&name.to_lowercase()))
             .copied()
             .ok_or(ResourceError::NotFound)
     }
 }
 
+impl Names {
+    async fn load<C: ConnectionTrait>(db: &C) -> Result<Self, DbErr> {
+        let mut names = Self {
+            groups: Ids::default(),
+            roles: Ids::default(),
+            targets: Ids::default(),
+            client_keys: Ids::default(),
+        };
+        for group in TargetGroup::Entity::find().all(db).await? {
+            names.groups.add(&group.name, group.id);
+        }
+        for role in Role::Entity::find().all(db).await? {
+            names.roles.add(&role.name, role.id);
+        }
+        for key in SshClientKey::Entity::find().all(db).await? {
+            names.client_keys.add(&key.label, key.id);
+        }
+        for target in Target::Entity::find().all(db).await? {
+            names.targets.add(&target.name, target.id);
+        }
+        Ok(names)
+    }
+}
+
 #[cfg(all(test, feature = "sqlite"))]
 mod tests {
-    use serde_json::json;
     use warpgate_common::{ProviderId, Secret, SecretError, SecretRef, SshHostKeyKind};
     use warpgate_gitops::plan::{Change, Prune, plan};
     use warpgate_gitops::types::Resource;
 
     use super::*;
     use crate::resources::roles::RoleDataRequest;
-    use crate::resources::target_groups::TargetGroupDataRequest;
-    use crate::resources::targets::{self, TargetDataRequest};
     use crate::resources::tests::db;
-    use crate::resources::{Actor, roles, target_groups};
-
-    #[tokio::test]
-    async fn rows_written_from_a_spec_load_back_as_that_spec() {
-        let db = db().await;
-        let gitops = Actor::Provider(ProviderId::GITOPS);
-
-        let prod = target_groups::create(
-            &db,
-            gitops,
-            &TargetGroupDataRequest {
-                name: "prod".into(),
-                description: Some("Production".into()),
-                color: None,
-            },
-        )
-        .await
-        .unwrap();
-        let dba = roles::create(
-            &db,
-            gitops,
-            &RoleDataRequest {
-                name: "dba".into(),
-                description: None,
-                is_default: Some(true),
-            },
-        )
-        .await
-        .unwrap();
-        let options =
-            json!({"mysql": {"host": "h", "auth": {"kind": "password", "password": "hunter2"}}});
-        let db_target = targets::create(
-            &db,
-            gitops,
-            &TargetDataRequest {
-                name: "db".into(),
-                description: None,
-                options: serde_json::from_value(options.clone()).unwrap(),
-                rate_limit_bytes_per_second: Some(1000),
-                group_id: Some(prod.id),
-                ticket_max_duration_seconds: Some(3600),
-                ticket_requests_disabled: false,
-                ticket_require_approval: true,
-                require_approval: false,
-                ticket_max_uses: None,
-            },
-        )
-        .await
-        .unwrap();
-        targets::add_role(&db, gitops, db_target.id, dba.id)
-            .await
-            .unwrap();
-
-        let current = load_current(&db).await.unwrap();
-        let desired: Vec<Resource> = [
-            json!({"kind": "TargetGroup", "metadata": {"name": "prod"}, "spec": {"description": "Production"}}),
-            json!({"kind": "Role", "metadata": {"name": "dba"}, "spec": {"is_default": true}}),
-            json!({"kind": "Target", "metadata": {"name": "db"}, "spec": {
-                "group": "prod",
-                "roles": ["dba"],
-                "options": options,
-                "rate_limit_bytes_per_second": 1000,
-                "ticket_max_duration_seconds": 3600,
-                "ticket_require_approval": true,
-            }}),
-        ]
-        .into_iter()
-        .map(|mut value| {
-            value["apiVersion"] = json!("warpgate/v1");
-            Resource::from_value(&value).unwrap()
-        })
-        .collect();
-
-        let plan = plan(ProviderId::GITOPS, &desired, &current, Prune::Off);
-        assert!(
-            plan.changes
-                .iter()
-                .all(|c| matches!(c, Change::Unchanged { .. })),
-            "{plan:?}"
-        );
-    }
+    use crate::resources::{Actor, roles};
 
     const GITOPS: ProviderId = ProviderId::GITOPS;
 
@@ -718,7 +617,9 @@ mod tests {
 
     fn resources(yaml: &str) -> Vec<Resource> {
         let files = [(std::path::PathBuf::from("test.yaml"), yaml.to_owned())];
-        warpgate_gitops::validate::check_files(&files).unwrap()
+        warpgate_gitops::validate::check_files(&files)
+            .unwrap()
+            .resources
     }
 
     async fn plan_against<C: ConnectionTrait>(db: &C, desired: &[Resource]) -> Plan {
@@ -851,7 +752,7 @@ mod tests {
             Err(ApplyError::PlanHasErrors)
         ));
 
-        let annotated = role(", annotations: {warpgate.dev/adopt-existing: \"true\"}");
+        let annotated = role(", adopt_existing: true");
         let adopting = plan_against(&db, &annotated).await;
         assert_eq!(summary(&adopting), ["adopt legacy"]);
         let _ = apply(&db, GITOPS, &annotated, &adopting, &Keys)
@@ -865,6 +766,45 @@ mod tests {
             .unwrap();
         assert_eq!(legacy.provider, Some(GITOPS));
         assert_eq!(legacy.description, "from git");
+    }
+
+    #[tokio::test]
+    async fn targets_can_grant_hand_made_roles_without_taking_them_over() {
+        let db = db().await;
+        let admins = roles::create(
+            &db,
+            Actor::Admin,
+            &RoleDataRequest {
+                name: "Admins".into(),
+                description: None,
+                is_default: None,
+            },
+        )
+        .await
+        .unwrap();
+        let desired = resources(
+            "apiVersion: warpgate/v1\nkind: Target\nmetadata: {name: web}\n\
+             spec: {roles: [admins], options: {ssh: {host: h}}}\n",
+        );
+        let first = plan_against(&db, &desired).await;
+        assert_eq!(summary(&first), ["create web"]);
+        let _ = apply(&db, GITOPS, &desired, &first, &Keys).await.unwrap();
+
+        let assigned = TargetRoleAssignment::Entity::find().all(&db).await.unwrap();
+        assert_eq!(
+            assigned.iter().map(|a| a.role_id).collect::<Vec<_>>(),
+            [admins.id]
+        );
+        let role = Role::Entity::find_by_id(admins.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(role.provider, None);
+        assert_eq!(
+            summary(&plan_against(&db, &desired).await),
+            ["unchanged web"]
+        );
     }
 
     #[tokio::test]

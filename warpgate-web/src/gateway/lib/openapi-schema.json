@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.30.3-52-gfebbda54-modified"
+    "version": "v0.30.3-53-g4d66a86d-modified"
   },
   "servers": [
     {
@@ -2119,6 +2119,27 @@
           }
         }
       },
+      "GitopsSyncInfo": {
+        "type": "object",
+        "title": "GitopsSyncInfo",
+        "description": "The latest GitOps sync",
+        "required": [
+          "status",
+          "started_at"
+        ],
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/SyncStatus"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
       "GroupInfo": {
         "type": "object",
         "title": "GroupInfo",
@@ -2265,6 +2286,17 @@
             "items": {
               "type": "string"
             }
+          },
+          "gitops_sync": {
+            "description": "For admins, while a GitOps source is configured or files are pushed\nthrough the API",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GitopsSyncInfo"
+              },
+              {
+                "description": "For admins, while a GitOps source is configured or files are pushed\nthrough the API"
+              }
+            ]
           }
         }
       },
@@ -2637,6 +2669,14 @@
             "type": "string"
           }
         }
+      },
+      "SyncStatus": {
+        "type": "string",
+        "enum": [
+          "Applied",
+          "Unchanged",
+          "Failed"
+        ]
       },
       "TargetClickAction": {
         "type": "string",

@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.30.3-52-gfebbda54-modified"
+    "version": "v0.30.3-53-g4d66a86d-modified"
   },
   "servers": [
     {
@@ -5326,6 +5326,32 @@
         "operationId": "dry_run_gitops"
       }
     },
+    "/gitops/export": {
+      "get": {
+        "summary": "Every target, group, role and SSH client key that GitOps doesn't\nmanage yet, as resource documents annotated to be adopted. Contains\ntheir credentials in plain text.",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/plain; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "export_gitops_unmanaged"
+      }
+    },
     "/gitops/history": {
       "get": {
         "parameters": [
@@ -7096,6 +7122,9 @@
             "description": "Checked every 15 seconds; `null` syncs at startup and on request only",
             "minimum": 1.0
           },
+          "gitops_sync_on_startup": {
+            "type": "boolean"
+          },
           "gitops_webhook_secret": {
             "type": "string",
             "description": "Authenticates pushes to `/@warpgate/api/gitops/webhook`, sent as\n`X-Hub-Signature-256` or `X-Gitlab-Token`. Write-only; `null` turns the\nwebhook off",
@@ -7149,7 +7178,9 @@
           "analytics_normal",
           "recordings_enable",
           "recordings_storage",
+          "gitops_sync_on_startup",
           "gitops_webhook_secret_set",
+          "gitops_git_password_set",
           "gitops_prune"
         ],
         "properties": {
@@ -7319,8 +7350,15 @@
             "type": "integer",
             "format": "int64"
           },
+          "gitops_sync_on_startup": {
+            "type": "boolean"
+          },
           "gitops_webhook_secret_set": {
             "type": "boolean"
+          },
+          "gitops_git_password_set": {
+            "type": "boolean",
+            "description": "Whether the Git source holds a stored password or token, which the\nredacted `gitops_source` can't show"
           },
           "gitops_prune": {
             "type": "boolean"
@@ -8558,6 +8596,11 @@
             "type": "boolean",
             "description": "Deletes what is gone from the source even when that is most of it",
             "default": false
+          },
+          "yaml": {
+            "type": "string",
+            "description": "Resource documents to use as the full desired state. The configured\nsource is not fetched for this run, and need not be set.",
+            "maxLength": 16000000
           }
         }
       },

@@ -6,6 +6,7 @@
         DropdownMenu,
         DropdownToggle,
     } from '@sveltestrap/sveltestrap'
+    import { providerLabel } from 'admin/lib/providers'
     import Fa from 'svelte-fa'
 
     interface Props {
@@ -15,8 +16,6 @@
     }
 
     let { provider, class: className, onRelease }: Props = $props()
-
-    const GITOPS = '00000000-0000-0000-0000-000000000000'
 </script>
 
 {#if provider}
@@ -28,14 +27,9 @@
             caret
         >
             <Fa icon={faBriefcase} fw class="text-secondary" />
-            Managed by
-            {#if provider === GITOPS}
-                GitOps
-            {:else}
-                provider {provider}
-            {/if}
+            Managed by {providerLabel(provider)}
         </DropdownToggle>
-        <DropdownMenu right>
+        <DropdownMenu end>
             <DropdownItem disabled={!onRelease} onclick={onRelease}>
                 Release
             </DropdownItem>

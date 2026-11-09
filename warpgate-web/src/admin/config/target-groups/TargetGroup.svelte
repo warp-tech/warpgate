@@ -78,7 +78,12 @@
     }
 
     async function release() {
-        group = await api.releaseTargetGroup({ id: groupId })
+        error = undefined
+        try {
+            group = await api.releaseTargetGroup({ id: groupId })
+        } catch (e) {
+            error = await stringifyError(e)
+        }
     }
 
     async function remove() {
@@ -178,14 +183,14 @@
             <AsyncButton
                 click={update}
                 color="primary"
-                disabled={!$adminPermissions.targetsEdit}
+                disabled={!$adminPermissions.targetsEdit || !!group.provider}
             >
                 Update
             </AsyncButton>
             <Button
                 color="danger"
                 onclick={remove}
-                disabled={!$adminPermissions.targetsDelete}
+                disabled={!$adminPermissions.targetsDelete || !!group.provider}
             >
                 Remove
             </Button>

@@ -14,6 +14,7 @@ spec:
   options:
     ssh:
       host: h
+      jump_host: bastion
       auth:
         kind: publickey
         key_id: deploy-key

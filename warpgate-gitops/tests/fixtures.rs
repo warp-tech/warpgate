@@ -16,19 +16,23 @@ fn assert_golden(expected: &Path, actual: &str) {
     assert_eq!(actual, expected_text, "{}", expected.display());
 }
 
-/// Every entry in `tests/fixtures/invalid` is a file or directory of resources,
-/// next to a `.expected` file with its text output
-#[test]
-fn invalid_fixtures() {
-    let mut fixtures: Vec<PathBuf> = fs::read_dir("tests/fixtures/invalid")
+/// The files and directories of resources in `dir`, each next to a
+/// `.expected` file
+fn fixtures(dir: &str) -> Vec<PathBuf> {
+    let mut fixtures: Vec<PathBuf> = fs::read_dir(dir)
         .unwrap()
         .map(|entry| entry.unwrap().path())
         .filter(|path| path.extension() != Some(OsStr::new("expected")))
         .collect();
     fixtures.sort();
     assert!(!fixtures.is_empty());
+    fixtures
+}
 
-    for fixture in fixtures {
+/// Every entry in `tests/fixtures/invalid` is expected to fail with its errors
+#[test]
+fn invalid_fixtures() {
+    for fixture in fixtures("tests/fixtures/invalid") {
         let files = read_files(std::slice::from_ref(&fixture)).unwrap();
         let Err(diagnostics) = check_files(&files) else {
             panic!("{} is valid", fixture.display());
@@ -55,7 +59,21 @@ fn json_output() {
 fn valid_fixtures() {
     let files = read_files(&["tests/fixtures/valid".into()]).unwrap();
     assert!(!files.is_empty());
-    assert!(check_files(&files).is_ok());
+    assert!(check_files(&files).unwrap().notes.is_empty());
+}
+
+/// Every entry in `tests/fixtures/notes` is expected to be valid, with its notes
+#[test]
+fn note_fixtures() {
+    for fixture in fixtures("tests/fixtures/notes") {
+        let files = read_files(std::slice::from_ref(&fixture)).unwrap();
+        let checked = check_files(&files)
+            .unwrap_or_else(|errors| panic!("{}: {}", fixture.display(), format_text(&errors)));
+        assert_golden(
+            &fixture.with_extension("expected"),
+            &format_text(&checked.notes),
+        );
+    }
 }
 
 /// A ConfigMap volume links each file to `..data/`, itself a link to a

@@ -13,9 +13,11 @@
     import AsyncButton from 'common/AsyncButton.svelte'
     import EmptyState from 'common/EmptyState.svelte'
     import { stringifyError } from 'common/errors'
+    import { downloadBlob } from 'common/helpers'
     import ItemList, { type LoadOptions } from 'common/ItemList.svelte'
     import Loadable from 'common/Loadable.svelte'
     import RelativeDate from 'common/RelativeDate.svelte'
+    import { reloadServerInfo } from 'gateway/lib/store'
     import { from } from 'rxjs'
     import { link } from 'svelte-spa-router'
     import GitopsDryRunModal from './GitopsDryRunModal.svelte'
@@ -56,13 +58,27 @@
                     confirm(
                         'Syncing will delete more than a half of managed objects. Are you sure?',
                     )
-                )
+                ) {
                     await sync(true)
+                }
             }
         } catch (err) {
             error = await stringifyError(err)
         }
         gen++
+        await reloadServerInfo()
+    }
+
+    async function exportUnmanaged(): Promise<void> {
+        error = undefined
+        try {
+            downloadBlob(
+                await api.exportGitopsUnmanaged(),
+                'warpgate-unmanaged.yaml',
+            )
+        } catch (err) {
+            error = await stringifyError(err)
+        }
     }
 
     async function dryRun(): Promise<void> {
@@ -89,15 +105,23 @@
 
 <div class="page-summary-bar">
     <h1>gitops</h1>
-    {#if $adminPermissions.configEdit}
-        <div class="ms-auto d-flex align-items-center gap-3">
+    <div class="ms-auto d-flex align-items-center gap-3">
+        {#if $adminPermissions.configEdit}
             <a class="btn btn-link" href="/config/gitops" use:link>
                 Configure
             </a>
+        {/if}
+        <!-- A sync writes targets and roles, and the export reads their credentials -->
+        {#if $adminPermissions.configEdit &&
+            $adminPermissions.targetsEdit &&
+            $adminPermissions.accessRolesEdit}
+            <AsyncButton color="link" click={exportUnmanaged}>
+                Export unmanaged
+            </AsyncButton>
             <AsyncButton color="link" click={dryRun}>Dry run</AsyncButton>
             <AsyncButton color="primary" click={sync}>Sync now</AsyncButton>
-        </div>
-    {/if}
+        {/if}
+    </div>
 </div>
 
 <GitopsDryRunModal bind:dryRun={dryRunResult} {sync} />
@@ -164,7 +188,8 @@
                 {@render entry(state.latest)}
                 <div class="mb-4"></div>
             {/if}
-            {#if state.latestSuccess && state.latestSuccess.id !== state.latest?.id}
+            {#if state.latestSuccess &&
+                state.latestSuccess.id !== state.latest?.id}
                 {@render entry(state.latestSuccess)}
                 <div class="mb-4"></div>
             {/if}

@@ -21,13 +21,6 @@ spec:
 ---
 apiVersion: warpgate/v1
 kind: Target
-metadata: {name: through-nothing}
-spec:
-  options:
-    ssh: {host: h, jump_host: nowhere}
----
-apiVersion: warpgate/v1
-kind: Target
 metadata: {name: web}
 spec:
   options:

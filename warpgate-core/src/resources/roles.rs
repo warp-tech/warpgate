@@ -4,10 +4,14 @@ use sea_orm::{
     TransactionTrait,
 };
 use uuid::Uuid;
-use warpgate_common::ProviderId;
 use warpgate_db_entities::{Role, TargetRoleAssignment, UserRoleAssignment};
 
-use super::{Actor, ResourceError, check_name, name_taken};
+use super::{Actor, OwnedEntity, ResourceError, check_name, name_taken};
+
+impl OwnedEntity for Role::Entity {
+    const ID: Self::Column = Role::Column::Id;
+    const PROVIDER: Self::Column = Role::Column::Provider;
+}
 
 #[derive(Object)]
 pub struct RoleDataRequest {
@@ -56,19 +60,6 @@ pub async fn update<C: ConnectionTrait>(
     let mut model: Role::ActiveModel = role.into();
     set_data(&mut model, data);
     model.update(db).await.map_err(name_taken)
-}
-
-pub(crate) async fn set_owner<C: ConnectionTrait>(
-    db: &C,
-    id: Uuid,
-    owner: Option<ProviderId>,
-) -> Result<(), ResourceError> {
-    super::set_owner::<Role::Entity, _>(db, Role::Column::Provider, Role::Column::Id, id, owner)
-        .await
-}
-
-pub async fn release<C: ConnectionTrait>(db: &C, id: Uuid) -> Result<(), ResourceError> {
-    set_owner(db, id, None).await
 }
 
 /// Also removes every assignment of the role, including revoked ones

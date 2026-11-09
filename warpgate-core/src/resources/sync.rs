@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use poem_openapi::Object;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel, QueryFilter,
-    QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
+    IntoActiveModel, QueryFilter, QueryOrder, Set,
 };
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
@@ -19,7 +19,7 @@ use warpgate_db_entities::Parameters::{self, GitopsSource};
 use warpgate_db_entities::ProviderSync::{self, PlannedChange, SyncPlan, SyncStatus, SyncTrigger};
 use warpgate_gitops::format_text;
 use warpgate_gitops::plan::{Plan, Prune, format_errors, plan};
-use warpgate_gitops::source::checkout;
+use warpgate_gitops::source::{Checkout, checkout, checkout_text};
 use warpgate_gitops::types::Resource;
 use warpgate_gitops::validate::check_files;
 
@@ -95,6 +95,25 @@ impl SyncRequest {
     }
 }
 
+/// The history's `source` for a sync of files sent with the request
+pub const REQUEST_SOURCE: &str = "request";
+
+/// Where a sync's files come from
+enum Input {
+    Source(GitopsSource),
+    /// The full desired state, sent with the request
+    Request(String),
+}
+
+impl Input {
+    fn describe(&self) -> String {
+        match self {
+            Self::Source(source) => source.describe(),
+            Self::Request(_) => REQUEST_SOURCE.into(),
+        }
+    }
+}
+
 /// The source's revision and plan, kept for the history when a later step fails
 #[derive(Default)]
 struct Reached {
@@ -126,27 +145,33 @@ pub async fn dry_run(
     db: &DatabaseConnection,
     secrets: &dyn SecretResolver,
     request: SyncRequest,
+    files: Option<String>,
 ) -> Result<DryRun, SyncError> {
-    let (source, prune) = configured(db, request).await?;
+    let (input, prune) = configured(db, request, files).await?;
     let mut reached = Reached::default();
-    let error = fetch_and_plan(db, secrets, &source, prune, &mut reached)
+    let error = fetch_and_plan(db, secrets, &input, prune, &mut reached)
         .await
         .err();
     Ok(DryRun {
-        source: source.describe(),
+        source: input.describe(),
         revision: reached.revision,
         plan: reached.plan,
         error,
     })
 }
 
-/// The configured source and the prune policy for `request`
+/// The files to sync, `files` if given, else the configured source, and the
+/// prune policy for `request`
 async fn configured(
     db: &DatabaseConnection,
     request: SyncRequest,
-) -> Result<(GitopsSource, Prune), SyncError> {
+    files: Option<String>,
+) -> Result<(Input, Prune), SyncError> {
     let parameters = Parameters::Entity::get(db).await?;
-    let source = parameters.gitops_source.ok_or(SyncError::NotConfigured)?;
+    let input = match files {
+        Some(files) => Input::Request(files),
+        None => Input::Source(parameters.gitops_source.ok_or(SyncError::NotConfigured)?),
+    };
     let prune = match (request, parameters.gitops_prune) {
         (
             SyncRequest::Admin {
@@ -157,18 +182,20 @@ async fn configured(
         (_, true) => Prune::On,
         (_, false) => Prune::Off,
     };
-    Ok((source, prune))
+    Ok((input, prune))
 }
 
-/// Syncs once and records the outcome. Returns the sessions that deleted
-/// targets had admitted, for the caller to close.
+/// Syncs once and records the outcome. `files`, when given, is the full
+/// desired state in place of the configured source. Returns the sessions
+/// that deleted targets had admitted, for the caller to close.
 pub async fn sync(
     db: &DatabaseConnection,
     secrets: &dyn SecretResolver,
     request: SyncRequest,
+    files: Option<String>,
 ) -> Result<(ProviderSync::Model, AdmittedSessions), SyncError> {
     let _running = RUNNING.lock().await;
-    sync_locked(db, secrets, request).await
+    sync_locked(db, secrets, request, files).await
 }
 
 /// [`sync`] for a caller that holds [`RUNNING`]
@@ -176,14 +203,15 @@ async fn sync_locked(
     db: &DatabaseConnection,
     secrets: &dyn SecretResolver,
     request: SyncRequest,
+    files: Option<String>,
 ) -> Result<(ProviderSync::Model, AdmittedSessions), SyncError> {
-    let (source, prune) = configured(db, request).await?;
+    let (input, prune) = configured(db, request, files).await?;
     let mut attempt = Attempt {
         id: Uuid::new_v4(),
         admin: request.admin(),
         reached: Reached::default(),
     };
-    let result = attempt_sync(db, secrets, &source, prune, &mut attempt).await;
+    let result = attempt_sync(db, secrets, &input, prune, &mut attempt).await;
     let (status, error, admitted) = match result {
         Ok(Some(admitted)) => (SyncStatus::Applied, None, admitted),
         Ok(None) => (SyncStatus::Unchanged, None, AdmittedSessions(vec![])),
@@ -200,7 +228,7 @@ async fn sync_locked(
         status,
         started_at: OffsetDateTime::now_utc(),
         checked_at: OffsetDateTime::now_utc(),
-        source: source.describe(),
+        source: input.describe(),
         revision: attempt.reached.revision,
         plan: attempt.reached.plan,
         error,
@@ -232,18 +260,20 @@ async fn sync_locked(
 async fn attempt_sync(
     db: &DatabaseConnection,
     secrets: &dyn SecretResolver,
-    source: &GitopsSource,
+    input: &Input,
     prune: Prune,
     attempt: &mut Attempt,
 ) -> Result<Option<AdmittedSessions>, String> {
-    let (resources, plan) =
-        fetch_and_plan(db, secrets, source, prune, &mut attempt.reached).await?;
+    let (resources, plan) = fetch_and_plan(db, secrets, input, prune, &mut attempt.reached).await?;
     if !plan.has_pending() {
         return Ok(None);
     }
     let applied = apply(db, PROVIDER, &resources, &plan, secrets)
         .await
         .map_err(|e| e.to_string())?;
+    if applied.changes.is_empty() {
+        return Ok(None);
+    }
     for (change, id) in &applied.changes {
         let change = PlannedChange::from(*change);
         let fields = (!change.fields.is_empty())
@@ -264,15 +294,35 @@ async fn attempt_sync(
     Ok(Some(applied.admitted))
 }
 
-/// Fetches and validates the source, and plans it against the database. A
+/// Fetches and validates the files, and plans them against the database. A
 /// plan with collisions or blocked changes is an error.
 async fn fetch_and_plan(
     db: &DatabaseConnection,
     secrets: &dyn SecretResolver,
-    source: &GitopsSource,
+    input: &Input,
     prune: Prune,
     reached: &mut Reached,
 ) -> Result<(Vec<Resource>, Plan), String> {
+    let checkout = match input {
+        Input::Source(source) => fetch(secrets, source).await?,
+        Input::Request(yaml) => checkout_text(yaml.clone()),
+    };
+    reached.revision = Some(checkout.revision);
+
+    let resources = check_files(&checkout.files)
+        .map_err(|diagnostics| format_text(&diagnostics))?
+        .resources;
+    let current = load_current(db).await.map_err(|e| e.to_string())?;
+    let plan = plan(PROVIDER, &resources, &current, prune);
+    reached.plan = Some(SyncPlan::from(&plan));
+    if plan.has_errors() {
+        return Err(format_errors(&plan));
+    }
+    Ok((resources, plan))
+}
+
+/// Checks out the source, off the async runtime and within [`CHECKOUT_TIMEOUT`]
+async fn fetch(secrets: &dyn SecretResolver, source: &GitopsSource) -> Result<Checkout, String> {
     let password = match source {
         GitopsSource::Git(git) if git.username.is_some() => Some(
             git.password
@@ -288,33 +338,38 @@ async fn fetch_and_plan(
         let interrupt = interrupt.clone();
         tokio::task::spawn_blocking(move || checkout(&source, password, &interrupt))
     };
-    let checkout = match tokio::time::timeout(CHECKOUT_TIMEOUT, task).await {
+    match tokio::time::timeout(CHECKOUT_TIMEOUT, task).await {
         Ok(joined) => joined
             .map_err(|e| e.to_string())?
-            .map_err(|e| e.to_string())?,
+            .map_err(|e| e.to_string()),
         Err(_) => {
             interrupt.store(true, Ordering::Relaxed);
-            return Err(format!(
+            Err(format!(
                 "fetching the source took longer than {}s",
                 CHECKOUT_TIMEOUT.as_secs()
-            ));
+            ))
         }
-    };
-    reached.revision = Some(checkout.revision);
-
-    let resources =
-        check_files(&checkout.files).map_err(|diagnostics| format_text(&diagnostics))?;
-    let current = load_current(db).await.map_err(|e| e.to_string())?;
-    let plan = plan(PROVIDER, &resources, &current, prune);
-    reached.plan = Some(SyncPlan::from(&plan));
-    if plan.has_errors() {
-        return Err(format_errors(&plan));
     }
-    Ok((resources, plan))
+}
+
+/// The most recent sync, or the most recent one that didn't fail
+pub async fn latest<C: ConnectionTrait>(
+    db: &C,
+    successful: bool,
+) -> Result<Option<ProviderSync::Model>, sea_orm::DbErr> {
+    let mut query = ProviderSync::Entity::find()
+        .filter(ProviderSync::Column::Provider.eq(PROVIDER))
+        .order_by_desc(ProviderSync::Column::StartedAt)
+        .order_by_desc(ProviderSync::Column::Id);
+    if successful {
+        query = query.filter(ProviderSync::Column::Status.ne(SyncStatus::Failed));
+    }
+    query.one(db).await
 }
 
 /// A sync that applied nothing and reached what the latest row already says
-/// (same source, revision and error) extends that row instead of adding one
+/// (same trigger, source, revision and error) extends that row instead of
+/// adding one
 async fn record(
     db: &DatabaseConnection,
     row: ProviderSync::Model,
@@ -326,6 +381,7 @@ async fn record(
             .one(db)
             .await?;
         if let Some(latest) = latest
+            && latest.triggered_by == row.triggered_by
             && latest.source == row.source
             && latest.revision == row.revision
             && latest.error == row.error
@@ -347,16 +403,18 @@ impl Services {
     pub async fn sync_gitops(
         &self,
         request: SyncRequest,
+        files: Option<String>,
     ) -> Result<ProviderSync::Model, SyncError> {
         let _running = RUNNING.lock().await;
-        self.sync_gitops_locked(request).await
+        self.sync_gitops_locked(request, files).await
     }
 
     async fn sync_gitops_locked(
         &self,
         request: SyncRequest,
+        files: Option<String>,
     ) -> Result<ProviderSync::Model, SyncError> {
-        let (row, admitted) = sync_locked(&self.db, &*self.secret_backends, request).await?;
+        let (row, admitted) = sync_locked(&self.db, &*self.secret_backends, request, files).await?;
         self.close_admitted_sessions(admitted).await?;
         Ok(row)
     }
@@ -371,22 +429,27 @@ impl Services {
         tokio::spawn(async move {
             let _running = RUNNING.lock().await;
             WEBHOOK_QUEUED.store(false, Ordering::SeqCst);
-            if let Err(error) = services.sync_gitops_locked(SyncRequest::Webhook).await {
+            if let Err(error) = services
+                .sync_gitops_locked(SyncRequest::Webhook, None)
+                .await
+            {
                 warn!("GitOps sync: {error}");
             }
         });
     }
 
-    /// Syncs at startup and then every `gitops_sync_interval_seconds`, on the
-    /// live node with the lowest id, so a cluster fetches once per interval.
-    /// A source configured later waits for the interval or a sync request.
+    /// Syncs at startup (unless `gitops_sync_on_startup` is off) and then
+    /// every `gitops_sync_interval_seconds`, on the live node with the lowest
+    /// id, so a cluster fetches once per interval. A source configured later
+    /// waits for the interval or a sync request.
     // ponytail: a node that dies mid-interval delays the next sync by up to
     // the node timeout; a DB lease would hand over sooner
     pub fn start_gitops_sync(&self) {
         let services = self.clone();
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(SCHEDULE_TICK);
-            // `None` only on the first tick, which is the startup sync
+            // `None` only on the first tick, which is the startup sync; the
+            // interval counts from startup either way
             let mut last = None;
             loop {
                 tick.tick().await;
@@ -401,7 +464,7 @@ impl Services {
                     }
                 };
                 last = Some(Instant::now());
-                if let Err(error) = services.sync_gitops(request).await {
+                if let Err(error) = services.sync_gitops(request, None).await {
                     warn!("GitOps sync: {error}");
                 }
             }
@@ -420,7 +483,8 @@ impl Services {
             .gitops_sync_interval_seconds
             .and_then(i64_seconds_to_duration);
         let request = match (last, interval) {
-            (None, _) => SyncRequest::Startup,
+            (None, _) if parameters.gitops_sync_on_startup => SyncRequest::Startup,
+            (None, _) => return Ok(None),
             (Some(last), Some(interval)) if last.elapsed() >= interval => SyncRequest::Interval,
             _ => return Ok(None),
         };
@@ -473,7 +537,10 @@ mod tests {
     }
 
     async fn run(db: &DatabaseConnection) -> ProviderSync::Model {
-        sync(db, &NoSecrets, SyncRequest::Interval).await.unwrap().0
+        sync(db, &NoSecrets, SyncRequest::Interval, None)
+            .await
+            .unwrap()
+            .0
     }
 
     async fn rows(db: &DatabaseConnection) -> u64 {
@@ -484,7 +551,7 @@ mod tests {
     async fn records_applied_runs_and_extends_unchanged_ones() {
         let db = db().await;
         assert!(matches!(
-            sync(&db, &NoSecrets, SyncRequest::Interval).await,
+            sync(&db, &NoSecrets, SyncRequest::Interval, None).await,
             Err(SyncError::NotConfigured)
         ));
 
@@ -501,13 +568,24 @@ mod tests {
         assert!(unchanged.checked_at >= applied.checked_at);
         assert_eq!(rows(&db).await, 1);
 
+        let admin = SyncRequest::Admin {
+            user_id: Uuid::nil(),
+            force_prune: false,
+        };
+        let (manual, _) = sync(&db, &NoSecrets, admin, None).await.unwrap();
+        assert_ne!(manual.id, applied.id, "another trigger gets its own row");
+        assert_eq!(manual.status, SyncStatus::Unchanged);
+        assert_eq!(rows(&db).await, 2);
+        let (again, _) = sync(&db, &NoSecrets, admin, None).await.unwrap();
+        assert_eq!(again.id, manual.id);
+
         fs::write(dir.path().join("roles.yaml"), "kind: Nope\n").unwrap();
         let failed = run(&db).await;
         assert_eq!(failed.status, SyncStatus::Failed);
         assert!(failed.error.as_deref().unwrap().contains("roles.yaml"));
         let again = run(&db).await;
         assert_eq!(again.id, failed.id, "the same failure extends its row");
-        assert_eq!(rows(&db).await, 2);
+        assert_eq!(rows(&db).await, 3);
     }
 
     #[tokio::test]
@@ -517,7 +595,7 @@ mod tests {
         fs::write(dir.path().join("roles.yaml"), ROLES).unwrap();
         configure(&db, dir.path(), false).await;
 
-        let dry = dry_run(&db, &NoSecrets, SyncRequest::Interval)
+        let dry = dry_run(&db, &NoSecrets, SyncRequest::Interval, None)
             .await
             .unwrap();
         assert!(dry.error.is_none());
@@ -525,6 +603,25 @@ mod tests {
         assert_eq!(actions, [PlanAction::Create, PlanAction::Create]);
         assert_eq!(Role::Entity::find().count(&db).await.unwrap(), 0);
         assert_eq!(rows(&db).await, 0);
+    }
+
+    #[tokio::test]
+    async fn syncs_files_from_the_request_without_a_source() {
+        let db = db().await;
+        let dry = dry_run(&db, &NoSecrets, SyncRequest::Interval, Some(ROLES.into()))
+            .await
+            .unwrap();
+        assert_eq!(dry.source, "request");
+        assert_eq!(dry.plan.unwrap().0.len(), 2);
+
+        let (row, _) = sync(&db, &NoSecrets, SyncRequest::Interval, Some(ROLES.into()))
+            .await
+            .unwrap();
+        assert_eq!(
+            (row.status, row.source.as_str()),
+            (SyncStatus::Applied, "request")
+        );
+        assert_eq!(Role::Entity::find().count(&db).await.unwrap(), 2);
     }
 
     #[tokio::test]
@@ -563,7 +660,7 @@ mod tests {
             user_id: Uuid::nil(),
             force_prune: true,
         };
-        let (forced, _) = sync(&db, &NoSecrets, request).await.unwrap();
+        let (forced, _) = sync(&db, &NoSecrets, request, None).await.unwrap();
         assert_eq!(forced.status, SyncStatus::Applied);
         assert_eq!(Role::Entity::find().count(&db).await.unwrap(), 1);
     }

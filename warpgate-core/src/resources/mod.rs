@@ -1,3 +1,4 @@
+pub mod export;
 pub mod reconcile;
 pub mod roles;
 pub mod ssh_client_keys;
@@ -57,7 +58,7 @@ impl From<ResourceError> for WarpgateError {
 /// edits write as [`Actor::Admin`], so a provider's rows stay read-only
 /// through the API until an admin releases them; a provider writes only
 /// through [`reconcile::apply`], and never overwrites a hand-made row unless
-/// the resource is annotated `warpgate.dev/adopt-existing`.
+/// the resource sets `metadata.adopt_existing`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Actor {
     Admin,
@@ -89,24 +90,34 @@ impl Actor {
 #[must_use]
 pub struct AdmittedSessions(pub Vec<UserSessionId>);
 
-/// Sets a row's owner, changing nothing else. The one write that skips
-/// [`Actor::may_write`]. Each module exposes it as crate-private (only the
-/// reconciler hands a row to a provider, when applying a resource annotated
-/// with `warpgate.dev/adopt-existing`) plus a public `release`, which hands a
-/// row back to manual editing.
-async fn set_owner<E: EntityTrait, C: ConnectionTrait>(
+/// A table whose rows a provider can own
+pub trait OwnedEntity: EntityTrait {
+    const ID: Self::Column;
+    const PROVIDER: Self::Column;
+}
+
+/// Sets a row's owner, changing nothing else: the one write that skips
+/// [`Actor::may_write`]. Only the reconciler hands a row to a provider, when
+/// applying a resource that sets `metadata.adopt_existing`.
+pub(crate) async fn set_owner<E: OwnedEntity, C: ConnectionTrait>(
     db: &C,
-    provider: E::Column,
-    id_column: E::Column,
     id: Uuid,
     owner: Option<ProviderId>,
 ) -> Result<(), ResourceError> {
     E::update_many()
-        .col_expr(provider, Expr::value(owner))
-        .filter(id_column.eq(id))
+        .col_expr(E::PROVIDER, Expr::value(owner))
+        .filter(E::ID.eq(id))
         .exec(db)
         .await?;
     Ok(())
+}
+
+/// Hands a row back to manual editing
+pub async fn release<E: OwnedEntity, C: ConnectionTrait>(
+    db: &C,
+    id: Uuid,
+) -> Result<(), ResourceError> {
+    set_owner::<E, C>(db, id, None).await
 }
 
 const fn check_name(name: &str) -> Result<(), ResourceError> {

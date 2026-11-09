@@ -1,1 +1,0 @@
-tests/fixtures/invalid/annotations.yaml:6:34 metadata.annotations.warpgate.dev/adopt-existing: must be "true" or "false"

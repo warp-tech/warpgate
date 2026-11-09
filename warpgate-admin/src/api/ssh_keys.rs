@@ -11,7 +11,7 @@ use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{AdminPermission, ProviderId, SecretRef, WarpgateError};
 use warpgate_common_http::errors::bad_request;
 use warpgate_core::resources::ssh_client_keys::{self, KeyMaterial, SshClientKeyDataRequest};
-use warpgate_core::resources::{Actor, ResourceError};
+use warpgate_core::resources::{self as resources, Actor, ResourceError};
 use warpgate_db_entities::SshClientKey;
 
 use super::AdminContext;
@@ -283,7 +283,7 @@ impl Api {
         admin.require(AdminPermission::ConfigEdit)?;
 
         let db = &admin.services().db;
-        ssh_client_keys::release(db, id.0).await?;
+        resources::release::<SshClientKey::Entity, _>(db, id.0).await?;
         Ok(
             match SshClientKey::Entity::find_by_id(id.0).one(db).await? {
                 Some(key) => ReleaseSSHClientKeyResponse::Ok(Json(key.into())),

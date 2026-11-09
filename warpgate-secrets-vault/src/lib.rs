@@ -332,7 +332,9 @@ fn renewal_interval(lease: Option<Duration>) -> Duration {
 /// root or non-renewable token) or can't be inspected right now.
 async fn renewable_token_ttl(client: &VaultClient, name: &str) -> Option<Option<Duration>> {
     match vaultrs::token::lookup_self(client).await {
-        Ok(token) if token.renewable && token.ttl > 0 => Some(Some(Duration::from_secs(token.ttl))),
+        Ok(token) if token.renewable == Some(true) && token.ttl > 0 => {
+            Some(Some(Duration::from_secs(token.ttl)))
+        }
         Ok(_) => {
             debug!(name, "Vault token is not renewable; skipping renewal");
             None

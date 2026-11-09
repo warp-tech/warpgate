@@ -13,9 +13,7 @@ use warpgate_common::{
 use warpgate_db_entities::ProviderSync::{PlanAction, PlannedChange, PlannedField, SyncPlan};
 
 use crate::diagnostic::{Path, Segment};
-use crate::types::{
-    ADOPT_EXISTING, Kind, Resource, RoleSpec, SshClientKeySpec, TargetGroupSpec, TargetSpec,
-};
+use crate::types::{Kind, Resource, RoleSpec, SshClientKeySpec, TargetGroupSpec, TargetSpec};
 
 /// A row as it is in the database, with its references by name
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -194,7 +192,8 @@ struct LiveRow<'a> {
 }
 
 pub fn plan(provider: ProviderId, desired: &[Resource], current: &Current, prune: Prune) -> Plan {
-    let canonical = canonical_names(desired);
+    let canonical = canonical_names(desired, current);
+    let ssh_targets = ssh_target_names(desired, current);
     let rows: HashMap<Kind, Vec<LiveRow<'_>>> = [
         (Kind::TargetGroup, live_rows(&current.groups, plain)),
         (Kind::Role, live_rows(&current.roles, plain)),
@@ -216,15 +215,28 @@ pub fn plan(provider: ProviderId, desired: &[Resource], current: &Current, prune
         let kind = Kind::from(resource);
         let name = &resource.metadata().name;
         let candidates = rows.get(&kind).map(Vec::as_slice).unwrap_or_default();
-        let Some(row) = find_row(candidates, name) else {
+        let row = find_row(candidates, name);
+        if let Some(row) = row {
+            matched.insert(row.id);
+        }
+        if let Resource::Target(target) = resource
+            && let Some(reason) = unresolved_reference(&target.spec, &canonical, &ssh_targets)
+        {
+            changes.push(Change::Blocked {
+                kind,
+                name: name.clone(),
+                reason,
+            });
+            continue;
+        }
+        let Some(row) = row else {
             changes.push(Change::Create(resource.clone()));
             continue;
         };
-        matched.insert(row.id);
 
         let adopting = match row.provider {
             Some(owner) if owner == provider => false,
-            None if resource.metadata().adopts_existing() => true,
+            None if resource.metadata().adopt_existing => true,
             owner => {
                 changes.push(Change::Collision {
                     kind,
@@ -273,6 +285,7 @@ pub fn plan(provider: ProviderId, desired: &[Resource], current: &Current, prune
         });
     }
 
+    let referenced = referenced_names(desired, current, &matched, provider);
     let owned: Vec<(Kind, &LiveRow<'_>)> = rows
         .iter()
         .flat_map(|(kind, rows)| rows.iter().map(|row| (*kind, row)))
@@ -288,9 +301,15 @@ pub fn plan(provider: ProviderId, desired: &[Resource], current: &Current, prune
         && (deleting == owned.len() || deleting > (owned.len() / 2).max(1));
     for (kind, row) in orphans {
         let (kind, name, id) = (*kind, row.name.to_owned(), row.id);
-        changes.push(match prune {
-            Prune::Off => Change::WouldPrune { kind, name, id },
-            Prune::On if guard_trips => Change::Blocked {
+        let referenced_by = referenced.get(&(kind, name.to_lowercase()));
+        changes.push(match (prune, referenced_by) {
+            (Prune::Off, _) => Change::WouldPrune { kind, name, id },
+            (_, Some(target)) => Change::Blocked {
+                kind,
+                name,
+                reason: format!("removed from the source, but Target `{target}` still refers to it"),
+            },
+            (Prune::On, None) if guard_trips => Change::Blocked {
                 kind,
                 name,
                 reason: format!(
@@ -298,7 +317,7 @@ pub fn plan(provider: ProviderId, desired: &[Resource], current: &Current, prune
                     owned.len()
                 ),
             },
-            Prune::On | Prune::Force => Change::Delete { kind, name, id },
+            (Prune::On | Prune::Force, None) => Change::Delete { kind, name, id },
         });
     }
 
@@ -343,15 +362,115 @@ fn live_rows<S>(rows: &[Row<S>], compare: impl Fn(&S) -> Compared) -> Vec<LiveRo
         .collect()
 }
 
-/// The names references resolve to, keyed by kind and lowercase name
-fn canonical_names(desired: &[Resource]) -> HashMap<(Kind, String), String> {
-    desired
+/// The names references resolve to, keyed by kind and lowercase name: a
+/// resource in the files, else a row on the server
+fn canonical_names(desired: &[Resource], current: &Current) -> HashMap<(Kind, String), String> {
+    fn names<S>(kind: Kind, rows: &[Row<S>]) -> impl Iterator<Item = (Kind, &str)> {
+        rows.iter().map(move |row| (kind, row.name.as_str()))
+    }
+    let live = names(Kind::TargetGroup, &current.groups)
+        .chain(names(Kind::Role, &current.roles))
+        .chain(names(Kind::SshClientKey, &current.ssh_client_keys))
+        .chain(names(Kind::Target, &current.targets));
+    let files = desired
         .iter()
-        .map(|resource| {
-            let name = &resource.metadata().name;
-            ((Kind::from(resource), name.to_lowercase()), name.clone())
-        })
+        .map(|resource| (Kind::from(resource), resource.metadata().name.as_str()));
+    // Later entries win
+    live.chain(files)
+        .map(|(kind, name)| ((kind, name.to_lowercase()), name.to_owned()))
         .collect()
+}
+
+/// Lowercase names of the SSH targets in the files, or else on the server
+fn ssh_target_names(desired: &[Resource], current: &Current) -> HashSet<String> {
+    let live = current
+        .targets
+        .iter()
+        .map(|row| (row.name.as_str(), &row.live));
+    let files = desired.iter().filter_map(|resource| match resource {
+        Resource::Target(m) => Some((m.metadata.name.as_str(), &m.spec)),
+        _ => None,
+    });
+    let mut names = HashMap::new();
+    for (name, spec) in live.chain(files) {
+        names.insert(
+            name.to_lowercase(),
+            matches!(spec.options, TargetOptions::Ssh(_)),
+        );
+    }
+    names
+        .into_iter()
+        .filter_map(|(name, ssh)| ssh.then_some(name))
+        .collect()
+}
+
+/// What the targets that stay after this plan refer to, keyed by kind and
+/// lowercase name, each with the name of one target referring to it: the
+/// targets in the files, and the live ones no file describes and this
+/// provider doesn't own (the rest are rewritten or pruned by the plan)
+fn referenced_names(
+    desired: &[Resource],
+    current: &Current,
+    matched: &HashSet<Uuid>,
+    provider: ProviderId,
+) -> HashMap<(Kind, String), String> {
+    let files = desired.iter().filter_map(|resource| match resource {
+        Resource::Target(m) => Some((m.metadata.name.as_str(), &m.spec)),
+        _ => None,
+    });
+    let live = current
+        .targets
+        .iter()
+        .filter(|row| !matched.contains(&row.id) && row.provider != Some(provider))
+        .map(|row| (row.name.as_str(), &row.live));
+    let mut referenced = HashMap::new();
+    for (target, spec) in files.chain(live) {
+        for (kind, name) in references_of(spec) {
+            referenced
+                .entry((kind, name.to_lowercase()))
+                .or_insert_with(|| target.to_owned());
+        }
+    }
+    referenced
+}
+
+fn references_of(spec: &TargetSpec) -> impl Iterator<Item = (Kind, &String)> {
+    spec.group
+        .iter()
+        .map(|name| (Kind::TargetGroup, name))
+        .chain(spec.roles.iter().map(|name| (Kind::Role, name)))
+        .chain(
+            spec.references
+                .client_key
+                .iter()
+                .map(|name| (Kind::SshClientKey, name)),
+        )
+        .chain(
+            spec.references
+                .jump_host
+                .iter()
+                .map(|name| (Kind::Target, name)),
+        )
+}
+
+/// Why a target's references can't be resolved, if they can't
+// ponytail: a jump host loop through server-side targets isn't detected here;
+// validate catches loops within the files
+fn unresolved_reference(
+    spec: &TargetSpec,
+    canonical: &HashMap<(Kind, String), String>,
+    ssh_targets: &HashSet<String>,
+) -> Option<String> {
+    for (kind, name) in references_of(spec) {
+        let lowercase = name.to_lowercase();
+        if !canonical.contains_key(&(kind, lowercase.clone())) {
+            return Some(format!("unknown {kind:?} `{name}`"));
+        }
+        if kind == Kind::Target && !ssh_targets.contains(&lowercase) {
+            return Some(format!("jump host `{name}` is not an SSH target"));
+        }
+    }
+    None
 }
 
 fn compare_resource(resource: &Resource, canonical: &HashMap<(Kind, String), String>) -> Compared {
@@ -505,9 +624,7 @@ fn diff(
 
 fn collision_reason(owner: Option<ProviderId>) -> String {
     match owner {
-        None => format!(
-            "created by hand; set the {ADOPT_EXISTING}: \"true\" annotation to take it over"
-        ),
+        None => format!("created by hand; set metadata.adopt_existing to take it over"),
         Some(owner) => format!("managed by {}", owner.label()),
     }
 }
@@ -681,9 +798,7 @@ mod tests {
             Resource::Role(m) => &mut m.metadata,
             Resource::SshClientKey(m) => &mut m.metadata,
         };
-        metadata
-            .annotations
-            .insert(ADOPT_EXISTING.into(), "true".into());
+        metadata.adopt_existing = true;
         resource
     }
 
@@ -929,19 +1044,6 @@ mod tests {
 
     #[test]
     fn prunes_only_its_own_rows() {
-        let (old, mine, theirs) = (role("old"), role("mine"), role("theirs"));
-        let live = current(&[
-            (&old, Some(GITOPS)),
-            (&mine, None),
-            (&theirs, Some(ProviderId(Uuid::new_v4()))),
-        ]);
-        let plan = plan(GITOPS, &[], &live, Prune::Off);
-        assert_eq!(summary(&plan), ["would_prune Role old"]);
-        assert!(!plan.has_pending());
-    }
-
-    #[test]
-    fn prune_deletes_only_its_own_rows() {
         let (kept, gone, mine, theirs) = (role("kept"), role("gone"), role("mine"), role("theirs"));
         let live = current(&[
             (&kept, Some(GITOPS)),
@@ -949,10 +1051,21 @@ mod tests {
             (&mine, None),
             (&theirs, Some(ProviderId(Uuid::new_v4()))),
         ]);
-        let plan = plan(GITOPS, &[kept], &live, Prune::On);
-        assert_eq!(summary(&plan), ["delete Role gone", "unchanged Role kept"]);
-        assert!(plan.has_pending());
-        assert!(!plan.has_errors());
+
+        let kept_only = plan(GITOPS, &[kept.clone()], &live, Prune::Off);
+        assert_eq!(
+            summary(&kept_only),
+            ["would_prune Role gone", "unchanged Role kept"]
+        );
+        assert!(!kept_only.has_pending());
+
+        let pruned = plan(GITOPS, &[kept], &live, Prune::On);
+        assert_eq!(
+            summary(&pruned),
+            ["delete Role gone", "unchanged Role kept"]
+        );
+        assert!(pruned.has_pending());
+        assert!(!pruned.has_errors());
     }
 
     #[test]
@@ -993,6 +1106,89 @@ mod tests {
     }
 
     #[test]
+    fn rows_still_referred_to_are_never_pruned() {
+        let (dba, ops) = (role("dba"), role("ops"));
+        let bastion = ssh("bastion", 22, &[]);
+        let managed = manifest(
+            "Target",
+            "app",
+            json!({"roles": ["dba"], "options": {"ssh": {"host": "h", "jump_host": "bastion"}}}),
+        );
+        let hand_made = ssh("legacy", 22, &["ops"]);
+        let live = current(&[
+            (&dba, Some(GITOPS)),
+            (&ops, Some(GITOPS)),
+            (&bastion, Some(GITOPS)),
+            (&managed, Some(GITOPS)),
+            (&hand_made, None),
+        ]);
+
+        // dba and bastion are gone from the files but `app` still uses them;
+        // ops is gone but a hand-made target still grants it
+        let forced = plan(GITOPS, &[managed], &live, Prune::Force);
+        assert_eq!(
+            summary(&forced),
+            [
+                "blocked Role dba",
+                "blocked Role ops",
+                "unchanged Target app",
+                "blocked Target bastion",
+            ]
+        );
+        assert!(format_errors(&forced).contains("Target `app` still refers to it"));
+        assert!(format_errors(&forced).contains("Target `legacy` still refers to it"));
+
+        // Dropping the references along with the rows is fine
+        let dropped = plan(GITOPS, &[ssh("app", 22, &[])], &live, Prune::Force);
+        assert_eq!(
+            summary(&dropped),
+            [
+                "delete Role dba",
+                "blocked Role ops",
+                "update Target app",
+                "delete Target bastion",
+            ]
+        );
+    }
+
+    #[test]
+    fn references_resolve_to_files_or_server_rows() {
+        let hand_made = role("Ops");
+        let bastion = ssh("bastion", 22, &[]);
+        let web = manifest(
+            "Target",
+            "web",
+            json!({"options": {"http": {"url": "https://web"}}}),
+        );
+        let live = current(&[(&hand_made, None), (&bastion, None), (&web, None)]);
+        let target = |roles: &[&str], jump: &str| {
+            manifest(
+                "Target",
+                "app",
+                json!({"roles": roles, "options": {"ssh": {"host": "h", "jump_host": jump}}}),
+            )
+        };
+
+        let resolved = plan(
+            GITOPS,
+            &[role("dba"), target(&["dba", "ops"], "Bastion")],
+            &live,
+            Prune::Off,
+        );
+        assert!(!resolved.has_errors(), "{resolved:?}");
+
+        let unknown = plan(GITOPS, &[target(&["dev"], "bastion")], &live, Prune::Off);
+        assert_eq!(summary(&unknown), ["blocked Target app"]);
+        assert_eq!(
+            format_errors(&unknown),
+            "blocked Target app: unknown Role `dev`\n"
+        );
+
+        let not_ssh = plan(GITOPS, &[target(&[], "web")], &live, Prune::Off);
+        assert!(format_errors(&not_ssh).contains("jump host `web` is not an SSH target"));
+    }
+
+    #[test]
     fn a_protocol_change_is_blocked() {
         let before = ssh("web", 22, &[]);
         let live = current(&[(&before, Some(GITOPS))]);
@@ -1023,7 +1219,7 @@ mod tests {
         );
         assert_eq!(
             format_plan(&plan),
-            "collision Role legacy: created by hand; set the warpgate.dev/adopt-existing: \"true\" annotation to take it over\n\
+            "collision Role legacy: created by hand; set metadata.adopt_existing to take it over\n\
              create Role new\n\
              update Target web\n    \
                  spec.options.ssh.port: 22 -> 2222\n\
