@@ -1,9 +1,34 @@
-import type { BootstrapThemeColor } from 'gateway/lib/api'
+import { router } from 'svelte-spa-router'
 
-export function getCSSColorFromThemeColor(color?: BootstrapThemeColor): string {
-    // Handle capitalized color names from API (e.g., "Primary" -> "primary")
-    const colorLower = (color ?? 'Secondary').toLowerCase()
-    return `var(--bs-${colorLower});`
+/**
+ * Query parameters of the current hash route, e.g. `#/foo?a=b`.
+ * Read once at component init - svelte-spa-router keeps the component
+ * mounted when only the querystring changes.
+ */
+export function routeQueryParams(): URLSearchParams {
+    return new URLSearchParams(router.querystring ?? '')
+}
+
+/**
+ * Navigate to a URL that originates outside Warpgate - currently the
+ * `authorization_endpoint` / `end_session_endpoint` an OIDC provider
+ * advertises in its discovery document.
+ *
+ * Assigning e.g. a `javascript:` URL to `location.href` runs it on our own
+ * origin, so only http(s) is allowed through. The backend rejects such
+ * endpoints at discovery time; this is the second line of defence.
+ */
+export function navigateToExternalUrl(url: string): void {
+    let parsed: URL
+    try {
+        parsed = new URL(url, location.href)
+    } catch {
+        throw new Error(`Refusing to navigate to a malformed URL: ${url}`)
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error(`Refusing to navigate to a non-HTTP URL: ${url}`)
+    }
+    location.href = url
 }
 
 export function downloadBlob(content: string, filename: string): void {
@@ -55,8 +80,29 @@ export const classnames = (...args: ClassValue[]): string =>
 
 export function uuid(): string {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-        const r = (Math.random() * 16) | 0
+        const r = Math.trunc(Math.random() * 16)
         const v = c === 'x' ? r : (r & 0x3) | 0x8
         return v.toString(16)
     })
+}
+
+export function logoUrl(etag: string): string {
+    return `/@warpgate/api/logo?v=${encodeURIComponent(etag)}`
+}
+
+export async function preloadImage(url: string): Promise<void> {
+    const image = new Image()
+    image.src = url
+    await Promise.race([
+        image.decode().catch(() => undefined),
+        new Promise(resolve => setTimeout(resolve, 1000)),
+    ])
+}
+
+/**
+ * match the `datetime-local` input format
+ */
+export function toLocalISO(date: Date): string {
+    const tzOffset = date.getTimezoneOffset() * 60000
+    return new Date(date.getTime() - tzOffset).toISOString().slice(0, -5)
 }

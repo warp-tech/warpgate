@@ -11,10 +11,12 @@ use warpgate_common::{
     AdminPermission, AdminRole as AdminRoleConfig, User as UserConfig,
     UserRequireCredentialsPolicy, WarpgateError,
 };
+use warpgate_common_http::errors::{bad_request, invalid_field};
+use warpgate_core::SessionsFilter;
 use warpgate_core::logging::{AuditEvent, format_related_ids};
 use warpgate_db_entities::{AdminRole, Role, User, UserAdminRoleAssignment, UserRoleAssignment};
 
-use super::AdminContext;
+use super::{AdminContext, guard_user_mutation};
 use crate::api::common::case_insensitive_search;
 
 #[derive(Object)]
@@ -85,7 +87,10 @@ impl ListApi {
         admin.require(AdminPermission::UsersCreate)?;
 
         if body.username.is_empty() {
-            return Ok(CreateUserResponse::BadRequest(Json("name".into())));
+            return Ok(CreateUserResponse::BadRequest(invalid_field(
+                "name",
+                "username is empty",
+            )));
         }
 
         let db = &admin.services().db;
@@ -94,16 +99,18 @@ impl ListApi {
         // existing one only by case is the same account. Rejected here to give a
         // field-level error rather than a bare unique-constraint failure.
         if username_taken(db, &body.username, None).await? {
-            return Ok(CreateUserResponse::BadRequest(Json("username".into())));
+            return Ok(CreateUserResponse::BadRequest(invalid_field(
+                "username",
+                "a user with this username already exists",
+            )));
         }
 
         let values = User::ActiveModel {
             id: Set(Uuid::new_v4()),
             username: Set(body.username.clone()),
-            credential_policy: Set(
-                serde_json::to_value(UserRequireCredentialsPolicy::default())
-                    .map_err(WarpgateError::from)?,
-            ),
+            credential_policy: Set(serde_json::to_value(
+                admin.parameters().await?.default_credential_policy()?,
+            )?),
             description: Set(body.description.clone().unwrap_or_default()),
             rate_limit_bytes_per_second: Set(None),
             ldap_server_id: Set(None),
@@ -112,29 +119,38 @@ impl ListApi {
         };
 
         let user = values.insert(db).await.map_err(WarpgateError::from)?;
-        let default_roles = Role::Entity::grant_default_roles(db, user.id).await?;
-
-        AuditEvent::UserCreated {
-            user_id: user.id,
-            username: user.username.clone(),
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
-
-        for role in default_roles {
-            AuditEvent::AccessRoleGranted {
-                grantee_id: user.id,
-                grantee_username: user.username.clone(),
-                role_id: role.id,
-                role_name: role.name,
-                actor_user_id: admin.auth.user_id(),
-                related_access_roles: format_related_ids(&[role.id]),
-            }
-            .emit();
-        }
+        on_user_created(db, &user, admin.auth.user_id()).await?;
 
         Ok(CreateUserResponse::Created(Json(user.try_into()?)))
     }
+}
+
+pub(crate) async fn on_user_created(
+    db: &sea_orm::DatabaseConnection,
+    user: &User::Model,
+    actor_user_id: Uuid,
+) -> Result<(), WarpgateError> {
+    let default_roles = Role::Entity::grant_default_roles(db, user.id).await?;
+
+    AuditEvent::UserCreated {
+        user_id: user.id,
+        username: user.username.clone(),
+        actor_user_id,
+    }
+    .emit();
+
+    for role in default_roles {
+        AuditEvent::AccessRoleGranted {
+            grantee_id: user.id,
+            grantee_username: user.username.clone(),
+            role_id: role.id,
+            role_name: role.name,
+            actor_user_id,
+            related_access_roles: format_related_ids(&[role.id]),
+        }
+        .emit();
+    }
+    Ok(())
 }
 
 #[derive(ApiResponse)]
@@ -225,7 +241,12 @@ impl DetailApi {
         Ok(GetUserResponse::Ok(Json(user.try_into()?)))
     }
 
-    #[oai(path = "/users/:id", method = "put", operation_id = "update_user")]
+    #[oai(
+        path = "/users/:id",
+        method = "put",
+        operation_id = "update_user",
+        transform = "guard_user_mutation"
+    )]
     async fn api_update_user(
         &self,
         admin: AdminContext,
@@ -241,13 +262,36 @@ impl DetailApi {
         };
 
         if body.username.is_empty() {
-            return Ok(UpdateUserResponse::BadRequest(Json("username".into())));
+            return Ok(UpdateUserResponse::BadRequest(invalid_field(
+                "username",
+                "username is empty",
+            )));
         }
 
         // Excludes this account, so re-casing or keeping one's own name is fine.
         if username_taken(db, &body.username, Some(user.id)).await? {
-            return Ok(UpdateUserResponse::BadRequest(Json("username".into())));
+            return Ok(UpdateUserResponse::BadRequest(invalid_field(
+                "username",
+                "another user already has this username",
+            )));
         }
+
+        let allowed_ip_ranges = match body.allowed_ip_ranges.clone() {
+            Some(ranges) => match User::parse_allowed_ip_ranges(ranges) {
+                Ok(ranges) => {
+                    serde_json::to_value(ranges.iter().map(ToString::to_string).collect::<Vec<_>>())
+                        .map_err(WarpgateError::from)?
+                }
+                Err(WarpgateError::InvalidNetworkAddress(range)) => {
+                    return Ok(UpdateUserResponse::BadRequest(invalid_field(
+                        "allowed_ip_ranges",
+                        &format!("not a valid IP network: {range}"),
+                    )));
+                }
+                Err(error) => return Err(error),
+            },
+            None => serde_json::Value::Null,
+        };
 
         let mut model: User::ActiveModel = user.into();
 
@@ -257,11 +301,7 @@ impl DetailApi {
             Set(serde_json::to_value(body.credential_policy.clone())
                 .map_err(WarpgateError::from)?);
         model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(i64::from));
-        model.allowed_ip_ranges = Set(match body.allowed_ip_ranges.clone() {
-            Some(ranges) => serde_json::to_value(ranges.into_iter().collect::<Vec<_>>())
-                .map_err(WarpgateError::from)?,
-            None => serde_json::Value::Null,
-        });
+        model.allowed_ip_ranges = Set(allowed_ip_ranges);
         let user = model.update(db).await?;
 
         warpgate_core::rate_limiting::apply_new_rate_limits(
@@ -273,7 +313,12 @@ impl DetailApi {
         Ok(UpdateUserResponse::Ok(Json(user.try_into()?)))
     }
 
-    #[oai(path = "/users/:id", method = "delete", operation_id = "delete_user")]
+    #[oai(
+        path = "/users/:id",
+        method = "delete",
+        operation_id = "delete_user",
+        transform = "guard_user_mutation"
+    )]
     async fn api_delete_user(
         &self,
         admin: AdminContext,
@@ -286,6 +331,11 @@ impl DetailApi {
         let Some(user) = User::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(DeleteUserResponse::NotFound);
         };
+
+        admin
+            .services()
+            .close_sessions(SessionsFilter::User { user_id: user.id })
+            .await?;
 
         UserRoleAssignment::Entity::delete_many()
             .filter(UserRoleAssignment::Column::UserId.eq(user.id))
@@ -312,7 +362,8 @@ impl DetailApi {
     #[oai(
         path = "/users/:id/ldap-link/unlink",
         method = "post",
-        operation_id = "unlink_user_from_ldap"
+        operation_id = "unlink_user_from_ldap",
+        transform = "guard_user_mutation"
     )]
     async fn api_unlink_user_from_ldap(
         &self,
@@ -328,8 +379,8 @@ impl DetailApi {
         };
 
         if user.ldap_server_id.is_none() {
-            return Ok(UnlinkUserFromLdapResponse::BadRequest(Json(
-                "User is not linked to LDAP".to_string(),
+            return Ok(UnlinkUserFromLdapResponse::BadRequest(bad_request(
+                "User is not linked to LDAP",
             )));
         }
 
@@ -344,7 +395,8 @@ impl DetailApi {
     #[oai(
         path = "/users/:id/ldap-link/auto-link",
         method = "post",
-        operation_id = "auto_link_user_to_ldap"
+        operation_id = "auto_link_user_to_ldap",
+        transform = "guard_user_mutation"
     )]
     async fn api_auto_link_user_to_ldap(
         &self,
@@ -362,8 +414,8 @@ impl DetailApi {
         };
 
         if user.ldap_server_id.is_some() {
-            return Ok(AutoLinkUserToLdapResponse::BadRequest(Json(
-                "User is already linked to LDAP".to_string(),
+            return Ok(AutoLinkUserToLdapResponse::BadRequest(bad_request(
+                "User is already linked to LDAP",
             )));
         }
 
@@ -373,8 +425,8 @@ impl DetailApi {
             .await?;
 
         if ldap_servers.is_empty() {
-            return Ok(AutoLinkUserToLdapResponse::BadRequest(Json(
-                "No enabled LDAP servers configured".to_string(),
+            return Ok(AutoLinkUserToLdapResponse::BadRequest(bad_request(
+                "No enabled LDAP servers configured",
             )));
         }
 
@@ -399,9 +451,9 @@ impl DetailApi {
         }
 
         if ldap_server_id.is_none() {
-            return Ok(AutoLinkUserToLdapResponse::BadRequest(Json(format!(
-                "No LDAP user found with username: {username}",
-            ))));
+            return Ok(AutoLinkUserToLdapResponse::BadRequest(bad_request(
+                format!("No LDAP user found with username: {username}",),
+            )));
         }
 
         let mut model: User::ActiveModel = user.into();
@@ -605,7 +657,8 @@ impl RolesApi {
     #[oai(
         path = "/users/:id/roles/:role_id",
         method = "post",
-        operation_id = "add_user_role"
+        operation_id = "add_user_role",
+        transform = "guard_user_mutation"
     )]
     async fn api_add_user_role(
         &self,
@@ -649,7 +702,8 @@ impl RolesApi {
     #[oai(
         path = "/users/:id/roles/:role_id",
         method = "delete",
-        operation_id = "delete_user_role"
+        operation_id = "delete_user_role",
+        transform = "guard_user_mutation"
     )]
     async fn api_delete_user_role(
         &self,
@@ -694,13 +748,20 @@ impl RolesApi {
         }
         .emit();
 
+        // Sessions this role admitted end now rather than at the next sweep.
+        admin
+            .services()
+            .close_sessions_without_role_access()
+            .await?;
+
         Ok(DeleteUserRoleResponse::Deleted)
     }
 
     #[oai(
         path = "/users/:id/roles/:role_id",
         method = "put",
-        operation_id = "update_user_role"
+        operation_id = "update_user_role",
+        transform = "guard_user_mutation"
     )]
     async fn api_update_user_role(
         &self,
@@ -709,6 +770,8 @@ impl RolesApi {
         role_id: Path<Uuid>,
         body: Json<UpdateUserRoleRequest>,
     ) -> Result<UpdateUserRoleResponse, WarpgateError> {
+        admin.require(AdminPermission::AccessRolesAssign)?;
+
         let db = &admin.services().db;
 
         let Some(role) = Role::Entity::find_by_id(role_id.0).one(db).await? else {
@@ -765,7 +828,8 @@ impl RolesApi {
     #[oai(
         path = "/users/:id/admin-roles/:role_id",
         method = "post",
-        operation_id = "add_user_admin_role"
+        operation_id = "add_user_admin_role",
+        transform = "guard_user_mutation"
     )]
     async fn api_add_user_admin_role(
         &self,
@@ -801,7 +865,6 @@ impl RolesApi {
         let values = warpgate_db_entities::UserAdminRoleAssignment::ActiveModel {
             user_id: Set(id.0),
             admin_role_id: Set(role_id.0),
-            ..Default::default()
         };
 
         values.insert(db).await.map_err(WarpgateError::from)?;
@@ -822,7 +885,8 @@ impl RolesApi {
     #[oai(
         path = "/users/:id/admin-roles/:role_id",
         method = "delete",
-        operation_id = "delete_user_admin_role"
+        operation_id = "delete_user_admin_role",
+        transform = "guard_user_mutation"
     )]
     async fn api_delete_user_admin_role(
         &self,

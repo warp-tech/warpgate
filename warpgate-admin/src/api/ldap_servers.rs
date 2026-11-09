@@ -6,7 +6,8 @@ use sea_orm::{
 };
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, Secret, WarpgateError};
-use warpgate_db_entities::LdapServer;
+use warpgate_common_http::errors::bad_request;
+use warpgate_db_entities::{LdapServer, Parameters};
 use warpgate_ldap::LdapUsernameAttribute;
 use warpgate_tls::TlsMode;
 
@@ -51,6 +52,7 @@ impl ImportApi {
         }
 
         let db = &admin.services().db;
+        let parameters = Parameters::Entity::get(db).await?;
         let Some(server) = LdapServer::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(ImportLdapUsersResponse::NotFound);
         };
@@ -70,7 +72,7 @@ impl ImportApi {
                         id: Set(Uuid::new_v4()),
                         username: Set(user.username.clone()),
                         credential_policy: Set(serde_json::to_value(
-                            warpgate_common::UserRequireCredentialsPolicy::default(),
+                            parameters.default_credential_policy()?,
                         )?),
                         description: Set(user.display_name.clone().unwrap_or_default()),
                         rate_limit_bytes_per_second: Set(None),
@@ -78,7 +80,8 @@ impl ImportApi {
                         ldap_server_id: Set(Some(server.id)),
                         allowed_ip_ranges: Set(serde_json::Value::Null),
                     };
-                    values.insert(db).await?;
+                    let created = values.insert(db).await?;
+                    super::users::on_user_created(db, &created, admin.auth.user_id()).await?;
                     imported.push(user.username.clone());
                 }
             }
@@ -322,8 +325,8 @@ impl ListApi {
         admin.require(AdminPermission::ConfigEdit)?;
 
         if body.name.is_empty() {
-            return Ok(CreateLdapServerResponse::BadRequest(Json(
-                "Name cannot be empty".into(),
+            return Ok(CreateLdapServerResponse::BadRequest(bad_request(
+                "Name cannot be empty",
             )));
         }
 
@@ -442,7 +445,7 @@ impl ListApi {
                 Err(e) => Ok(TestLdapServerConnectionResponse::Ok(Json(
                     TestLdapServerResponse {
                         success: false,
-                        message: format!("Connection failed: {e}"),
+                        message: format!("Connection failed: {e:#}"),
                         base_dns: None,
                     },
                 ))),
@@ -651,7 +654,7 @@ impl QueryApi {
         let users = match warpgate_ldap::list_users(&ldap_config).await {
             Ok(users) => users,
             Err(e) => {
-                return Ok(GetLdapUsersResponse::BadRequest(Json(format!(
+                return Ok(GetLdapUsersResponse::BadRequest(bad_request(format!(
                     "Failed to query users: {e}"
                 ))));
             }

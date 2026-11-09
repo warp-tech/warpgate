@@ -102,6 +102,9 @@ pub struct SsoProviderConfig {
     /// kubectl OIDC parameters for generating a kubelogin kubeconfig.
     #[serde(default)]
     pub kubernetes: Option<SsoProviderKubernetesConfig>,
+    /// Disables "log out from Warpgate" functionality when the provider supports single logout
+    #[serde(default)]
+    pub disable_local_logout: bool,
 }
 
 impl SsoProviderConfig {

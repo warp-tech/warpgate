@@ -1,15 +1,8 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use tokio::sync::Mutex;
-use url::Url;
-use warpgate_common::SessionId;
+use warpgate_common::TargetSessionId;
 use warpgate_core::recordings::{
     NDJsonRecordingWriter, Recorder, RecordingWriterOpener, SessionRecordings, TerminalRecorder,
 };
@@ -82,90 +75,40 @@ pub enum SessionRecordingMetadata {
     Exec {
         namespace: String,
         pod: String,
-        container: String,
-        command: String,
+        /// Absent when the client named no container (kubectl omits it for
+        /// single-container pods and lets the API server choose).
+        container: Option<String>,
+        /// Full argv. `kubectl exec pod -- ls -la` sends one `command=` query
+        /// parameter per element, and every one of them belongs here.
+        command: Vec<String>,
     },
     #[serde(rename = "kubernetes-attach")]
     Attach {
         namespace: String,
         pod: String,
-        container: String,
+        container: Option<String>,
     },
 }
 
-/// Monotonic sequence giving every API request its own recording name.
-///
-/// `SessionRecordings::start` keys a recording by (session_id, name, kind) and
-/// reuses the existing writer for a repeated name — so a fixed name would open
-/// two `data.ndjson` writers on the same folder for concurrent requests and let
-/// them clobber each other. A process-wide counter is monotonic (never random
-/// or time-based) and is unique within any single session, which is all that is
-/// required to keep each request's recording separate.
-static API_RECORDING_SEQ: AtomicU64 = AtomicU64::new(0);
-
 pub async fn start_recording_api(
-    session_id: &SessionId,
-    recordings: &Arc<Mutex<SessionRecordings>>,
-) -> anyhow::Result<KubernetesRecorder> {
-    let seq = API_RECORDING_SEQ.fetch_add(1, Ordering::Relaxed);
-    let recordings = recordings.lock().await;
+    target_session_id: &TargetSessionId,
+    recordings: &SessionRecordings,
+) -> anyhow::Result<Option<KubernetesRecorder>> {
+    // No name: `start` reuses the writer for a repeated name, so concurrent
+    // requests, possibly on different nodes, would write to the same folder.
     recordings
-        .start::<KubernetesRecorder, _>(
-            session_id,
-            Some(format!("api-{seq}")),
-            SessionRecordingMetadata::Api,
-        )
+        .start::<KubernetesRecorder, _>(target_session_id, None, SessionRecordingMetadata::Api)
         .await
         .context("starting recording")
 }
 
 pub async fn start_recording_exec(
-    session_id: &SessionId,
-    recordings: &Arc<Mutex<SessionRecordings>>,
+    target_session_id: &TargetSessionId,
+    recordings: &SessionRecordings,
     metadata: SessionRecordingMetadata,
-) -> anyhow::Result<TerminalRecorder> {
-    let recordings = recordings.lock().await;
+) -> anyhow::Result<Option<TerminalRecorder>> {
     recordings
-        .start::<TerminalRecorder, _>(session_id, None, metadata)
+        .start::<TerminalRecorder, _>(target_session_id, None, metadata)
         .await
         .context("starting recording")
-}
-
-pub fn deduce_exec_recording_metadata(target_url: &Url) -> Option<SessionRecordingMetadata> {
-    let path = target_url.path();
-    #[allow(clippy::unwrap_used, reason = "static regex")]
-    let exec_url_regex =
-        Regex::new(r"^/api/v1/namespaces/([^/]+)/pods/([^/]+)/(exec|attach)$").unwrap();
-    if let Some(captures) = exec_url_regex.captures(path) {
-        let namespace = captures.get(1).map_or("unknown", |m| m.as_str()).into();
-        let pod = captures.get(2).map_or("unknown", |m| m.as_str()).into();
-        let operation = captures.get(3).map_or("unknown", |m| m.as_str());
-        let query = target_url.query().unwrap_or_default();
-        let parsed_query: HashMap<_, _> = url::form_urlencoded::parse(query.as_bytes()).collect();
-        let command = parsed_query
-            .get("command")
-            .cloned()
-            .unwrap_or_else(|| "unknown".into())
-            .into();
-        let container = parsed_query
-            .get("container")
-            .cloned()
-            .unwrap_or_else(|| "unknown".into())
-            .into();
-        return match operation {
-            "exec" => Some(SessionRecordingMetadata::Exec {
-                namespace,
-                pod,
-                container,
-                command,
-            }),
-            "attach" => Some(SessionRecordingMetadata::Attach {
-                namespace,
-                pod,
-                container,
-            }),
-            _ => None,
-        };
-    }
-    None
 }

@@ -5,6 +5,7 @@
     import { stringifyError } from 'common/errors'
     import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import { setCurrentSidebarSubtitle } from 'common/sidebarState.svelte'
     import * as rx from 'rxjs'
     import { link, replace } from 'svelte-spa-router'
     import {
@@ -22,6 +23,7 @@
 
     let error: string | null = $state(null)
     let role: AdminRole | undefined = $state()
+    setCurrentSidebarSubtitle(() => role?.name)
     const initPromise = init()
 
     let disabled = $state(false)
@@ -137,7 +139,7 @@
         if (!role) return
         if (confirm(`Delete admin role ${role.name}?`)) {
             await api.deleteAdminRole(role)
-            replace('/config/admin-roles')
+            replace('/manage/admin-roles')
         }
     }
 </script>
@@ -173,22 +175,33 @@
                                     bind:checked={role[key]}
                                     {disabled}
                                     onchange={e => {
-                                const checked = (e.target as HTMLInputElement).checked
-                                if (checked) {
-                                    enablePermissionDependenciesRecursive(role, key)
-                                } else {
-                                    disablePermissionDependantsRecursive(role, key)
-                                }
-                            }}
+                                        const checked = (
+                                            e.target as HTMLInputElement
+                                        ).checked
+                                        if (checked) {
+                                            enablePermissionDependenciesRecursive(
+                                                role,
+                                                key,
+                                            )
+                                        } else {
+                                            disablePermissionDependantsRecursive(
+                                                role,
+                                                key,
+                                            )
+                                        }
+                                    }}
                                 >
                                 <span class="form-check-label">
                                     {label}
-                                    {#if ADMIN_PERMISSIONS.find(p=>p.key===key)?.dangerous}
+                                    {#if ADMIN_PERMISSIONS.find(
+                                        p => p.key === key,
+                                    )?.dangerous}
                                         <span
                                             id="warn-{key}"
                                             class="text-warning ms-1"
-                                            >⚠️</span
                                         >
+                                            ⚠️
+                                        </span>
                                         <Tooltip
                                             target="warn-{key}"
                                             animation
@@ -222,16 +235,18 @@
                     {disabled}
                     class="ms-auto"
                     click={update}
-                    >Update</AsyncButton
                 >
+                    Update
+                </AsyncButton>
 
                 <AsyncButton
                     class="ms-2"
                     {disabled}
                     color="danger"
                     click={remove}
-                    >Remove</AsyncButton
                 >
+                    Remove
+                </AsyncButton>
             </div>
 
             <h4 class="mt-4">Assigned users</h4>
@@ -239,7 +254,7 @@
                 {#snippet item(user)}
                     <a
                         class="list-group-item list-group-item-action"
-                        href="/config/users/{user.id}"
+                        href="/manage/users/{user.id}"
                         use:link
                     >
                         <div>
@@ -255,9 +270,9 @@
                     </a>
                 {/snippet}
                 {#snippet empty()}
-                    <Alert color="info"
-                        >This admin role has no users assigned to it</Alert
-                    >
+                    <Alert color="info">
+                        This admin role has no users assigned to it
+                    </Alert>
                 {/snippet}
             </ItemList>
         {/snippet}

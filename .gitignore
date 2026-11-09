@@ -34,4 +34,9 @@ cdx.xml
 node_modules
 
 .github
-*.md
+!/.github/workflows
+/*.md
+.env
+
+rustc-ice-*.txt
+.zed

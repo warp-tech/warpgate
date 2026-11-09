@@ -29,6 +29,17 @@ pub enum Input {
         width: u16,
         height: u16,
     },
+    /// The target's cursor shape: BGRA pixels, top row first, with the hotspot inside them.
+    Cursor {
+        hotspot_x: u16,
+        hotspot_y: u16,
+        width: u16,
+        height: u16,
+        data: Bytes,
+    },
+    CursorDefault,
+    CursorHidden,
+    Clipboard(String),
     Shutdown,
 }
 
@@ -51,6 +62,13 @@ pub enum Event {
     /// completes, and again after every renegotiation, so Warpgate can paint and dial
     /// the target at the size the viewer is actually showing.
     Size {
+        width: u16,
+        height: u16,
+    },
+    /// The viewer requested a dynamic desktop resize over the Display Control channel.
+    /// This is distinct from [`Self::Size`]: it is a request to resize the target, not a
+    /// signal that Warpgate should start painting at the new size.
+    ResizeRequest {
         width: u16,
         height: u16,
     },

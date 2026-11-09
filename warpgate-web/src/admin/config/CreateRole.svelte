@@ -16,7 +16,7 @@
                     isDefault: false,
                 },
             })
-            replace(`/config/access-roles/${role.id}`)
+            replace(`/manage/access-roles/${role.id}`)
         } catch (err) {
             error = await stringifyError(err)
         }
@@ -44,9 +44,9 @@
                 >
             </FormGroup>
 
-            <AsyncButton color="primary" click={create}
-                >Create role</AsyncButton
-            >
+            <AsyncButton color="primary" click={create}>
+                Create role
+            </AsyncButton>
         </Form>
     </div>
 </div>

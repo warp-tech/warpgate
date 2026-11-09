@@ -1,0 +1,3 @@
+{{- with .Values.setup.type }}
+WARNING: setup.type ({{ . }}) is deprecated and ignored: setup runs in an init container on every pod start. Remove the value.
+{{- end }}

@@ -1,13 +1,14 @@
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
+use sea_orm::prelude::Expr;
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
 use warpgate_db_entities::LogEntry;
 
 use super::AdminContext;
-use crate::api::common::case_insensitive_search;
+use crate::api::common::{case_insensitive_search_expr, json_as_text};
 
 pub struct Api;
 
@@ -81,12 +82,13 @@ impl Api {
         if let Some(ref search) = body.search
             && !search.is_empty()
         {
-            q = q.filter(case_insensitive_search(
+            q = q.filter(case_insensitive_search_expr(
                 search,
                 [
-                    LogEntry::Column::Text,
-                    LogEntry::Column::Username,
-                    LogEntry::Column::Values,
+                    Expr::col(LogEntry::Column::Text).into(),
+                    Expr::col(LogEntry::Column::Username).into(),
+                    // `values` is a JSON column and needs an explicit cast on Postgres
+                    json_as_text(db.get_database_backend(), LogEntry::Column::Values),
                 ],
             ));
         }

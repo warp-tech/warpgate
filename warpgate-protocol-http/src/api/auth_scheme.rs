@@ -3,6 +3,7 @@ use poem_openapi::SecurityScheme;
 use poem_openapi::auth::ApiKey;
 use warpgate_common_http::AuthenticatedRequestContext;
 
+#[allow(clippy::unused_async)]
 async fn authenticated_context(req: &Request, _key: ApiKey) -> Option<AuthenticatedRequestContext> {
     req.data::<AuthenticatedRequestContext>().cloned()
 }
@@ -15,7 +16,7 @@ async fn authenticated_context(req: &Request, _key: ApiKey) -> Option<Authentica
     key_in = "header",
     checker = "authenticated_context"
 )]
-pub(crate) struct TokenAuth(AuthenticatedRequestContext);
+pub struct TokenAuth(AuthenticatedRequestContext);
 
 #[derive(SecurityScheme)]
 #[oai(
@@ -25,20 +26,38 @@ pub(crate) struct TokenAuth(AuthenticatedRequestContext);
     key_in = "cookie",
     checker = "authenticated_context"
 )]
-pub(crate) struct CookieAuth(AuthenticatedRequestContext);
+pub struct CookieAuth(AuthenticatedRequestContext);
+
+/// Requests forwarded by a cluster peer are authenticated by the peer's TLS
+/// client certificate at the listener (plus the forwarded user identity
+/// resolved into the request authorization — see
+/// `cluster_request_authorization`). The node id header only lets this scheme
+/// fire: the checker reads the context that `inject_request_authorization`
+/// attaches, so a header alone never authenticates.
+#[derive(SecurityScheme)]
+#[oai(
+    rename = "ClusterSecurityScheme",
+    ty = "api_key",
+    key_name = "x-warpgate-cluster-node",
+    key_in = "header",
+    checker = "authenticated_context"
+)]
+pub struct ClusterAuth(AuthenticatedRequestContext);
 
 /// Auth gate - both a check and a AuthenticatedRequestContext extractor at once
 #[derive(SecurityScheme)]
-pub(crate) enum AuthedSession {
+pub enum AuthedSession {
     Token(TokenAuth),
     Cookie(CookieAuth),
+    Cluster(ClusterAuth),
 }
 
 impl AuthedSession {
-    pub fn ctx(&self) -> &AuthenticatedRequestContext {
+    pub const fn ctx(&self) -> &AuthenticatedRequestContext {
         match self {
             Self::Token(t) => &t.0,
             Self::Cookie(c) => &c.0,
+            Self::Cluster(c) => &c.0,
         }
     }
 }
@@ -90,6 +109,16 @@ mod tests {
     #[tokio::test]
     async fn rejects_request_with_no_credentials() {
         let resp = client().get("/guarded").send().await;
+        resp.assert_status(http::StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn rejects_cluster_node_header_without_a_verified_peer() {
+        let resp = client()
+            .get("/guarded")
+            .header("x-warpgate-cluster-node", "anything")
+            .send()
+            .await;
         resp.assert_status(http::StatusCode::UNAUTHORIZED);
     }
 }

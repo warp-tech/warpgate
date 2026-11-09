@@ -8,7 +8,8 @@ use rsasl::config::SASLConfig;
 use rsasl::prelude::{Mechname, SASLClient};
 use tokio::net::TcpStream;
 use tracing::{debug, info, warn};
-use warpgate_common::{TargetPostgresOptions, WarpgateError};
+use warpgate_common::{SecretResolver, TargetPostgresOptions, WarpgateError};
+use warpgate_core::AdmittedTarget;
 use warpgate_tls::{ClientTlsStream, TlsMode, configure_tls_connector};
 
 use crate::error::PostgresError;
@@ -56,9 +57,11 @@ impl PostgresClient {
     }
 
     pub async fn connect(
-        target: &TargetPostgresOptions,
+        admitted: AdmittedTarget<TargetPostgresOptions>,
         options: ConnectionOptions,
+        secrets: &dyn SecretResolver,
     ) -> Result<Self, PostgresError> {
+        let target = admitted.specific_target().options().clone();
         let stream = TcpStream::connect((target.host.clone(), target.port)).await?;
         stream.set_nodelay(true)?;
 
@@ -123,9 +126,14 @@ impl PostgresClient {
         stream.push(startup)?;
         stream.flush().await?;
 
-        // Resolve effective password (may be an IAM-generated token or legacy field)
-        let effective_password = match &target.effective_auth() {
-            warpgate_common::DatabaseTargetAuth::Password(auth) => auth.password.clone(),
+        // An IAM role yields a short-lived token in place of a stored password
+        let effective_password = match &target.auth {
+            warpgate_common::DatabaseTargetAuth::Password(auth) => auth
+                .password
+                .resolve(secrets)
+                .await?
+                .expose_secret()
+                .clone(),
             warpgate_common::DatabaseTargetAuth::IamRole(_) => {
                 warpgate_aws::generate_rds_auth_token(&target.host, target.port, &target.username)
                     .await
@@ -154,6 +162,12 @@ impl PostgresClient {
                     pgwire::messages::startup::Authentication::Ok => {
                         info!("Authenticated at target");
                         break;
+                    }
+                    pgwire::messages::startup::Authentication::CleartextPassword
+                    | pgwire::messages::startup::Authentication::MD5Password(_)
+                        if !stream.is_tls() && target.tls.mode != TlsMode::Disabled =>
+                    {
+                        return Err(PostgresError::PasswordAuthWithoutTls);
                     }
                     pgwire::messages::startup::Authentication::CleartextPassword => {
                         let password_message =

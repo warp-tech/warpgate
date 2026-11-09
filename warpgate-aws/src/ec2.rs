@@ -1,8 +1,15 @@
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use tracing::{debug, info};
+use warpgate_common_cache::Cache;
 
-use crate::{AwsError, instance_cache};
+use crate::AwsError;
+
+// Key = IP
+// quick expiry to avoid caching across instance reboots
+static INSTANCE_CACHE: LazyLock<Cache<String, (), Ec2InstanceInfo>> =
+    LazyLock::new(|| Cache::new(Duration::from_mins(5)));
 
 #[derive(Debug, Clone)]
 pub struct Ec2InstanceInfo {
@@ -44,30 +51,29 @@ pub async fn is_running_on_ec2() -> bool {
 
 /// Look up an EC2 instance by IP address across all regions (cached)
 pub async fn find_instance_by_ip(ip: &str) -> Result<Ec2InstanceInfo, AwsError> {
-    if let Some(entry) = instance_cache().get(ip) {
-        return Ok(entry.value().clone());
-    }
-
-    let regions = list_all_regions().await?;
     let ip = ip.to_string();
+    INSTANCE_CACHE
+        .get_or_build(&ip, &(), || async {
+            let regions = list_all_regions().await?;
 
-    // Query all regions in parallel
-    let mut handles = Vec::new();
-    for region_name in regions {
-        let ip = ip.clone();
-        handles.push(tokio::spawn(async move {
-            find_instance_in_region(&ip, &region_name).await
-        }));
-    }
+            // Query all regions in parallel
+            let mut handles = Vec::new();
+            for region_name in regions {
+                let ip = ip.clone();
+                handles.push(tokio::spawn(async move {
+                    find_instance_in_region(&ip, &region_name).await
+                }));
+            }
 
-    for handle in handles {
-        if let Ok(Ok(Some(info))) = handle.await {
-            instance_cache().insert(ip.clone(), info.clone());
-            return Ok(info);
-        }
-    }
+            for handle in handles {
+                if let Ok(Ok(Some(info))) = handle.await {
+                    return Ok(info);
+                }
+            }
 
-    Err(AwsError::RegionUnknown(ip))
+            Err(AwsError::RegionUnknown(ip.clone()))
+        })
+        .await
 }
 
 async fn find_instance_in_region(

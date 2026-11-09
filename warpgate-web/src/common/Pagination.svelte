@@ -32,29 +32,36 @@
         }
         return result
     })
+
+    function goto(e: Event, p: number) {
+        e.preventDefault()
+        page = p
+    }
 </script>
 
 <Pagination>
     <PaginationItem disabled={page === 0}>
-        <PaginationLink on:click={() => page--} href="#">
+        <PaginationLink on:click={e => goto(e, page - 1)} href="#">
             <Fa icon={faAngleLeft} />
         </PaginationLink>
     </PaginationItem>
     {#each pages as i (i)}
         {#if i !== null}
             <PaginationItem active={page === i}>
-                <PaginationLink on:click={() => page = i} href="#"
-                    >{i + 1}</PaginationLink
-                >
+                <PaginationLink on:click={e => goto(e, i)} href="#">
+                    {i + 1}
+                </PaginationLink>
             </PaginationItem>
         {:else}
             <PaginationItem disabled>
-                <PaginationLink href="#">...</PaginationLink>
+                <PaginationLink on:click={e => goto(e, page)} href="#">
+                    ...
+                </PaginationLink>
             </PaginationItem>
         {/if}
     {/each}
     <PaginationItem disabled={(page + 1) * pageSize >= total}>
-        <PaginationLink on:click={() => page++} href="#">
+        <PaginationLink on:click={e => goto(e, page + 1)} href="#">
             <Fa icon={faAngleRight} />
         </PaginationLink>
     </PaginationItem>

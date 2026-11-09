@@ -203,7 +203,8 @@
         {/if}
 
         <AsyncButton color="secondary" click={checkRemoteHostKey}>
-            {#if _state.state === 'ready' || _state.state === 'checking' && _state.previousResult}
+            {#if _state.state === 'ready' ||
+                (_state.state === 'checking' && _state.previousResult)}
                 Recheck
             {:else}
                 Check host key

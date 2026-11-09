@@ -96,8 +96,7 @@
         {
           "type": "null"
         }
-      ],
-      "default": null
+      ]
     },
     "ssh": {
       "$ref": "#/$defs/SshConfig",
@@ -108,9 +107,9 @@
         "host_key_verification": "prompt",
         "inactivity_timeout": "5m",
         "keepalive_interval": null,
-        "keys": "./data/keys",
         "listen": "[::]:2222",
-        "proxy_protocol": false
+        "proxy_protocol": false,
+        "target_handshake_timeout": "30s"
       }
     },
     "sso_providers": {
@@ -135,25 +134,6 @@
     }
   },
   "$defs": {
-    "Duration": {
-      "type": "object",
-      "properties": {
-        "nanos": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "secs": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0
-        }
-      },
-      "required": [
-        "secs",
-        "nanos"
-      ]
-    },
     "HttpConfig": {
       "type": "object",
       "properties": {
@@ -494,6 +474,7 @@
           "minimum": 0
         },
         "host_key_verification": {
+          "description": "Only seeds the `ssh_host_key_verification` parameter when the database\nrow is first created; the admin UI owns the setting afterwards.",
           "$ref": "#/$defs/SshHostKeyVerificationMode",
           "default": "prompt"
         },
@@ -502,19 +483,18 @@
           "default": "5m"
         },
         "keepalive_interval": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Duration"
-            },
-            {
-              "type": "null"
-            }
+          "type": [
+            "string",
+            "null"
           ],
           "default": null
         },
         "keys": {
-          "type": "string",
-          "default": "./data/keys"
+          "description": "Legacy directory for the SSH host keys (`host-ed25519`, `host-rsa`).\nIf set, key files are re-imported into the database, after which the option can be removed from the config.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "listen": {
           "$ref": "#/$defs/ListenEndpoint",
@@ -524,6 +504,11 @@
           "description": "Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.",
           "type": "boolean",
           "default": false
+        },
+        "target_handshake_timeout": {
+          "description": "Deadline for a target to accept the connection and complete key exchange.\nCovers the TCP connect (or the direct-tcpip hop through a jump host) and the\nSSH handshake, but not authentication. Set to `0s` to wait forever.",
+          "type": "string",
+          "default": "30s"
         }
       }
     },
@@ -532,7 +517,8 @@
       "enum": [
         "prompt",
         "auto_accept",
-        "auto_reject"
+        "auto_reject",
+        "ignore"
       ]
     },
     "SsoInternalProviderConfig": {
@@ -735,6 +721,11 @@
         },
         "default_credential_policy": {
           "description": "Default credential policy for auto-created users.\nKeys: \"http\", \"ssh\", \"mysql\", \"postgres\"\nValues: list of credential kinds e.g. [\"sso\"], [\"web\"], []"
+        },
+        "disable_local_logout": {
+          "description": "Disables \"log out from Warpgate\" functionality when the provider supports single logout",
+          "type": "boolean",
+          "default": false
         },
         "kubernetes": {
           "description": "kubectl OIDC parameters for generating a kubelogin kubeconfig.",

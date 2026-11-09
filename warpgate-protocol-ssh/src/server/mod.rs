@@ -1,17 +1,20 @@
+mod channel_registry;
 mod channel_writer;
-mod command_detector;
+mod event_intake;
 mod russh_handler;
 mod service_output;
 mod session;
 mod session_handle;
 mod target_menu;
 use std::borrow::Cow;
+use std::net::SocketAddr;
+use std::os::fd::AsFd;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use futures::FutureExt;
 use futures::future::BoxFuture;
-use futures::{FutureExt, StreamExt};
 use russh::keys::{Algorithm, HashAlg, PrivateKey};
 use russh::{MethodKind, MethodSet, Preferred};
 pub use russh_handler::ServerHandler;
@@ -21,11 +24,11 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc::unbounded_channel;
 use tracing::*;
 use warpgate_common::ListenEndpoint;
-use warpgate_common::helpers::net::detect_port_knock;
-use warpgate_core::{Services, SessionStateInit, State};
+use warpgate_common::helpers::net::accept_loop;
+use warpgate_core::{Services, State, UserSessionStateInit};
 use warpgate_db_entities::Parameters;
 
-use crate::keys::load_keys;
+use crate::keys::load_host_keys;
 use crate::server::session_handle::SSHSessionHandle;
 
 #[derive(Clone)]
@@ -39,30 +42,27 @@ pub async fn bind_server(
     proxy_protocol: bool,
 ) -> Result<BoxFuture<'static, Result<()>>> {
     let russh_config_init = Arc::new({
-        let config = services.config.lock().await;
         RusshConfigInit {
-            keys: load_keys(&config, &services.global_params, "host")?,
+            keys: load_host_keys(&services.db).await?,
         }
     });
 
-    let mut listener = address.tcp_accept_stream().await?;
+    let listener = address.tcp_accept_stream().await?;
 
     Ok(async move {
-        while let Some(stream) = listener.next().await {
-            let russh_config_init = russh_config_init.clone();
-            let services = services.clone();
-
-            tokio::task::Builder::new()
-                .name("SSH new connection setup")
-                .spawn(async move {
-                    if let Err(e) =
-                        _handle_connection(services, russh_config_init, stream, proxy_protocol)
-                            .await
-                    {
-                        error!(%e, "Connection handling failed");
-                    }
-                })?;
-        }
+        accept_loop(
+            "SSH connection",
+            listener,
+            proxy_protocol,
+            move |stream, remote_address| {
+                let russh_config_init = russh_config_init.clone();
+                let services = services.clone();
+                async move {
+                    _handle_connection(services, russh_config_init, stream, remote_address).await
+                }
+            },
+        )
+        .await;
         Ok(())
     }
     .boxed())
@@ -71,33 +71,30 @@ pub async fn bind_server(
 async fn _handle_connection(
     services: Services,
     russh_config_init: Arc<RusshConfigInit>,
-    mut stream: TcpStream,
-    proxy_protocol: bool,
+    stream: TcpStream,
+    remote_address: SocketAddr,
 ) -> Result<()> {
-    stream.set_nodelay(true)?;
-
-    if detect_port_knock(&stream).await {
-        return Ok(());
-    }
-
-    let remote_address =
-        warpgate_common::helpers::proxy_protocol::remote_address(&mut stream, proxy_protocol)
-            .await?;
-
     let (session_handle, session_handle_rx) = SSHSessionHandle::new();
 
-    let server_handle = State::register_session(
+    // A second descriptor on the client socket. Everything else Warpgate can
+    // say to a client goes through russh, which cannot act on any of it while
+    // its loop is parked in a write the client never drains; `shutdown(2)`
+    // through this descriptor fails that write from underneath.
+    let client_socket = std::net::TcpStream::from(stream.as_fd().try_clone_to_owned()?);
+
+    let (server_handle, wrapped_stream) = State::register_user_session_with_stream(
         &services.state,
         crate::PROTOCOL_NAME,
-        SessionStateInit {
+        UserSessionStateInit {
             remote_address: Some(remote_address),
             handle: Box::new(session_handle),
         },
+        stream,
     )
     .await
     .context("registering session")?;
 
-    let id = server_handle.lock().await.id();
+    let id = server_handle.lock().await.user_session_id();
 
     let (event_tx, event_rx) = unbounded_channel();
 
@@ -111,10 +108,6 @@ async fn _handle_connection(
     };
 
     let handler = ServerHandler { event_tx, banner };
-    let wrapped_stream = {
-        let guard = server_handle.lock().await;
-        guard.wrap_stream(stream).await?
-    };
 
     let session = match ServerSession::start(
         remote_address,
@@ -122,6 +115,7 @@ async fn _handle_connection(
         server_handle,
         session_handle_rx,
         event_rx,
+        client_socket,
     )
     .await
     {
@@ -138,8 +132,14 @@ async fn _handle_connection(
         russh::server::Config {
             auth_rejection_time: Duration::from_secs(1),
             auth_rejection_time_initial: Some(Duration::from_secs(0)),
-            // Extra time for the "closing due to inactivity" message to be sent
-            inactivity_timeout: Some(config.store.ssh.inactivity_timeout + Duration::from_secs(10)),
+            inactivity_timeout: Some(
+                config.store.ssh.inactivity_timeout
+                // There is no traffic during admin approval hold that would
+                // reset the inactivity timer, so the timeout needs to be at least that long
+                + services.admin_approval_timeout().await?
+                // Extra time for the "closing due to inactivity" message to be sent
+                + Duration::from_secs(10),
+            ),
             keepalive_interval: config.store.ssh.keepalive_interval,
             methods: get_allowed_auth_methods(&services).await?,
             keys: russh_config_init.keys.clone(),
@@ -226,4 +226,42 @@ pub async fn get_allowed_auth_methods(services: &Services) -> Result<MethodSet> 
     }
 
     Ok(MethodSet::from(&methods_vec[..]))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::Shutdown;
+    use std::os::fd::AsFd;
+
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::{TcpListener, TcpStream};
+
+    /// A write parked on a peer that never reads must fail once the duplicate
+    /// descriptor is shut down; that wake-up is what ends a stalled client.
+    #[tokio::test]
+    async fn shutdown_through_duplicate_fd_releases_parked_write() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let _client = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (mut server, _) = listener.accept().await.unwrap();
+        let dup = std::net::TcpStream::from(server.as_fd().try_clone_to_owned().unwrap());
+
+        let writer = tokio::spawn(async move {
+            let chunk = vec![0u8; 65536];
+            loop {
+                if let Err(e) = server.write_all(&chunk).await {
+                    return e;
+                }
+            }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        assert!(!writer.is_finished(), "write never parked");
+
+        dup.shutdown(Shutdown::Both).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), writer)
+            .await
+            .expect("write still parked after shutdown")
+            .unwrap();
+    }
 }

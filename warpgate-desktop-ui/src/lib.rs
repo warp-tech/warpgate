@@ -27,7 +27,7 @@ pub use self::{DEFAULT_SCREEN_H as SCREEN_H, DEFAULT_SCREEN_W as SCREEN_W};
 use crate::char_boxes::draw_char_boxes;
 use crate::logo::logo;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Screen {
     pub width: u16,
     pub height: u16,
@@ -47,6 +47,15 @@ const FG: Rgb888 = Rgb888::new(0xc1, 0xc9, 0xe4);
 
 pub fn render_connecting(screen: Screen, tick: u64) -> Result<Vec<u8>, Infallible> {
     render(screen, tick, "Connecting", None)
+}
+
+pub fn render_awaiting_approval(screen: Screen, tick: u64) -> Result<Vec<u8>, Infallible> {
+    render(
+        screen,
+        tick,
+        "Waiting for an administrator\nto approve this session...",
+        None,
+    )
 }
 
 /// The login banner, shown until the viewer acknowledges it with any key or click.

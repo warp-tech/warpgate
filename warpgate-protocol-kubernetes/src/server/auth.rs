@@ -1,27 +1,84 @@
 use std::net::IpAddr;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use anyhow::Context;
 use poem::Request;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
+use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 use warpgate_aws::EksClusterInfo;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
-use warpgate_common::auth::{AuthResult, CredentialKind};
-use warpgate_common::{TargetKubernetesOptions, TargetOptions, User};
-use warpgate_common_http::logging::get_client_ip;
+use warpgate_common::auth::{AuthResult, AuthState, AuthStateUserInfo, CredentialKind};
+use warpgate_common::{
+    Protocol, Secret, Target, TargetKubernetesOptions, TargetOptions, User, UserSessionId,
+    WarpgateError,
+};
+use warpgate_common_http::authorization_token;
+use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
-    AuthorizedIdentity, ConfigProvider, Services, TargetAuthorization, authorize_for_target,
-    check_ip_allowed, wait_for_auth_completion,
+    AuthorizedIdentity, ConfigProvider, Services, TargetAuthorization, ValidatedTicket,
+    authorize_for_target, validate_ticket, vet_credential_bearer, wait_for_auth_completion,
 };
-use warpgate_db_entities::{CertificateCredential, CertificateRevocation};
+use warpgate_db_entities::{CertificateCredential, CertificateRevocation, Parameters};
 
 use crate::server::client_certs::RequestCertificateExt;
 
-fn unauthorized() -> poem::Error {
+// used to key correlator entries to prevent cross-token/ticket approvals
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum TransportCredential {
+    Ticket(Uuid),
+    ApiToken(Uuid),
+    /// ID tokens are reissued every few minutes, so the stable issuer-side
+    /// identity is the credential, not the token bytes.
+    OidcToken {
+        provider: String,
+        subject: String,
+    },
+    ClientCertificate(Uuid),
+}
+
+impl TransportCredential {
+    /// Stable text form for the cross-node session key. The free-text OIDC
+    /// fields go last so they cannot be mistaken for a leading segment.
+    pub fn key_segment(&self) -> String {
+        match self {
+            Self::Ticket(id) => format!("ticket:{id}"),
+            Self::ApiToken(id) => format!("token:{id}"),
+            Self::OidcToken { provider, subject } => format!("oidc:{provider}:{subject}"),
+            Self::ClientCertificate(id) => format!("cert:{id}"),
+        }
+    }
+}
+
+pub enum KubernetesIdentity {
+    User {
+        user: User,
+        credential: TransportCredential,
+    },
+    Ticket(ValidatedTicket),
+}
+
+impl KubernetesIdentity {
+    pub fn user_info(&self) -> AuthStateUserInfo {
+        match self {
+            Self::User { user, .. } => user.into(),
+            Self::Ticket(ticket) => ticket.user_info().clone(),
+        }
+    }
+
+    pub fn credential(&self) -> TransportCredential {
+        match self {
+            Self::User { credential, .. } => credential.clone(),
+            Self::Ticket(ticket) => TransportCredential::Ticket(ticket.id()),
+        }
+    }
+}
+
+pub fn unauthorized() -> poem::Error {
     poem::Error::from_string(
         "Unauthorized: provide a valid Bearer token or client certificate",
         poem::http::StatusCode::UNAUTHORIZED,
@@ -32,12 +89,7 @@ fn unauthorized() -> poem::Error {
 /// `None` means no credential was presented at all — an unauthenticated probe,
 /// not a failed login attempt.
 fn presented_credential_kind(req: &Request) -> Option<&'static str> {
-    let has_bearer = req
-        .headers()
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.starts_with("Bearer "));
-    if has_bearer {
+    if authorization_token(req, "Bearer").is_some() {
         Some("token")
     } else if req.client_certificate().is_some() {
         Some("certificate")
@@ -63,17 +115,15 @@ fn emit_authentication_failed(client_ip: Option<IpAddr>, credential_type: &str, 
 }
 
 /// Resolve and vet the caller's identity from the request's transport credentials
-/// (API token / OIDC token / client certificate). Runs on *every* request — it
+/// (ticket / API token / OIDC token / client certificate). Runs on *every* request — it
 /// must, both to attribute the request to a session and to re-check the credential
 /// and account status — so it is deliberately cheap: no auth state, no web
 /// approval. `Err(unauthorized)` on any failure.
 pub async fn authenticate_kubernetes_user(
     req: &Request,
     services: &Services,
-) -> poem::Result<User> {
-    let client_ip: Option<IpAddr> = get_client_ip(req, services)
-        .await
-        .and_then(|ip| ip.parse().ok());
+) -> poem::Result<KubernetesIdentity> {
+    let client_ip = get_client_ip_addr(req, services).await;
 
     // Fail closed if login protection currently has this source IP blocked.
     if let Some(ip) = client_ip
@@ -89,7 +139,22 @@ pub async fn authenticate_kubernetes_user(
 
     let credential_kind = presented_credential_kind(req);
 
-    let Some(user) = authenticate(req, services).await? else {
+    let ticket_secret = authorization_token(req, "Bearer").and_then(|v| v.strip_prefix("ticket-"));
+    let identity = if let Some(secret) = ticket_secret {
+        validate_ticket(
+            &services.db,
+            &services.login_protection,
+            &Secret::new(secret.to_owned()),
+            client_ip,
+            crate::PROTOCOL_NAME,
+        )
+        .await?
+        .map(KubernetesIdentity::Ticket)
+    } else {
+        authenticate(req, services).await?
+    };
+
+    let Some(identity) = identity else {
         // A presented-but-invalid credential counts toward brute-force
         // protection and is audited; a request with no credential at all is a
         // plain unauthenticated probe and is neither recorded nor audited.
@@ -108,17 +173,11 @@ pub async fn authenticate_kubernetes_user(
         return Err(unauthorized());
     };
 
-    // Account lockout and the user's IP allow-list, both fail-closed.
-    if services
-        .login_protection
-        .check_user_locked(&user.username)
-        .await?
-        .is_some()
+    // Account lockout and the user's IP allow-list, both fail-closed. A ticket's
+    // bearer is vetted the same way inside `validate_ticket`.
+    if let KubernetesIdentity::User { user, .. } = &identity
+        && !vet_credential_bearer(&services.login_protection, user, client_ip).await?
     {
-        warn!(username = %user.username, "Kubernetes auth for locked user");
-        return Err(unauthorized());
-    }
-    if check_ip_allowed(user.allowed_ip_ranges.as_ref(), client_ip, &user.username).is_err() {
         return Err(unauthorized());
     }
 
@@ -126,11 +185,11 @@ pub async fn authenticate_kubernetes_user(
     if let Some(ip) = client_ip {
         let _ = services
             .login_protection
-            .clear_failed_attempts(&ip, &user.username)
+            .clear_failed_attempts(&ip, &identity.user_info().username)
             .await;
     }
 
-    Ok(user)
+    Ok(identity)
 }
 
 /// Authorize an already-authenticated user for a Kubernetes target, applying the
@@ -138,20 +197,55 @@ pub async fn authenticate_kubernetes_user(
 /// the expensive step, so the caller caches the result per correlated session so it
 /// runs once per session (one approval per `kubectl` command's fan-out of requests)
 /// rather than once per request.
+///
+/// `session_id` is that of the session the caller has registered for this
+/// request: the auth state is keyed by it, which is what lets a web approval
+/// raised on another node be routed back to the waiting request.
 pub async fn authorize_kubernetes_target(
     req: &Request,
     user: &User,
-    target_name: &str,
+    target: Target,
+    session_id: UserSessionId,
     services: &Services,
-) -> poem::Result<TargetAuthorization> {
-    let client_ip: Option<IpAddr> = get_client_ip(req, services)
-        .await
-        .and_then(|ip| ip.parse().ok());
+) -> poem::Result<TargetAuthorization<TargetKubernetesOptions>> {
+    let client_ip = get_client_ip_addr(req, services).await;
 
     // When the user has a Kubernetes credential policy, enforce its web-approval
     // factor on top of the transport identity; otherwise use the identity directly.
-    let identity = authorize_kubernetes_identity(services, user, client_ip, target_name).await?;
-    lookup_authorized_k8s_target(services.config_provider.as_ref(), target_name, &identity).await
+    let identity =
+        authorize_kubernetes_identity(services, user, client_ip, &target.name, session_id).await?;
+    authorize_k8s_target(services.config_provider.as_ref(), target, &identity).await
+}
+
+/// For joining a session another node admitted. Re-checks roles but skips the
+/// credential policy, which the opener already satisfied.
+pub async fn authorize_kubernetes_join(
+    user: &User,
+    target: Target,
+    services: &Services,
+) -> poem::Result<TargetAuthorization<TargetKubernetesOptions>> {
+    let identity = AuthorizedIdentity::for_authenticated_session(user.into(), crate::PROTOCOL_NAME);
+    authorize_k8s_target(services.config_provider.as_ref(), target, &identity).await
+}
+
+fn target_not_found(target_name: &str) -> poem::Error {
+    poem::Error::from_string(
+        format!("Kubernetes target not found: {target_name}"),
+        poem::http::StatusCode::NOT_FOUND,
+    )
+}
+
+pub async fn resolve_kubernetes_target(
+    services: &Services,
+    target_name: &str,
+) -> poem::Result<Target> {
+    services
+        .config_provider
+        .get_target_by_name(target_name)
+        .await
+        .context("looking up target")?
+        .filter(|target| matches!(target.options, TargetOptions::Kubernetes(_)))
+        .ok_or_else(|| target_not_found(target_name))
 }
 
 /// Turn a validated Kubernetes identity into an [`AuthorizedIdentity`], applying
@@ -163,16 +257,18 @@ pub async fn authorize_kubernetes_target(
 /// web-approval factor on top, the one factor a non-interactive client can
 /// satisfy, so no transport credential is ever submitted to the auth state here.
 ///
-/// With no policy the transport identity is used directly. With one, a fresh auth
-/// state enforces the web approval, cleared either by a cached grace-period bypass
-/// or by the user approving the pending request in the Warpgate UI while the
-/// request waits (kubectl has no default client timeout; the auth-state TTL bounds
-/// the wait).
+/// With no policy the transport identity is used directly — unless global MFA
+/// enforcement adds a factor for Kubernetes (see `mfa_required_factor`).
+/// Otherwise a fresh auth state enforces the web approval, cleared either by a
+/// cached grace-period bypass or by the user approving the pending request in
+/// the Warpgate UI while the request waits (kubectl has no default client
+/// timeout; the auth-state TTL bounds the wait).
 async fn authorize_kubernetes_identity(
     services: &Services,
     user: &User,
     client_ip: Option<IpAddr>,
     target_name: &str,
+    session_id: UserSessionId,
 ) -> poem::Result<AuthorizedIdentity> {
     let policy_configured = user
         .credential_policy
@@ -181,15 +277,24 @@ async fn authorize_kubernetes_identity(
         .is_some_and(|kinds| !kinds.is_empty());
 
     if !policy_configured {
-        return Ok(AuthorizedIdentity::for_authenticated_session(
-            user.into(),
-            crate::PROTOCOL_NAME,
-        ));
+        let parameters = Parameters::Entity::get(&services.db)
+            .await
+            .map_err(WarpgateError::from)?;
+        if services
+            .mfa_required_factor(&parameters, user.id, Protocol::Kubernetes)
+            .await?
+            .is_none()
+        {
+            return Ok(AuthorizedIdentity::for_authenticated_session(
+                user.into(),
+                crate::PROTOCOL_NAME,
+            ));
+        }
     }
 
-    let (_id, state_arc) = services
+    let state_arc = services
         .create_auth_state(
-            None,
+            &session_id,
             &user.username,
             crate::PROTOCOL_NAME,
             target_name,
@@ -199,6 +304,16 @@ async fn authorize_kubernetes_identity(
         )
         .await?;
 
+    await_kubernetes_web_approval(services, user, &state_arc).await
+}
+
+/// Blocks until the pending web approval resolves, either from a cached
+/// grace-period bypass or from the user acting on the request in the UI.
+async fn await_kubernetes_web_approval(
+    services: &Services,
+    user: &User,
+    state_arc: &Arc<Mutex<AuthState>>,
+) -> poem::Result<AuthorizedIdentity> {
     loop {
         let verification = state_arc.lock().await.verify();
         match verification {
@@ -207,11 +322,11 @@ async fn authorize_kubernetes_identity(
                     .ok_or_else(unauthorized);
             }
             AuthResult::Need(kinds) if kinds.contains(&CredentialKind::WebUserApproval) => {
-                if services.try_web_approval_bypass(&state_arc).await? {
+                if services.try_web_approval_bypass(state_arc).await? {
                     continue;
                 }
                 if !matches!(
-                    wait_for_auth_completion(&state_arc).await,
+                    wait_for_auth_completion(state_arc).await,
                     AuthResult::Accepted { .. }
                 ) {
                     warn!(username = %user.username, "Kubernetes web approval not granted");
@@ -237,14 +352,17 @@ async fn authorize_kubernetes_identity(
 /// web approval on top). Returns `None` if no presented credential validated;
 /// genuine lookup/verification errors propagate rather than being treated as a
 /// failure.
-async fn authenticate(req: &Request, services: &Services) -> poem::Result<Option<User>> {
+async fn authenticate(
+    req: &Request,
+    services: &Services,
+) -> poem::Result<Option<KubernetesIdentity>> {
     // Bearer token authentication (API tokens, then OIDC ID tokens).
-    if let Some(auth_header) = req.headers().get("authorization")
-        && let Ok(auth_str) = auth_header.to_str()
-        && let Some(token) = auth_str.strip_prefix("Bearer ")
-    {
-        if let Ok(Some(user)) = services.config_provider.validate_api_token(token).await {
-            return Ok(Some(user));
+    if let Some(token) = authorization_token(req, "Bearer") {
+        if let Ok(Some(token)) = services.config_provider.validate_api_token(token).await {
+            return Ok(Some(KubernetesIdentity::User {
+                user: token.user,
+                credential: TransportCredential::ApiToken(token.id),
+            }));
         }
 
         // API token did not match — try OIDC ID token validation against any SSO
@@ -304,7 +422,13 @@ async fn authenticate(req: &Request, services: &Services) -> poem::Result<Option
             // the stored-SSO-linkage `validate_credential` arm, which would deny
             // legitimately-authenticated users resolved via preferred-username or
             // role mapping.
-            return Ok(Some(user_for_username(services, &username).await?));
+            return Ok(Some(KubernetesIdentity::User {
+                user: user_for_username(services, &username).await?,
+                credential: TransportCredential::OidcToken {
+                    provider: provider_config.name.clone(),
+                    subject: response.subject,
+                },
+            }));
         }
     }
 
@@ -314,7 +438,7 @@ async fn authenticate(req: &Request, services: &Services) -> poem::Result<Option
         debug!("Found client certificate from middleware, validating against database");
 
         match validate_client_certificate(&client_cert.der_bytes, services).await {
-            Ok(Some(user)) => return Ok(Some(user)),
+            Ok(Some(identity)) => return Ok(Some(identity)),
             Ok(None) => debug!("Client certificate provided but not found in database"),
             // A rejected certificate returns `Ok(None)`; an `Err` is a fault in the
             // certificate store (DB) or an unparseable cert, not a credential
@@ -334,25 +458,13 @@ async fn authenticate(req: &Request, services: &Services) -> poem::Result<Option
     Ok(None)
 }
 
-/// Look up a Kubernetes target by name and prove the user is authorized for it.
-/// Shared by the API-token, OIDC and client-certificate auth paths.
-async fn lookup_authorized_k8s_target<C: ConfigProvider + Send>(
+/// Checks the identity's roles against a resolved Kubernetes target.
+async fn authorize_k8s_target<C: ConfigProvider + Send>(
     config_provider: &C,
-    target_name: &str,
+    target: Target,
     identity: &AuthorizedIdentity,
-) -> poem::Result<TargetAuthorization> {
-    let target = config_provider
-        .get_target_by_name(target_name)
-        .await
-        .context("looking up target")?
-        .filter(|t| matches!(t.options, TargetOptions::Kubernetes(_)))
-        .ok_or_else(|| {
-            poem::Error::from_string(
-                format!("Kubernetes target not found: {target_name}"),
-                poem::http::StatusCode::NOT_FOUND,
-            )
-        })?;
-
+) -> poem::Result<TargetAuthorization<TargetKubernetesOptions>> {
+    let target_name = target.name.clone();
     authorize_for_target(config_provider, identity, target)
         .await?
         .ok_or_else(|| {
@@ -360,7 +472,9 @@ async fn lookup_authorized_k8s_target<C: ConfigProvider + Send>(
                 format!("Access denied to target: {target_name}"),
                 poem::http::StatusCode::FORBIDDEN,
             )
-        })
+        })?
+        .narrow()
+        .map_err(|_| target_not_found(&target_name))
 }
 
 /// Load a resolved SSO user by username.
@@ -387,8 +501,7 @@ async fn user_for_username(services: &Services, username: &str) -> poem::Result<
 
 pub async fn create_authenticated_client(
     k8s_options: &TargetKubernetesOptions,
-    _auth_user: Option<&String>,
-    _services: &Services,
+    services: &Services,
 ) -> anyhow::Result<reqwest::ClientBuilder> {
     debug!(
         server_url = ?k8s_options.cluster_url,
@@ -397,8 +510,7 @@ pub async fn create_authenticated_client(
         "Creating authenticated Kubernetes client"
     );
 
-    // Create HTTP client with the configuration
-    let mut client_builder = reqwest::Client::builder();
+    let mut client_builder = upstream_client_builder(&k8s_options.cluster_url);
 
     if !k8s_options.tls.verify {
         client_builder = client_builder.danger_accept_invalid_certs(true);
@@ -411,7 +523,10 @@ pub async fn create_authenticated_client(
                 reqwest::header::AUTHORIZATION,
                 reqwest::header::HeaderValue::from_str(&format!(
                     "Bearer {}",
-                    auth.token.expose_secret()
+                    auth.token
+                        .resolve(&*services.secret_backends)
+                        .await?
+                        .expose_secret()
                 ))
                 .context("setting Authorization header")?,
             );
@@ -421,11 +536,11 @@ pub async fn create_authenticated_client(
             // Expect PEM certificate and PEM private key in the auth config
             // Combine into a single PEM bundle for reqwest::Identity
             let cert_pem = auth.certificate.expose_secret();
-            let key_pem = auth.private_key.expose_secret();
+            let key_pem = auth.private_key.resolve(&*services.secret_backends).await?;
             let pem_bundle = format!(
                 "{}\n{}\n",
                 cert_pem.trim_end_matches('\n'),
-                key_pem.trim_end_matches('\n')
+                key_pem.expose_secret().trim_end_matches('\n')
             );
 
             let identity = reqwest::Identity::from_pem(pem_bundle.as_bytes())
@@ -456,6 +571,57 @@ pub async fn create_authenticated_client(
     Ok(client_builder)
 }
 
+/// Retry policy for requests to the Kubernetes API server.
+///
+/// Keeps reqwest's default (resend after a graceful GOAWAY or REFUSED_STREAM)
+/// and adds connections that failed to come up: TCP connect or TLS handshake.
+/// Nothing has been sent at that point, so resending is safe for any method.
+/// Connect timeouts are not resent: each attempt would wait out the full
+/// timeout again against an unreachable server.
+/// SNI-routing front ends can miss a ClientHello that spans two TCP segments
+/// and answer with their default certificate (kubernetes/ingress-nginx#11491),
+/// and a ClientHello with a post-quantum key share is big enough to do that.
+fn upstream_client_builder(cluster_url: &str) -> reqwest::ClientBuilder {
+    // never follow untrusted redirects
+    let builder = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none());
+    match url::Url::parse(cluster_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned))
+    {
+        Some(host) => builder.retry(upstream_retry_policy(host)),
+        None => builder,
+    }
+}
+
+fn upstream_retry_policy(host: String) -> reqwest::retry::Builder {
+    reqwest::retry::for_host(host).classify_fn(|req_rep| match req_rep.error() {
+        Some(error) if is_safe_to_resend(error) => {
+            debug!(url = %req_rep.uri(), %error, "Resending Kubernetes upstream request");
+            req_rep.retryable()
+        }
+        _ => req_rep.success(),
+    })
+}
+
+fn is_safe_to_resend(error: &(dyn std::error::Error + 'static)) -> bool {
+    if error
+        .downcast_ref::<reqwest::Error>()
+        .is_some_and(|error| error.is_connect() && !error.is_timeout())
+    {
+        return true;
+    }
+    let mut source = error.source();
+    while let Some(cause) = source {
+        if let Some(error) = cause.downcast_ref::<h2::Error>() {
+            return error.is_remote()
+                && ((error.is_go_away() && error.reason() == Some(h2::Reason::NO_ERROR))
+                    || (error.is_reset() && error.reason() == Some(h2::Reason::REFUSED_STREAM)));
+        }
+        source = cause.source();
+    }
+    false
+}
+
 /// True if `now` falls within the certificate's `[not_before, not_after]`
 /// validity window (bounds inclusive).
 fn cert_is_currently_valid(not_before: SystemTime, not_after: SystemTime, now: SystemTime) -> bool {
@@ -466,7 +632,7 @@ fn cert_is_currently_valid(not_before: SystemTime, not_after: SystemTime, now: S
 pub async fn validate_client_certificate(
     cert_der: &[u8],
     services: &Services,
-) -> anyhow::Result<Option<User>> {
+) -> anyhow::Result<Option<KubernetesIdentity>> {
     // Convert DER to PEM format for comparison
     let cert_pem = der_to_pem(cert_der);
 
@@ -516,6 +682,7 @@ pub async fn validate_client_certificate(
                     "Client certificate validated for user"
                 );
 
+                let credential_id = cert_credential.id;
                 // Update last_used timestamp
                 let mut active_model: CertificateCredential::ActiveModel = cert_credential.into();
                 active_model.last_used = Set(Some(OffsetDateTime::now_utc()));
@@ -523,7 +690,10 @@ pub async fn validate_client_certificate(
                     warn!("Failed to update certificate last_used timestamp: {}", e);
                 }
 
-                return Ok(Some(User::try_from(user)?));
+                return Ok(Some(KubernetesIdentity::User {
+                    user: User::try_from(user)?,
+                    credential: TransportCredential::ClientCertificate(credential_id),
+                }));
             }
         }
     }
@@ -556,4 +726,153 @@ fn normalize_certificate_pem(pem: &str) -> String {
         .chars()
         .filter(|c| !c.is_whitespace())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    use super::{upstream_client_builder, upstream_retry_policy};
+
+    fn client_builder() -> reqwest::ClientBuilder {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        reqwest::Client::builder()
+    }
+
+    /// Accepts connections and either closes them straight away or holds them
+    /// open without answering, so every TLS handshake fails or stalls.
+    /// Returns a URL on it and a count of accepted connections.
+    async fn tls_failing_server(stall: bool) -> (String, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("https://{}/version", listener.local_addr().unwrap());
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let counter = accepted.clone();
+        tokio::spawn(async move {
+            let mut held = vec![];
+            while let Ok((stream, _)) = listener.accept().await {
+                counter.fetch_add(1, Ordering::SeqCst);
+                if stall {
+                    held.push(stream);
+                }
+            }
+        });
+        (url, accepted)
+    }
+
+    /// Plaintext HTTP/2 server that resets every stream with REFUSED_STREAM.
+    /// Returns a URL on it and a count of requests seen.
+    async fn refusing_server() -> (String, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/version", listener.local_addr().unwrap());
+        let requests = Arc::new(AtomicUsize::new(0));
+        let counter = requests.clone();
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                let counter = counter.clone();
+                tokio::spawn(async move {
+                    let Ok(mut connection) = h2::server::handshake(stream).await else {
+                        return;
+                    };
+                    while let Some(Ok((_, mut respond))) = connection.accept().await {
+                        counter.fetch_add(1, Ordering::SeqCst);
+                        respond.send_reset(h2::Reason::REFUSED_STREAM);
+                    }
+                });
+            }
+        });
+        (url, requests)
+    }
+
+    async fn attempts(client: reqwest::Client, stall: bool) -> usize {
+        let (url, accepted) = tls_failing_server(stall).await;
+        let error = client.get(&url).send().await.unwrap_err();
+        assert!(error.is_connect(), "{error:?}");
+        accepted.load(Ordering::SeqCst)
+    }
+
+    #[tokio::test]
+    async fn failed_handshakes_are_resent() {
+        let client = client_builder()
+            .retry(upstream_retry_policy("127.0.0.1".into()))
+            .build()
+            .unwrap();
+        // The first attempt and two resends.
+        assert_eq!(attempts(client, false).await, 3);
+
+        let client = client_builder().build().unwrap();
+        assert_eq!(attempts(client, false).await, 1);
+    }
+
+    #[tokio::test]
+    async fn connect_timeouts_are_not_resent() {
+        let client = client_builder()
+            .connect_timeout(Duration::from_millis(100))
+            .retry(upstream_retry_policy("127.0.0.1".into()))
+            .build()
+            .unwrap();
+        assert_eq!(attempts(client, true).await, 1);
+    }
+
+    #[tokio::test]
+    async fn refused_streams_are_still_resent() {
+        // Setting a classifier replaces reqwest's default protocol-NACK
+        // retries, so this checks the h2 branch of is_safe_to_resend keeps them.
+        let requests = async |policy| {
+            let (url, requests) = refusing_server().await;
+            let client = client_builder()
+                .http2_prior_knowledge()
+                .retry(policy)
+                .build()
+                .unwrap();
+            client.get(&url).send().await.unwrap_err();
+            requests.load(Ordering::SeqCst)
+        };
+        assert_eq!(requests(upstream_retry_policy("127.0.0.1".into())).await, 3);
+        assert_eq!(requests(reqwest::retry::never()).await, 1);
+    }
+
+    /// Answers every HTTP/1.1 request with `response` and counts requests.
+    async fn canned_server(response: String) -> (String, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let requests = Arc::new(AtomicUsize::new(0));
+        let counter = requests.clone();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                counter.fetch_add(1, Ordering::SeqCst);
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf).await;
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
+        });
+        (url, requests)
+    }
+
+    #[tokio::test]
+    async fn redirects_are_passed_through() {
+        let (internal, internal_hits) = canned_server(
+            "HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\nsecret".into(),
+        )
+        .await;
+        let (api, _) = canned_server(format!(
+            "HTTP/1.1 307 Temporary Redirect\r\nLocation: {internal}/secret\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        ))
+        .await;
+
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let client = upstream_client_builder(&api).build().unwrap();
+        let response = client
+            .get(format!("{api}/api/v1/namespaces/default/services/x/proxy/"))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), reqwest::StatusCode::TEMPORARY_REDIRECT);
+        assert_eq!(internal_hits.load(Ordering::SeqCst), 0);
+    }
 }

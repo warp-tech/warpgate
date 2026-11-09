@@ -16,7 +16,7 @@
                     username,
                 },
             })
-            replace(`/config/users/${user.id}`)
+            replace(`/manage/users/${user.id}`)
         } catch (err) {
             error = await stringifyError(err)
         }
@@ -46,8 +46,9 @@
                 color="primary"
                 click={create}
                 disabled={!$adminPermissions.usersCreate}
-                >Create user</AsyncButton
             >
+                Create user
+            </AsyncButton>
         </Form>
     </div>
 </div>

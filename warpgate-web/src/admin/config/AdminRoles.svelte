@@ -2,17 +2,22 @@
     import { Alert } from '@sveltestrap/sveltestrap'
     import { type AdminRole, api } from 'admin/lib/api'
     import PermissionGate from 'admin/lib/PermissionGate.svelte'
-    import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
+    import ItemList, {
+        type LoadOptions,
+        type PaginatedResponse,
+    } from 'common/ItemList.svelte'
     import * as rx from 'rxjs'
     import { link } from 'svelte-spa-router'
     import { adminPermissions } from '../lib/store'
     import AdminRolePermissionsBadge from './AdminRolePermissionsBadge.svelte'
 
-    function loadRoles(): rx.Observable<PaginatedResponse<AdminRole>> {
+    function loadRoles(
+        options: LoadOptions,
+    ): rx.Observable<PaginatedResponse<AdminRole>> {
         if (!$adminPermissions.adminRolesManage) {
             return rx.from([])
         }
-        return rx.from(api.getAdminRoles()).pipe(
+        return rx.from(api.getAdminRoles({ search: options.search })).pipe(
             rx.map(targets => ({
                 items: targets,
                 offset: 0,
@@ -34,17 +39,18 @@
             </div>
             <a
                 class="btn btn-primary ms-auto"
-                href="/config/admin-roles/create"
+                href="/manage/admin-roles/create"
                 use:link
-                >Create</a
             >
+                Create
+            </a>
         </div>
 
         <ItemList load={loadRoles} showSearch={true}>
             {#snippet item(role)}
                 <a
                     class="list-group-item list-group-item-action d-flex align-items-center"
-                    href="/config/admin-roles/{role.id}"
+                    href="/manage/admin-roles/{role.id}"
                     use:link
                 >
                     <div>

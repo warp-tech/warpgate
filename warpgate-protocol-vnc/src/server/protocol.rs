@@ -1,6 +1,7 @@
 use anyhow::{Result, bail};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::debug;
+use warpgate_core::truncate_clipboard_contents;
 
 /// Max clipboard payload (either direction). Clipboard sync is a convenience, not a bulk
 /// transfer channel — cap it so a giant paste isn't mirrored wholesale.
@@ -106,10 +107,9 @@ impl PixelFormat {
 pub fn pack_rgb(pixel_format: &PixelFormat, rgb: &[u8]) -> Vec<u8> {
     let bytes_per_pixel = usize::from(pixel_format.bits_per_pixel) / 8;
     let mut out = Vec::with_capacity(rgb.len() / 3 * bytes_per_pixel);
-    for px in rgb.chunks_exact(3) {
-        if let [r, g, b] = *px {
-            pixel_format.pack(r, g, b, &mut out);
-        }
+    for px in rgb.as_chunks::<3>().0 {
+        let [r, g, b] = *px;
+        pixel_format.pack(r, g, b, &mut out);
     }
     out
 }
@@ -125,10 +125,9 @@ pub fn pack_bgra(pixel_format: &PixelFormat, bgra: &[u8]) -> Vec<u8> {
     }
     let bytes_per_pixel = usize::from(pixel_format.bits_per_pixel) / 8;
     let mut out = Vec::with_capacity(bgra.len() / 4 * bytes_per_pixel);
-    for px in bgra.chunks_exact(4) {
-        if let [b, g, r, _a] = *px {
-            pixel_format.pack(r, g, b, &mut out);
-        }
+    for px in bgra.as_chunks::<4>().0 {
+        let [b, g, r, _a] = *px;
+        pixel_format.pack(r, g, b, &mut out);
     }
     out
 }
@@ -202,8 +201,12 @@ where
     Ok(())
 }
 
+/// Maximum payload size representable by a 3-byte Tight compact length (22 bits = 4 MiB - 1).
+const MAX_TIGHT_COMPACT_LEN: usize = 0x3f_ffff;
+
 /// Append a Tight "compact length" (1–3 bytes, 7 bits each, little-endian, MSB=continue).
 fn push_tight_compact_len(msg: &mut Vec<u8>, len: usize) {
+    debug_assert!(len <= MAX_TIGHT_COMPACT_LEN);
     msg.push((len & 0x7f) as u8 | if len >= 0x80 { 0x80 } else { 0 });
     if len >= 0x80 {
         msg.push(((len >> 7) & 0x7f) as u8 | if len >= 0x4000 { 0x80 } else { 0 });
@@ -227,6 +230,12 @@ pub async fn write_tight_jpeg_rect<S>(
 where
     S: AsyncWrite + Unpin,
 {
+    if jpeg.len() > MAX_TIGHT_COMPACT_LEN {
+        bail!(
+            "Tight JPEG payload too large ({} bytes, max {MAX_TIGHT_COMPACT_LEN})",
+            jpeg.len()
+        );
+    }
     let mut msg = Vec::with_capacity(20 + jpeg.len());
     push_single_rect_fb_update_header(&mut msg, x, y, w, h, ENCODING_TIGHT);
     msg.push(TIGHT_JPEG_CONTROL);
@@ -241,12 +250,7 @@ pub async fn write_server_cut_text<S>(stream: &mut S, text: &str) -> Result<()>
 where
     S: AsyncWrite + Unpin,
 {
-    // Cap the payload mirrored to the viewer, truncating on a char boundary.
-    let mut end = text.len().min(MAX_CLIPBOARD_LEN);
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    let bytes = text.get(..end).unwrap_or(text).as_bytes();
+    let bytes = truncate_clipboard_contents(text, MAX_CLIPBOARD_LEN).as_bytes();
     let mut msg = Vec::with_capacity(8 + bytes.len());
     msg.push(3); // ServerCutText
     msg.extend_from_slice(&[0, 0, 0]); // padding
@@ -320,13 +324,11 @@ where
                 reader.read_exact(&mut body).await?;
                 let mut desktop_size = false;
                 let mut tight = false;
-                for chunk in body.chunks_exact(4) {
-                    if let Ok(arr) = <[u8; 4]>::try_from(chunk) {
-                        match i32::from_be_bytes(arr) {
-                            ENCODING_DESKTOP_SIZE => desktop_size = true,
-                            ENCODING_TIGHT => tight = true,
-                            _ => {}
-                        }
+                for arr in body.as_chunks::<4>().0 {
+                    match i32::from_be_bytes(*arr) {
+                        ENCODING_DESKTOP_SIZE => desktop_size = true,
+                        ENCODING_TIGHT => tight = true,
+                        _ => {}
                     }
                 }
                 debug!(count, desktop_size, tight, "viewer SetEncodings");

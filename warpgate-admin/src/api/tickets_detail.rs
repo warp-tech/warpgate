@@ -1,6 +1,6 @@
 use poem_openapi::param::Path;
 use poem_openapi::{ApiResponse, OpenApi};
-use sea_orm::{EntityTrait, ModelTrait};
+use sea_orm::EntityTrait;
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_core::logging::AuditEvent;
@@ -56,7 +56,10 @@ impl Api {
             .emit();
         }
 
-        ticket.delete(db).await?;
+        admin
+            .services()
+            .delete_ticket_closing_sessions(ticket.id)
+            .await?;
         Ok(DeleteTicketResponse::Deleted)
     }
 }

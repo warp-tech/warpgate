@@ -1,66 +1,26 @@
 use std::sync::Arc;
 
+use poem::Request;
 use poem::session::Session;
 use poem::web::{Data, RemoteAddr};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
-use poem_openapi::{ApiResponse, Object, OpenApi};
+use poem_openapi::{Object, OpenApi};
 use uuid::Uuid;
-use warpgate_common::WarpgateError;
-use warpgate_db_entities::Target::TargetKind;
+use warpgate_common::UserSessionId;
 use warpgate_web_ssh::WebSshClientManager;
 
 use crate::api::auth_scheme::AuthedSession;
-use crate::api::common::{WebClientTargetAccess, authorize_web_client_target};
+use crate::api::web_clients::{
+    CreateWebClientSessionResponse, DeleteWebClientSessionResponse, GetWebClientSessionResponse,
+    create_web_client_session, delete_web_client_session, get_web_client_session,
+};
 
 pub struct Api;
 
 #[derive(Object)]
 struct CreateWebSshSessionBody {
     target_id: Uuid,
-}
-
-#[derive(Object)]
-struct WebSshSessionCreated {
-    session_id: Uuid,
-}
-
-#[derive(Object)]
-struct WebSshSessionInfo {
-    target_name: String,
-    target_kind: TargetKind,
-}
-
-#[derive(ApiResponse)]
-enum CreateWebSshSessionResponse {
-    #[oai(status = 201)]
-    Created(Json<WebSshSessionCreated>),
-    #[oai(status = 401)]
-    ReauthRequired,
-    #[oai(status = 403)]
-    Forbidden,
-    #[oai(status = 404)]
-    NotFound,
-    #[oai(status = 429)]
-    TooManyRequests,
-}
-
-#[derive(ApiResponse)]
-enum GetWebSshSessionResponse {
-    #[oai(status = 200)]
-    Ok(Json<WebSshSessionInfo>),
-    #[oai(status = 404)]
-    NotFound,
-}
-
-#[derive(ApiResponse)]
-enum DeleteWebSshSessionResponse {
-    #[oai(status = 204)]
-    Deleted,
-    #[oai(status = 403)]
-    Forbidden,
-    #[oai(status = 404)]
-    NotFound,
 }
 
 #[OpenApi]
@@ -77,37 +37,15 @@ impl Api {
         ctx: AuthedSession,
         body: Json<CreateWebSshSessionBody>,
         manager: Data<&Arc<WebSshClientManager>>,
-    ) -> poem::Result<CreateWebSshSessionResponse> {
-        let authorization = match authorize_web_client_target(&ctx, session, body.target_id).await?
-        {
-            WebClientTargetAccess::Authorized(authorization) => authorization,
-            WebClientTargetAccess::ReauthRequired => {
-                return Ok(CreateWebSshSessionResponse::ReauthRequired);
-            }
-            WebClientTargetAccess::Forbidden => {
-                return Ok(CreateWebSshSessionResponse::Forbidden);
-            }
-            WebClientTargetAccess::NotFound => return Ok(CreateWebSshSessionResponse::NotFound),
-        };
-
-        let session_id = manager
-            .create_session(
+    ) -> poem::Result<CreateWebClientSessionResponse> {
+        create_web_client_session(&ctx, session, body.target_id, |authorization| {
+            manager.create_session(
                 ctx.services(),
                 authorization,
                 remote_addr.0.as_socket_addr().copied(),
             )
-            .await;
-
-        let session_id = match session_id {
-            Ok(id) => id,
-            Err(WarpgateError::SessionLimitReached) => {
-                return Ok(CreateWebSshSessionResponse::TooManyRequests);
-            }
-            Err(e) => return Err(e.into()),
-        };
-        Ok(CreateWebSshSessionResponse::Created(Json(
-            WebSshSessionCreated { session_id },
-        )))
+        })
+        .await
     }
 
     #[oai(
@@ -118,21 +56,11 @@ impl Api {
     async fn api_get_web_ssh_session(
         &self,
         ctx: AuthedSession,
-        session_id: Path<Uuid>,
+        req: &Request,
+        Path(session_id): Path<UserSessionId>,
         manager: Data<&Arc<WebSshClientManager>>,
-    ) -> poem::Result<GetWebSshSessionResponse> {
-        let Some(session) = manager.get_session(*session_id).await else {
-            return Ok(GetWebSshSessionResponse::NotFound);
-        };
-
-        if session.user_id() != ctx.auth.user_id() {
-            return Ok(GetWebSshSessionResponse::NotFound);
-        }
-
-        Ok(GetWebSshSessionResponse::Ok(Json(WebSshSessionInfo {
-            target_name: session.target_name().into(),
-            target_kind: *session.target_kind(),
-        })))
+    ) -> poem::Result<GetWebClientSessionResponse> {
+        get_web_client_session(&ctx, req, session_id, &manager).await
     }
 
     #[oai(
@@ -143,18 +71,10 @@ impl Api {
     async fn api_delete_web_ssh_session(
         &self,
         ctx: AuthedSession,
-        session_id: Path<Uuid>,
+        req: &Request,
+        Path(session_id): Path<UserSessionId>,
         manager: Data<&Arc<WebSshClientManager>>,
-    ) -> poem::Result<DeleteWebSshSessionResponse> {
-        let Some(session) = manager.get_session(*session_id).await else {
-            return Ok(DeleteWebSshSessionResponse::NotFound);
-        };
-
-        if session.user_id() != ctx.auth.user_id() {
-            return Ok(DeleteWebSshSessionResponse::Forbidden);
-        }
-
-        manager.remove_session(*session_id).await;
-        Ok(DeleteWebSshSessionResponse::Deleted)
+    ) -> poem::Result<DeleteWebClientSessionResponse> {
+        delete_web_client_session(&ctx, req, session_id, &manager).await
     }
 }

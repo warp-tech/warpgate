@@ -11,29 +11,27 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use ironrdp_server::tokio_rustls::TlsAcceptor;
-use ironrdp_server::tokio_rustls::rustls::ServerConfig as TlsServerConfig;
+use ironrdp_displaycontrol::pdu::{DisplayControlMonitorLayout, MonitorLayoutEntry};
 use ironrdp_server::{
     BitmapUpdate, CredentialDecision, CredentialValidationError, CredentialValidator, Credentials,
-    DesktopSize, DisplayUpdate, KeyboardEvent, MouseEvent, PixelFormat, RdpServer,
-    RdpServerDisplay, RdpServerDisplayUpdates, RdpServerInputHandler,
+    DesktopSize, DisplayContext, DisplayUpdate, KeyboardEvent, MouseButton, MouseEvent,
+    PixelFormat, RGBAPointer, RdpServer, RdpServerDisplay, RdpServerDisplayUpdates,
+    RdpServerInputHandler, ServerResult,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, mpsc, oneshot};
-use tracing::warn;
-use warpgate_core::DesktopInput;
+use tokio_rustls::TlsAcceptor;
+use tokio_rustls::rustls::ServerConfig as TlsServerConfig;
+use tracing::{Instrument as _, Span, debug, warn};
+use warpgate_core::{DesktopInput, Scancode};
+#[cfg(test)]
 use warpgate_desktop_ui::DEFAULT_SIZE;
 
+use super::clipboard::ViewerClipboard;
 use super::protocol::{AuthVerdict, Event, Input};
-
-/// Upper bound on a single framebuffer update, and so on the desktop size we will accept
-/// from a viewer: a full-screen BGRA frame has to stay a sane allocation.
-const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
-/// Smallest desktop MS-RDPBCGR allows a client to ask for; also keeps the hold screen from
-/// being asked to render into a degenerate framebuffer.
-const MIN_DESKTOP_DIM: u16 = 200;
-/// Largest desktop dimension we will honour.
-const MAX_DESKTOP_DIM: u16 = 8192;
+use crate::desktop_size::{MAX_DESKTOP_DIM, bound_desktop_size};
+#[cfg(test)]
+use crate::desktop_size::{MAX_FRAME_BYTES, MIN_DESKTOP_DIM};
 
 /// Run the RDP server on a dedicated thread, resolving to its result.
 ///
@@ -53,6 +51,9 @@ where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
 {
     let (done_tx, done_rx) = oneshot::channel();
+    // The session span is thread-local, so it has to be carried over by hand: without it
+    // nothing this server logs is attributed to the session.
+    let span = Span::current();
     std::thread::spawn(move || {
         let runtime = match tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -64,7 +65,8 @@ where
                 return;
             }
         };
-        let result = runtime.block_on(run(stream, cert_pem, key_pem, size, out_tx, in_rx));
+        let result =
+            runtime.block_on(run(stream, cert_pem, key_pem, size, out_tx, in_rx).instrument(span));
         let _ = done_tx.send(result);
     });
     done_rx
@@ -84,8 +86,7 @@ where
 {
     // `ironrdp-server` pulls in tokio-rustls with the aws-lc-rs provider (its default);
     // install it as the process default so `ServerConfig::builder()` works.
-    let _ = ironrdp_server::tokio_rustls::rustls::crypto::aws_lc_rs::default_provider()
-        .install_default();
+    let _ = tokio_rustls::rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     let tls = build_tls_acceptor(&cert_pem, &key_pem)?;
 
@@ -95,10 +96,24 @@ where
         height: size.1,
     }));
 
-    let router = tokio::spawn(route_input(in_rx, frame_tx, Arc::clone(&size)));
+    let clipboard = ViewerClipboard::new(out_tx.clone());
+
+    let router = tokio::spawn(
+        route_input(
+            in_rx,
+            frame_tx,
+            DisplayRouteState {
+                size: Arc::clone(&size),
+                out: out_tx.clone(),
+            },
+            clipboard.clone(),
+        )
+        .in_current_span(),
+    );
 
     let display = DisplayHandler {
         size,
+        initial_size_negotiated: false,
         updates: Arc::new(Mutex::new(frame_rx)),
         out: out_tx.clone(),
     };
@@ -122,8 +137,12 @@ where
         .with_display_handler(display)
         // Opt in to calling `request_initial_size`; without it the acceptor ignores the
         // viewer's requested resolution and pins the session to `size()`'s seed.
-        .with_honor_client_desktop_size(true)
+        .with_honor_client_desktop_size(Some(DesktopSize {
+            width: MAX_DESKTOP_DIM,
+            height: MAX_DESKTOP_DIM,
+        }))
         .with_credential_validator(Some(validator))
+        .with_cliprdr_factory(Some(Box::new(clipboard)))
         .build();
 
     if let Err(error) = server.run_connection(stream).await {
@@ -159,12 +178,19 @@ fn build_tls_acceptor(cert_pem: &str, key_pem: &str) -> Result<TlsAcceptor> {
     Ok(TlsAcceptor::from(Arc::new(config)))
 }
 
+/// Shared display state used while routing Warpgate framebuffer messages.
+struct DisplayRouteState {
+    size: Arc<Mutex<DesktopSize>>,
+    out: mpsc::UnboundedSender<Event>,
+}
+
 /// Route Warpgate's messages to the display backend (framebuffer updates) and the
 /// credential validator (auth decisions).
 async fn route_input(
     mut rx: mpsc::Receiver<Input>,
     frame_tx: mpsc::Sender<DisplayUpdate>,
-    size: Arc<Mutex<DesktopSize>>,
+    display: DisplayRouteState,
+    clipboard: ViewerClipboard,
 ) {
     while let Some(msg) = rx.recv().await {
         match msg {
@@ -175,10 +201,10 @@ async fn route_input(
                 height,
                 data,
             } => {
-                if let Some(update) = frame_to_update(x, y, width, height, data) {
-                    if frame_tx.send(update).await.is_err() {
-                        break;
-                    }
+                if let Some(update) = frame_to_update(x, y, width, height, data)
+                    && frame_tx.send(update).await.is_err()
+                {
+                    break;
                 }
             }
             Input::Resize { width, height } => {
@@ -187,13 +213,42 @@ async fn route_input(
                 // down to the acceptor and renegotiates capabilities with the viewer. Skip
                 // it when the size is unchanged so an already-correct session is never
                 // disturbed.
-                if core::mem::replace(&mut *size.lock().await, new) == new {
+                let previous = core::mem::replace(&mut *display.size.lock().await, new);
+                if previous == new {
                     continue;
                 }
+                debug!(?previous, ?new, "viewer surface resized");
                 if frame_tx.send(DisplayUpdate::Resize(new)).await.is_err() {
                     break;
                 }
+                let _ = display.out.send(Event::Size {
+                    width: new.width,
+                    height: new.height,
+                });
             }
+            Input::Cursor {
+                hotspot_x,
+                hotspot_y,
+                width,
+                height,
+                data,
+            } => {
+                let update = cursor_to_update(hotspot_x, hotspot_y, width, height, &data);
+                if frame_tx.send(update).await.is_err() {
+                    break;
+                }
+            }
+            Input::CursorDefault => {
+                if frame_tx.send(DisplayUpdate::DefaultPointer).await.is_err() {
+                    break;
+                }
+            }
+            Input::CursorHidden => {
+                if frame_tx.send(DisplayUpdate::HidePointer).await.is_err() {
+                    break;
+                }
+            }
+            Input::Clipboard(text) => clipboard.offer(text),
             Input::Shutdown => break,
         }
     }
@@ -222,29 +277,73 @@ fn frame_to_update(x: u16, y: u16, width: u16, height: u16, data: Bytes) -> Opti
     }))
 }
 
-/// Bound a viewer-supplied desktop size. This arrives during the capability exchange —
-/// before the credential validator has run — and drives full-screen framebuffer
-/// allocations of `width * height * 4`, so it is untrusted input. Sizes whose full-screen
-/// frame would exceed [`MAX_FRAME_BYTES`] fall back to the default rather than being
-/// silently squashed to a different aspect ratio.
-fn clamp_desktop_size(requested: DesktopSize) -> DesktopSize {
-    let size = DesktopSize {
-        width: requested.width.clamp(MIN_DESKTOP_DIM, MAX_DESKTOP_DIM),
-        height: requested.height.clamp(MIN_DESKTOP_DIM, MAX_DESKTOP_DIM),
-    };
-    let frame_len = usize::from(size.width) * usize::from(size.height) * 4;
-    if frame_len > MAX_FRAME_BYTES {
+/// Largest cursor, in pixels per side, sent to the viewer. Bigger ones need the large-pointer
+/// capability, which this server doesn't advertise, so a viewer can't be assumed to take them.
+const MAX_CURSOR_DIM: u16 = 32;
+
+/// Convert a BGRA cursor image (top row first) into an IronRDP pointer update. A cursor that
+/// is malformed or too large for the viewer becomes the viewer's default arrow, so the viewer
+/// never keeps showing a shape the target has already left.
+fn cursor_to_update(
+    hotspot_x: u16,
+    hotspot_y: u16,
+    width: u16,
+    height: u16,
+    data: &[u8],
+) -> DisplayUpdate {
+    let row_len = usize::from(width) * 4;
+    if width == 0
+        || height == 0
+        || width > MAX_CURSOR_DIM
+        || height > MAX_CURSOR_DIM
+        || data.len() != row_len * usize::from(height)
+    {
         warn!(
-            width = size.width,
-            height = size.height,
-            "viewer requested a desktop too large to frame; using the default"
+            width,
+            height,
+            len = data.len(),
+            "unusable cursor, using the default"
         );
-        return DesktopSize {
-            width: DEFAULT_SIZE.0,
-            height: DEFAULT_SIZE.1,
-        };
+        return DisplayUpdate::DefaultPointer;
     }
-    size
+    // The pointer PDU's 32bpp XOR mask is a bottom-up DIB, hence the reversed rows.
+    // `RGBAPointer` is named for its channels, but the mask goes on the wire as given, and
+    // the wire order is BGRA.
+    let data = data
+        .chunks_exact(row_len)
+        .rev()
+        .flatten()
+        .copied()
+        .collect();
+    DisplayUpdate::RGBAPointer(RGBAPointer {
+        // Every update replaces the one slot; the target's own cache isn't mirrored.
+        cache_index: 0,
+        width,
+        height,
+        hot_x: hotspot_x,
+        hot_y: hotspot_y,
+        data,
+    })
+}
+
+/// Bound a viewer-supplied desktop size with [`bound_desktop_size`]. On this path it arrives
+/// during the capability exchange, before the credential validator has run.
+fn clamp_desktop_size(requested: DesktopSize) -> DesktopSize {
+    let (width, height) = bound_desktop_size(requested.width, requested.height);
+    DesktopSize { width, height }
+}
+
+fn primary_monitor_size(layout: &DisplayControlMonitorLayout) -> Option<DesktopSize> {
+    let monitor = layout
+        .monitors()
+        .iter()
+        .find(|monitor| monitor.is_primary())?;
+    let (width, height) = monitor.dimensions();
+    let (width, height) = MonitorLayoutEntry::adjust_display_size(width, height);
+    Some(clamp_desktop_size(DesktopSize {
+        width: u16::try_from(width).ok()?,
+        height: u16::try_from(height).ok()?,
+    }))
 }
 
 /// Display backend: hands the IronRDP server a receiver of framebuffer updates fed by
@@ -254,6 +353,10 @@ struct DisplayHandler {
     /// `UpdateEncoder`, so this has to track the size last renegotiated with the client,
     /// not the one the session started at.
     size: Arc<Mutex<DesktopSize>>,
+    /// Whether the initial viewer-driven size has been adopted. Gates
+    /// [`Self::request_initial_size`] so reactivations keep the committed size instead of
+    /// re-adopting a stale one the viewer echoes.
+    initial_size_negotiated: bool,
     // Shared, not `take()`n: ironrdp-server calls `updates()` again after every
     // deactivation-reactivation (e.g. an mstsc / MS Remote Desktop resize), so a
     // one-shot receiver would fail the second connection with "already taken".
@@ -267,11 +370,30 @@ impl RdpServerDisplay for DisplayHandler {
         *self.size.lock().await
     }
 
-    /// Whatever this returns is what the session runs at — RDP lets the server dictate, and
-    /// the viewer resizes to match. Honour what the viewer asked for, then report it so
-    /// Warpgate paints the hold screen and dials the target at that same size.
+    /// Whatever this returns is what the session runs at; RDP lets the server dictate, and
+    /// the viewer resizes to match.
+    ///
+    /// ironrdp-server also calls this on every deactivation-reactivation, passing the size
+    /// the viewer echoes in its Confirm Active. That echo can lag the resolution Warpgate
+    /// just negotiated — mstsc, growing the window, still reports the smaller previous size —
+    /// and adopting it would rebuild the encoder below the frames Warpgate is about to send,
+    /// so every larger tile hits the "bitmap exceeds desktop size" drop (a grow paints black,
+    /// while a shrink still fits and looks fine). So the viewer's size is honoured only for
+    /// the initial negotiation; from then on the committed size — driven by the target after
+    /// a Display Control resize — is authoritative and the viewer conforms to it.
     async fn request_initial_size(&mut self, client_size: DesktopSize) -> DesktopSize {
+        if self.initial_size_negotiated {
+            let committed = *self.size.lock().await;
+            debug!(
+                ?client_size,
+                ?committed,
+                "reactivation: keeping committed size, viewer echo ignored"
+            );
+            return committed;
+        }
+        self.initial_size_negotiated = true;
         let size = clamp_desktop_size(client_size);
+        debug!(?client_size, adopted = ?size, "initial viewer size negotiated");
         *self.size.lock().await = size;
         let _ = self.out.send(Event::Size {
             width: size.width,
@@ -280,12 +402,31 @@ impl RdpServerDisplay for DisplayHandler {
         size
     }
 
-    async fn updates(&mut self) -> Result<Box<dyn RdpServerDisplayUpdates>> {
+    async fn updates(
+        &mut self,
+        _ctx: DisplayContext,
+    ) -> ServerResult<Box<dyn RdpServerDisplayUpdates>> {
         // Hand out a fresh view over the shared receiver. Only one is active at a time
         // (the previous is dropped when its client loop ends before reactivation).
         Ok(Box::new(DisplayUpdatesReceiver {
             rx: self.updates.clone(),
         }))
+    }
+
+    fn request_layout(&mut self, layout: DisplayControlMonitorLayout) {
+        let Some(size) = primary_monitor_size(&layout) else {
+            return;
+        };
+        // ironrdp-server calls this from `spawn_blocking`, never on the runtime thread, which
+        // is what makes blocking on the lock legal here.
+        if *self.size.blocking_lock() == size {
+            return;
+        }
+        debug!(requested = ?size, "viewer requested a dynamic resize");
+        let _ = self.out.send(Event::ResizeRequest {
+            width: size.width,
+            height: size.height,
+        });
     }
 }
 
@@ -295,9 +436,11 @@ struct DisplayUpdatesReceiver {
 
 #[async_trait::async_trait]
 impl RdpServerDisplayUpdates for DisplayUpdatesReceiver {
-    async fn next_update(&mut self) -> Result<Option<DisplayUpdate>> {
+    async fn next_update(&mut self) -> ServerResult<Option<DisplayUpdate>> {
         // `mpsc::Receiver::recv` is cancellation-safe, as this trait requires; the guard
-        // is released on cancel and no message is lost.
+        // is released on cancel and no message is lost. `Resize` and the frames that follow
+        // it share this one ordered channel, so the encoder is always resized before it is
+        // handed a frame at the new size.
         Ok(self.rx.lock().await.recv().await)
     }
 }
@@ -353,6 +496,14 @@ impl InputHandler {
         }));
     }
 
+    fn send_key(&self, keysym: Option<u32>, scancode: Option<Scancode>, down: bool) {
+        let _ = self.out.send(Event::Input(DesktopInput::Key {
+            keysym,
+            scancode,
+            down,
+        }));
+    }
+
     fn set_button(&mut self, bit: u8, down: bool) {
         if down {
             self.buttons |= 1 << bit;
@@ -367,30 +518,16 @@ impl RdpServerInputHandler for InputHandler {
     fn keyboard(&mut self, event: KeyboardEvent) {
         match event {
             KeyboardEvent::Pressed { code, extended } => {
-                let _ = self.out.send(Event::Input(DesktopInput::Scancode {
-                    code,
-                    extended,
-                    down: true,
-                }));
+                self.send_key(None, Some(Scancode { code, extended }), true);
             }
             KeyboardEvent::Released { code, extended } => {
-                let _ = self.out.send(Event::Input(DesktopInput::Scancode {
-                    code,
-                    extended,
-                    down: false,
-                }));
+                self.send_key(None, Some(Scancode { code, extended }), false);
             }
             KeyboardEvent::UnicodePressed(unit) => {
-                let _ = self.out.send(Event::Input(DesktopInput::Key {
-                    keysym: u32::from(unit),
-                    down: true,
-                }));
+                self.send_key(Some(u32::from(unit)), None, true);
             }
             KeyboardEvent::UnicodeReleased(unit) => {
-                let _ = self.out.send(Event::Input(DesktopInput::Key {
-                    keysym: u32::from(unit),
-                    down: false,
-                }));
+                self.send_key(Some(u32::from(unit)), None, false);
             }
             // Lock-key (caps/num/scroll) sync state; not propagated to the target.
             KeyboardEvent::Synchronize(_) => {}
@@ -404,16 +541,26 @@ impl RdpServerInputHandler for InputHandler {
                 self.y = y;
                 self.emit_pointer();
             }
-            MouseEvent::LeftPressed => self.set_button(0, true),
-            MouseEvent::LeftReleased => self.set_button(0, false),
-            MouseEvent::MiddlePressed => self.set_button(1, true),
-            MouseEvent::MiddleReleased => self.set_button(1, false),
-            MouseEvent::RightPressed => self.set_button(2, true),
-            MouseEvent::RightReleased => self.set_button(2, false),
-            MouseEvent::Button4Pressed => self.set_button(3, true),
-            MouseEvent::Button4Released => self.set_button(3, false),
-            MouseEvent::Button5Pressed => self.set_button(4, true),
-            MouseEvent::Button5Released => self.set_button(4, false),
+            MouseEvent::Button {
+                x,
+                y,
+                button,
+                pressed,
+            } => {
+                self.x = x;
+                self.y = y;
+                self.set_button(button_bit(button), pressed);
+            }
+            MouseEvent::ButtonRel {
+                x,
+                y,
+                button,
+                pressed,
+            } => {
+                self.x = self.x.saturating_add_signed(clamp_to_i16(x));
+                self.y = self.y.saturating_add_signed(clamp_to_i16(y));
+                self.set_button(button_bit(button), pressed);
+            }
             MouseEvent::VerticalScroll { value } => {
                 let _ = self.out.send(Event::Input(DesktopInput::Wheel {
                     x: self.x,
@@ -439,6 +586,8 @@ impl RdpServerInputHandler for InputHandler {
                 self.y = self.y.saturating_add_signed(clamp_to_i16(y));
                 self.emit_pointer();
             }
+            // `MouseEvent` is non-exhaustive; input kinds added upstream have no viewer mapping.
+            _ => {}
         }
     }
 }
@@ -455,19 +604,43 @@ const fn wheel_notches(value: i16) -> i16 {
     }
 }
 
+/// Bit index of `button` in the viewer-side button mask (matches the browser's
+/// `MouseEvent.buttons` order).
+fn button_bit(button: MouseButton) -> u8 {
+    match button {
+        MouseButton::Left => 0,
+        MouseButton::Middle => 1,
+        MouseButton::Right => 2,
+        MouseButton::X1 => 3,
+        MouseButton::X2 => 4,
+        _ => 5,
+    }
+}
+
 fn clamp_to_i16(value: i32) -> i16 {
     value.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16
 }
 
 #[cfg(test)]
 mod desktop_size_tests {
+    use std::sync::Arc;
+
+    use ironrdp_displaycontrol::pdu::{DisplayControlMonitorLayout, MonitorLayoutEntry};
+    use tokio::sync::{Mutex, mpsc};
+
     use super::{
-        DEFAULT_SIZE, DesktopSize, MAX_DESKTOP_DIM, MAX_FRAME_BYTES, MIN_DESKTOP_DIM,
-        clamp_desktop_size,
+        DEFAULT_SIZE, DesktopSize, DisplayHandler, MAX_DESKTOP_DIM, MAX_FRAME_BYTES,
+        MIN_DESKTOP_DIM, RdpServerDisplay, clamp_desktop_size, primary_monitor_size,
     };
+    use crate::server::protocol::Event;
 
     fn size(width: u16, height: u16) -> DesktopSize {
         DesktopSize { width, height }
+    }
+
+    fn single_primary_layout(width: u32, height: u32) -> DisplayControlMonitorLayout {
+        DisplayControlMonitorLayout::new(&[MonitorLayoutEntry::new_primary(width, height).unwrap()])
+            .unwrap()
     }
 
     #[test]
@@ -488,10 +661,204 @@ mod desktop_size_tests {
 
     #[test]
     fn falls_back_when_a_full_frame_would_not_fit() {
-        // 8192x8192 BGRA is 256 MB — past MAX_FRAME_BYTES, so neither dimension is trusted.
+        // 8192x8192 BGRA is 256 MB, past MAX_FRAME_BYTES, so neither dimension is trusted.
         let fallback = clamp_desktop_size(size(MAX_DESKTOP_DIM, MAX_DESKTOP_DIM));
         assert_eq!(fallback, size(DEFAULT_SIZE.0, DEFAULT_SIZE.1));
         let frame_len = usize::from(fallback.width) * usize::from(fallback.height) * 4;
         assert!(frame_len <= MAX_FRAME_BYTES);
+    }
+
+    #[test]
+    fn uses_primary_monitor_for_dynamic_layout() {
+        let layout = DisplayControlMonitorLayout::new(&[
+            MonitorLayoutEntry::new_primary(1920, 1080).unwrap(),
+            MonitorLayoutEntry::new_secondary(1280, 720)
+                .unwrap()
+                .with_position(1920, 0)
+                .unwrap(),
+        ])
+        .unwrap();
+
+        assert_eq!(primary_monitor_size(&layout), Some(size(1920, 1080)));
+    }
+
+    #[test]
+    fn normalizes_dynamic_layout_size() {
+        let layout = single_primary_layout(1921, 1080);
+
+        assert_eq!(primary_monitor_size(&layout), Some(size(1920, 1080)));
+    }
+
+    fn display_handler(
+        committed: DesktopSize,
+        initial_size_negotiated: bool,
+    ) -> (DisplayHandler, mpsc::UnboundedReceiver<Event>) {
+        let (_tx, rx) = mpsc::channel(1);
+        let (out, events) = mpsc::unbounded_channel();
+        let display = DisplayHandler {
+            size: Arc::new(Mutex::new(committed)),
+            initial_size_negotiated,
+            updates: Arc::new(Mutex::new(rx)),
+            out,
+        };
+        (display, events)
+    }
+
+    /// A layout at the committed size is noise; a different one is a request for the target.
+    #[test]
+    fn dynamic_layout_request_is_forwarded_to_the_target() {
+        let (mut display, mut events) = display_handler(size(800, 600), true);
+
+        display.request_layout(single_primary_layout(800, 600));
+        assert!(events.try_recv().is_err());
+
+        display.request_layout(single_primary_layout(1024, 768));
+        assert!(matches!(
+            events.try_recv(),
+            Ok(Event::ResizeRequest {
+                width: 1024,
+                height: 768,
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn initial_size_adopts_the_viewer_request() {
+        let (mut display, mut events) =
+            display_handler(size(DEFAULT_SIZE.0, DEFAULT_SIZE.1), false);
+
+        assert_eq!(
+            display.request_initial_size(size(1024, 768)).await,
+            size(1024, 768)
+        );
+        assert_eq!(display.size().await, size(1024, 768));
+        assert!(matches!(
+            events.try_recv(),
+            Ok(Event::Size {
+                width: 1024,
+                height: 768,
+            })
+        ));
+    }
+
+    /// On reactivation the viewer can echo a size that lags the freshly negotiated one; the
+    /// committed (target-driven) size must win, or a grow would rebuild the encoder too small
+    /// and drop every oversized tile.
+    #[tokio::test]
+    async fn reactivation_keeps_the_committed_size() {
+        let (mut display, mut events) = display_handler(size(1920, 1080), true);
+
+        assert_eq!(
+            display.request_initial_size(size(1024, 768)).await,
+            size(1920, 1080)
+        );
+        assert_eq!(display.size().await, size(1920, 1080));
+        assert!(events.try_recv().is_err());
+    }
+}
+
+#[cfg(test)]
+mod cursor_tests {
+    use ironrdp_graphics::pointer::{DecodedPointer, PointerBitmapTarget};
+    use ironrdp_pdu::pointer::{ColorPointerAttribute, Point16, PointerAttribute};
+    use ironrdp_server::DisplayUpdate;
+
+    use super::{MAX_CURSOR_DIM, cursor_to_update};
+
+    /// What a viewer decodes from the update: the target's RGBA pixels come back out.
+    #[test]
+    fn viewer_decodes_the_cursor_the_target_sent() {
+        // 2x2, BGRA, top row first: red, green / blue, translucent white.
+        let bgra = [
+            [0, 0, 255, 255],
+            [0, 255, 0, 255],
+            [255, 0, 0, 255],
+            [255, 255, 255, 128],
+        ]
+        .concat();
+        let DisplayUpdate::RGBAPointer(pointer) = cursor_to_update(1, 0, 2, 2, &bgra) else {
+            panic!("expected a pointer update");
+        };
+        assert_eq!((pointer.hot_x, pointer.hot_y), (1, 0));
+
+        let decoded = DecodedPointer::decode_pointer_attribute(
+            &PointerAttribute {
+                xor_bpp: 32,
+                color_pointer: ColorPointerAttribute {
+                    cache_index: pointer.cache_index,
+                    hot_spot: Point16 {
+                        x: pointer.hot_x,
+                        y: pointer.hot_y,
+                    },
+                    width: pointer.width,
+                    height: pointer.height,
+                    xor_mask: &pointer.data,
+                    and_mask: &[],
+                },
+            },
+            PointerBitmapTarget::Accelerated,
+        )
+        .unwrap();
+        let rgba = [
+            [255, 0, 0, 255],
+            [0, 255, 0, 255],
+            [0, 0, 255, 255],
+            [255, 255, 255, 128],
+        ]
+        .concat();
+        assert_eq!(decoded.bitmap_data, rgba);
+    }
+
+    #[test]
+    fn unusable_cursors_fall_back_to_the_default() {
+        let pixels =
+            |width: u16, height: u16| vec![0; usize::from(width) * usize::from(height) * 4];
+
+        assert!(matches!(
+            cursor_to_update(0, 0, 0, 0, &[]),
+            DisplayUpdate::DefaultPointer
+        ));
+        assert!(matches!(
+            cursor_to_update(0, 0, 2, 2, &pixels(2, 1)),
+            DisplayUpdate::DefaultPointer
+        ));
+        let too_big = MAX_CURSOR_DIM + 1;
+        assert!(matches!(
+            cursor_to_update(0, 0, too_big, 1, &pixels(too_big, 1)),
+            DisplayUpdate::DefaultPointer
+        ));
+        assert!(matches!(
+            cursor_to_update(
+                0,
+                0,
+                MAX_CURSOR_DIM,
+                MAX_CURSOR_DIM,
+                &pixels(MAX_CURSOR_DIM, MAX_CURSOR_DIM)
+            ),
+            DisplayUpdate::RGBAPointer(_)
+        ));
+    }
+}
+
+#[cfg(test)]
+mod framed_tests {
+    use std::time::Duration;
+
+    use ironrdp_pdu::X224_HINT;
+    use ironrdp_tokio::TokioFramed;
+    use tokio::io::AsyncWriteExt as _;
+
+    /// A fast-path header whose length field is zero is a frame `X224_HINT` neither
+    /// matches nor can skip past. The reader has to fail it; looping on it would pin a
+    /// core for as long as the process lives, long after the sender has gone away.
+    #[tokio::test]
+    async fn zero_length_unmatched_frame_fails_instead_of_spinning() {
+        let (server_side, mut client_side) = tokio::io::duplex(64);
+        client_side.write_all(&[0x00, 0x00]).await.unwrap();
+        let mut framed = TokioFramed::new(server_side);
+        let result = tokio::time::timeout(Duration::from_secs(5), framed.read_by_hint(&X224_HINT))
+            .await
+            .expect("read_by_hint spun instead of returning");
+        assert!(result.is_err());
     }
 }

@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use warpgate_protocol_ssh::RCState;
+use warpgate_web_clients_common::SessionPhase;
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -30,9 +30,7 @@ pub enum ClientMessage {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
-    ConnectionState {
-        state: RCState,
-    },
+    State(SessionPhase),
     Output {
         channel_id: Uuid,
         #[serde(with = "warpgate_common::helpers::serde_base64")]
@@ -51,6 +49,7 @@ pub enum ServerMessage {
         channel_id: Uuid,
         code: u32,
     },
+    /// A non-fatal notice; the session ends through [`ServerMessage::State`] alone.
     Error {
         message: String,
     },
@@ -60,4 +59,10 @@ pub enum ServerMessage {
         key_type: String,
         key_base64: String,
     },
+}
+
+impl From<SessionPhase> for ServerMessage {
+    fn from(phase: SessionPhase) -> Self {
+        Self::State(phase)
+    }
 }

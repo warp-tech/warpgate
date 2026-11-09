@@ -1,16 +1,15 @@
-use poem::http::StatusCode;
+use poem::session::Session;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use uuid::Uuid;
-use warpgate_common::{AdminPermission, WarpgateError};
-use warpgate_core::SessionSnapshot;
-use warpgate_core::db::mark_session_ended;
-use warpgate_db_entities::{Node, Recording, Session};
+use warpgate_common::{AdminPermission, UserSessionId, WarpgateError};
+use warpgate_core::{SessionsFilter, UserSessionSnapshot};
+use warpgate_db_entities::{HttpSession, Recording, TargetSession, UserSession};
 
-use super::{AdminContext, ClusterOrAdminContext};
-use crate::api::cluster_proxy::{Owner, forward_http, session_owner};
+use super::AdminContext;
+use super::sessions_list::user_session_snapshots;
 
 pub struct Api;
 
@@ -18,7 +17,7 @@ pub struct Api;
 #[derive(ApiResponse)]
 enum GetSessionResponse {
     #[oai(status = 200)]
-    Ok(Json<SessionSnapshot>),
+    Ok(Json<UserSessionSnapshot>),
     #[oai(status = 404)]
     NotFound,
 }
@@ -43,23 +42,22 @@ impl Api {
     async fn api_get_session(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<UserSessionId>,
     ) -> Result<GetSessionResponse, WarpgateError> {
         admin.require(AdminPermission::SessionsView)?;
 
         let db = &admin.services().db;
 
-        let Some(session) = Session::Entity::find_by_id(id.0).one(db).await? else {
+        let Some(session) = UserSession::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(GetSessionResponse::NotFound);
         };
-
-        let mut snapshot: SessionSnapshot = session.into();
-        if let Some(node_id) = snapshot.node_id {
-            snapshot.node_hostname = Node::Entity::find_by_id(node_id)
-                .one(db)
-                .await?
-                .map(|node| node.hostname);
-        }
+        let Some(snapshot) = user_session_snapshots(db, vec![session])
+            .await?
+            .into_iter()
+            .next()
+        else {
+            return Ok(GetSessionResponse::NotFound);
+        };
         Ok(GetSessionResponse::Ok(Json(snapshot)))
     }
 
@@ -71,16 +69,27 @@ impl Api {
     async fn api_get_session_recordings(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<UserSessionId>,
     ) -> Result<GetSessionRecordingsResponse, WarpgateError> {
         admin.require(AdminPermission::RecordingsView)?;
 
         let db = &admin.services().db;
-        let recordings: Vec<Recording::Model> = Recording::Entity::find()
-            .order_by_desc(Recording::Column::Started)
-            .filter(Recording::Column::SessionId.eq(id.0))
+        let target_session_ids = TargetSession::Entity::find()
+            .select_only()
+            .column(TargetSession::Column::Id)
+            .filter(TargetSession::Column::UserSessionId.eq(id.0))
+            .into_tuple::<Uuid>()
             .all(db)
             .await?;
+        let recordings = if target_session_ids.is_empty() {
+            vec![]
+        } else {
+            Recording::Entity::find()
+                .order_by_desc(Recording::Column::Started)
+                .filter(Recording::Column::SessionId.is_in(target_session_ids))
+                .all(db)
+                .await?
+        };
         Ok(GetSessionRecordingsResponse::Ok(Json(recordings)))
     }
 
@@ -91,54 +100,30 @@ impl Api {
     )]
     async fn api_close_session(
         &self,
-        admin: ClusterOrAdminContext,
-        id: Path<Uuid>,
-        req: &poem::Request,
+        admin: AdminContext,
+        id: Path<UserSessionId>,
+        browser_session: &Session,
     ) -> poem::Result<CloseSessionResponse> {
         admin.require(AdminPermission::SessionsTerminate)?;
 
-        {
-            let state = admin.services().state.lock().await;
-            if let Some(s) = state.sessions.get(&id) {
-                s.lock().await.handle.close();
-                drop(state);
-                // a stuck event loop might never mark a session ended
-                mark_session_ended(&admin.services().db, id.0).await?;
-                return Ok(CloseSessionResponse::Ok);
-            }
-        }
-
-        // No live handle here — the session may be owned by another node.
-        let session = Session::Entity::find_by_id(id.0)
+        let session = UserSession::Entity::find_by_id(id.0)
             .one(&admin.services().db)
             .await
             .map_err(WarpgateError::from)?;
-        let Some(session) = session else {
-            return Ok(CloseSessionResponse::NotFound);
-        };
-        if session.ended.is_some() {
+        if session.is_none_or(|session| session.ended.is_some()) {
             return Ok(CloseSessionResponse::NotFound);
         }
-        let owner = match session_owner(&admin, &session).await {
-            // The owner node is gone; nothing left to close.
-            Err(WarpgateError::NodeGone(_)) => return Ok(CloseSessionResponse::NotFound),
-            owner => owner?,
-        };
-        match owner {
-            // Owned here but no live handle — already terminated.
-            Owner::Local => Ok(CloseSessionResponse::NotFound),
-            Owner::Remote(remote) => {
-                let response =
-                    forward_http(&admin, req, remote, &admin.services().cluster_token).await?;
-                match response.status() {
-                    StatusCode::CREATED => Ok(CloseSessionResponse::Ok),
-                    StatusCode::NOT_FOUND => Ok(CloseSessionResponse::NotFound),
-                    status => Err(poem::Error::from_string(
-                        format!("Unexpected response from the owner node: {status}"),
-                        StatusCode::BAD_GATEWAY,
-                    )),
-                }
-            }
+
+        admin
+            .services()
+            .close_sessions(SessionsFilter::Sessions { ids: vec![id.0] })
+            .await
+            .map_err(poem::error::InternalServerError)?;
+
+        if browser_session.get::<UserSessionId>(HttpSession::SESSION_ID_DATA_KEY) == Some(id.0) {
+            browser_session.purge();
         }
+
+        Ok(CloseSessionResponse::Ok)
     }
 }

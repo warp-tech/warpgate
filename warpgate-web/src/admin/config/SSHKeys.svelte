@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { Alert, Badge, Button } from '@sveltestrap/sveltestrap'
+    import { Alert, Badge, Button, Tooltip } from '@sveltestrap/sveltestrap'
     import {
         api,
         type SSHClientKey,
@@ -10,6 +10,7 @@
     import CopyableTextArea from 'common/CopyableTextArea.svelte'
     import { stringifyError } from 'common/errors'
     import InfoBox from 'common/InfoBox.svelte'
+    import { isSecretRef } from 'common/SecretRefInput.svelte'
     import ClientKeyModal from './ClientKeyModal.svelte'
     import GenerateClientKeyModal from './GenerateClientKeyModal.svelte'
 
@@ -61,8 +62,18 @@
                 })
                 return
             }
+            if (isSecretRef(secretKey)) {
+                await api.importSshOwnKeyReference({
+                    importSshClientKeyReferenceRequest: {
+                        label,
+                        reference: secretKey,
+                        isDefault,
+                    },
+                })
+                return
+            }
             await api.importSshOwnKey({
-                importSSHClientKeyRequest: { label, secretKey, isDefault },
+                importSshClientKeyRequest: { label, secretKey, isDefault },
             })
         })
     }
@@ -115,6 +126,15 @@
                     {#if key.isDefault}
                         <Badge color="primary">Default</Badge>
                     {/if}
+                    {#if key.secretBackend}
+                        <Tooltip target="keyRow-{key.id}">
+                            Private key will be loaded from the secret backend
+                            on use
+                        </Tooltip>
+                        <Badge color="info" id="keyRow-{key.id}">
+                            {key.secretBackend}
+                        </Badge>
+                    {/if}
                     {#if $adminPermissions.configEdit}
                         <Button
                             class="ms-auto"
@@ -123,8 +143,9 @@
                                 e.preventDefault()
                                 openEditKey(key)
                             }}
-                            >Edit</Button
                         >
+                            Edit
+                        </Button>
                         <Button
                             class="ms-3"
                             color="link px-0"
@@ -132,8 +153,9 @@
                                 e.preventDefault()
                                 deleteKey(key)
                             }}
-                            >Delete</Button
                         >
+                            Delete
+                        </Button>
                     {/if}
                 </div>
                 <CopyableTextArea label="Public key" value={key.publicKey} />
@@ -178,8 +200,9 @@
                             deleteHost(host)
                         }}
                         disabled={!$adminPermissions.configEdit}
-                        >Delete</Button
                     >
+                        Delete
+                    </Button>
                 </div>
                 <pre>{host.keyType} {host.keyBase64}</pre>
             </div>

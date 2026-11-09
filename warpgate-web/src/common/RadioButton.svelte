@@ -17,9 +17,9 @@
 
 <Button
     on:click={e => {
-    group = value
-    e.preventDefault()
-}}
+        group = value
+        e.preventDefault()
+    }}
     class={classes}
     {...rest}
 >

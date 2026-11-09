@@ -13,7 +13,7 @@
 
 use zune_jpeg::zune_core::bytestream::ZCursor;
 
-use super::DesktopEvent;
+use super::{DesktopEvent, MAX_DESKTOP_DIM};
 
 /// PNG encoding failed. Carries the codec's message; callers map it into their own error.
 #[derive(Debug, thiserror::Error)]
@@ -76,6 +76,12 @@ impl Framebuffer {
     }
 
     pub(crate) fn resize(&mut self, width: u32, height: u32) {
+        let max = u32::from(MAX_DESKTOP_DIM);
+        let (width, height) = if width > max || height > max {
+            (0, 0)
+        } else {
+            (width, height)
+        };
         self.width = width;
         self.height = height;
         let needed = (width as usize)
@@ -141,7 +147,12 @@ impl Framebuffer {
             let Some(dst_row) = self.rgba.get_mut(dst_off..dst_off + cols * 4) else {
                 break;
             };
-            for (dst, src) in dst_row.chunks_exact_mut(4).zip(src_row.chunks_exact(SRC)) {
+            for (dst, src) in dst_row
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
+                .zip(src_row.as_chunks::<SRC>().0.iter())
+            {
                 dst.copy_from_slice(&convert(src));
             }
         }
@@ -244,6 +255,8 @@ impl Framebuffer {
                 );
             }
             DesktopEvent::Cursor { .. }
+            | DesktopEvent::CursorDefault
+            | DesktopEvent::CursorHidden
             | DesktopEvent::State(_)
             | DesktopEvent::Clipboard(_)
             | DesktopEvent::Bell
@@ -370,6 +383,16 @@ mod tests {
 
     /// A refinement must be pixel-exact: it exists to replace lossy pixels, so any loss
     /// here defeats the whole feature.
+    #[test]
+    fn oversized_resize_leaves_the_framebuffer_empty() {
+        let mut fb = Framebuffer::default();
+        fb.resize(65535, 65535);
+        assert!(fb.is_empty());
+        assert!(fb.rgba().is_empty());
+        fb.resize(u32::from(MAX_DESKTOP_DIM), 1);
+        assert_eq!(fb.size(), (u32::from(MAX_DESKTOP_DIM), 1));
+    }
+
     #[test]
     fn region_png_roundtrips_losslessly() {
         let mut fb = Framebuffer::default();

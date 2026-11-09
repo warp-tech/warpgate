@@ -1,5 +1,7 @@
 mod defaults;
+mod specific_target;
 mod target;
+mod warnings;
 
 use std::ops::Deref;
 use std::path::PathBuf;
@@ -10,14 +12,16 @@ use defaults::{
     _default_http_listen, _default_kubernetes_listen, _default_mysql_advertised_version,
     _default_mysql_listen, _default_postgres_listen, _default_rdp_listen, _default_recordings_path,
     _default_retention, _default_session_max_age, _default_ssh_inactivity_timeout,
-    _default_ssh_keys_path, _default_ssh_listen, _default_vnc_listen,
+    _default_ssh_listen, _default_ssh_target_handshake_timeout, _default_vnc_listen,
 };
+use poem::http::uri::Authority;
 use poem_openapi::{Object, Union};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+pub use specific_target::*;
 pub use target::*;
-use tracing::warn;
 use uuid::Uuid;
+pub use warnings::{clear_config_warnings, emit_config_warning, emit_runtime_warning, warnings};
 use warpgate_sso::SsoProviderConfig;
 use warpgate_tls::IntoTlsCertificateRelativePaths;
 
@@ -25,7 +29,7 @@ use crate::auth::CredentialKind;
 use crate::helpers::hash::hash_password;
 use crate::helpers::ipnet::WarpgateIpNet;
 use crate::helpers::otp::OtpSecretKey;
-use crate::{ListenEndpoint, Secret};
+use crate::{GlobalParams, ListenEndpoint, Secret};
 
 #[derive(Debug, Clone, PartialEq, Eq, Union)]
 #[oai(discriminator_name = "kind", one_of)]
@@ -82,21 +86,26 @@ impl UserAuthCredential {
     }
 }
 
+/// Coerce [] to None
+fn credential_entry_is_unset(entry: &Option<Vec<CredentialKind>>) -> bool {
+    entry.as_ref().is_none_or(Vec::is_empty)
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Object, Default)]
 pub struct UserRequireCredentialsPolicy {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub http: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub kubernetes: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub ssh: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub mysql: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub postgres: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub vnc: Option<Vec<CredentialKind>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "credential_entry_is_unset")]
     pub rdp: Option<Vec<CredentialKind>>,
 }
 
@@ -196,6 +205,7 @@ pub struct AdminRole {
 
     pub sessions_view: bool,
     pub sessions_terminate: bool,
+    pub approve_sessions: bool,
 
     pub recordings_view: bool,
 
@@ -224,6 +234,7 @@ pub enum AdminPermission {
     AccessRolesAssign,
     SessionsView,
     SessionsTerminate,
+    ApproveSessions,
     RecordingsView,
     TicketsCreate,
     TicketsDelete,
@@ -247,6 +258,7 @@ impl AdminRole {
             AdminPermission::AccessRolesAssign => self.access_roles_assign,
             AdminPermission::SessionsView => self.sessions_view,
             AdminPermission::SessionsTerminate => self.sessions_terminate,
+            AdminPermission::ApproveSessions => self.approve_sessions,
             AdminPermission::RecordingsView => self.recordings_view,
             AdminPermission::TicketsCreate => self.tickets_create,
             AdminPermission::TicketsDelete => self.tickets_delete,
@@ -303,13 +315,19 @@ impl AdminPermissionSet {
     }
 
     #[must_use]
-    pub const fn contains(&self, perm: AdminPermission) -> bool {
+    pub const fn contains(self, perm: AdminPermission) -> bool {
         self.0 & perm.bit() != 0
+    }
+
+    /// Every permission in `other` is also in `self`.
+    #[must_use]
+    pub const fn is_superset_of(self, other: Self) -> bool {
+        other.0 & !self.0 == 0
     }
 
     /// Holding any permission at all makes the principal an administrator.
     #[must_use]
-    pub const fn is_admin(&self) -> bool {
+    pub const fn is_admin(self) -> bool {
         self.0 != 0
     }
 }
@@ -338,6 +356,7 @@ mod admin_permission_set_tests {
             access_roles_assign: false,
             sessions_view: false,
             sessions_terminate: false,
+            approve_sessions: false,
             recordings_view: false,
             tickets_create: false,
             tickets_delete: false,
@@ -377,6 +396,20 @@ mod admin_permission_set_tests {
     }
 
     #[test]
+    fn superset_requires_every_permission() {
+        let mut narrow = empty_role();
+        narrow.users_edit = true;
+        let mut broad = narrow.clone();
+        broad.config_edit = true;
+        let narrow = AdminPermissionSet::from_roles([narrow]);
+        let broad = AdminPermissionSet::from_roles([broad]);
+        assert!(broad.is_superset_of(narrow));
+        assert!(!narrow.is_superset_of(broad));
+        assert!(narrow.is_superset_of(narrow));
+        assert!(narrow.is_superset_of(AdminPermissionSet::none()));
+    }
+
+    #[test]
     fn role_granting_nothing_is_not_admin() {
         let set = AdminPermissionSet::from_roles([empty_role()]);
         assert!(!set.is_admin());
@@ -384,7 +417,9 @@ mod admin_permission_set_tests {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq, Copy, JsonSchema)]
+#[derive(
+    Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq, Copy, JsonSchema, clap::ValueEnum,
+)]
 pub enum SshHostKeyVerificationMode {
     #[serde(rename = "prompt")]
     #[default]
@@ -393,6 +428,8 @@ pub enum SshHostKeyVerificationMode {
     AutoAccept,
     #[serde(rename = "auto_reject")]
     AutoReject,
+    #[serde(rename = "ignore")]
+    Ignore,
 }
 
 #[derive(
@@ -423,9 +460,13 @@ pub struct SshConfig {
     #[serde(default)]
     pub external_host: Option<String>,
 
-    #[serde(default = "_default_ssh_keys_path")]
-    pub keys: String,
+    /// Legacy directory for the SSH host keys (`host-ed25519`, `host-rsa`).
+    /// If set, key files are re-imported into the database, after which the option can be removed from the config.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keys: Option<String>,
 
+    /// Only seeds the `ssh_host_key_verification` parameter when the database
+    /// row is first created; the admin UI owns the setting afterwards.
     #[serde(default)]
     pub host_key_verification: SshHostKeyVerificationMode,
 
@@ -433,8 +474,19 @@ pub struct SshConfig {
     #[schemars(with = "String")]
     pub inactivity_timeout: Duration,
 
-    #[serde(default)]
+    #[serde(default, with = "humantime_serde")]
+    #[schemars(with = "Option<String>")]
     pub keepalive_interval: Option<Duration>,
+
+    /// Deadline for a target to accept the connection and complete key exchange.
+    /// Covers the TCP connect (or the direct-tcpip hop through a jump host) and the
+    /// SSH handshake, but not authentication. Set to `0s` to wait forever.
+    #[serde(
+        default = "_default_ssh_target_handshake_timeout",
+        with = "humantime_serde"
+    )]
+    #[schemars(with = "String")]
+    pub target_handshake_timeout: Duration,
 }
 
 impl Default for SshConfig {
@@ -443,12 +495,13 @@ impl Default for SshConfig {
             enable: false,
             listen: _default_ssh_listen(),
             proxy_protocol: false,
-            keys: _default_ssh_keys_path(),
+            keys: None,
             host_key_verification: <_>::default(),
             external_port: None,
             external_host: None,
             inactivity_timeout: _default_ssh_inactivity_timeout(),
             keepalive_interval: None,
+            target_handshake_timeout: _default_ssh_target_handshake_timeout(),
         }
     }
 }
@@ -460,6 +513,12 @@ impl SshConfig {
 
     pub fn external_host(&self) -> Option<String> {
         self.external_host.clone()
+    }
+
+    pub fn keys_path(&self, params: &GlobalParams) -> PathBuf {
+        params
+            .paths_relative_to()
+            .join(self.keys.as_deref().unwrap_or("./data/keys"))
     }
 }
 
@@ -865,7 +924,7 @@ pub struct WarpgateConfigStore {
     #[serde(default)]
     pub sso_providers: Vec<SsoProviderConfig>,
 
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recordings: Option<RecordingsConfig>,
 
     #[serde(default)]
@@ -924,17 +983,121 @@ pub struct WarpgateConfig {
     pub store: WarpgateConfigStore,
 }
 
+/// Ignores anything that does not look like a bare hostname or at least a
+/// legacy host:port.
+fn bare_host_name(value: &str) -> Option<String> {
+    Some(value.parse::<Authority>().ok()?.host().to_owned())
+}
+
 impl WarpgateConfig {
+    pub fn external_host_name(&self) -> Option<String> {
+        bare_host_name(self.store.external_host.as_deref()?)
+    }
+
+    /// The host where /@warpgate API access is allowed, here either the HTTP external host or the global external host
+    pub fn control_plane_host(&self) -> Option<String> {
+        let external_host = self.external_host_name()?;
+        Some(
+            self.store
+                .http
+                .external_host
+                .as_deref()
+                .and_then(bare_host_name)
+                .unwrap_or(external_host),
+        )
+    }
+
     pub fn validate(&self) {
-        if let Some(ref ext) = self.store.external_host
-            && ext.contains(':')
-        {
-            warn!(
-                "Looks like your `external_host` config option contains a port - it will be ignored."
-            );
-            warn!(
-                "Set the external port via the `http.external_port`, `ssh.external_port` or `mysql.external_port` options."
-            );
+        let Some(ext) = self.store.external_host.as_deref() else {
+            return;
+        };
+        let tip = "`external_host` takes a bare hostname - set the external port via the `http.external_port` instead.";
+        match self.external_host_name() {
+            None => emit_config_warning(format!(
+                "Your `external_host` config option is set to `{ext}`, which is not a hostname and will be ignored. {tip}"
+            )),
+            Some(host) if host != ext => emit_config_warning(format!(
+                "Your `external_host` config option is set to `{ext}` - only `{host}` will be used. {tip}"
+            )),
+            Some(_) => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::{SshConfig, WarpgateConfig, WarpgateConfigStore};
+
+    #[test]
+    fn keepalive_interval_is_a_humantime_string() {
+        let config = serde_json::from_str::<SshConfig>(r#"{"keepalive_interval": "1m"}"#).unwrap();
+        assert_eq!(config.keepalive_interval, Some(Duration::from_secs(60)));
+        assert!(
+            serde_json::to_string(&config)
+                .unwrap()
+                .contains(r#""keepalive_interval":"1m""#)
+        );
+    }
+
+    #[test]
+    fn default_config_store_omits_recordings() {
+        let config = serde_json::to_value(WarpgateConfigStore::default()).unwrap();
+        let config = config.as_object().unwrap();
+
+        assert!(!config.contains_key("recordings"));
+    }
+
+    #[test]
+    fn external_host_name_keeps_only_a_hostname() {
+        let name = |ext: &str| {
+            WarpgateConfig {
+                store: WarpgateConfigStore {
+                    external_host: Some(ext.to_owned()),
+                    ..Default::default()
+                },
+            }
+            .external_host_name()
+        };
+
+        assert_eq!(
+            name("warp.example.com").as_deref(),
+            Some("warp.example.com")
+        );
+        assert_eq!(
+            name("warp.example.com:8888").as_deref(),
+            Some("warp.example.com")
+        );
+        assert_eq!(name("https://warp.example.com:8888"), None);
+        assert_eq!(name("warp.example.com/gateway"), None);
+    }
+
+    #[test]
+    fn control_plane_host_needs_external_host() {
+        let host = |ext: Option<&str>, http_ext: Option<&str>| {
+            WarpgateConfig {
+                store: WarpgateConfigStore {
+                    external_host: ext.map(ToOwned::to_owned),
+                    http: super::HttpConfig {
+                        external_host: http_ext.map(ToOwned::to_owned),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            }
+            .control_plane_host()
+        };
+
+        assert_eq!(host(None, None), None);
+        assert_eq!(host(None, Some("portal.example.com")), None);
+        assert_eq!(
+            host(Some("example.com"), None).as_deref(),
+            Some("example.com")
+        );
+        assert_eq!(
+            host(Some("example.com"), Some("portal.example.com:8443")).as_deref(),
+            Some("portal.example.com")
+        );
     }
 }

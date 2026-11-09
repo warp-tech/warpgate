@@ -4,7 +4,6 @@ Tests for SSH client authentication method configuration via Parameters API.
 These tests verify that SSH auth methods can be configured via the Parameters API
 and that the configuration actually affects SSH authentication behavior.
 """
-import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -71,12 +70,9 @@ class TestSSHClientAuthConfigE2E:
     """E2E tests verifying SSH auth methods are actually enforced."""
 
     def _start_ssh_server(self, processes, wg_c_ed25519_pubkey):
-        """Start SSH server with delay for Docker port forwarding."""
         ssh_port = processes.start_ssh_server(
             trusted_keys=[wg_c_ed25519_pubkey.read_text()]
         )
-        # Give Docker time to set up port forwarding
-        time.sleep(3)
         wait_port(ssh_port)
         return ssh_port
 
@@ -102,9 +98,13 @@ class TestSSHClientAuthConfigE2E:
         ssh_target = api.create_target(
             sdk.TargetDataRequest(
                 name=f"ssh-{uuid4()}",
+                require_approval=False,
+                ticket_requests_disabled=False,
+                ticket_require_approval=False,
                 options=sdk.TargetOptions(
                     sdk.TargetOptionsTargetSSHOptions(
                         kind="Ssh",
+                        allow_insecure_algos=False,
                         host="localhost",
                         port=ssh_port,
                         username="root",

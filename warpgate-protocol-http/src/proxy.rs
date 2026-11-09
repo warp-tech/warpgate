@@ -14,9 +14,9 @@ use poem::session::Session;
 use poem::web::Data;
 use poem::web::websocket::WebSocket;
 use poem::{Body, FromRequest, IntoResponse, Request, Response};
-use tokio::sync::Mutex;
+use tokio::sync::broadcast;
 use tokio_tungstenite::{Connector, connect_async_tls_with_config, tungstenite};
-use tracing::{debug, error, warn};
+use tracing::{Instrument, debug, error, warn};
 use url::{Url, form_urlencoded};
 use warpgate_common::helpers::websocket::pump_websocket;
 use warpgate_common::http_headers::{
@@ -24,13 +24,15 @@ use warpgate_common::http_headers::{
 };
 use warpgate_common::{TargetHTTPOptions, WarpgateError, try_block};
 use warpgate_common_http::logging::{get_client_ip, log_request_result};
-use warpgate_common_http::{AuthenticatedRequestContext, SessionAuthorization, SessionKeepalive};
+use warpgate_common_http::{
+    AuthenticatedRequestContext, SessionAuthorization, SessionKeepalive, SessionKeepaliveGuard,
+};
+use warpgate_core::AdmittedTarget;
 use warpgate_tls::{TlsMode, configure_tls_connector};
 use warpgate_web::lookup_built_file;
 
-use crate::client_cache::HttpClientCache;
-use crate::common::SessionExt;
-use crate::session::SessionStore;
+use crate::client_cache::{HttpClientCache, build_client};
+use crate::common::{SESSION_COOKIE_NAME, SessionExt};
 
 static X_WARPGATE_USERNAME: HeaderName = HeaderName::from_static("x-warpgate-username");
 static X_WARPGATE_AUTHENTICATION_TYPE: HeaderName =
@@ -64,6 +66,9 @@ trait SomeRequestBuilder {
     where
         HeaderValue: TryFrom<V>,
         <HeaderValue as TryFrom<V>>::Error: Into<http::Error>;
+
+    /// Set a target-configured header, replacing values copied or generated earlier.
+    fn set_header(self, k: HeaderName, v: HeaderValue) -> Self;
 }
 
 impl SomeRequestBuilder for reqwest::RequestBuilder {
@@ -73,6 +78,12 @@ impl SomeRequestBuilder for reqwest::RequestBuilder {
         <HeaderValue as TryFrom<V>>::Error: Into<http::Error>,
     {
         self.header(k, v)
+    }
+
+    fn set_header(self, k: HeaderName, v: HeaderValue) -> Self {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(k, v);
+        self.headers(headers)
     }
 }
 
@@ -84,22 +95,31 @@ impl SomeRequestBuilder for http::request::Builder {
     {
         self.header(k, v)
     }
+
+    fn set_header(mut self, k: HeaderName, v: HeaderValue) -> Self {
+        if let Some(headers) = self.headers_mut() {
+            headers.insert(k, v);
+        }
+        self
+    }
 }
 
 fn strip_warpgate_internal_query_params(pq: &PathAndQuery) -> Result<PathAndQuery> {
     let Some(query) = pq.query() else {
         return Ok(pq.clone());
     };
-    let query = form_urlencoded::parse(query.as_bytes())
-        .filter(|(key, _)| key != "warpgate-target" && key != "warpgate-ticket")
-        .fold(
-            form_urlencoded::Serializer::new(String::new()),
-            |mut s, (k, v)| {
-                s.append_pair(&k, &v);
-                s
-            },
-        )
-        .finish();
+    // Keep the other segments verbatim: the query isn't necessarily form-encoded and
+    // re-serialising it would rewrite bytes the upstream expects (e.g. `==` -> `=%3D`)
+    let query = query
+        .split('&')
+        .filter(|segment| {
+            !matches!(
+                form_urlencoded::parse(segment.as_bytes()).next(),
+                Some((key, _)) if key == "warpgate-target" || key == "warpgate-ticket"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("&");
     let path = pq.path();
     let rebuilt = if query.is_empty() {
         path.to_string()
@@ -166,10 +186,8 @@ fn copy_client_response<R: SomeResponse>(
 }
 
 fn rewrite_request<B: SomeRequestBuilder>(mut req: B, options: &TargetHTTPOptions) -> Result<B> {
-    if let Some(ref headers) = options.headers {
-        for (k, v) in headers {
-            req = req.header(HeaderName::try_from(k)?, v);
-        }
+    for (k, v) in &options.headers {
+        req = req.set_header(HeaderName::try_from(k)?, HeaderValue::try_from(v)?);
     }
     Ok(req)
 }
@@ -227,9 +245,30 @@ fn rewrite_response(
     Ok(())
 }
 
-fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> B {
+fn cookie_header_for_target(req: &Request) -> Result<Option<String>> {
+    let mut cookies = Vec::new();
+
+    for value in req.headers().get_all(http::header::COOKIE) {
+        for cookie in Cookie::split_parse(value.to_str()?) {
+            let cookie = cookie?;
+            if cookie.name() != SESSION_COOKIE_NAME {
+                cookies.push(cookie.stripped().to_string());
+            }
+        }
+    }
+
+    Ok((!cookies.is_empty()).then(|| cookies.join("; ")))
+}
+
+fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> Result<B> {
     for k in req.headers().keys() {
         if !may_forward_header(k) {
+            continue;
+        }
+        if k == http::header::COOKIE {
+            if let Some(value) = cookie_header_for_target(req)? {
+                target = target.header(k.clone(), value);
+            }
             continue;
         }
         target = target.header(
@@ -243,7 +282,24 @@ fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> B
                 .join("; "),
         );
     }
-    target
+    Ok(target)
+}
+
+fn target_accept_encoding(req: &Request) -> HeaderValue {
+    let identity = HeaderValue::from_static("identity");
+    let wants_html = req
+        .headers()
+        .get_all(http::header::ACCEPT)
+        .iter()
+        .any(|v| v.to_str().is_ok_and(|v| v.contains("text/html")));
+    if wants_html {
+        // we need a parseable body for manipulation
+        return identity;
+    }
+    req.headers()
+        .get(http::header::ACCEPT_ENCODING)
+        .cloned()
+        .unwrap_or(identity)
 }
 
 fn inject_forwarding_headers<B: SomeRequestBuilder>(
@@ -255,8 +311,8 @@ fn inject_forwarding_headers<B: SomeRequestBuilder>(
         target = target.header(X_FORWARDED_HOST.clone(), host);
     }
     target = target.header(X_FORWARDED_PROTO.clone(), ctx.trusted_proto(req).as_str());
-    if let Some(addr) = req.remote_addr().as_socket_addr() {
-        target = target.header(X_FORWARDED_FOR.clone(), addr.ip().to_string());
+    if let Some(ip) = ctx.trusted_client_ip(req) {
+        target = target.header(X_FORWARDED_FOR.clone(), ip);
     }
     target
 }
@@ -272,42 +328,58 @@ async fn inject_own_headers<B: SomeRequestBuilder>(req: &Request, mut target: B)
             },
         );
     }
+    target = target.header(http::header::ACCEPT_ENCODING, target_accept_encoding(req));
     Ok(target)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn proxy_normal_request(
     req: &Request,
     ctx: &AuthenticatedRequestContext,
     body: Body,
-    target_name: &str,
-    options: &TargetHTTPOptions,
     client_cache: &HttpClientCache,
+    admitted: AdmittedTarget<TargetHTTPOptions>,
+    mut close_rx: broadcast::Receiver<()>,
+    keepalive_guard: Option<SessionKeepaliveGuard>,
 ) -> poem::Result<Response> {
-    let uri = construct_uri(req, options, false)?;
+    let options = admitted.specific_target().options().clone();
+    let uri = construct_uri(req, &options, false)?;
 
     tracing::debug!("URI: {:?}", uri);
 
-    let client = client_cache.client_for(target_name, options).await?;
+    let client = client_cache
+        .get_or_build(&admitted.target().name, &options, || async {
+            build_client(&options)
+        })
+        .await?;
 
     let (authorization_header, uri) = extract_basic_auth(uri)?;
 
     let mut client_request = client.request(req.method().into(), uri.to_string());
 
-    client_request = copy_server_request(req, client_request);
+    client_request = copy_server_request(req, client_request)?;
     client_request = inject_forwarding_headers(req, ctx, client_request);
     client_request = inject_own_headers(req, client_request).await?;
-    client_request = rewrite_request(client_request, options)?;
+    client_request = rewrite_request(client_request, &options)?;
     if let Some(authorization_header) = authorization_header {
         client_request = client_request.header(http::header::AUTHORIZATION, authorization_header);
     }
 
-    client_request = client_request.body(reqwest::Body::wrap_stream(body.into_bytes_stream()));
+    if req.headers().contains_key(http::header::CONTENT_LENGTH)
+        || req.headers().contains_key(http::header::TRANSFER_ENCODING)
+    {
+        client_request = client_request.body(reqwest::Body::wrap_stream(body.into_bytes_stream()));
+    }
 
     let client_request = client_request.build().context("Could not build request")?;
-    let client_response = client
-        .execute(client_request)
-        .await
-        .map_err(|e| anyhow::anyhow!("Could not execute request: {e}"))?;
+    let client_response = tokio::select! {
+        result = client.execute(client_request) => {
+            result.map_err(poem::error::BadGateway)?
+        }
+        _ = close_rx.recv() => {
+            return Err(poem::Error::from_status(StatusCode::GONE));
+        }
+    };
     let status = client_response.status();
 
     let mut response: Response = "".into();
@@ -316,17 +388,26 @@ pub async fn proxy_normal_request(
 
     // The embedded UI can go in if the response is a usable HTML page - we for example
     // don't want to embed into a 404 page or a JS file - and it has something to show:
-    // the session menu, the login banner, or both.
+    // the session menu, the login banner, or both. An encoded body can't be edited.
     let embed_ui = response.status() == StatusCode::OK
+        && !response
+            .headers()
+            .contains_key(http::header::CONTENT_ENCODING)
         && response
             .content_type()
             .is_some_and(|content_type| content_type.starts_with("text/html"))
         && ctx
             .parameters()
             .await
-            .map(|p| p.show_session_menu || p.banner_text().is_some())
-            .unwrap_or(true);
-    copy_client_body(client_response, &mut response, embed_ui).await?;
+            .map_or(true, |p| p.show_session_menu || p.banner_text().is_some());
+    copy_client_body(
+        client_response,
+        &mut response,
+        embed_ui,
+        close_rx,
+        keepalive_guard,
+    )
+    .await?;
 
     log_request_result(
         req.method(),
@@ -335,7 +416,7 @@ pub async fn proxy_normal_request(
         status,
     );
 
-    rewrite_response(&mut response, options, &uri)?;
+    rewrite_response(&mut response, &options, &uri)?;
     Ok(response)
 }
 
@@ -343,17 +424,32 @@ async fn copy_client_body(
     client_response: reqwest::Response,
     response: &mut Response,
     embed_ui: bool,
+    close_rx: broadcast::Receiver<()>,
+    keepalive_guard: Option<SessionKeepaliveGuard>,
 ) -> Result<()> {
     if embed_ui {
         copy_client_body_and_embed(client_response, response).await?;
+        drop(keepalive_guard);
         return Ok(());
     }
 
-    response.set_body(Body::from_bytes_stream(
+    let body = Box::pin(
         client_response
             .bytes_stream()
             .map_err(std::io::Error::other),
-    ));
+    );
+    let guarded = futures::stream::unfold(
+        (body, close_rx, keepalive_guard),
+        |(mut body, mut close_rx, keepalive_guard)| async move {
+            tokio::select! {
+                item = body.next() => item.map(|item| {
+                    (item, (body, close_rx, keepalive_guard))
+                }),
+                _ = close_rx.recv() => None,
+            }
+        },
+    );
+    response.set_body(Body::from_bytes_stream(guarded));
     Ok(())
 }
 
@@ -399,10 +495,12 @@ pub async fn proxy_websocket_request(
     req: &Request,
     ws: WebSocket,
     ctx: &AuthenticatedRequestContext,
-    options: &TargetHTTPOptions,
+    admitted: AdmittedTarget<TargetHTTPOptions>,
+    close_rx: broadcast::Receiver<()>,
 ) -> poem::Result<impl IntoResponse> {
-    let uri = construct_uri(req, options, true)?;
-    proxy_ws_inner(req, ws, uri.clone(), ctx, options)
+    let options = admitted.specific_target().options().clone();
+    let uri = construct_uri(req, &options, true)?;
+    proxy_ws_inner(req, ws, uri.clone(), ctx, options, close_rx)
         .await
         .map_err(|error| {
             tracing::error!(?uri, ?error, "WebSocket proxy failed");
@@ -445,14 +543,9 @@ async fn proxy_ws_inner(
     ws: WebSocket,
     uri: Uri,
     ctx: &AuthenticatedRequestContext,
-    options: &TargetHTTPOptions,
+    options: TargetHTTPOptions,
+    mut close_rx: broadcast::Receiver<()>,
 ) -> poem::Result<impl IntoResponse> {
-    let session_middleware = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req)
-        .await?
-        .clone();
-    let session = <&Session>::from_request_without_body(req).await?;
-    let mut close_rx = session_middleware.lock().await.close_receiver_for(session);
-
     let keepalive_guard = Data::<&SessionKeepalive>::from_request_without_body(req)
         .await
         .ok()
@@ -481,107 +574,111 @@ async fn proxy_ws_inner(
         client_request = client_request.header(http::header::AUTHORIZATION, authorization_header);
     }
 
-    client_request = copy_server_request(req, client_request);
+    client_request = copy_server_request(req, client_request)?;
     client_request = inject_forwarding_headers(req, ctx, client_request);
     client_request = inject_own_headers(req, client_request).await?;
-    client_request = rewrite_request(client_request, options)?;
+    client_request = rewrite_request(client_request, &options)?;
 
     let tls_config = configure_tls_connector(!options.tls.verify, false, None)
         .await
         .map_err(poem::error::InternalServerError)?;
     let connector = Connector::Rustls(Arc::new(tls_config));
 
-    let (client, client_response) = connect_async_tls_with_config(
+    let connect = connect_async_tls_with_config(
         client_request
             .body(())
             .map_err(poem::error::InternalServerError)?,
         None,
         true,
         Some(connector),
-    )
-    .await
-    .map_err(poem::error::BadGateway)?;
+    );
+    let (client, client_response) = tokio::select! {
+        result = connect => result.map_err(poem::error::BadGateway)?,
+        _ = close_rx.recv() => {
+            return Err(poem::Error::from_status(StatusCode::GONE));
+        }
+    };
 
     tracing::info!("{:?} {:?} - WebSocket", client_response.status(), uri);
 
+    // poem drives the upgraded stream after this handler has returned, so the
+    // request span is carried over explicitly; the database log layer keeps
+    // only events that fall under a session span.
+    let span = tracing::Span::current();
     let mut response = ws
-        .on_upgrade(|socket| async move {
-            let (client_sink, client_source) = client.split();
-            let (server_sink, server_source) = socket.split();
+        .on_upgrade(|socket| {
+            async move {
+                let (client_sink, client_source) = client.split();
+                let (server_sink, server_source) = socket.split();
 
-            if let Err(error) = {
-                let mut server_to_client =
-                    tokio::spawn(pump_websocket(server_source, client_sink, |msg| {
-                        Box::pin(async {
-                            tracing::debug!("Server: {:?}", msg);
-                            anyhow::Ok(msg)
-                        })
-                    }));
+                if let Err(error) = {
+                    let mut server_to_client =
+                        tokio::spawn(pump_websocket(server_source, client_sink, |msg| {
+                            Box::pin(async {
+                                tracing::debug!("Server: {:?}", msg);
+                                anyhow::Ok(msg)
+                            })
+                        }));
 
-                let mut client_to_server =
-                    tokio::spawn(pump_websocket(client_source, server_sink, |msg| {
-                        Box::pin(async {
-                            tracing::debug!("Client: {:?}", msg);
-                            anyhow::Ok(msg)
-                        })
-                    }));
+                    let mut client_to_server =
+                        tokio::spawn(pump_websocket(client_source, server_sink, |msg| {
+                            Box::pin(async {
+                                tracing::debug!("Client: {:?}", msg);
+                                anyhow::Ok(msg)
+                            })
+                        }));
 
-                let (server_finished, pump_result): (
-                    bool,
-                    Option<Result<anyhow::Result<()>, tokio::task::JoinError>>,
-                ) = tokio::select! {
-                    result = &mut server_to_client => {
-                        (true, Some(result))
-                    }
-                    result = &mut client_to_server => {
-                        (false, Some(result))
-                    }
-                    () = async {
-                        match close_rx.as_mut() {
-                            Some(close_rx) => {
-                                let _ = close_rx.recv().await;
-                            }
-                            None => std::future::pending::<()>().await,
+                    let (server_finished, pump_result): (
+                        bool,
+                        Option<Result<anyhow::Result<()>, tokio::task::JoinError>>,
+                    ) = tokio::select! {
+                        result = &mut server_to_client => {
+                            (true, Some(result))
                         }
-                    } => {
-                        (false, None)
-                    }
-                };
+                        result = &mut client_to_server => {
+                            (false, Some(result))
+                        }
+                        _ = close_rx.recv() => {
+                            (false, None)
+                        }
+                    };
 
-                match pump_result {
-                    Some(result) if server_finished => {
-                        client_to_server.abort();
-                        let _ = client_to_server.await;
-                        result.context("server-to-client WebSocket pump task failed")??;
+                    match pump_result {
+                        Some(result) if server_finished => {
+                            client_to_server.abort();
+                            let _ = client_to_server.await;
+                            result.context("server-to-client WebSocket pump task failed")??;
+                        }
+                        Some(result) => {
+                            server_to_client.abort();
+                            let _ = server_to_client.await;
+                            result.context("client-to-server WebSocket pump task failed")??;
+                        }
+                        None => {
+                            debug!("Closing WebSocket stream after HTTP session ended");
+                            server_to_client.abort();
+                            client_to_server.abort();
+                            let _ = server_to_client.await;
+                            let _ = client_to_server.await;
+                        }
                     }
-                    Some(result) => {
-                        server_to_client.abort();
-                        let _ = server_to_client.await;
-                        result.context("client-to-server WebSocket pump task failed")??;
-                    }
-                    None => {
-                        debug!("Closing WebSocket stream after HTTP session ended");
-                        server_to_client.abort();
-                        client_to_server.abort();
-                        let _ = server_to_client.await;
-                        let _ = client_to_server.await;
-                    }
+                    debug!("Closing Websocket stream");
+
+                    Ok::<_, anyhow::Error>(())
+                } {
+                    error!(?error, "Websocket stream error");
                 }
-                debug!("Closing Websocket stream");
+
+                drop(keepalive_guard);
 
                 Ok::<_, anyhow::Error>(())
-            } {
-                error!(?error, "Websocket stream error");
             }
-
-            drop(keepalive_guard);
-
-            Ok::<_, anyhow::Error>(())
+            .instrument(span)
         })
         .into_response();
 
     copy_client_response(&client_response, &mut response);
-    rewrite_response(&mut response, options, &uri)?;
+    rewrite_response(&mut response, &options, &uri)?;
     Ok(response)
 }
 
@@ -589,13 +686,115 @@ async fn proxy_ws_inner(
 mod tests {
     use super::*;
 
+    fn forwarded_cookie_header(values: &[&str]) -> Option<String> {
+        let mut request = Request::builder();
+        for value in values {
+            request = request.header(http::header::COOKIE, *value);
+        }
+        cookie_header_for_target(&request.finish()).unwrap()
+    }
+
+    #[test]
+    fn accept_encoding_passes_through_except_for_pages() {
+        let req = |accept: &str| {
+            Request::builder()
+                .header(http::header::ACCEPT, accept)
+                .header(http::header::ACCEPT_ENCODING, "br, gzip")
+                .finish()
+        };
+        assert_eq!(target_accept_encoding(&req("*/*")), "br, gzip");
+        assert_eq!(
+            target_accept_encoding(&req("text/html,application/xhtml+xml,*/*;q=0.8")),
+            "identity"
+        );
+        assert_eq!(
+            target_accept_encoding(&Request::builder().finish()),
+            "identity"
+        );
+    }
+
+    #[test]
+    fn client_forwarding_headers_are_not_copied() {
+        let req = Request::builder()
+            .header(&X_FORWARDED_FOR, "203.0.113.10")
+            .header(&X_FORWARDED_HOST, "evil.example")
+            .header(&X_FORWARDED_PROTO, "https")
+            .header(http::header::FORWARDED, "for=203.0.113.10")
+            .header("x-real-ip", "203.0.113.10")
+            .header("x-custom", "kept")
+            .finish();
+        let copied = copy_server_request(&req, http::Request::builder())
+            .unwrap()
+            .body(())
+            .unwrap();
+        let names: Vec<_> = copied.headers().keys().map(HeaderName::as_str).collect();
+        assert_eq!(names, ["x-custom"]);
+    }
+
+    #[test]
+    fn request_cookie_header_omits_only_warpgate_session() {
+        assert_eq!(
+            forwarded_cookie_header(&[
+                "target-session=one; warpgate-http-session=secret",
+                "warpgate-http-session-extra=two; Warpgate-Http-Session=three",
+            ]),
+            Some(
+                "target-session=one; warpgate-http-session-extra=two; Warpgate-Http-Session=three"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn request_cookie_header_is_reserialized() {
+        assert_eq!(
+            forwarded_cookie_header(&[
+                " first = value ; warpgate-http-session=secret; token=abc== "
+            ]),
+            Some("first=value; token=abc==".to_string())
+        );
+    }
+
+    #[test]
+    fn request_cookie_header_is_omitted_without_target_cookies() {
+        assert_eq!(
+            forwarded_cookie_header(&["warpgate-http-session=secret"]),
+            None
+        );
+    }
+
     fn make_options(url: &str) -> TargetHTTPOptions {
         TargetHTTPOptions {
             url: url.to_string(),
             tls: Default::default(),
-            headers: None,
+            headers: Default::default(),
             external_host: None,
         }
+    }
+
+    #[test]
+    fn rewrite_request_replaces_websocket_host() {
+        let mut options = make_options("http://ingress.internal");
+        options.headers = std::collections::HashMap::from([(
+            "Host".to_string(),
+            "backend.example.com".to_string(),
+        )]);
+
+        let request = rewrite_request(
+            http::Request::builder().header(http::header::HOST, "ingress.internal"),
+            &options,
+        )
+        .unwrap()
+        .body(())
+        .unwrap();
+
+        let hosts = request
+            .headers()
+            .get_all(http::header::HOST)
+            .iter()
+            .map(|value| value.to_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(hosts, ["backend.example.com"]);
     }
 
     #[test]
@@ -680,5 +879,15 @@ mod tests {
         assert_eq!(strip("/search?warpgate-target=es&q=x"), "/search?q=x");
         assert_eq!(strip("/?q=x&warpgate-ticket=abc"), "/?q=x");
         assert_eq!(strip("/?warpgate-target=a&warpgate-ticket=b"), "/");
+        assert_eq!(strip("/?warpgate%2Dtarget=a&q=x"), "/?q=x");
+    }
+
+    #[test]
+    fn strip_keeps_other_query_bytes() {
+        assert_eq!(strip("/?eyJhIjoxfQ=="), "/?eyJhIjoxfQ==");
+        assert_eq!(strip("/c?eyJ+/w==&warpgate-ticket=t"), "/c?eyJ+/w==");
+        assert_eq!(strip("/?a=%20b&c=d+e"), "/?a=%20b&c=d+e");
+        assert_eq!(strip("/?flag&x=1"), "/?flag&x=1");
+        assert_eq!(strip("/?a=1&&b=2"), "/?a=1&&b=2");
     }
 }

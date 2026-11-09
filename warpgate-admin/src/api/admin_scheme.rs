@@ -4,19 +4,19 @@
 //! so the gate can't be forgotten the way a hand-written first line can. This is the admin
 //! counterpart to the gateway's `AuthedSession`.
 
-use poem::Request;
+use poem::{Endpoint, EndpointExt, Request};
 use poem_openapi::SecurityScheme;
 use poem_openapi::auth::ApiKey;
 use warpgate_common::{AdminPermission, AdminPermissionSet, WarpgateError};
-use warpgate_common_http::{AuthenticatedRequestContext, RequestAuthorization};
+use warpgate_common_http::AuthenticatedRequestContext;
 
-use super::common::admin_permission_set;
+use super::common::{admin_permission_set, user_admin_permission_set};
 
 /// Proof that a specific [`AdminPermission`] was checked. Minted only by
 /// [`AdminContext::require`]; take it where a permission must have been verified so
 /// "checked before acting" is enforced by the type rather than by convention.
 #[must_use = "obtain from AdminContext::require to prove the permission was checked"]
-pub(crate) struct PermissionGranted(());
+pub struct PermissionGranted(());
 
 /// The authenticated context plus the resolved admin permission set, shared by both gates.
 #[derive(Clone)]
@@ -26,8 +26,12 @@ struct AdminAccess {
 }
 
 impl AdminAccess {
-    fn require(&self, permission: AdminPermission) -> Result<(), WarpgateError> {
-        if self.permissions.contains(permission) {
+    const fn has_permission(&self, permission: AdminPermission) -> bool {
+        self.permissions.contains(permission)
+    }
+
+    const fn require(&self, permission: AdminPermission) -> Result<(), WarpgateError> {
+        if self.has_permission(permission) {
             Ok(())
         } else {
             Err(WarpgateError::NoAdminPermission(permission))
@@ -47,11 +51,12 @@ async fn admin_access(req: &Request, _key: ApiKey) -> Option<AdminAccess> {
     }
 }
 
-/// Checker for [`ClusterOrAdminContext`]: as above, but a cluster peer is also accepted — the
-/// origin node has already authorized the admin before forwarding, so it gets every permission.
+/// Checker for [`ClusterOrAdminContext`]: as above, but a cluster peer (a node that proved its
+/// pinned TLS identity at the listener) is also accepted — the origin node has already
+/// authorized the admin before forwarding, so it gets every permission.
 async fn cluster_or_admin_access(req: &Request, _key: ApiKey) -> Option<AdminAccess> {
     let ctx = req.data::<AuthenticatedRequestContext>().cloned()?;
-    if matches!(ctx.auth, RequestAuthorization::ClusterToken) {
+    if ctx.auth.is_cluster_peer() {
         return Some(AdminAccess {
             ctx,
             permissions: AdminPermissionSet::all(),
@@ -73,7 +78,7 @@ async fn cluster_or_admin_access(req: &Request, _key: ApiKey) -> Option<AdminAcc
     key_in = "header",
     checker = "admin_access"
 )]
-pub(crate) struct AdminTokenAuth(AdminAccess);
+pub struct AdminTokenAuth(AdminAccess);
 
 #[derive(SecurityScheme)]
 #[oai(
@@ -83,26 +88,30 @@ pub(crate) struct AdminTokenAuth(AdminAccess);
     key_in = "cookie",
     checker = "admin_access"
 )]
-pub(crate) struct AdminCookieAuth(AdminAccess);
+pub struct AdminCookieAuth(AdminAccess);
 
 /// Admin gate + context extractor. Obtaining it proves the caller is an administrator;
 /// per-permission gating goes through [`AdminContext::require`].
 #[derive(SecurityScheme)]
-pub(crate) enum AdminContext {
+pub enum AdminContext {
     Token(AdminTokenAuth),
     Cookie(AdminCookieAuth),
 }
 
 impl AdminContext {
-    fn access(&self) -> &AdminAccess {
+    const fn access(&self) -> &AdminAccess {
         match self {
             Self::Token(t) => &t.0,
             Self::Cookie(c) => &c.0,
         }
     }
 
+    pub(crate) const fn has_permission(&self, permission: AdminPermission) -> bool {
+        self.access().has_permission(permission)
+    }
+
     /// Require a specific permission, yielding a [`PermissionGranted`] proof or a 403.
-    pub(crate) fn require(&self, permission: AdminPermission) -> Result<(), WarpgateError> {
+    pub(crate) const fn require(&self, permission: AdminPermission) -> Result<(), WarpgateError> {
         self.access().require(permission)
     }
 }
@@ -123,7 +132,7 @@ impl std::ops::Deref for AdminContext {
     key_in = "header",
     checker = "cluster_or_admin_access"
 )]
-pub(crate) struct ClusterOrAdminTokenAuth(AdminAccess);
+pub struct ClusterOrAdminTokenAuth(AdminAccess);
 
 #[derive(SecurityScheme)]
 #[oai(
@@ -133,25 +142,42 @@ pub(crate) struct ClusterOrAdminTokenAuth(AdminAccess);
     key_in = "cookie",
     checker = "cluster_or_admin_access"
 )]
-pub(crate) struct ClusterOrAdminCookieAuth(AdminAccess);
+pub struct ClusterOrAdminCookieAuth(AdminAccess);
 
-/// Like [`AdminContext`], but also accepts a cluster token (peer-forwarded admin requests).
+/// Peer-forwarded request.
+// A forwarded request carries no admin token or cookie - the sending node's id header is the
+// only key this scheme can latch onto. The value is not trusted: the peer was authenticated by
+// its TLS client certificate at the listener, and `cluster_or_admin_access` goes by the
+// authorization the middleware derived from that.
+#[derive(SecurityScheme)]
+#[oai(
+    rename = "ClusterPeerSecurityScheme",
+    ty = "api_key",
+    key_name = "X-Warpgate-Cluster-Node",
+    key_in = "header",
+    checker = "cluster_or_admin_access"
+)]
+pub struct ClusterPeerAuth(AdminAccess);
+
+/// Like [`AdminContext`], but also accepts a cluster peer (peer-forwarded admin requests).
 /// Use only on endpoints that are legitimately cross-node forwardable.
 #[derive(SecurityScheme)]
-pub(crate) enum ClusterOrAdminContext {
+pub enum ClusterOrAdminContext {
     Token(ClusterOrAdminTokenAuth),
     Cookie(ClusterOrAdminCookieAuth),
+    ClusterPeer(ClusterPeerAuth),
 }
 
 impl ClusterOrAdminContext {
-    fn access(&self) -> &AdminAccess {
+    const fn access(&self) -> &AdminAccess {
         match self {
             Self::Token(t) => &t.0,
             Self::Cookie(c) => &c.0,
+            Self::ClusterPeer(t) => &t.0,
         }
     }
 
-    pub(crate) fn require(&self, permission: AdminPermission) -> Result<(), WarpgateError> {
+    pub(crate) const fn require(&self, permission: AdminPermission) -> Result<(), WarpgateError> {
         self.access().require(permission)
     }
 }
@@ -162,4 +188,29 @@ impl std::ops::Deref for ClusterOrAdminContext {
     fn deref(&self) -> &Self::Target {
         &self.access().ctx
     }
+}
+
+/// poem-openapi transform to prevent admins from editing a higher-level admin user
+///
+/// expects user ID as first path param
+pub fn guard_user_mutation(ep: impl Endpoint) -> impl Endpoint {
+    ep.before(|req| async move {
+        let Some(ctx) = req.data::<AuthenticatedRequestContext>() else {
+            return Err(WarpgateError::NoAdminAccess.into());
+        };
+        if ctx.auth.is_cluster_peer() {
+            // already checked
+            return Ok(req);
+        }
+        let user_id: uuid::Uuid = req
+            .raw_path_param("param0")
+            .and_then(|id| id.parse().ok())
+            .ok_or_else(|| WarpgateError::InvalidRequest("user id missing from path".into()))?;
+        let caller = admin_permission_set(ctx).await?;
+        let target = user_admin_permission_set(&ctx.services().db, user_id).await?;
+        if !caller.is_superset_of(target) {
+            return Err(WarpgateError::TargetUserOutranksAdmin.into());
+        }
+        Ok(req)
+    })
 }

@@ -3,17 +3,17 @@
 //! Collects that factor over the live RDP session before the target is dialed.
 
 use std::convert::Infallible;
-use std::sync::Arc;
+use std::future::Future;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use anyhow::{Result, bail};
-use tokio::sync::Mutex;
+use anyhow::{Result, anyhow};
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
-use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_core::{DesktopInput, Services};
+use warpgate_core::{AuthorizedIdentity, DesktopInput, Scancode, Services};
 use warpgate_desktop_auth::{
-    Deadline, HoldEvent, HoldFrame, HoldInputSource, HoldPainter as HoldPainterExt, InteractiveAuth,
-    OtpAction, run_hold_screen as run_hold_screen_driver,
+    Deadline, HoldEvent, HoldFrame, HoldInputSource, HoldPainter as HoldPainterExt,
+    InteractiveAuth, OtpAction, hold_while as hold_while_driver,
+    run_hold_screen as run_hold_screen_driver,
 };
 use warpgate_desktop_ui as ui;
 
@@ -33,37 +33,68 @@ pub(super) async fn run_hold_screen(
     events: &mut UnboundedReceiver<ServerEvent>,
     server_in_tx: &Sender<ServerInput>,
     screen: &mut ui::Screen,
-) -> Result<Option<AuthStateUserInfo>> {
-    // The negotiated size is written by viewer resize events (in the input source) and read
-    // by the painter — and, once auth completes, by the caller to dial the target at it.
-    // Shared behind a lock because the input and painter are separate objects (so the driver
-    // can await input and paint without aliasing one `&mut` across its `select!`).
-    let shared_screen = Arc::new(Mutex::new(*screen));
-    let mut input = RdpHoldInput {
-        events,
-        screen: shared_screen.clone(),
-    };
-    let mut painter = RdpHoldPainter {
-        inner: HoldPainter::new(*screen),
-        server_in_tx: server_in_tx.clone(),
-        screen: shared_screen.clone(),
-    };
-
+) -> Result<Option<AuthorizedIdentity>> {
+    let mut hold = RdpHold::new(events, server_in_tx, *screen);
     let result = run_hold_screen_driver(
         services,
         interactive.state_id,
         crate::PROTOCOL_NAME,
         &interactive.username,
         interactive.remote_ip,
-        &mut input,
-        &mut painter,
+        &mut hold.input,
+        &mut hold.painter,
         Deadline::until_auth_state_expires(),
     )
     .await;
-
-    // Hand the size the viewer settled on back to the caller so it dials the target at it.
-    *screen = *shared_screen.lock().await;
+    *screen = hold.screen();
     result
+}
+
+/// Await `wait` while rendering hold UI, see [hold_while_driver]
+pub(super) async fn hold_while<T>(
+    wait: impl Future<Output = T>,
+    events: &mut UnboundedReceiver<ServerEvent>,
+    server_in_tx: &Sender<ServerInput>,
+    screen: &mut ui::Screen,
+    frame: impl Fn() -> HoldFrame<'static>,
+) -> Result<Option<T>> {
+    let mut hold = RdpHold::new(events, server_in_tx, *screen);
+    let result = hold_while_driver(wait, &mut hold.input, &mut hold.painter, frame).await;
+    *screen = hold.screen();
+    result
+}
+
+struct RdpHold<'a> {
+    input: RdpHoldInput<'a>,
+    painter: RdpHoldPainter,
+    screen: Arc<Mutex<ui::Screen>>,
+}
+
+impl<'a> RdpHold<'a> {
+    fn new(
+        events: &'a mut UnboundedReceiver<ServerEvent>,
+        server_in_tx: &Sender<ServerInput>,
+        screen: ui::Screen,
+    ) -> Self {
+        let shared = Arc::new(Mutex::new(screen));
+        Self {
+            input: RdpHoldInput {
+                events,
+                screen: shared.clone(),
+            },
+            painter: RdpHoldPainter {
+                inner: HoldPainter::new(screen),
+                server_in_tx: server_in_tx.clone(),
+                screen: shared.clone(),
+            },
+            screen: shared,
+        }
+    }
+
+    /// The size the viewer has settled on so far.
+    fn screen(&self) -> ui::Screen {
+        *self.screen.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 }
 
 /// Reads RDP viewer input for the hold screen, mapping scancodes / Unicode keys to OTP
@@ -77,15 +108,19 @@ impl HoldInputSource for RdpHoldInput<'_> {
     async fn next(&mut self) -> HoldEvent {
         match self.events.recv().await {
             None => HoldEvent::Disconnected,
-            Some(ServerEvent::Input(DesktopInput::Scancode {
-                code, down: true, ..
-            })) => scancode_otp_action(code).map_or(HoldEvent::Other, HoldEvent::Otp),
             Some(ServerEvent::Input(DesktopInput::Key {
                 keysym,
+                scancode,
                 down: true,
-            })) => key_otp_action(keysym).map_or(HoldEvent::Other, HoldEvent::Otp),
-            Some(ServerEvent::Size { width, height }) => {
-                *self.screen.lock().await = ui::Screen { width, height };
+            })) => scancode
+                .and_then(scancode_otp_action)
+                .or_else(|| keysym.and_then(key_otp_action))
+                .map_or(HoldEvent::Other, HoldEvent::Otp),
+            Some(
+                ServerEvent::Size { width, height } | ServerEvent::ResizeRequest { width, height },
+            ) => {
+                *self.screen.lock().unwrap_or_else(PoisonError::into_inner) =
+                    ui::Screen { width, height };
                 HoldEvent::Other
             }
             Some(_) => HoldEvent::Other,
@@ -103,21 +138,13 @@ struct RdpHoldPainter {
 
 impl HoldPainterExt for RdpHoldPainter {
     async fn paint(&mut self, frame: HoldFrame<'_>) -> Result<()> {
-        self.inner.set_screen(*self.screen.lock().await);
-        match frame {
-            HoldFrame::Prompt(prompt) => {
-                self.inner
-                    .paint(&self.server_in_tx, |screen, tick| {
-                        ui::render_authentication(screen, tick, prompt)
-                    })
-                    .await
-            }
-            HoldFrame::Connecting => {
-                self.inner
-                    .paint(&self.server_in_tx, ui::render_connecting)
-                    .await
-            }
-        }
+        self.inner
+            .set_screen(*self.screen.lock().unwrap_or_else(PoisonError::into_inner));
+        self.inner
+            .paint(&self.server_in_tx, |screen, tick| {
+                frame.render(screen, tick)
+            })
+            .await
     }
 
     fn render_interval(&self) -> Duration {
@@ -145,15 +172,13 @@ pub(super) async fn run_banner_screen(
                     return Ok(false);
                 };
                 match event {
-                    ServerEvent::Input(
-                        DesktopInput::Scancode { down: true, .. }
-                        | DesktopInput::Key { down: true, .. },
-                    ) => return Ok(true),
+                    ServerEvent::Input(DesktopInput::Key { down: true, .. }) => return Ok(true),
                     // Any button press
                     ServerEvent::Input(DesktopInput::Pointer { buttons, .. }) if buttons != 0 => {
                         return Ok(true);
                     }
-                    ServerEvent::Size { width, height } => {
+                    ServerEvent::Size { width, height }
+                    | ServerEvent::ResizeRequest { width, height } => {
                         *screen = ui::Screen { width, height };
                         painter.set_screen(*screen);
                     }
@@ -169,58 +194,94 @@ pub(super) async fn run_banner_screen(
     }
 }
 
-/// Paints the full-screen hold-screen UI to the RDP viewer, owning the
-/// spinner tick. `paint` takes a UI render function (`ui::render_*`) so the prompt and
-/// "Connecting" screens go through one code path.
+/// Paints the full-screen hold-screen UI to the RDP viewer, owning the spinner tick and
+/// keeping the RDP server's desktop in step with the negotiated size. `paint` takes a UI
+/// render function (`ui::render_*`) so the prompt and "Connecting" screens go through one
+/// code path.
 struct HoldPainter {
     tick: u64,
     screen: ui::Screen,
+    /// The size the RDP server was last told to run at.
+    server_screen: ui::Screen,
 }
 
 impl HoldPainter {
     const fn new(screen: ui::Screen) -> Self {
-        Self { tick: 0, screen }
+        Self {
+            tick: 0,
+            screen,
+            server_screen: screen,
+        }
     }
 
-    fn set_screen(&mut self, screen: ui::Screen) {
+    const fn set_screen(&mut self, screen: ui::Screen) {
         self.screen = screen;
     }
 
     /// Render one frame with `render_frame(tick)` (RGB888), convert it to the BGRA the RDP
     /// server expects, and push it as a full-screen frame. Advances the spinner tick.
+    ///
+    /// A changed size is pushed to the server first, so it never sees a frame larger than
+    /// its desktop. Pre-dial there is no target to consult, so a viewer's resize request is
+    /// granted as-is (a size the server already runs at is ignored by it). This happens here
+    /// rather than where the resize event is read because the input reader is polled inside
+    /// the driver's `select!` and can be dropped mid-await, whereas `paint` runs to completion.
     async fn paint(
         &mut self,
         server_in_tx: &Sender<ServerInput>,
         render_frame: impl FnOnce(ui::Screen, u64) -> Result<Vec<u8>, Infallible>,
     ) -> Result<()> {
+        if self.screen != self.server_screen {
+            Self::send(
+                server_in_tx,
+                ServerInput::Resize {
+                    width: self.screen.width,
+                    height: self.screen.height,
+                },
+            )
+            .await?;
+            self.server_screen = self.screen;
+        }
+
         let rgb = render_frame(self.screen, self.tick).unwrap_or_default();
         self.tick = self.tick.wrapping_add(1);
 
         let mut bgra = Vec::with_capacity(rgb.len() / 3 * 4);
-        for px in rgb.chunks_exact(3) {
+        for px in rgb.as_chunks::<3>().0 {
             if let Some(&[r, g, b]) = px.first_chunk::<3>() {
                 bgra.extend_from_slice(&[b, g, r, 255]);
             }
         }
-        if server_in_tx
-            .send(ServerInput::Frame {
+        Self::send(
+            server_in_tx,
+            ServerInput::Frame {
                 x: 0,
                 y: 0,
                 width: self.screen.width,
                 height: self.screen.height,
                 data: bgra.into(),
-            })
+            },
+        )
+        .await
+    }
+
+    async fn send(server_in_tx: &Sender<ServerInput>, input: ServerInput) -> Result<()> {
+        server_in_tx
+            .send(input)
             .await
-            .is_err()
-        {
-            bail!("RDP server channel closed");
-        }
-        Ok(())
+            .map_err(|_| anyhow!("RDP server channel closed"))
     }
 }
 
 /// Map a PC/AT set-1 scancode (what mstsc/FreeRDP send) to an OTP action.
-fn scancode_otp_action(code: u8) -> Option<OtpAction> {
+fn scancode_otp_action(scancode: Scancode) -> Option<OtpAction> {
+    let Scancode { code, extended } = scancode;
+    // The nav cluster shares its make codes with the keypad and is told apart only by the
+    // E0 prefix, so without this an arrow key would type a digit. Numpad Enter is the one
+    // extended key that still means something here.
+    if extended && code != 0x1c {
+        return None;
+    }
     Some(match code {
         0x02..=0x0a => OtpAction::Digit(char::from(b'1' + (code - 0x02))), // top row 1..9
         0x0b | 0x52 => OtpAction::Digit('0'),                              // keypad 0
@@ -250,8 +311,175 @@ fn key_otp_action(keysym: u32) -> Option<OtpAction> {
 }
 
 #[cfg(test)]
+mod hold_while_tests {
+    use tokio::sync::mpsc::{channel, unbounded_channel};
+
+    use super::*;
+
+    fn pointer() -> ServerEvent {
+        ServerEvent::Input(DesktopInput::Pointer {
+            x: 1,
+            y: 1,
+            buttons: 0,
+        })
+    }
+
+    fn screen() -> ui::Screen {
+        ui::Screen {
+            width: 800,
+            height: 600,
+        }
+    }
+
+    /// A viewer-side sink for the painted frames, drained so painting never blocks.
+    fn viewer() -> Sender<ServerInput> {
+        let (tx, mut rx) = channel(16);
+        tokio::spawn(async move { while rx.recv().await.is_some() {} });
+        tx
+    }
+
+    /// The channel is unbounded and the hold lasts as long as an administrator
+    /// takes, so anything the viewer sends meanwhile has to be taken off it —
+    /// otherwise a client that keeps typing grows the gateway's memory for the
+    /// length of the window.
+    ///
+    /// The hold here never resolves, which is the case that matters: the drain
+    /// has to happen *during* the wait, not after it.
+    #[tokio::test(start_paused = true)]
+    async fn viewer_input_does_not_pile_up_behind_the_hold() {
+        let (tx, mut events) = unbounded_channel();
+        let mut screen = screen();
+
+        for _ in 0..1000 {
+            tx.send(pointer()).unwrap();
+        }
+
+        let held = std::future::pending::<()>();
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(200),
+                hold_while(held, &mut events, &viewer(), &mut screen, || {
+                    HoldFrame::Connecting
+                }),
+            )
+            .await
+            .is_err(),
+            "the hold does not resolve, so the pump should still be waiting",
+        );
+
+        assert!(
+            events.try_recv().is_err(),
+            "every event sent during the hold must have been taken off the channel",
+        );
+    }
+
+    /// What the hold produced still reaches the caller.
+    #[tokio::test]
+    async fn the_held_outcome_is_returned() {
+        let (_tx, mut events) = unbounded_channel::<ServerEvent>();
+        let mut screen = screen();
+
+        assert_eq!(
+            hold_while(
+                std::future::ready(7),
+                &mut events,
+                &viewer(),
+                &mut screen,
+                || HoldFrame::Connecting
+            )
+            .await
+            .unwrap(),
+            Some(7),
+        );
+    }
+
+    /// A viewer can settle a new size mid-hold; the target has to be dialled at
+    /// the size actually being shown, not the one negotiated before the wait.
+    #[tokio::test]
+    async fn a_size_settled_during_the_hold_is_kept() {
+        let (tx, mut events) = unbounded_channel();
+        let mut screen = screen();
+
+        tx.send(ServerEvent::Size {
+            width: 1024,
+            height: 768,
+        })
+        .unwrap();
+        tx.send(pointer()).unwrap();
+        tx.send(ServerEvent::Size {
+            width: 1920,
+            height: 1080,
+        })
+        .unwrap();
+
+        // Resolves only after the queued events have been drained.
+        let held = tokio::time::sleep(Duration::from_millis(200));
+        hold_while(held, &mut events, &viewer(), &mut screen, || {
+            HoldFrame::Connecting
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(screen.width, 1920);
+        assert_eq!(screen.height, 1080);
+    }
+
+    /// Nothing is left to admit once the viewer is gone, and the caller has to
+    /// hear about it: holding on would keep the approval request standing for a
+    /// connection that no longer exists.
+    #[tokio::test]
+    async fn a_departed_viewer_ends_the_hold() {
+        let (tx, mut events) = unbounded_channel::<ServerEvent>();
+        let mut screen = screen();
+
+        tx.send(pointer()).unwrap();
+        drop(tx);
+
+        assert!(
+            hold_while(
+                std::future::pending::<()>(),
+                &mut events,
+                &viewer(),
+                &mut screen,
+                || HoldFrame::Connecting
+            )
+            .await
+            .unwrap()
+            .is_none(),
+            "the hold must end when the viewer disconnects, not wait out the window",
+        );
+    }
+
+    /// The frames painted during the hold are the ones that keep the viewer from
+    /// freezing on whatever it showed last.
+    #[tokio::test]
+    async fn the_viewer_is_painted_during_the_hold() {
+        let (_tx, mut events) = unbounded_channel::<ServerEvent>();
+        let (viewer_tx, mut viewer_rx) = channel(16);
+        let mut screen = screen();
+
+        let _ = tokio::time::timeout(
+            Duration::from_millis(250),
+            hold_while(
+                std::future::pending::<()>(),
+                &mut events,
+                &viewer_tx,
+                &mut screen,
+                || HoldFrame::Connecting,
+            ),
+        )
+        .await;
+
+        assert!(
+            matches!(viewer_rx.try_recv(), Ok(ServerInput::Frame { .. })),
+            "a frame must have been pushed to the viewer while the hold ran",
+        );
+    }
+}
+
+#[cfg(test)]
 mod otp_input_tests {
-    use super::{OtpAction, key_otp_action, scancode_otp_action};
+    use super::{OtpAction, Scancode, key_otp_action, scancode_otp_action};
 
     fn digit(action: Option<OtpAction>) -> Option<char> {
         match action {
@@ -260,12 +488,26 @@ mod otp_input_tests {
         }
     }
 
+    fn plain(code: u8) -> Option<OtpAction> {
+        scancode_otp_action(Scancode {
+            code,
+            extended: false,
+        })
+    }
+
+    fn e0(code: u8) -> Option<OtpAction> {
+        scancode_otp_action(Scancode {
+            code,
+            extended: true,
+        })
+    }
+
     #[test]
     fn scancode_number_row() {
         // 0x02..=0x0a is the '1'..'9' row (computed, so guard the ends), 0x0b is '0'.
-        assert_eq!(digit(scancode_otp_action(0x02)), Some('1'));
-        assert_eq!(digit(scancode_otp_action(0x0a)), Some('9'));
-        assert_eq!(digit(scancode_otp_action(0x0b)), Some('0'));
+        assert_eq!(digit(plain(0x02)), Some('1'));
+        assert_eq!(digit(plain(0x0a)), Some('9'));
+        assert_eq!(digit(plain(0x0b)), Some('0'));
     }
 
     #[test]
@@ -282,23 +524,26 @@ mod otp_input_tests {
             (0x48, '8'),
             (0x49, '9'),
         ] {
-            assert_eq!(
-                digit(scancode_otp_action(code)),
-                Some(expected),
-                "scancode {code:#x}"
-            );
+            assert_eq!(digit(plain(code)), Some(expected), "scancode {code:#x}");
         }
+    }
+
+    /// The nav cluster repeats the keypad's make codes under an E0 prefix; pressing an
+    /// arrow must not enter a digit.
+    #[test]
+    fn scancode_nav_cluster_is_not_a_digit() {
+        for code in [0x47u8, 0x48, 0x49, 0x4b, 0x4d, 0x4f, 0x50, 0x51, 0x52] {
+            assert!(e0(code).is_none(), "extended scancode {code:#x}");
+        }
+        assert!(matches!(e0(0x1c), Some(OtpAction::Submit))); // numpad Enter
     }
 
     #[test]
     fn scancode_control_and_unmapped() {
-        assert!(matches!(
-            scancode_otp_action(0x0e),
-            Some(OtpAction::Backspace)
-        ));
-        assert!(matches!(scancode_otp_action(0x1c), Some(OtpAction::Submit)));
-        assert!(scancode_otp_action(0x3b).is_none()); // F1 — not an OTP key
-        assert!(scancode_otp_action(0x00).is_none());
+        assert!(matches!(plain(0x0e), Some(OtpAction::Backspace)));
+        assert!(matches!(plain(0x1c), Some(OtpAction::Submit)));
+        assert!(plain(0x3b).is_none()); // F1 — not an OTP key
+        assert!(plain(0x00).is_none());
     }
 
     #[test]

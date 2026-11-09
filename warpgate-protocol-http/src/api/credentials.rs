@@ -4,7 +4,10 @@ use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QuerySelect, Set,
+    TransactionTrait,
+};
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::{
@@ -13,6 +16,7 @@ use warpgate_common::{
 };
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
+use warpgate_db_entities::Parameters::MfaEnforcement;
 use warpgate_db_entities::{
     self as entities, CertificateCredential, PasswordCredential, PublicKeyCredential,
 };
@@ -136,6 +140,8 @@ enum DeleteCredentialResponse {
     Deleted,
     #[oai(status = 401)]
     Unauthorized,
+    #[oai(status = 403)]
+    Forbidden,
     #[oai(status = 404)]
     NotFound,
 }
@@ -162,6 +168,8 @@ enum CreateOtpCredentialResponse {
     Created(Json<ExistingOtpCredential>),
     #[oai(status = 401)]
     Unauthorized,
+    #[oai(status = 403)]
+    Forbidden,
 }
 
 #[derive(Object)]
@@ -389,13 +397,18 @@ impl Api {
             return Ok(CreatePublicKeyCredentialResponse::Unauthorized);
         };
 
+        let mut key = russh::keys::PublicKey::from_openssh(&body.openssh_public_key)
+            .map_err(russh::keys::Error::from)?;
+        key.set_comment("");
+        let openssh_public_key = key.to_openssh().map_err(russh::keys::Error::from)?;
+
         let object = PublicKeyCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(user.id),
             date_added: Set(Some(OffsetDateTime::now_utc())),
             last_used: Set(None),
             label: Set(body.label.clone()),
-            openssh_public_key: Set(body.openssh_public_key.clone()),
+            openssh_public_key: Set(openssh_public_key),
         }
         .insert(db)
         .await
@@ -462,11 +475,12 @@ impl Api {
         Ok(DeleteCredentialResponse::Deleted)
     }
 
+    // Path allowlisted in the MFA setup gate (`is_mfa_setup_allowed`)
     #[oai(
         path = "/profile/credentials/otp",
         method = "post",
         operation_id = "add_my_otp",
-        transform = "parameters_based_auth"
+        transform = "endpoint_auth"
     )]
     async fn api_create_otp(
         &self,
@@ -483,9 +497,19 @@ impl Api {
             return Ok(CreateOtpCredentialResponse::Unauthorized);
         };
 
+        // OTP enrollment overrides self-service cred mgmt restriction for this API
+        let parameters = ctx.parameters().await?;
+        if !parameters.allow_own_credential_management
+            && !ctx
+                .services()
+                .mfa_setup_required(parameters, user.id)
+                .await?
+        {
+            return Ok(CreateOtpCredentialResponse::Forbidden);
+        }
+
         let user_id = user.id;
         let username = user.username.clone();
-        let mut user_cfg: User = user.clone().try_into()?;
 
         let object = entities::OtpCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -496,16 +520,7 @@ impl Api {
         .await
         .map_err(WarpgateError::from)?;
 
-        let details = user.load_details(db).await?;
-        user_cfg.credential_policy = Some(
-            user_cfg
-                .credential_policy
-                .unwrap_or_default()
-                .upgrade_to_otp(details.credentials.as_slice()),
-        );
-
-        let user = entities::User::ActiveModel::try_from(user_cfg)?;
-        user.update(db).await?;
+        user.require_otp_in_policy(db).await?;
 
         AuditEvent::CredentialCreated {
             credential_type: "otp".to_string(),
@@ -541,16 +556,32 @@ impl Api {
             return Ok(DeleteCredentialResponse::Unauthorized);
         };
 
-        let Some(model) = user
-            .find_related(entities::OtpCredential::Entity)
-            .filter(entities::OtpCredential::Column::Id.eq(id.0))
-            .one(db)
+        let enforced = ctx
+            .services()
+            .effective_mfa_enforcement(ctx.parameters().await?, user.id)
             .await?
-        else {
-            return Ok(DeleteCredentialResponse::NotFound);
-        };
+            != MfaEnforcement::Off;
 
-        model.delete(db).await?;
+        {
+            let tx = db.begin().await?;
+            let otp_creds = user
+                .find_related(entities::OtpCredential::Entity)
+                .lock_exclusive()
+                .all(&tx)
+                .await?;
+
+            let Some(model) = otp_creds.iter().find(|c| c.id == id.0) else {
+                return Ok(DeleteCredentialResponse::NotFound);
+            };
+
+            // Disallow deleting last TOTP cred
+            if enforced && otp_creds.len() <= 1 {
+                return Ok(DeleteCredentialResponse::Forbidden);
+            }
+
+            model.clone().delete(&tx).await?;
+            tx.commit().await?;
+        }
 
         AuditEvent::CredentialDeleted {
             credential_type: "otp".to_string(),

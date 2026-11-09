@@ -1,42 +1,92 @@
 use core::str;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::Context;
-use http::{HeaderName, StatusCode};
+use http::StatusCode;
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use poem::error::InternalServerError;
-use poem::session::Session;
+use poem::session::{CookieConfig, Session};
+use poem::web::cookie::CookieJar;
 use poem::web::{Data, Redirect};
 use poem::{Endpoint, EndpointExt, FromRequest, IntoResponse, Request, Response};
+use sea_orm::EntityTrait;
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
+use tracing::Instrument;
 use uuid::Uuid;
-use warpgate_common::auth::{AuthState, AuthStateUserInfo, CredentialKind};
+use warpgate_common::auth::{AuthResult, AuthState, AuthStateUserInfo, CredentialKind};
 use warpgate_common::helpers::username::username_eq_ci;
-use warpgate_common::{Protocol, SessionId, WarpgateError};
+use warpgate_common::{Protocol, UserSessionId, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
-use warpgate_common_http::ext::construct_external_url;
+pub use warpgate_common_http::auth::is_localhost_host;
+use warpgate_common_http::ext::{construct_external_url, is_navigation_request};
+use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
-    X_WARPGATE_CLUSTER_TOKEN,
+    X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_TOKEN, is_cluster_peer_request,
 };
-use warpgate_core::ConfigProvider;
+use warpgate_core::{ConfigProvider, vet_credential_bearer};
+use warpgate_db_entities::User;
 use warpgate_sso::WarpgateIdToken;
 
+use crate::middleware::{assert_mfa_setup_gate, is_session_bootstrap_path, warpgate_surface_path};
 use crate::session::SessionStore;
+use crate::session_storage::SharedSessionStorage;
 
 pub const PROTOCOL_NAME: Protocol = Protocol::Http;
 static TARGET_SESSION_KEY: &str = "target_name";
 static AUTH_SESSION_KEY: &str = "auth";
-static AUTH_STATE_ID_SESSION_KEY: &str = "auth_state_id";
 static AUTH_SSO_LOGIN_STATE: &str = "auth_sso_login_state";
 pub static SESSION_COOKIE_NAME: &str = "warpgate-http-session";
-pub static X_WARPGATE_TOKEN: HeaderName = HeaderName::from_static("x-warpgate-token");
 
-/// Check if a host is localhost or 127.x.x.x (for development/testing scenarios)
-pub fn is_localhost_host(host: &str) -> bool {
-    host == "localhost" || host == "127.0.0.1" || host.starts_with("127.")
+/// The session cookie's shape — name and (absence of) signing — defined once:
+/// the `ServerSession` middleware writes the cookie through this config, and
+/// [`storage_session_id`] reads it back through the same one. `max_age` is
+/// applied at the middleware wiring, where the write happens.
+pub fn session_cookie_config() -> CookieConfig {
+    CookieConfig::default()
+        .secure(false)
+        .name(SESSION_COOKIE_NAME)
+}
+
+/// The browser session's storage id from the request's cookie — poem keeps it
+/// only there, never inside the session entries.
+pub fn storage_session_id(jar: &CookieJar) -> Option<String> {
+    session_cookie_config().get_cookie_value(jar)
+}
+
+/// Deferred rekey after authorization
+pub struct SessionRotation {
+    storage: SharedSessionStorage,
+    stored_id: Option<String>,
+}
+
+impl SessionRotation {
+    /// None if rotation not needed
+    pub async fn for_request(req: &Request) -> Result<Option<Self>, WarpgateError> {
+        // don't try to rotate forwarded reqs
+        if is_cluster_peer_request(req) {
+            return Ok(None);
+        }
+        let jar = <&CookieJar>::from_request_without_body(req)
+            .await
+            .context("CookieJar not in request")?;
+        let storage = Data::<&SharedSessionStorage>::from_request_without_body(req)
+            .await
+            .context("SharedSessionStorage not in request")?;
+        Ok(Some(Self {
+            storage: (*storage).clone(),
+            stored_id: storage_session_id(jar),
+        }))
+    }
+
+    pub async fn apply(self, session: &Session) -> Result<(), WarpgateError> {
+        self.storage
+            .rotate_session_id(self.stored_id, session)
+            .await
+    }
 }
 
 pub fn host_is_subdomain_of_or_equal(host: &str, base_domain: &str) -> bool {
@@ -44,11 +94,98 @@ pub fn host_is_subdomain_of_or_equal(host: &str, base_domain: &str) -> bool {
     host == base || host.ends_with(&format!(".{base}"))
 }
 
+/// Whether a request may present a session cookie, given the configured base
+/// host: the base host itself, its subdomains, or localhost (for development
+/// against a non-localhost deployment). A request whose host cannot be
+/// determined proves nothing and is refused — this check must not fail open.
+fn session_host_is_authorized(request_host: Option<&str>, base_host: &str) -> bool {
+    let Some(host) = request_host else {
+        return false;
+    };
+    host_is_subdomain_of_or_equal(host, base_host)
+        || (is_localhost_host(host) && !is_localhost_host(base_host))
+}
+
+/// Whether a state-changing (or WebSocket) request to Warpgate's own endpoints
+/// came from a page on any other origin, so the session cookie it carries must
+/// not count. The cookie is `SameSite=None` on HTTPS and shared with every
+/// target subdomain, so the browser attaches it to requests from other sites
+/// and from target pages alike - hence `same-site` is no better than
+/// `cross-site`. Target traffic is left alone; targets do their own CSRF
+/// checks. A request without `Origin`, `Referer` or `Sec-Fetch-Site` did not
+/// come from a browser page.
+///
+/// Only the host is compared. The listener speaks TLS only, so the scheme
+/// adds nothing, and the port is routinely stripped or rewritten by reverse
+/// proxies while Warpgate serves nothing on another port of the same host.
+fn is_cross_origin_api_request(req: &Request, request_host: Option<&str>) -> bool {
+    let headers = req.headers();
+
+    if warpgate_surface_path(req.uri().path()).is_none() {
+        return false;
+    }
+
+    let is_websocket = headers
+        .get(http::header::UPGRADE)
+        .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"websocket"));
+
+    if req.method().is_safe() && !is_websocket {
+        return false;
+    }
+
+    if headers
+        .get("sec-fetch-site")
+        .is_some_and(|v| v.as_bytes() == b"cross-site" || v.as_bytes() == b"same-site")
+    {
+        return true;
+    }
+
+    let Some(source) = headers
+        .get(http::header::ORIGIN)
+        .or_else(|| headers.get(http::header::REFERER))
+    else {
+        return false;
+    };
+
+    // An opaque ("null") or unparsable origin is never ours.
+    let source = source
+        .to_str()
+        .ok()
+        .and_then(|s| url::Url::parse(s).ok())
+        .and_then(|url| url.host_str().map(str::to_owned));
+    match (source, request_host) {
+        (Some(host), Some(request_host)) => !host.eq_ignore_ascii_case(request_host),
+        _ => true,
+    }
+}
+
+/// restricted sessions are only allowed to access the API parts needed for login/logout and captive MFA flow
+fn is_session_restricted_on_host(request_host: Option<&str>, control_plane_host: &str) -> bool {
+    request_host.is_none_or(|host| {
+        !host.eq_ignore_ascii_case(control_plane_host) && !is_localhost_host(host)
+    })
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct SsoLoginState {
     pub token: WarpgateIdToken,
     pub provider: String,
     pub supports_single_logout: bool,
+    #[serde(default)]
+    pub subject: Option<String>,
+    #[serde(default)]
+    pub sid: Option<String>,
+}
+
+impl SsoLoginState {
+    fn parse(json: &str) -> Option<Self> {
+        serde_json::from_str(json).ok()
+    }
+
+    // HACK: for getting the session state out of an already serialized session
+    pub fn from_session_entries(entries: &BTreeMap<String, serde_json::Value>) -> Option<Self> {
+        Self::parse(entries.get(AUTH_SSO_LOGIN_STATE)?.as_str()?)
+    }
 }
 
 pub trait SessionExt {
@@ -56,8 +193,10 @@ pub trait SessionExt {
     fn set_target_name(&self, target_name: String);
     fn get_auth(&self) -> Option<SessionAuthorization>;
     fn set_auth(&self, auth: SessionAuthorization);
-    fn get_auth_state_id(&self) -> Option<AuthStateId>;
-    fn clear_auth_state(&self);
+    /// The Warpgate session id of this browser session, once one has been
+    /// registered for it. Unlike [`session_id_for_request`] this never creates
+    /// one.
+    fn get_session_id(&self) -> Option<UserSessionId>;
 
     fn get_sso_login_state(&self) -> Option<SsoLoginState>;
     fn set_sso_login_state(&self, token: SsoLoginState);
@@ -80,17 +219,12 @@ impl SessionExt for Session {
         self.set(AUTH_SESSION_KEY, auth);
     }
 
-    fn get_auth_state_id(&self) -> Option<AuthStateId> {
-        self.get(AUTH_STATE_ID_SESSION_KEY)
-    }
-
-    fn clear_auth_state(&self) {
-        self.remove(AUTH_STATE_ID_SESSION_KEY);
+    fn get_session_id(&self) -> Option<UserSessionId> {
+        self.get(crate::session::SESSION_ID_SESSION_KEY)
     }
 
     fn get_sso_login_state(&self) -> Option<SsoLoginState> {
-        self.get::<String>(AUTH_SSO_LOGIN_STATE)
-            .and_then(|x| serde_json::from_str(&x).ok())
+        SsoLoginState::parse(&self.get::<String>(AUTH_SSO_LOGIN_STATE)?)
     }
 
     fn set_sso_login_state(&self, state: SsoLoginState) {
@@ -99,9 +233,6 @@ impl SessionExt for Session {
         }
     }
 }
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct AuthStateId(pub Uuid);
 
 pub async fn is_user_admin(ctx: &AuthenticatedRequestContext) -> poem::Result<bool> {
     // A user is an administrator if they hold any admin permission. Resolved through the one
@@ -141,27 +272,32 @@ pub fn page_auth<E: Endpoint + 'static>(e: E) -> impl Endpoint {
     })
 }
 
-pub fn gateway_redirect(req: &Request) -> Response {
-    // Only do a login redirect for document requests
-    if let Some(mode) = req.headers().get(HeaderName::from_static("sec-fetch-mode"))
-        && mode != "navigate"
-    {
-        return Response::builder()
-            .status(StatusCode::UNAUTHORIZED)
-            .finish();
+pub fn redirect_navigations(
+    req: &Request,
+    location: String,
+    fallback_status: StatusCode,
+) -> Response {
+    if !is_navigation_request(req) {
+        return Response::builder().status(fallback_status).finish();
     }
 
+    Redirect::temporary(location).into_response()
+}
+
+pub fn gateway_redirect(req: &Request) -> Response {
     let path = req
         .original_uri()
         .path_and_query()
         .map_or_else(String::new, ToString::to_string);
 
-    let path = format!(
-        "/@warpgate#/login?next={}",
-        utf8_percent_encode(&path, NON_ALPHANUMERIC),
-    );
-
-    Redirect::temporary(path).into_response()
+    redirect_navigations(
+        req,
+        format!(
+            "/@warpgate#/login?next={}",
+            utf8_percent_encode(&path, NON_ALPHANUMERIC),
+        ),
+        StatusCode::UNAUTHORIZED,
+    )
 }
 
 pub async fn get_or_create_auth_state_for_request(
@@ -170,22 +306,30 @@ pub async fn get_or_create_auth_state_for_request(
     ctx: &UnauthenticatedRequestContext,
     rate_limit_credential_type: Option<&str>,
 ) -> Result<Arc<Mutex<AuthState>>, WarpgateError> {
-    let remote_ip = req.remote_addr().as_socket_addr().map(|a| a.ip());
-    let session = <&Session>::from_request_without_body(req)
-        .await
-        .context("Session not in request")?;
+    let client_ip = get_client_ip_addr(req, ctx.services()).await;
 
     if let Some(state) = get_auth_state_for_request(req, ctx).await? {
-        let existing_matched = username_eq_ci(&state.lock().await.user_info().username, username);
-        if existing_matched {
+        let reusable = {
+            let state = state.lock().await;
+            // A terminally rejected attempt can never accept another
+            // credential, so a retry must start a fresh one.
+            username_eq_ci(&state.user_info().username, username)
+                && !matches!(state.verify(), AuthResult::Rejected)
+        };
+        if reusable {
             return Ok(state);
         }
     }
 
-    let (id, state) = ctx
+    // Pass the browser session id so the auth state is keyed by it: a web
+    // approval landing on another node resolves the owner from the session's
+    // `node_id` in the DB (see `api::auth::auth_state_owner`).
+    let session_id = session_id_for_request(req, ctx).await?;
+
+    let state = ctx
         .services()
         .create_auth_state(
-            None,
+            &session_id,
             username,
             crate::common::PROTOCOL_NAME,
             "",
@@ -194,52 +338,41 @@ pub async fn get_or_create_auth_state_for_request(
                 CredentialKind::Sso,
                 CredentialKind::Totp,
             ],
-            remote_ip,
+            client_ip,
             rate_limit_credential_type,
         )
         .await?;
 
-    {
-        let session_id = session_id_for_request(req, ctx).await?;
-        let mut state = state.lock().await;
-        if state.session_id() != Some(&session_id) {
-            state.set_session_id(session_id);
-        }
-    }
-
-    session.set(AUTH_STATE_ID_SESSION_KEY, AuthStateId(id));
     Ok(state)
 }
 
+/// The login attempt in progress on this browser session, if any. Auth states
+/// are keyed by session id, so the session itself is the lookup key and there is
+/// nothing to keep in sync.
 pub async fn get_auth_state_for_request(
     req: &Request,
     ctx: &UnauthenticatedRequestContext,
 ) -> Result<Option<Arc<Mutex<AuthState>>>, WarpgateError> {
-    let store = ctx.services().auth_state_store.lock().await;
     let session = <&Session>::from_request_without_body(req)
         .await
         .context("Session not in request")?;
 
-    if let Some(id) = session.get_auth_state_id()
-        && !store.contains_key(&id.0)
-    {
-        session.clear_auth_state();
-    }
+    let Some(session_id) = session.get_session_id() else {
+        return Ok(None);
+    };
 
-    if let Some(id) = session.get_auth_state_id() {
-        let state = store.get(&id.0).ok_or(WarpgateError::InconsistentState(
-            "unknown auth state id".into(),
-        ))?;
-        return Ok(Some(state));
-    }
-
-    Ok(None)
+    Ok(ctx
+        .services()
+        .auth_state_store
+        .lock()
+        .await
+        .get(&session_id))
 }
 
 pub async fn session_id_for_request(
     req: &Request,
     ctx: &UnauthenticatedRequestContext,
-) -> Result<SessionId, WarpgateError> {
+) -> Result<UserSessionId, WarpgateError> {
     let session_middleware = Data::<&Arc<Mutex<SessionStore>>>::from_request_without_body(req)
         .await
         .context("SessionStore not in request")?;
@@ -247,11 +380,11 @@ pub async fn session_id_for_request(
     let server_handle = session_middleware
         .lock()
         .await
-        .create_handle_for(req, ctx)
+        .handle_for_request(req, ctx)
         .await
         .context("creating session handle")?;
 
-    Ok(server_handle.lock().await.id())
+    Ok(server_handle.lock().await.user_session_id())
 }
 
 pub async fn authorize_session(
@@ -266,17 +399,54 @@ pub async fn authorize_session(
         .await
         .context("Session not in request")?;
 
-    let server_handle = session_middleware
+    let mut server_handle = session_middleware
         .lock()
         .await
-        .create_handle_for(req, ctx)
+        .handle_for_request(req, ctx)
         .await
-        .context("create_handle_for")?;
-    server_handle
+        .context("resolving session handle")?;
+
+    // session user cannot be switched, so a second attempt should kill
+    // thi session and init a new one
+    let attributed = server_handle
         .lock()
         .await
         .set_user_info(user_info.clone())
-        .await?;
+        .await;
+    match attributed {
+        Ok(()) => {}
+        Err(WarpgateError::UserSessionAlreadyAttributed) => {
+            let old_id = server_handle.lock().await.user_session_id();
+            {
+                let mut store = session_middleware.lock().await;
+                store.remove_session(session);
+            }
+            ctx.services()
+                .state
+                .lock()
+                .await
+                .remove_session(old_id)
+                .await;
+            session.clear();
+            server_handle = session_middleware
+                .lock()
+                .await
+                .handle_for_request(req, ctx)
+                .await
+                .context("registering replacement session")?;
+            server_handle
+                .lock()
+                .await
+                .set_user_info(user_info.clone())
+                .await?;
+        }
+        Err(error) => return Err(error),
+    }
+
+    if let Some(rotation) = SessionRotation::for_request(req).await? {
+        rotation.apply(session).await?;
+    }
+
     session.set_auth(SessionAuthorization::User {
         user_id: user_info.id,
         username: user_info.username,
@@ -286,23 +456,67 @@ pub async fn authorize_session(
     Ok(())
 }
 
-/// True if the request carries a valid cluster token in its dedicated header.
-async fn cluster_token_matches(
+/// Authorization for a request from an authenticated cluster peer. The proxying
+/// node forwards the acting user's id in `x-warpgate-cluster-identity` (see
+/// `cluster_proxy::proxy_or_serve`), so the request runs here as that user;
+/// without the header the peer acts as a bare cluster peer. An id that no
+/// longer resolves to a user fails closed (unauthenticated).
+async fn cluster_request_authorization(
     ctx: &UnauthenticatedRequestContext,
     req: &Request,
-) -> poem::Result<bool> {
-    let Some(header) = req.headers().get(&X_WARPGATE_CLUSTER_TOKEN) else {
-        return Ok(false);
+) -> poem::Result<Option<RequestAuthorization>> {
+    let Some(header) = req.headers().get(&X_WARPGATE_CLUSTER_IDENTITY) else {
+        return Ok(Some(RequestAuthorization::ClusterPeer));
     };
-    let provided = header.to_str().map_err(poem::error::BadRequest)?;
-    // Constant-time comparison to prevent timing attacks.
-    Ok(ctx
-        .services()
-        .cluster_token
-        .expose_secret()
-        .as_bytes()
-        .ct_eq(provided.as_bytes())
-        .into())
+    let Some(user_id) = header.to_str().ok().and_then(|s| s.parse::<Uuid>().ok()) else {
+        return Ok(None);
+    };
+    Ok(User::Entity::find_by_id(user_id)
+        .one(&ctx.services().db)
+        .await
+        .map_err(poem::error::InternalServerError)?
+        .map(|user| {
+            RequestAuthorization::Session(SessionAuthorization::User {
+                user_id: user.id,
+                username: user.username,
+            })
+        }))
+}
+
+/// Resolves an API token to its user, applying the same account-status checks a
+/// login goes through. `None` for an unknown token or for a user who may not
+/// authenticate right now — the caller can't tell the two apart, by design.
+async fn user_for_api_token(
+    req: &Request,
+    ctx: &UnauthenticatedRequestContext,
+    token: &str,
+) -> Result<Option<warpgate_common::User>, WarpgateError> {
+    let services = ctx.services();
+    let remote_ip = get_client_ip_addr(req, services).await;
+
+    // Checked ahead of the lookup so a blocked caller can't use this as a
+    // token-existence oracle.
+    if let Some(ip) = remote_ip
+        && services
+            .login_protection
+            .check_ip_blocked(&ip)
+            .await?
+            .is_some()
+    {
+        tracing::warn!("API token presented from a blocked IP: {ip}");
+        return Ok(None);
+    }
+
+    let Some(token) = services.config_provider.validate_api_token(token).await? else {
+        return Ok(None);
+    };
+    let user = token.user;
+
+    if !vet_credential_bearer(&services.login_protection, &user, remote_ip).await? {
+        return Ok(None);
+    }
+
+    Ok(Some(user))
 }
 
 pub async fn inject_request_authorization<E: Endpoint + 'static>(
@@ -315,39 +529,61 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
         .await?
         .for_request();
     let session = <&Session>::from_request_without_body(&req).await?;
+    let is_cluster_peer = is_cluster_peer_request(&req);
 
     let mut session_auth = session.get_auth();
-    if session_auth.is_some() {
-        let config = ctx.services().config.lock().await;
-        if let Ok(base_url) = construct_external_url(None, &config, None).await
-            && let Some(base_host) = base_url.host_str()
+    // A forwarded request's Host is the cluster SNI name by construction, so the
+    // origin check below would reject - and clear - a session that is fine.
+    if session_auth.is_some() && !is_cluster_peer {
+        // Host binding only means something when `external_host` pins an
+        // origin. Without it the external URL is derived from Host header
+        let (base_host, control_plane_host) = {
+            let config = ctx.services().config.lock().await;
+            let base_host = construct_external_url(None, &config, None)
+                .await
+                .ok()
+                .and_then(|url| url.host_str().map(str::to_owned));
+            (base_host, config.control_plane_host())
+        };
+        let request_host = ctx.trusted_hostname(&req);
+        if let Some(base_host) = &base_host
+            && !session_host_is_authorized(request_host.as_deref(), base_host)
         {
-            let request_host = ctx.trusted_hostname(&req);
-
-            if let Some(host) = request_host {
-                // Validate request host matches base host or is a subdomain/localhost
-                let is_localhost = is_localhost_host(&host);
-                let is_authorized = host == base_host
-                    || host.ends_with(&format!(".{base_host}"))
-                    || (is_localhost && base_host != "localhost" && base_host != "127.0.0.1");
-
-                if !is_authorized {
-                    tracing::warn!(
-                        "Session cookie rejected: request host '{}' is not authorized (base host: '{}'). Clearing session.",
-                        host,
-                        base_host
-                    );
-                    session.clear();
-                    session_auth = None;
-                }
-            }
+            tracing::warn!(
+                "Session cookie rejected: request host {:?} is not authorized (base host: '{}'). Clearing session.",
+                request_host,
+                base_host
+            );
+            session.clear();
+            session_auth = None;
+        } else if control_plane_host
+            .as_deref()
+            .is_some_and(|control_plane_host| {
+                is_session_restricted_on_host(request_host.as_deref(), control_plane_host)
+            })
+            && warpgate_surface_path(req.uri().path()).is_some()
+            && !is_session_bootstrap_path(req.method(), req.uri().path())
+        {
+            tracing::debug!(
+                "Session cookie ignored for {} {} on non-control-plane host {request_host:?}",
+                req.method(),
+                req.uri().path(),
+            );
+            session_auth = None;
+        } else if is_cross_origin_api_request(&req, request_host.as_deref()) {
+            tracing::warn!(
+                "Session cookie ignored for cross-origin {} {}",
+                req.method(),
+                req.uri().path()
+            );
+            session_auth = None;
         }
     }
 
     let auth = if let Some(auth) = session_auth {
         Some(RequestAuthorization::Session(auth))
-    } else if cluster_token_matches(&ctx, &req).await? {
-        Some(RequestAuthorization::ClusterToken)
+    } else if is_cluster_peer {
+        cluster_request_authorization(&ctx, &req).await?
     } else if let Some(token_from_header) = req.headers().get(&X_WARPGATE_TOKEN) {
         let token_from_header = token_from_header
             .to_str()
@@ -364,12 +600,7 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
             })
         {
             Some(RequestAuthorization::AdminToken)
-        } else if let Some(user) = ctx
-            .services()
-            .config_provider
-            .validate_api_token(token_from_header)
-            .await?
-        {
+        } else if let Some(user) = user_for_api_token(&req, &ctx, token_from_header).await? {
             Some(RequestAuthorization::UserToken {
                 user_id: user.id,
                 username: user.username,
@@ -382,9 +613,17 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
     };
 
     if let Some(auth) = auth {
+        // additional span to include the session_username for token requests
+        let span = match &auth {
+            RequestAuthorization::UserToken { username, .. } => {
+                tracing::info_span!("API token", session_username = %username)
+            }
+            _ => tracing::Span::none(),
+        };
         // build context and attach it instead of raw authorization
         let actx = ctx.to_authenticated(auth);
-        Ok(ep.data(actx).data(ctx).call(req).await?)
+        assert_mfa_setup_gate(&actx, &req, session).await?;
+        Ok(ep.data(actx).data(ctx).call(req).instrument(span).await?)
     } else {
         Ok(ep.data(ctx).call(req).await?)
     }
@@ -394,10 +633,14 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
 mod tests {
     use super::{StatusCode, gateway_redirect, host_is_subdomain_of_or_equal};
 
+    const BROWSER_ACCEPT: &str = "text/html,application/xhtml+xml,*/*;q=0.8";
+
     #[test]
     fn gateway_redirect_navigation_redirects_to_login() {
         for mode in [None, Some("navigate")] {
-            let mut req = poem::Request::builder().uri_str("/api/data");
+            let mut req = poem::Request::builder()
+                .uri_str("/api/data")
+                .header("accept", BROWSER_ACCEPT);
             if let Some(mode) = mode {
                 req = req.header("sec-fetch-mode", mode);
             }
@@ -415,14 +658,148 @@ mod tests {
     #[test]
     fn gateway_redirect_fetch_gets_401() {
         // https://github.com/warp-tech/warpgate/issues/1989
-        for mode in ["cors", "same-origin", "no-cors"] {
-            let req = poem::Request::builder()
-                .uri_str("/api/data")
-                .header("sec-fetch-mode", mode)
-                .finish();
-            let resp = gateway_redirect(&req);
-            assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        let cases = [
+            (None, None),
+            (Some("*/*"), None),
+            (Some("application/json"), Some("cors")),
+            (Some(BROWSER_ACCEPT), Some("cors")),
+            (Some(BROWSER_ACCEPT), Some("same-origin")),
+            (Some(BROWSER_ACCEPT), Some("no-cors")),
+        ];
+        for (accept, mode) in cases {
+            let mut req = poem::Request::builder().uri_str("/api/data");
+            if let Some(accept) = accept {
+                req = req.header("accept", accept);
+            }
+            if let Some(mode) = mode {
+                req = req.header("sec-fetch-mode", mode);
+            }
+            let resp = gateway_redirect(&req.finish());
+            assert_eq!(
+                resp.status(),
+                StatusCode::UNAUTHORIZED,
+                "{accept:?} {mode:?}"
+            );
         }
+    }
+
+    #[test]
+    fn session_host_check_fails_closed() {
+        use super::session_host_is_authorized;
+
+        assert!(session_host_is_authorized(
+            Some("example.com"),
+            "example.com"
+        ));
+        assert!(session_host_is_authorized(
+            Some("app.example.com"),
+            "example.com"
+        ));
+        assert!(session_host_is_authorized(Some("localhost"), "example.com"));
+        assert!(!session_host_is_authorized(
+            Some("evil-example.com"),
+            "example.com"
+        ));
+        assert!(session_host_is_authorized(Some("localhost"), "localhost"));
+        // The localhost exception is for developing against a real deployment,
+        // not a blanket pass when the deployment itself is localhost.
+        assert!(!session_host_is_authorized(Some("127.0.0.5"), "localhost"));
+        // A host that cannot be determined proves nothing.
+        assert!(!session_host_is_authorized(None, "example.com"));
+    }
+
+    #[test]
+    fn cross_origin_warpgate_requests() {
+        use http::Method;
+
+        use super::is_cross_origin_api_request;
+
+        let check = |method: Method, path: &str, headers: &[(&str, &str)]| {
+            let mut req = poem::Request::builder().method(method).uri_str(path);
+            for (k, v) in headers {
+                req = req.header(*k, *v);
+            }
+            is_cross_origin_api_request(&req.finish(), Some("example.com"))
+        };
+        let api = "/@warpgate/admin/api/sessions/x/close";
+        let evil = [("origin", "https://evil.example")];
+
+        assert!(check(Method::POST, api, &evil));
+        assert!(check(Method::POST, "/_warpgate/api/x", &evil));
+        assert!(check(Method::POST, api, &[("origin", "null")]));
+        assert!(check(
+            Method::POST,
+            api,
+            &[("sec-fetch-site", "cross-site")]
+        ));
+        assert!(check(
+            Method::GET,
+            "/@warpgate/api/x/stream",
+            &[("upgrade", "websocket"), ("origin", "https://evil.example")]
+        ));
+        // Target pages on subdomains share the cookie but not the trust.
+        assert!(check(
+            Method::POST,
+            api,
+            &[
+                ("origin", "https://app.example.com"),
+                ("sec-fetch-site", "same-site")
+            ]
+        ));
+        assert!(check(Method::POST, api, &[("sec-fetch-site", "same-site")]));
+        assert!(check(
+            Method::POST,
+            api,
+            &[("referer", "https://evil.example/page")]
+        ));
+        assert!(!check(
+            Method::POST,
+            api,
+            &[("origin", "https://example.com")]
+        ));
+        // Proxies strip or rewrite the port, so only the host counts.
+        assert!(!check(
+            Method::POST,
+            api,
+            &[
+                ("origin", "https://Example.com:8443"),
+                ("sec-fetch-site", "same-origin")
+            ]
+        ));
+        assert!(!check(
+            Method::POST,
+            api,
+            &[("referer", "https://example.com/@warpgate")]
+        ));
+        // Non-browser clients send none of the headers.
+        assert!(!check(Method::POST, api, &[]));
+        // Navigations and reads are not state changes.
+        assert!(!check(Method::GET, api, &evil));
+        // Target traffic is the target's business.
+        assert!(!check(Method::POST, "/some/form", &evil));
+    }
+
+    #[test]
+    fn session_restricted_off_the_control_plane() {
+        use super::is_session_restricted_on_host;
+
+        assert!(!is_session_restricted_on_host(
+            Some("example.com"),
+            "example.com"
+        ));
+        assert!(!is_session_restricted_on_host(
+            Some("EXAMPLE.com"),
+            "example.com"
+        ));
+        assert!(is_session_restricted_on_host(
+            Some("t.example.com"),
+            "example.com"
+        ));
+        assert!(!is_session_restricted_on_host(
+            Some("localhost"),
+            "example.com"
+        ));
+        assert!(is_session_restricted_on_host(None, "example.com"));
     }
 
     #[test]

@@ -1,33 +1,29 @@
-use poem::http::{HeaderValue, header};
 use poem::{Endpoint, IntoResponse, Middleware, Request, Response};
-pub use warpgate_common_http::{WARPGATE_CSP, WARPGATE_PLAYGROUND_CSP};
+use warpgate_common_http::insert_security_headers;
 
+/// Applies [`insert_security_headers`] to successful responses. Must only wrap
+/// Warpgate-served endpoints; errors get the same headers from `render_errors`.
 #[derive(Clone)]
-pub struct ContentSecurityPolicyMiddleware;
+pub struct SecurityHeadersMiddleware;
 
-impl<E: Endpoint> Middleware<E> for ContentSecurityPolicyMiddleware {
-    type Output = ContentSecurityPolicyEndpoint<E>;
+impl<E: Endpoint> Middleware<E> for SecurityHeadersMiddleware {
+    type Output = SecurityHeadersEndpoint<E>;
 
     fn transform(&self, inner: E) -> Self::Output {
-        ContentSecurityPolicyEndpoint { inner }
+        SecurityHeadersEndpoint { inner }
     }
 }
 
-pub struct ContentSecurityPolicyEndpoint<E: Endpoint> {
+pub struct SecurityHeadersEndpoint<E: Endpoint> {
     inner: E,
 }
 
-impl<E: Endpoint> Endpoint for ContentSecurityPolicyEndpoint<E> {
+impl<E: Endpoint> Endpoint for SecurityHeadersEndpoint<E> {
     type Output = Response;
 
     async fn call(&self, req: Request) -> poem::Result<Self::Output> {
         let mut resp = self.inner.call(req).await?.into_response();
-        if !resp.headers().contains_key(header::CONTENT_SECURITY_POLICY) {
-            resp.headers_mut().insert(
-                header::CONTENT_SECURITY_POLICY,
-                HeaderValue::from_static(WARPGATE_CSP),
-            );
-        }
+        insert_security_headers(resp.headers_mut());
         Ok(resp)
     }
 }
@@ -35,18 +31,36 @@ impl<E: Endpoint> Endpoint for ContentSecurityPolicyEndpoint<E> {
 #[cfg(test)]
 mod tests {
     use poem::endpoint::make_sync;
+    use poem::http::header;
     use poem::{EndpointExt, Request, Response};
+    use warpgate_common_http::{WARPGATE_CSP, WARPGATE_PLAYGROUND_CSP};
 
     use super::*;
 
+    fn assert_baseline_headers(resp: &Response) {
+        assert_eq!(
+            resp.headers().get(header::X_CONTENT_TYPE_OPTIONS).unwrap(),
+            "nosniff"
+        );
+        assert_eq!(
+            resp.headers().get(header::REFERRER_POLICY).unwrap(),
+            "same-origin"
+        );
+        assert_eq!(
+            resp.headers().get(header::X_FRAME_OPTIONS).unwrap(),
+            "SAMEORIGIN"
+        );
+    }
+
     #[tokio::test]
     async fn adds_strict_csp_when_absent() {
-        let ep = make_sync(|_| Response::builder().finish()).with(ContentSecurityPolicyMiddleware);
+        let ep = make_sync(|_| Response::builder().finish()).with(SecurityHeadersMiddleware);
         let resp = ep.call(Request::default()).await.unwrap();
         assert_eq!(
             resp.headers().get(header::CONTENT_SECURITY_POLICY).unwrap(),
             WARPGATE_CSP
         );
+        assert_baseline_headers(&resp);
     }
 
     #[tokio::test]
@@ -58,11 +72,33 @@ mod tests {
                 .header(header::CONTENT_SECURITY_POLICY, WARPGATE_PLAYGROUND_CSP)
                 .finish()
         })
-        .with(ContentSecurityPolicyMiddleware);
+        .with(SecurityHeadersMiddleware);
         let resp = ep.call(Request::default()).await.unwrap();
         assert_eq!(
             resp.headers().get(header::CONTENT_SECURITY_POLICY).unwrap(),
             WARPGATE_PLAYGROUND_CSP
+        );
+        assert_baseline_headers(&resp);
+    }
+
+    #[tokio::test]
+    async fn preserves_existing_security_headers() {
+        let ep = make_sync(|_| {
+            Response::builder()
+                .header(header::X_FRAME_OPTIONS, "DENY")
+                .header(header::REFERRER_POLICY, "no-referrer")
+                .finish()
+        })
+        .with(SecurityHeadersMiddleware);
+        let resp = ep.call(Request::default()).await.unwrap();
+        assert_eq!(resp.headers().get(header::X_FRAME_OPTIONS).unwrap(), "DENY");
+        assert_eq!(
+            resp.headers().get(header::REFERRER_POLICY).unwrap(),
+            "no-referrer"
+        );
+        assert_eq!(
+            resp.headers().get(header::X_CONTENT_TYPE_OPTIONS).unwrap(),
+            "nosniff"
         );
     }
 }

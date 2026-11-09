@@ -36,6 +36,26 @@ impl<T: AsRef<str>> From<T> for AuthSelector {
     }
 }
 
+// for logs
+pub fn redacted_selector(selector: &str) -> &str {
+    if selector.starts_with(TICKET_SELECTOR_PREFIX) {
+        "ticket-<redacted>"
+    } else {
+        selector
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ticket_selector_is_redacted() {
+        assert_eq!(redacted_selector("ticket-s3cret"), "ticket-<redacted>");
+        assert_eq!(redacted_selector("alice:db"), "alice:db");
+    }
+}
+
 impl Debug for AuthSelector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

@@ -4,14 +4,11 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
-use tracing::{info, warn};
+use tracing::{Instrument as _, info, warn};
 use warpgate_common::TargetRdpOptions;
 use warpgate_core::recordings::DesktopRecorder;
-use warpgate_core::{
-    DesktopEvent, DesktopState, Services, TargetAuthorization, WarpgateServerHandle,
-};
+use warpgate_core::{AdmittedTarget, DesktopClientHandles, DesktopEvent, DesktopState, Services};
 
 use super::BackendBridge;
 use super::protocol::Input as ServerInput;
@@ -33,13 +30,16 @@ async fn frame_bridge(
 ) {
     let record_tx = recorder.map(|recorder| {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<DesktopEvent>(256);
-        tokio::spawn(async move {
-            while let Some(event) = rx.recv().await {
-                if let Err(error) = recorder.write_event(&event).await {
-                    warn!(%error, "Failed to record RDP desktop event");
+        tokio::spawn(
+            async move {
+                while let Some(event) = rx.recv().await {
+                    if let Err(error) = recorder.write_event(&event).await {
+                        warn!(%error, "Failed to record RDP desktop event");
+                    }
                 }
             }
-        });
+            .in_current_span(),
+        );
         tx
     });
 
@@ -59,6 +59,17 @@ async fn frame_bridge(
                 // `data` is ref-counted `Bytes` — moved into the frame, no framebuffer copy.
                 data,
             },
+            DesktopEvent::Cursor { rect, data } => ServerInput::Cursor {
+                // As in RFB, the rect's origin is the hotspot.
+                hotspot_x: rect.x,
+                hotspot_y: rect.y,
+                width: rect.width,
+                height: rect.height,
+                data,
+            },
+            DesktopEvent::CursorDefault => ServerInput::CursorDefault,
+            DesktopEvent::CursorHidden => ServerInput::CursorHidden,
+            DesktopEvent::Clipboard(text) => ServerInput::Clipboard(text),
             DesktopEvent::State(DesktopState::Disconnected) => {
                 let _ = server_in.send(ServerInput::Shutdown).await;
                 return;
@@ -71,8 +82,7 @@ async fn frame_bridge(
                 info!(?state, "RDP target");
                 continue;
             }
-            // The client only emits Connecting/Connected/Resize/RawImage/Error/Disconnected;
-            // the remaining framebuffer variants never occur on this path.
+            // The client never emits the remaining framebuffer variants
             _ => continue,
         };
 
@@ -85,39 +95,37 @@ async fn frame_bridge(
 /// Connect to the target and start bridging its framebuffer, once auth is complete.
 pub(super) async fn connect_backend(
     services: &Services,
-    server_handle: &Arc<Mutex<WarpgateServerHandle>>,
     server_in_tx: &Sender<ServerInput>,
-    authorization: TargetAuthorization,
-    options: TargetRdpOptions,
+    admitted: AdmittedTarget<TargetRdpOptions>,
     screen: warpgate_desktop_ui::Screen,
 ) -> Result<BackendBridge> {
-    let (user_info, target) = authorization.into_parts();
-    {
-        let handle = server_handle.lock().await;
-        handle.set_user_info(user_info).await?;
-        handle.set_target(&target).await?;
-    }
-    info!(target=%target.name, "Authorized");
+    info!(target=%admitted.target().name, "Authorized");
 
-    let session_id = server_handle.lock().await.id();
-    let recorder = warpgate_desktop_auth::start_recording(services, &session_id, "rdp")
+    let recorder = warpgate_desktop_auth::start_recording(services, &admitted.id(), "rdp")
         .await
         .map(Arc::new);
 
-    let crate::RdpClientHandles {
+    let DesktopClientHandles {
         event_rx,
         input_tx,
         abort_tx,
-    } = crate::connect(options, (screen.width, screen.height));
-    let frame_bridge = tokio::spawn(frame_bridge(
-        event_rx,
-        server_in_tx.clone(),
-        recorder.clone(),
-    ));
+        logon_state,
+    } = crate::connect(
+        admitted,
+        (screen.width, screen.height),
+        services.secret_backends.clone(),
+    )?;
+    if let Some(recorder) = &recorder {
+        recorder.track_logon_state(logon_state);
+    }
+    let frame_bridge = tokio::spawn(
+        frame_bridge(event_rx, server_in_tx.clone(), recorder.clone()).in_current_span(),
+    );
     Ok(BackendBridge {
         input_tx,
         abort_tx,
         frame_bridge,
         recorder,
+        dialed_at: Some(screen),
     })
 }

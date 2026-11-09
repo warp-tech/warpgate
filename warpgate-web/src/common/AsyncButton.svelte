@@ -42,7 +42,9 @@
     let lastHeight = $state(0)
     let st = $state(State.Normal)
 
-    async function _click() {
+    async function _click(event: MouseEvent) {
+        event.preventDefault()
+
         if (!button) {
             return
         }
@@ -82,7 +84,11 @@
 </script>
 
 <Button
-    on:click={_click}
+    on:click={event => {
+        if (!(st === State.Progress || st === State.ProgressWithSpinner)) {
+            _click(event)
+        }
+    }}
     bind:inner={button}
     style="min-width: {lastWidth}px; min-height: {lastHeight}px;"
     class={cls}
@@ -91,7 +97,7 @@
     {type}
     {size}
     {id}
-    disabled={disabled || st === State.Progress || st === State.ProgressWithSpinner}
+    {disabled}
 >
     {#if st === State.Normal || st === State.Progress}
         {#if children}

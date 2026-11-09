@@ -1,6 +1,10 @@
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
-use warpgate_core::{DesktopEvent, DesktopInput, DesktopRect, DesktopState};
+use warpgate_core::{
+    DesktopEvent, DesktopInput, DesktopRect, DesktopState, MAX_CLIPBOARD_BYTES, Scancode,
+    truncate_clipboard_contents_in_place,
+};
+use warpgate_web_clients_common::{LiveSessionPhase, SessionPhase};
 
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct WsRect {
@@ -30,8 +34,15 @@ pub enum ClientMessage {
         y: u16,
         buttons: u8,
     },
+    /// The browser reports both forms it can derive from a `KeyboardEvent`: the keysym
+    /// from `event.key` (already mapped through the client's layout) and the scancode
+    /// from `event.code` (the physical key). Older clients send only the keysym.
     KeyEvent {
-        keysym: u32,
+        keysym: Option<u32>,
+        #[serde(default)]
+        scancode: Option<u8>,
+        #[serde(default)]
+        extended: bool,
         down: bool,
     },
     WheelEvent {
@@ -44,10 +55,11 @@ pub enum ClientMessage {
         text: String,
     },
     Refresh,
+    Resize {
+        width: u16,
+        height: u16,
+    },
 }
-
-// avoid unbounded memory use from untrusted input
-const MAX_CLIPBOARD_BYTES: usize = 10 * 1024 * 1024;
 
 impl From<ClientMessage> for Option<DesktopInput> {
     fn from(msg: ClientMessage) -> Self {
@@ -55,7 +67,16 @@ impl From<ClientMessage> for Option<DesktopInput> {
             ClientMessage::PointerEvent { x, y, buttons } => {
                 DesktopInput::Pointer { x, y, buttons }
             }
-            ClientMessage::KeyEvent { keysym, down } => DesktopInput::Key { keysym, down },
+            ClientMessage::KeyEvent {
+                keysym,
+                scancode,
+                extended,
+                down,
+            } => DesktopInput::Key {
+                keysym,
+                scancode: scancode.map(|code| Scancode { code, extended }),
+                down,
+            },
             ClientMessage::WheelEvent {
                 x,
                 y,
@@ -68,16 +89,11 @@ impl From<ClientMessage> for Option<DesktopInput> {
                 delta,
             },
             ClientMessage::Clipboard { mut text } => {
-                if text.len() > MAX_CLIPBOARD_BYTES {
-                    let mut end = MAX_CLIPBOARD_BYTES;
-                    while end > 0 && !text.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    text.truncate(end);
-                }
+                truncate_clipboard_contents_in_place(&mut text, MAX_CLIPBOARD_BYTES);
                 DesktopInput::Clipboard(text)
             }
             ClientMessage::Refresh => DesktopInput::Refresh,
+            ClientMessage::Resize { width, height } => DesktopInput::Resize { width, height },
         })
     }
 }
@@ -86,9 +102,7 @@ impl From<ClientMessage> for Option<DesktopInput> {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
-    ConnectionState {
-        state: &'static str,
-    },
+    State(SessionPhase),
     Resize {
         width: u16,
         height: u16,
@@ -129,9 +143,16 @@ pub enum ServerMessage {
         text: String,
     },
     Bell,
+    /// A non-fatal notice; the session ends through [`ServerMessage::State`] alone.
     Error {
         message: String,
     },
+}
+
+impl From<SessionPhase> for ServerMessage {
+    fn from(phase: SessionPhase) -> Self {
+        Self::State(phase)
+    }
 }
 
 impl ServerMessage {
@@ -183,20 +204,25 @@ fn encode_image(kind: u8, rect: WsRect, data: &[u8]) -> Vec<u8> {
     out
 }
 
-const fn state_name(state: DesktopState) -> &'static str {
+/// A backend state change as a session phase; `None` for the backend's own end, which
+/// the lifecycle reports once with a reason.
+pub const fn phase_for(state: DesktopState) -> Option<LiveSessionPhase> {
     match state {
-        DesktopState::Connecting => "connecting",
-        DesktopState::Connected => "connected",
-        DesktopState::Disconnected => "disconnected",
+        DesktopState::Connecting => Some(LiveSessionPhase::Connecting),
+        DesktopState::Connected => Some(LiveSessionPhase::Connected),
+        DesktopState::Disconnected => None,
     }
 }
 
-impl From<DesktopEvent> for ServerMessage {
-    fn from(event: DesktopEvent) -> Self {
-        match event {
-            DesktopEvent::State(state) => Self::ConnectionState {
-                state: state_name(state),
-            },
+impl ServerMessage {
+    /// `None` for state changes, which are reported as a session phase instead.
+    pub fn from_event(event: DesktopEvent) -> Option<Self> {
+        Some(match event {
+            // The browser client doesn't draw the target's cursor shape, so there is nothing
+            // to tell it when the cursor reverts or hides.
+            DesktopEvent::State(_) | DesktopEvent::CursorDefault | DesktopEvent::CursorHidden => {
+                return None;
+            }
             DesktopEvent::Resize { width, height } => Self::Resize { width, height },
             DesktopEvent::RawImage { rect, data } => Self::RawImage {
                 rect: rect.into(),
@@ -222,6 +248,6 @@ impl From<DesktopEvent> for ServerMessage {
             DesktopEvent::Clipboard(text) => Self::Clipboard { text },
             DesktopEvent::Bell => Self::Bell,
             DesktopEvent::Error(message) => Self::Error { message },
-        }
+        })
     }
 }

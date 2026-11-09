@@ -2,8 +2,7 @@ use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, ModelTrait, QueryFilter,
-    Set,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryFilter, Set,
 };
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -11,7 +10,7 @@ use warpgate_common::{AdminPermission, UserPublicKeyCredential, WarpgateError};
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_db_entities::{PublicKeyCredential, User};
 
-use super::AdminContext;
+use super::{AdminContext, guard_user_mutation};
 
 async fn check_user_ldap_linked(
     db: &DatabaseConnection,
@@ -133,7 +132,8 @@ impl ListApi {
     #[oai(
         path = "/users/:user_id/credentials/public-keys",
         method = "post",
-        operation_id = "create_public_key_credential"
+        operation_id = "create_public_key_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_create(
         &self,
@@ -200,7 +200,8 @@ impl DetailApi {
     #[oai(
         path = "/users/:user_id/credentials/public-keys/:id",
         method = "put",
-        operation_id = "update_public_key_credential"
+        operation_id = "update_public_key_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_update(
         &self,
@@ -222,29 +223,37 @@ impl DetailApi {
             return Ok(UpdatePublicKeyCredentialResponse::Forbidden(Json(msg)));
         }
 
-        let model = PublicKeyCredential::ActiveModel {
-            id: Set(id.0),
-            user_id: Set(*user_id),
-            date_added: Set(Some(OffsetDateTime::now_utc())),
-            label: Set(body.label.clone()),
-            ..<_>::from(UserPublicKeyCredential::try_from(&*body)?)
-        }
-        .update(db)
-        .await;
+        let updated = PublicKeyCredential::Entity::update_many()
+            .set(PublicKeyCredential::ActiveModel {
+                date_added: Set(Some(OffsetDateTime::now_utc())),
+                label: Set(body.label.clone()),
+                ..<_>::from(UserPublicKeyCredential::try_from(&*body)?)
+            })
+            .filter(PublicKeyCredential::Column::Id.eq(id.0))
+            .filter(PublicKeyCredential::Column::UserId.eq(*user_id))
+            .exec(db)
+            .await?;
 
-        match model {
-            Ok(model) => Ok(UpdatePublicKeyCredentialResponse::Updated(Json(
-                model.into(),
-            ))),
-            Err(DbErr::RecordNotFound(_)) => Ok(UpdatePublicKeyCredentialResponse::NotFound),
-            Err(e) => Err(e.into()),
+        if updated.rows_affected == 0 {
+            return Ok(UpdatePublicKeyCredentialResponse::NotFound);
         }
+        let Some(model) = PublicKeyCredential::Entity::find_by_id(id.0)
+            .one(db)
+            .await?
+        else {
+            return Ok(UpdatePublicKeyCredentialResponse::NotFound);
+        };
+
+        Ok(UpdatePublicKeyCredentialResponse::Updated(Json(
+            model.into(),
+        )))
     }
 
     #[oai(
         path = "/users/:user_id/credentials/public-keys/:id",
         method = "delete",
-        operation_id = "delete_public_key_credential"
+        operation_id = "delete_public_key_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_delete(
         &self,

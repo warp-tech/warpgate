@@ -12,7 +12,7 @@ const DEFAULT_ENDPOINT: &str = "https://api.openpanel.dev";
 const DEFAULT_CLIENT_ID: &str = "33492e68-494c-4ad1-a8fe-8353afb66d53";
 const DEFAULT_SECRET: &str = "sec_8828dbdfcf50be39c17f";
 const STARTUP_DELAY: Duration = Duration::from_secs(30);
-const REPORT_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+const REPORT_INTERVAL: Duration = Duration::from_hours(24);
 
 const EVENT_NAME: &str = "instance_report";
 
@@ -87,6 +87,14 @@ async fn build_properties(db: &DatabaseConnection, normal: bool) -> Result<Map<S
             json!(round_up_to_10(
                 count_targets(db, TargetKind::Kubernetes).await?
             )),
+        );
+        properties.insert(
+            "approximate_targets_rdp".into(),
+            json!(round_up_to_10(count_targets(db, TargetKind::Rdp).await?)),
+        );
+        properties.insert(
+            "approximate_targets_vnc".into(),
+            json!(round_up_to_10(count_targets(db, TargetKind::Vnc).await?)),
         );
         properties.insert(
             "approximate_users".into(),

@@ -42,18 +42,18 @@
     toggle={_cancel}
     {isOpen}
     on:open={() => {
-    if (instance) {
-        provider = instance.provider ?? null
-        email = instance.email
-    }
-}}
+        if (instance) {
+            provider = instance.provider ?? null
+            email = instance.email
+        }
+    }}
 >
     <Form
         {validated}
         on:submit={e => {
-        _save()
-        e.preventDefault()
-    }}
+            _save()
+            e.preventDefault()
+        }}
     >
         <ModalBody>
             <FormGroup floating label="E-mail">
@@ -86,13 +86,14 @@
                 type="submit"
                 color="primary"
                 class="modal-button"
-                on:click={() => validated = true}
-                >Save</Button
+                on:click={() => (validated = true)}
             >
+                Save
+            </Button>
 
-            <Button class="modal-button" color="danger" on:click={_cancel}
-                >Cancel</Button
-            >
+            <Button class="modal-button" color="secondary" on:click={_cancel}>
+                Cancel
+            </Button>
         </ModalFooter>
     </Form>
 </Modal>

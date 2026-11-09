@@ -20,10 +20,10 @@ use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::recordings::{LiveChunk, RecordingFile};
 use warpgate_db_entities::Recording::{self, RecordingKind};
-use warpgate_db_entities::Session;
+use warpgate_db_entities::TargetSession;
 
 use super::ClusterOrAdminContext;
-use crate::api::cluster_proxy::{Owner, proxy_or_serve, proxy_or_serve_websocket, session_owner};
+use crate::api::cluster_proxy::{Owner, proxy_or_serve, proxy_or_serve_websocket};
 use crate::api::common::require_cluster_or_admin_permission;
 
 pub struct Api;
@@ -90,7 +90,7 @@ pub async fn api_get_recording_tcpdump(
 
     let recording = find_recording(&ctx, id.0, Some(RecordingKind::Traffic)).await?;
     let owner = recording_owner(&ctx, &recording).await?;
-    proxy_or_serve(&ctx, req, owner, || {
+    proxy_or_serve(&ctx, req, owner, None::<&()>, || {
         serve_recording_file(&ctx, &recording, RecordingFile::TcpDumpData, static_req)
     })
     .await
@@ -107,7 +107,7 @@ pub async fn api_get_recording_data(
 
     let recording = find_recording(&ctx, id.0, None).await?;
     let owner = recording_owner(&ctx, &recording).await?;
-    proxy_or_serve(&ctx, req, owner, || {
+    proxy_or_serve(&ctx, req, owner, None::<&()>, || {
         serve_recording_file(&ctx, &recording, RecordingFile::NDJsonData, static_req)
     })
     .await
@@ -124,7 +124,7 @@ pub async fn api_get_recording_index(
 
     let recording = find_recording(&ctx, id.0, None).await?;
     let owner = recording_owner(&ctx, &recording).await?;
-    proxy_or_serve(&ctx, req, owner, || {
+    proxy_or_serve(&ctx, req, owner, None::<&()>, || {
         serve_recording_file(&ctx, &recording, RecordingFile::Index, static_req)
     })
     .await
@@ -139,8 +139,6 @@ async fn serve_recording_file(
     let access = ctx
         .services()
         .recordings
-        .lock()
-        .await
         .access(recording, file)
         .await
         .map_err(InternalServerError)?;
@@ -300,7 +298,7 @@ async fn serve_live_stream(
                             end - sent
                         );
                         sent = end;
-                    } else if !replay_scratch_span_awaiting(&mut sink, &path, &mut sent, end, LAG_REPLAY_TIMEOUT).await? {
+                    } else if !replay_scratch_span_awaiting(&mut sink, path, &mut sent, end, LAG_REPLAY_TIMEOUT).await? {
                         return Ok(());
                     }
                     chunk
@@ -372,7 +370,7 @@ pub async fn api_get_recording_stream(
     let owner = recording_owner(&ctx, &recording).await?;
 
     proxy_or_serve_websocket(&ctx, req, ws, owner, async move |ws| {
-        let recordings = ctx.services().recordings.lock().await;
+        let recordings = &ctx.services().recordings;
         let live = match recordings.subscribe_live(&id).await {
             Some(receiver) => {
                 // An in-progress recording is always a local file on the owner
@@ -405,13 +403,13 @@ pub async fn recording_owner(
     if recording.ended.is_some() {
         return Ok(Owner::Local);
     }
-    let Some(session) = Session::Entity::find_by_id(recording.session_id)
+    let Some(session) = TargetSession::Entity::find_by_id(recording.session_id)
         .one(&ctx.services().db)
         .await?
     else {
         return Ok(Owner::Local);
     };
-    session_owner(ctx, &session).await
+    ctx.services().cluster.owner(session.node_id).await
 }
 
 #[cfg(test)]

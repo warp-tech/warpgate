@@ -1,0 +1,58 @@
+diff -ru ironrdp-connector-0.12.0/src/credssp.rs base/ironrdp-connector/src/credssp.rs
+--- ironrdp-connector-0.12.0/src/credssp.rs	2026-11-03 23:33:29.897921149 -0800
++++ base/ironrdp-connector/src/credssp.rs	2026-11-03 23:23:38.208473654 -0800
+@@ -99,6 +99,28 @@
+         server_public_key: Vec<u8>,
+         kerberos_config: Option<KerberosConfig>,
+     ) -> ConnectorResult<(Self, credssp::TsRequest)> {
++        Self::init_with_mode(
++            credentials,
++            domain,
++            protocol,
++            server_name,
++            server_public_key,
++            kerberos_config,
++            false,
++        )
++    }
++
++    /// Like [`Self::init`]; `credentialless` authenticates over CredSSP but delegates no
++    /// credentials, so the server presents its own sign-in screen.
++    pub fn init_with_mode(
++        credentials: Credentials,
++        domain: Option<&str>,
++        protocol: nego::SecurityProtocol,
++        server_name: ServerName,
++        server_public_key: Vec<u8>,
++        kerberos_config: Option<KerberosConfig>,
++        credentialless: bool,
++    ) -> ConnectorResult<(Self, credssp::TsRequest)> {
+         let credentials: sspi::Credentials = match &credentials {
+             Credentials::UsernamePassword { username, password } => {
+                 let username = Username::new(username, domain).map_err(|e| custom_err!("invalid username", e))?;
+@@ -158,7 +180,11 @@
+         let client = CredSspClient::new(
+             server_public_key,
+             credentials,
+-            credssp::CredSspMode::WithCredentials,
++            if credentialless {
++                credssp::CredSspMode::CredentialLess
++            } else {
++                credssp::CredSspMode::WithCredentials
++            },
+             client_mode,
+             service_principal_name,
+         )
+diff -ru ironrdp-connector-0.12.0/src/lib.rs base/ironrdp-connector/src/lib.rs
+--- ironrdp-connector-0.12.0/src/lib.rs	2026-11-03 23:33:29.897308522 -0800
++++ base/ironrdp-connector/src/lib.rs	2026-11-03 23:23:38.208669572 -0800
+@@ -234,6 +234,9 @@
+     /// computers.
+     #[doc(alias("enable_nla", "nla"))]
+     pub enable_credssp: bool,
++    /// Authenticate over CredSSP without delegating the credentials to the server
++    /// (`CredSspMode::CredentialLess`), so the server shows its own sign-in screen.
++    pub credssp_credentialless: bool,
+     /// Allow Standard RDP Security (`PROTOCOL_RDP`, empty X.224 flags).
+     ///
+     /// When both [`enable_tls`](Self::enable_tls) and [`enable_credssp`](Self::enable_credssp) are

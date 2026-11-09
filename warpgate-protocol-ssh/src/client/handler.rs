@@ -1,11 +1,13 @@
 use russh::Channel;
 use russh::client::{ChannelOpenHandle, Msg, Session};
-use russh::keys::{PublicKey, PublicKeyBase64};
+use russh::keys::{PublicKey, PublicKeyBase64, PublicKeyOrCertificate};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tracing::*;
-use warpgate_common::{SessionId, TargetSSHOptions};
+use warpgate_common::{TargetSSHOptions, UserSessionId};
 use warpgate_core::Services;
+use warpgate_db_entities::Parameters;
+use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
 
 use crate::known_hosts::{KnownHostValidationResult, KnownHosts};
 use crate::{ConnectionError, ForwardedStreamlocalParams, ForwardedTcpIpParams};
@@ -25,39 +27,42 @@ pub struct ClientHandler {
     pub ssh_options: TargetSSHOptions,
     pub event_tx: UnboundedSender<ClientHandlerEvent>,
     pub services: Services,
-    pub session_id: SessionId,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ClientHandlerError {
-    #[error("Connection error")]
-    ConnectionError(ConnectionError),
-
-    #[error("SSH")]
-    Ssh(#[from] russh::Error),
-
-    #[error("Internal error")]
-    Internal,
+    pub session_id: UserSessionId,
 }
 
 impl russh::client::Handler for ClientHandler {
-    type Error = ClientHandlerError;
+    type Error = ConnectionError;
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &PublicKey,
+        server_public_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
+        let server_public_key = server_public_key.public_key();
         let known_hosts = KnownHosts::new(&self.services.db);
         self.event_tx
             .send(ClientHandlerEvent::HostKeyReceived(
                 server_public_key.clone(),
             ))
-            .map_err(|_| ClientHandlerError::ConnectionError(ConnectionError::Internal))?;
+            .map_err(|_| ConnectionError::Internal)?;
+
+        let mode = Parameters::Entity::get(&self.services.db)
+            .await
+            .map_err(|error| {
+                error!(?error, session=%self.session_id, "Failed to read the host key verification mode");
+                ConnectionError::Internal
+            })?
+            .ssh_host_key_verification;
+
+        if mode == SshHostKeyVerificationMode::Ignore {
+            debug!(session=%self.session_id, "Not checking the host key (verification is disabled)");
+            return Ok(true);
+        }
+
         match known_hosts
             .validate(
                 &self.ssh_options.host,
                 self.ssh_options.port,
-                server_public_key,
+                &server_public_key,
             )
             .await
         {
@@ -67,14 +72,12 @@ impl russh::client::Handler for ClientHandler {
                 key_base64,
             }) => {
                 warn!(session=%self.session_id, "Host key is invalid!");
-                Err(ClientHandlerError::ConnectionError(
-                    ConnectionError::HostKeyMismatch {
-                        received_key_type: server_public_key.algorithm(),
-                        received_key_base64: server_public_key.public_key_base64(),
-                        known_key_type: key_type,
-                        known_key_base64: key_base64,
-                    },
-                ))
+                Err(ConnectionError::HostKeyMismatch {
+                    received_key_type: server_public_key.algorithm(),
+                    received_key_base64: server_public_key.public_key_base64(),
+                    known_key_type: key_type,
+                    known_key_base64: key_base64,
+                })
             }
             Ok(KnownHostValidationResult::Unknown) => {
                 warn!(session=%self.session_id, "Host key is unknown");
@@ -85,14 +88,14 @@ impl russh::client::Handler for ClientHandler {
                         server_public_key.clone(),
                         tx,
                     ))
-                    .map_err(|_| ClientHandlerError::Internal)?;
-                let accepted = rx.await.map_err(|_| ClientHandlerError::Internal)?;
+                    .map_err(|_| ConnectionError::Internal)?;
+                let accepted = rx.await.map_err(|_| ConnectionError::Internal)?;
                 if accepted {
                     if let Err(error) = known_hosts
                         .trust(
                             &self.ssh_options.host,
                             self.ssh_options.port,
-                            server_public_key,
+                            &server_public_key,
                         )
                         .await
                     {
@@ -105,7 +108,7 @@ impl russh::client::Handler for ClientHandler {
             }
             Err(error) => {
                 error!(?error, session=%self.session_id, "Failed to verify the host key");
-                Err(ClientHandlerError::Internal)
+                Err(ConnectionError::Internal)
             }
         }
     }

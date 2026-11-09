@@ -44,6 +44,45 @@ impl<E: Endpoint> Middleware<E> for CookieHostMiddleware {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum DomainChange {
+    /// Set common parent domain
+    Set(String),
+    Unset,
+    Keep,
+}
+
+fn decide_domain_change(host: Option<&str>, base_domain: Option<&str>) -> DomainChange {
+    match (host, base_domain) {
+        // - No Host header and a base domain is configured -> use base domain
+        (None, Some(base)) => DomainChange::Set(normalize_cookie_domain(base)),
+
+        // - localhost → remove domain
+        (Some(h), _) if is_localhost_host(h) => DomainChange::Unset,
+
+        // - Host == external_host exactly or Host is a subdomain -> set Domain to base_domain
+        (Some(h), Some(base)) if host_is_subdomain_of_or_equal(h, base) => {
+            DomainChange::Set(normalize_cookie_domain(base))
+        }
+        _ => DomainChange::Keep,
+    }
+}
+
+fn rewrite_session_cookie(cookie: &mut Cookie<'_>, action: &DomainChange, is_https: bool) {
+    match action {
+        DomainChange::Set(domain) => cookie.set_domain(domain.clone()),
+        DomainChange::Unset => cookie.unset_domain(),
+        DomainChange::Keep => {}
+    }
+    if is_https {
+        cookie.set_secure(true);
+        if *action != DomainChange::Keep {
+            // disable SameSite when cookie is shared between domains
+            cookie.set_same_site(cookie::SameSite::None);
+        }
+    }
+}
+
 impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
     type Output = Response;
 
@@ -54,39 +93,10 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
 
         let mut resp = self.inner.call(req).await?.into_response();
 
-        // Decide what Domain attribute value to stamp on the session cookie.
-        //
-        // `target_domain` is:
-        //   `Some(Some(d))` → set Domain attribute to `d`
-        //   `Some(None)`    → remove Domain attribute (localhost / IP)
-        //   `None`          → leave the cookie entirely unchanged
-        //
-        // Rules:
-        //  • No Host header and a base domain is configured → use base domain.
-        //  • localhost / 127.x → remove Domain (browsers reject a domain
-        //    attribute that doesn't match the actual host for IP addresses).
-        //  • Host == external_host exactly, or Host is a subdomain of it →
-        //    set Domain to base_domain so the cookie is accessible from both
-        //    external_host *and* all its subdomains.
-        //  • Any other host → leave the cookie as-is (scoped to that host).
-        let target_domain: Option<Option<String>> = match host.as_deref() {
-            None => self
-                .base_domain
-                .as_ref()
-                .map(|b| Some(normalize_cookie_domain(b))),
-            Some(h) if is_localhost_host(h) => Some(None),
-            Some(h) => self.base_domain.as_ref().and_then(|base| {
-                if host_is_subdomain_of_or_equal(h, base) {
-                    Some(Some(normalize_cookie_domain(base)))
-                } else {
-                    None
-                }
-            }),
-        };
-
-        let Some(target_domain) = target_domain else {
+        let action = decide_domain_change(host.as_deref(), self.base_domain.as_deref());
+        if action == DomainChange::Keep && !is_https {
             return Ok(resp);
-        };
+        }
 
         // Extract all Set-Cookie headers for modification
         let cookie_values: Vec<String> = {
@@ -105,24 +115,11 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
             if let Ok(mut cookie) = Cookie::parse(cookie_str)
                 && cookie.name() == SESSION_COOKIE_NAME
             {
-                // Set or remove Domain attribute using cookie crate methods
-                if let Some(ref domain) = target_domain {
-                    cookie.set_domain(domain.clone());
-                } else {
-                    // For localhost/127.0.0.1, omit Domain attribute since browsers won't send cookies with a different domain
-                    cookie.unset_domain();
-                }
-
-                // Add Secure and SameSite=None for HTTPS (required for cross-site cookies)
-                if is_https {
-                    cookie.set_secure(true);
-                    cookie.set_same_site(cookie::SameSite::None);
-                }
-
+                rewrite_session_cookie(&mut cookie, &action, is_https);
                 modified_session_cookie = Some(cookie.to_string());
                 tracing::debug!(
-                    "CookieHostMiddleware: Modified cookie - domain={:?}, is_https={}",
-                    target_domain,
+                    "CookieHostMiddleware: Modified cookie - action={:?}, is_https={}",
+                    action,
                     is_https
                 );
                 break;
@@ -154,5 +151,74 @@ impl<E: Endpoint> Endpoint for CookieHostMiddlewareEndpoint<E> {
         }
 
         Ok(resp)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rewritten(host: Option<&str>, base: Option<&str>, is_https: bool) -> Cookie<'static> {
+        let mut cookie = Cookie::new(SESSION_COOKIE_NAME, "v");
+        rewrite_session_cookie(&mut cookie, &decide_domain_change(host, base), is_https);
+        cookie
+    }
+
+    #[test]
+    fn https_cookie_is_always_secure() {
+        for (host, base) in [
+            (Some("app.example.com"), Some("example.com")),
+            (Some("other.net"), Some("example.com")),
+            (Some("other.net"), None),
+            (Some("localhost"), None),
+            (None, None),
+        ] {
+            assert_eq!(
+                rewritten(host, base, true).secure(),
+                Some(true),
+                "{host:?} {base:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn plain_http_cookie_is_never_secure() {
+        for (host, base) in [
+            (Some("app.example.com"), Some("example.com")),
+            (Some("other.net"), Some("example.com")),
+            (Some("localhost"), None),
+        ] {
+            assert_eq!(
+                rewritten(host, base, false).secure(),
+                None,
+                "{host:?} {base:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn host_scoped_cookie_keeps_default_same_site() {
+        let c = rewritten(Some("other.net"), Some("example.com"), true);
+        assert_eq!(c.domain(), None);
+        assert_eq!(c.same_site(), None);
+    }
+
+    #[test]
+    fn shared_domain_cookie_is_cross_site() {
+        let c = rewritten(Some("app.example.com"), Some("example.com"), true);
+        assert_eq!(c.domain(), Some("example.com"));
+        assert_eq!(c.same_site(), Some(cookie::SameSite::None));
+    }
+
+    #[test]
+    fn localhost_drops_domain() {
+        let mut c = Cookie::new(SESSION_COOKIE_NAME, "v");
+        c.set_domain(".example.com");
+        rewrite_session_cookie(
+            &mut c,
+            &decide_domain_change(Some("127.0.0.1"), Some("example.com")),
+            true,
+        );
+        assert_eq!(c.domain(), None);
     }
 }

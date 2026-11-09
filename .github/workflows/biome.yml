@@ -1,0 +1,23 @@
+name: Biome
+
+on: [pull_request]
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  biome:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      - uses: biomejs/setup-biome@v2.7.1
+        with:
+          version: 2.5.9
+
+      - name: Biome CI
+        run: biome ci
+        working-directory: warpgate-web

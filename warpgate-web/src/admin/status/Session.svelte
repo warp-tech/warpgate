@@ -1,34 +1,42 @@
 <script lang="ts">
-    import { faUser } from '@fortawesome/free-regular-svg-icons'
-    import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
+    import {
+        faCircle as faCircleRegular,
+        faHand,
+        faUser,
+    } from '@fortawesome/free-regular-svg-icons'
+    import {
+        faComputer,
+        faPlay,
+        faTimes,
+    } from '@fortawesome/free-solid-svg-icons'
     import { Alert, Badge, Tooltip } from '@sveltestrap/sveltestrap'
     import {
+        ApprovalRequestStatus,
         api,
         type Recording,
-        type SessionSnapshot,
-        type TargetHTTPOptions,
-        type TargetKubernetesOptions,
-        type TargetMySqlOptions,
-        type TargetPostgresOptions,
-        type TargetRdpOptions,
-        type TargetSSHOptions,
-        type TargetVncOptions,
+        type TargetSessionSnapshot,
+        type UserSessionSnapshot,
     } from 'admin/lib/api'
-    import { timeAgo } from 'admin/lib/time'
+    import { adminPermissions } from 'admin/lib/store'
+    import TargetBadge from 'admin/log-viewer/TargetBadge.svelte'
+    import UserBadge from 'admin/log-viewer/UserBadge.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import { stringifyError } from 'common/errors'
     import { PROTOCOL_PROPERTIES } from 'common/protocols'
+    import RelativeDate from 'common/RelativeDate.svelte'
     import {
         recordingMetadataToFieldSet,
+        recordingTypeIcon,
         recordingTypeLabel,
     } from 'common/recordings'
-    import { formatDistance, formatDistanceToNow } from 'date-fns'
+    import StickyActionBar from 'common/StickyActionBar.svelte'
+    import { setCurrentSidebarSubtitle } from 'common/sidebarState.svelte'
+    import { formatDistance } from 'date-fns'
     import { onDestroy } from 'svelte'
     import Fa from 'svelte-fa'
-    import { link } from 'svelte-spa-router'
+    import firstBy from 'thenby'
     import LogViewer from '../log-viewer/LogViewer.svelte'
-    import RelativeDate from 'common/RelativeDate.svelte'
 
     interface Props {
         params: { id: string }
@@ -37,11 +45,15 @@
     let { params = { id: '' } }: Props = $props()
 
     let error: string | null = $state(null)
-    let session: SessionSnapshot | null = $state(null)
+    let session: UserSessionSnapshot | null = $state(null)
+    setCurrentSidebarSubtitle(
+        () => session && (session.username ?? session.id.slice(0, 8)),
+    )
     let recordings: Recording[] | null = $state(null)
 
     async function load() {
         session = await api.getSession(params)
+        session.targetSessions.sort(firstBy(x => x.started, 'desc'))
         recordings = await api.getSessionRecordings(params)
     }
 
@@ -50,43 +62,8 @@
         api.closeSession(session)
     }
 
-    function getTargetDescription() {
-        if (session?.target) {
-            let address = '<unknown>'
-            if (session.target.options.kind === 'Ssh') {
-                const options = session.target.options as TargetSSHOptions
-                address = `${options.host}:${options?.port}`
-            }
-            if (session.target.options.kind === 'MySql') {
-                const options = session.target.options as TargetMySqlOptions
-                address = `${options.host}:${options?.port}`
-            }
-            if (session.target.options.kind === 'Postgres') {
-                const options = session.target.options as TargetPostgresOptions
-                address = `${options.host}:${options?.port}`
-            }
-            if (session.target.options.kind === 'Http') {
-                const options = session.target
-                    .options as unknown as TargetHTTPOptions
-                address = options.url
-            }
-            if (session.target.options.kind === 'Kubernetes') {
-                const options = session.target
-                    .options as unknown as TargetKubernetesOptions
-                address = options.clusterUrl
-            }
-            if (session.target.options.kind === 'Vnc') {
-                const options = session.target.options as TargetVncOptions
-                address = `${options.host}:${options?.port}`
-            }
-            if (session.target.options.kind === 'Rdp') {
-                const options = session.target.options as TargetRdpOptions
-                address = `${options.host}:${options?.port}`
-            }
-            return `${session.target.name} (${address})`
-        } else {
-            return 'Not selected yet'
-        }
+    function getRecordingsForSession(s: TargetSessionSnapshot) {
+        return recordings?.filter(x => x.sessionId === s.id) ?? []
     }
 
     load().catch(async e => {
@@ -107,115 +84,211 @@
 
 {#if session}
     <div class="page-summary-bar">
-        <div>
-            <h1>session</h1>
-            <div class="d-flex align-items-center mt-1">
-                <Tooltip delay="250" target="usernameBadge" animation>
-                    Authenticated user
-                </Tooltip>
-                <Tooltip delay="250" target="targetBadge" animation>
-                    Selected target
-                </Tooltip>
+        <div class="flex-grow-1">
+            <h1>{session.protocol} session</h1>
+        </div>
+        <div class="text-muted ms-auto">
+            {#if session.ended}
+                {formatDistance(
+                    new Date(session.started),
+                    new Date(session.ended),
+                )}
+                long
+            {/if}
+            {#if session.nodeHostname}
+                · on {session.nodeHostname}
+            {/if}
+        </div>
+    </div>
 
-                <Badge
-                    id="usernameBadge"
-                    color="success"
-                    class="me-2 d-flex align-items-center"
-                >
-                    {#if session.username}
-                        <Fa icon={faUser} class="me-2" />
-                        {session.username}
-                    {:else}
-                        Logging in
-                    {/if}
-                </Badge>
-                {#if session.target}
-                    <Badge
-                        id="targetBadge"
-                        color="info"
-                        class="me-2 d-flex align-items-center"
-                    >
-                        <Fa icon={faArrowRight} class="me-2" />
-                        {getTargetDescription()}
-                    </Badge>
+    <div class="list-group list-group-flush tree">
+        <div class="list-group-item">
+            <Fa fw icon={faComputer} />
+            <span class="text-muted">Connected from</span>
+            <span>{session.remoteAddress}</span>
+            <small class="text-muted ms-auto">
+                <RelativeDate date={session.started} />
+            </small>
+        </div>
+
+        <div class="list-group-item">
+            <Fa fw icon={faUser} />
+            {#if session.username}
+                <span class="text-muted">Authenticated as</span>
+
+                {#if session.username}
+                    <UserBadge id={session.userId} name={session.username} />
+                {:else}
+                    Logging in
                 {/if}
+            {:else}
                 <span class="text-muted">
                     {#if session.ended}
-                        {formatDistance(new Date(session.started), new Date(session.ended))}
-                        long, <RelativeDate date={session.started} />
+                        Not authenticated
                     {:else}
-                        {formatDistanceToNow(new Date(session.started))}
-                    {/if}
-                    {#if session.nodeHostname}
-                        · on {session.nodeHostname}
+                        Not authenticated yet
                     {/if}
                 </span>
-            </div>
+            {/if}
         </div>
-        {#if !session.ended && PROTOCOL_PROPERTIES[session.protocol]?.sessionsCanBeClosed}
-            <div class="ms-auto">
-                <AsyncButton color="warning" click={close}>
-                    Close now
-                </AsyncButton>
+
+        {#each session.adminApprovals as approval (approval)}
+            <div class="list-group-item">
+                {#if approval.status === ApprovalRequestStatus.Pending}
+                    <div class="blinking-live-icon">
+                        <Fa fw icon={faHand} class="text-success" />
+                    </div>
+                    <span class="text-muted">Requesting approval for</span>
+                {:else}
+                    <Fa fw icon={faHand} />
+                    {#if approval.status === ApprovalRequestStatus.Approved}
+                        <span class="text-muted">Approved for</span>
+                    {:else if approval.status ===
+                        ApprovalRequestStatus.Rejected}
+                        <span class="text-muted">Rejected for</span>
+                    {:else if approval.status ===
+                        ApprovalRequestStatus.TimedOut}
+                        <span class="text-muted">Request timed out for</span>
+                    {/if}
+                {/if}
+
+                <TargetBadge id={approval.targetId} name={approval.target} />
+
+                {#if approval.resolvedAt}
+                    {#if approval.resolvedByUsername}
+                        by
+                        <UserBadge
+                            id={approval.resolvedByUserId}
+                            name={approval.resolvedByUsername}
+                        />
+                    {/if}
+                    <small class="text-muted ms-auto">
+                        <RelativeDate date={approval.resolvedAt} />
+                    </small>
+                {/if}
+            </div>
+        {/each}
+
+        {#each session.targetSessions as targetSession (targetSession.id)}
+            <div class="list-group-item">
+                {#if targetSession.ended}
+                    <Fa fw icon={faCircleRegular} />
+                {:else}
+                    <div class="blinking-live-icon">
+                        <Fa fw icon={faCircleRegular} class="text-success" />
+                    </div>
+                {/if}
+                <span class="text-muted">Connected to</span>
+                {#if targetSession.target}
+                    <TargetBadge
+                        id={targetSession.targetId}
+                        name={targetSession.target.name}
+                    />
+                {:else}
+                    a now deleted target
+                {/if}
+                {#if targetSession.nodeHostname}
+                    <small class="text-muted ms-auto">
+                        via {targetSession.nodeHostname}
+                    </small>
+                {/if}
+            </div>
+
+            {#each getRecordingsForSession(
+                targetSession,
+            ) as recording (recording.id)}
+                {@const metadata = JSON.parse(recording.metadata)}
+                <div class="list-group-item">
+                    <div class="indent">·</div>
+
+                    {#if session.ended || recording.ended}
+                        <Fa icon={faPlay} fw />
+                    {:else}
+                        <div class="blinking-live-icon">
+                            <Fa icon={faPlay} fw class="text-warning" />
+                        </div>
+                    {/if}
+
+                    <Badge
+                        href={$adminPermissions.recordingsView
+                            ? `#/status/recordings/${recording.id}`
+                            : undefined}
+                        color="warning"
+                        class="d-flex align-items-center"
+                    >
+                        <Fa icon={recordingTypeIcon(recording)} class="me-2" />
+                        {recordingTypeLabel(recording)}
+                    </Badge>
+
+                    <div class="meta-fields ms-2">
+                        {#if metadata}
+                            {#each recordingMetadataToFieldSet(
+                                metadata,
+                            ) as item (item[0])}
+                                <small class="me-2">
+                                    <span class="text-muted"> {item[0]}: </span>
+                                    {item[1]}
+                                </small>
+                            {/each}
+                        {/if}
+                    </div>
+                    <small class="text-muted ms-auto">
+                        <RelativeDate date={recording.started} />
+                    </small>
+                </div>
+            {/each}
+        {/each}
+
+        {#if session.ended && session.protocol !== 'HTTP'}
+            <div class="list-group-item">
+                <Fa fw icon={faTimes} />
+                <span class="text-muted">Disconnected</span>
+                <small class="text-muted ms-auto">
+                    <RelativeDate date={session.ended} />
+                </small>
             </div>
         {/if}
     </div>
 
-    {#if recordings?.length}
-        <h3 class="mt-4">Recordings</h3>
-        <div class="list-group list-group-flush">
-            {#each recordings as recording (recording.id)}
-                {@const metadata = JSON.parse(recording.metadata)}
-                <a
-                    class="list-group-item list-group-item-action"
-                    href="/status/recordings/{recording.id}"
-                    use:link
-                >
-                    <div class="main gap-1">
-                        <strong>
-                            {recordingTypeLabel(recording)}
-                            {#if !metadata}
-                                : {recording.name}
-                            {/if}
-                        </strong>
-                        {#if metadata}
-                            {#each recordingMetadataToFieldSet(metadata) as item (item[0])}
-                                <div>
-                                    <span class="text-muted">{item[0]}:</span>
-                                    {item[1]}
-                                </div>
-                            {/each}
-                        {/if}
-                        <small class="meta ms-auto">
-                            {timeAgo(recording.started)}
-                        </small>
-                    </div>
-                </a>
-            {/each}
-        </div>
-    {/if}
-
     <h3 class="mt-4">Log</h3>
     <LogViewer
         filters={{
-        sessionId: session.id,
-    }}
+            sessionId: session.id,
+        }}
     />
+
+    {#if !session.ended &&
+        PROTOCOL_PROPERTIES[session.protocol]?.sessionsCanBeClosed}
+        <StickyActionBar>
+            <AsyncButton color="warning" click={close}>
+                Close session now
+            </AsyncButton>
+        </StickyActionBar>
+    {/if}
 {/if}
 
 <style lang="scss">
-.list-group-item {
-    .main {
-        display: flex;
-        align-items: center;
-
-        > * {
-            margin-right: 20px;
-        }
+.tree {
+    .indent {
+        width: 20px;
+        text-align: center;
+        opacity: .5;
     }
 
-    .meta {
-        opacity: .75;
+    .list-group-item {
+        display: flex;
+        align-items: center;
+        gap: .5rem;
+    }
+}
+
+.blinking-live-icon {
+    animation: blinker 1s linear infinite;
+}
+
+@keyframes blinker {
+    50% {
+        opacity: .25;
     }
 }
 </style>

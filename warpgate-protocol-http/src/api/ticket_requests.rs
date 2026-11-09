@@ -4,9 +4,10 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder};
 use time::OffsetDateTime;
 use uuid::Uuid;
-use warpgate_common::{Secret, WarpgateError};
+use warpgate_common::{Secret, Target as TargetConfig, WarpgateError};
 use warpgate_common_http::SessionAuthorization;
 use warpgate_common_http::auth::AuthenticatedRequestContext;
+use warpgate_common_http::errors::bad_request;
 use warpgate_core::ticket_requests::{
     ActivateTicketRequestError, CreateTicketRequestError, CreateTicketRequestParams,
     activate_ticket_request, create_ticket_request,
@@ -35,7 +36,35 @@ struct CreateTicketRequestBody {
 #[derive(Object)]
 struct ActivatedTicketModel {
     request: TicketRequest::Model,
+    target: ActivatedTicketTargetInfo,
     secret: Option<String>,
+}
+
+/// Just the slim view of fields that the UI needs to show connection instructions
+/// since the user might not have full role based access to the target
+#[derive(Object)]
+struct ActivatedTicketTargetInfo {
+    pub name: String,
+    pub kind: Target::TargetKind,
+    pub external_host: Option<String>,
+    pub default_database_name: Option<String>,
+}
+
+impl TryFrom<Target::Model> for ActivatedTicketTargetInfo {
+    type Error = WarpgateError;
+
+    fn try_from(model: Target::Model) -> Result<Self, Self::Error> {
+        let target = TargetConfig::try_from(model)?;
+        Ok(Self {
+            name: target.name,
+            kind: (&target.options).into(),
+            external_host: target.options.external_host().map(ToString::to_string),
+            default_database_name: target
+                .options
+                .default_database_name()
+                .map(ToString::to_string),
+        })
+    }
 }
 
 #[derive(Object)]
@@ -72,6 +101,7 @@ struct MyTicketModel {
 #[derive(Object)]
 struct CreatedRequest {
     pub request: TicketRequest::Model,
+    pub target: ActivatedTicketTargetInfo,
     pub auto_approved_ticket_secret: Option<Secret<String>>,
 }
 
@@ -165,8 +195,8 @@ impl Api {
 
         let target_name = body.target_name.trim().to_string();
         if target_name.is_empty() {
-            return Ok(CreateTicketRequestResponse::BadRequest(Json(
-                "target_name is required".into(),
+            return Ok(CreateTicketRequestResponse::BadRequest(bad_request(
+                "target_name is required",
             )));
         }
 
@@ -186,10 +216,11 @@ impl Api {
         match result {
             Ok(result) => Ok(CreateTicketRequestResponse::Created(Json(CreatedRequest {
                 request: result.request,
+                target: result.target.try_into()?,
                 auto_approved_ticket_secret: result.auto_approved_secret,
             }))),
             Err(CreateTicketRequestError::InvalidInput(msg)) => {
-                Ok(CreateTicketRequestResponse::BadRequest(Json(msg)))
+                Ok(CreateTicketRequestResponse::BadRequest(bad_request(msg)))
             }
             Err(CreateTicketRequestError::Internal(e)) => Err(e),
         }
@@ -304,10 +335,11 @@ impl Api {
         };
 
         match activate_ticket_request(&ctx.services().db, id.0, user_model.id).await {
-            Ok((request, secret)) => Ok(ActivateTicketRequestResponse::Ok(Json(
+            Ok(activated) => Ok(ActivateTicketRequestResponse::Ok(Json(
                 ActivatedTicketModel {
-                    request,
-                    secret: Some(secret.expose_secret().clone()),
+                    request: activated.request,
+                    target: activated.target.try_into()?,
+                    secret: Some(activated.secret.expose_secret().clone()),
                 },
             ))),
             Err(ActivateTicketRequestError::NotFound) => {
@@ -403,11 +435,9 @@ impl Api {
             return Ok(DeleteMyTicketResponse::NotFound);
         };
 
-        TicketRequest::Entity::delete_many()
-            .filter(TicketRequest::Column::TicketId.eq(Some(ticket.id)))
-            .exec(db)
+        ctx.services()
+            .delete_ticket_closing_sessions(ticket.id)
             .await?;
-        ticket.delete(db).await?;
         Ok(DeleteMyTicketResponse::Deleted)
     }
 }

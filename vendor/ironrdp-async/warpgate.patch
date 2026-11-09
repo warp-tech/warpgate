@@ -1,0 +1,19 @@
+diff -ru ironrdp-async-0.12.0/src/connector.rs base/ironrdp-async/src/connector.rs
+--- ironrdp-async-0.12.0/src/connector.rs	2026-11-03 23:33:29.904777134 -0800
++++ base/ironrdp-async/src/connector.rs	2026-11-03 23:23:38.208778489 -0800
+@@ -294,13 +294,14 @@
+ 
+     debug!(connector.state = connector.state.name(), "Begin CredSSP");
+ 
+-    let (sequence, ts_request) = CredsspSequence::init(
++    let (sequence, ts_request) = CredsspSequence::init_with_mode(
+         connector.config.credentials.clone(),
+         connector.config.domain.as_deref(),
+         selected_protocol,
+         server_name,
+         server_public_key,
+         kerberos_config,
++        connector.config.credssp_credentialless,
+     )?;
+ 
+     perform_credssp(framed, network_client, buf, sequence, ts_request).await?;

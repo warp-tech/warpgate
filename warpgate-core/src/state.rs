@@ -3,24 +3,26 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use sea_orm::{ActiveModelTrait, DatabaseConnection};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter,
+};
+use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, broadcast};
 use tracing::error;
 use uuid::Uuid;
 use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_common::{Protocol, SessionId, Target, WarpgateError};
-use warpgate_db_entities::Session;
+use warpgate_common::{NodeId, Protocol, Target, UserSessionId, WarpgateError};
+use warpgate_db_entities::{SessionApprovalRequest, TargetSession, UserSession};
 
-use crate::logging::AuditEvent;
 use crate::rate_limiting::{RateLimiterRegistry, RateLimiterStackHandle};
 use crate::{SessionHandle, WarpgateServerHandle};
 
 pub struct State {
-    pub sessions: HashMap<SessionId, Arc<Mutex<SessionState>>>,
+    pub user_sessions: HashMap<UserSessionId, Arc<Mutex<UserSessionState>>>,
     db: DatabaseConnection,
-    // Node IDs are random
-    node_id: Uuid,
+    node_id: NodeId,
     rate_limiter_registry: Arc<Mutex<RateLimiterRegistry>>,
     change_sender: broadcast::Sender<()>,
 }
@@ -29,11 +31,11 @@ impl State {
     pub fn new(
         db: &DatabaseConnection,
         rate_limiter_registry: &Arc<Mutex<RateLimiterRegistry>>,
-        node_id: Uuid,
+        node_id: NodeId,
     ) -> Arc<Mutex<Self>> {
         let sender = broadcast::channel(2).0;
         Arc::new(Mutex::new(Self {
-            sessions: HashMap::new(),
+            user_sessions: HashMap::new(),
             db: db.clone(),
             node_id,
             rate_limiter_registry: rate_limiter_registry.clone(),
@@ -41,35 +43,62 @@ impl State {
         }))
     }
 
-    pub async fn register_session(
+    /// Registers a session with no owning node: it is a DB record any node
+    /// may serve, kept alive by its own backing rather than this node's
+    /// handle (a stored browser cookie session). The row's `node_id` is left
+    /// unset — the only kind of session for which the orphan reaper looks
+    /// elsewhere for liveness instead of this node's registration.
+    pub async fn register_nonlocal_user_session(
         this: &Arc<Mutex<Self>>,
         protocol: Protocol,
-        state: SessionStateInit,
+        state: UserSessionStateInit,
     ) -> Result<Arc<Mutex<WarpgateServerHandle>>, WarpgateError> {
-        let this_copy = this.clone();
-        let mut self_ = this.lock().await;
-        let id = uuid::Uuid::new_v4();
+        Self::register_user_session_in(this, protocol, false, state).await
+    }
 
-        let state = Arc::new(Mutex::new(SessionState::new(
+    /// Registers a session bound to this node: it is kept alive by this
+    /// node's handle alone, so the row must record an owner — unowned it
+    /// would back nothing and the orphan reaper would end it mid-use.
+    pub async fn register_node_local_user_session(
+        this: &Arc<Mutex<Self>>,
+        protocol: Protocol,
+        state: UserSessionStateInit,
+    ) -> Result<Arc<Mutex<WarpgateServerHandle>>, WarpgateError> {
+        Self::register_user_session_in(this, protocol, true, state).await
+    }
+
+    async fn register_user_session_in(
+        this: &Arc<Mutex<Self>>,
+        protocol: Protocol,
+        node_owned: bool,
+        state: UserSessionStateInit,
+    ) -> Result<Arc<Mutex<WarpgateServerHandle>>, WarpgateError> {
+        let mut self_ = this.lock().await;
+        let id = UserSessionId(Uuid::new_v4());
+
+        // Read before the state is shared: locking a `UserSessionState` while
+        // holding `State` is the reverse of the order everything else takes,
+        // and is only safe here because nothing else can reach this one yet.
+        // Not relying on that keeps the order true without an exception.
+        let remote_address = state
+            .remote_address
+            .map_or_else(String::new, |address| address.to_string());
+        let state = Arc::new(Mutex::new(UserSessionState::new(
             state,
             self_.change_sender.clone(),
         )));
 
-        self_.sessions.insert(id, state.clone());
-
         {
             use sea_orm::ActiveValue::Set;
 
-            let values = Session::ActiveModel {
+            let values = UserSession::ActiveModel {
                 id: Set(id),
                 started: Set(OffsetDateTime::now_utc()),
-                remote_address: Set(state
-                    .lock()
-                    .await
-                    .remote_address
-                    .map_or_else(String::new, |x| x.to_string())),
+                remote_address: Set(remote_address),
                 protocol: Set(protocol.to_string()),
-                node_id: Set(Some(self_.node_id)),
+                // An unowned session is served by any node; recording an owner
+                // would make the reaper end it when this node goes away.
+                node_id: Set(node_owned.then_some(self_.node_id)),
                 ..Default::default()
             };
 
@@ -81,65 +110,235 @@ impl State {
                 .map_err(WarpgateError::from)?;
         }
 
-        let _ = self_.change_sender.send(());
+        Ok(self_.install_user_session(this, id, state, protocol, node_owned))
+    }
 
-        Ok(Arc::new(Mutex::new(WarpgateServerHandle::new(
-            id,
-            self_.db.clone(),
-            this_copy,
+    /// Registers a user session and wraps its raw connection stream with the
+    /// session rate limiters in one step, so a raw-TCP protocol cannot serve
+    /// an unlimited stream by forgetting the wrap.
+    ///
+    /// The session is necessarily connection-bound: it is this socket, and it
+    /// ends with it — which is also every raw-TCP protocol's default.
+    pub async fn register_user_session_with_stream<S>(
+        this: &Arc<Mutex<Self>>,
+        protocol: Protocol,
+        state: UserSessionStateInit,
+        stream: S,
+    ) -> Result<
+        (
+            Arc<Mutex<WarpgateServerHandle>>,
+            impl AsyncRead + AsyncWrite + Unpin + Send + use<S>,
+        ),
+        WarpgateError,
+    >
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send,
+    {
+        let handle = Self::register_node_local_user_session(this, protocol, state).await?;
+        let wrapped = handle.lock().await.wrap_stream(stream).await?;
+        Ok((handle, wrapped))
+    }
+
+    /// Registers a non-owning local view of an existing user session: an HTTP
+    /// browser session, or a Kubernetes session opened on another node. Inserts
+    /// no row; the caller has validated it. Dropping the view detaches it
+    /// without ending the session.
+    pub async fn adopt_user_session(
+        this: &Arc<Mutex<Self>>,
+        id: UserSessionId,
+        protocol: Protocol,
+        state: UserSessionStateInit,
+    ) -> Arc<Mutex<WarpgateServerHandle>> {
+        let mut self_ = this.lock().await;
+        let state = Arc::new(Mutex::new(UserSessionState::new(
             state,
-            self_.rate_limiter_registry.clone(),
-        ))))
+            self_.change_sender.clone(),
+        )));
+        self_.install_user_session(this, id, state, protocol, false)
+    }
+
+    fn install_user_session(
+        &mut self,
+        owner: &Arc<Mutex<Self>>,
+        id: UserSessionId,
+        state: Arc<Mutex<UserSessionState>>,
+        protocol: Protocol,
+        node_owned: bool,
+    ) -> Arc<Mutex<WarpgateServerHandle>> {
+        self.user_sessions.insert(id, state.clone());
+        let _ = self.change_sender.send(());
+        Arc::new(Mutex::new(WarpgateServerHandle::new(
+            id,
+            self.db.clone(),
+            owner.clone(),
+            state,
+            self.rate_limiter_registry.clone(),
+            protocol,
+            node_owned,
+            self.node_id,
+        )))
+    }
+
+    // close matching live sessions
+    pub async fn close_local_sessions(this: &Arc<Mutex<Self>>, scope: &SessionsFilter) {
+        let user_states = this
+            .lock()
+            .await
+            .user_sessions
+            .iter()
+            .map(|(id, state)| (*id, state.clone()))
+            .collect::<Vec<_>>();
+        for (id, state) in user_states {
+            let state = state.lock().await;
+            if scope.includes(id, state.user_info.as_ref().map(|user| user.id)) {
+                state.handle.close();
+            }
+        }
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<()> {
         self.change_sender.subscribe()
     }
 
-    pub async fn remove_session(&mut self, id: SessionId) {
-        if let Some(session_state) = self.sessions.remove(&id) {
-            let state_guard = session_state.lock().await;
-            if let (Some(user_info), Some(target)) = (&state_guard.user_info, &state_guard.target) {
-                AuditEvent::TargetSessionEnded {
-                    session_id: id,
-                    target_id: target.id,
-                    target_name: target.name.clone(),
-                    user_id: user_info.id,
-                    username: user_info.username.clone(),
-                }
-                .emit();
-            }
+    /// Removes a session that never completed authentication, deleting its row
+    /// rather than marking it ended — see
+    /// [`WarpgateServerHandle::mark_provisional`]. Target sessions started
+    /// while still provisional (Kubernetes confirms only after admission) are
+    /// part of the attempt and are discarded with it.
+    pub async fn discard_session(&mut self, id: UserSessionId) {
+        self.user_sessions.remove(&id);
+
+        if let Err(error) = TargetSession::Entity::delete_many()
+            .filter(TargetSession::Column::UserSessionId.eq(id))
+            .exec(&self.db)
+            .await
+        {
+            error!(%error, %id, "Could not delete the session's target sessions from the DB");
+        }
+        if let Err(error) = UserSession::Entity::delete_by_id(id).exec(&self.db).await {
+            error!(%error, %id, "Could not delete user session from the DB");
         }
 
-        if let Err(error) = crate::db::mark_session_ended(&self.db, id).await {
-            error!(%error, %id, "Could not update session in the DB");
+        self.abandon_session_approvals(id).await;
+
+        let _ = self.change_sender.send(());
+    }
+
+    pub fn detach_user_session(
+        &mut self,
+        id: UserSessionId,
+        session_state: &Arc<Mutex<UserSessionState>>,
+    ) {
+        if self
+            .user_sessions
+            .get(&id)
+            .is_some_and(|state| Arc::ptr_eq(state, session_state))
+        {
+            self.user_sessions.remove(&id);
+        }
+    }
+
+    async fn abandon_session_approvals(&self, id: UserSessionId) {
+        if let Err(error) = SessionApprovalRequest::abandon_requests_for_session(&self.db, id).await
+        {
+            error!(%error, %id, "Could not close the session's approval requests");
+        }
+    }
+
+    pub async fn remove_session(&mut self, id: UserSessionId) {
+        // The row is ended whether or not this node still holds the state: a
+        // handle dropped just before this call detaches the entry without
+        // ending anything, and ending the row is the whole point of the call.
+        self.user_sessions.remove(&id);
+
+        if let Err(error) = UserSession::mark_ended_including_target_sessions(&self.db, id).await {
+            error!(%error, %id, "Could not end user session in the DB");
         }
 
         let _ = self.change_sender.send(());
     }
 }
 
-pub struct SessionState {
+#[derive(Clone)]
+pub struct SharedSessionHandle {
+    inner: Arc<std::sync::Mutex<Box<dyn SessionHandle + Send + Sync>>>,
+}
+
+impl SharedSessionHandle {
+    fn new(handle: Box<dyn SessionHandle + Send + Sync>) -> Self {
+        Self {
+            inner: Arc::new(std::sync::Mutex::new(handle)),
+        }
+    }
+
+    pub fn close(&self) {
+        match self.inner.lock() {
+            Ok(mut handle) => handle.close(),
+            Err(error) => error!(%error, "Could not lock session close handle"),
+        }
+    }
+}
+
+pub struct UserSessionState {
     pub remote_address: Option<SocketAddr>,
     pub user_info: Option<AuthStateUserInfo>,
+    pub handle: SharedSessionHandle,
+    /// The target this session's connection streams are limited against.
+    /// Set when a target session starts and never unset — a stream serves at
+    /// most one target for its whole life.
     pub target: Option<Target>,
-    pub handle: Box<dyn SessionHandle + Send + Sync>,
     change_sender: broadcast::Sender<()>,
     pub rate_limiter_handles: Vec<RateLimiterStackHandle>,
 }
 
-pub struct SessionStateInit {
+// not Condition because it matches both against DB and active session list
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SessionsFilter {
+    Sessions { ids: Vec<UserSessionId> },
+    User { user_id: Uuid },
+    All,
+}
+
+impl SessionsFilter {
+    fn includes(&self, id: UserSessionId, user_id: Option<Uuid>) -> bool {
+        match self {
+            Self::Sessions { ids } => ids.contains(&id),
+            Self::User { user_id: target } => user_id == Some(*target),
+            Self::All => true,
+        }
+    }
+
+    fn condition(&self) -> Condition {
+        match self {
+            Self::Sessions { ids } => {
+                Condition::all().add(UserSession::Column::Id.is_in(ids.iter().copied()))
+            }
+            Self::User { user_id } => {
+                Condition::all().add(UserSession::Column::UserId.eq(*user_id))
+            }
+            Self::All => Condition::all(),
+        }
+    }
+
+    pub async fn revoke(&self, db: &DatabaseConnection) -> Result<(), WarpgateError> {
+        UserSession::revoke_open_matching(db, self.condition()).await?;
+        Ok(())
+    }
+}
+
+pub struct UserSessionStateInit {
     pub remote_address: Option<SocketAddr>,
     pub handle: Box<dyn SessionHandle + Send + Sync>,
 }
 
-impl SessionState {
-    fn new(init: SessionStateInit, change_sender: broadcast::Sender<()>) -> Self {
+impl UserSessionState {
+    fn new(init: UserSessionStateInit, change_sender: broadcast::Sender<()>) -> Self {
         Self {
             remote_address: init.remote_address,
             user_info: None,
+            handle: SharedSessionHandle::new(init.handle),
             target: None,
-            handle: init.handle,
             change_sender,
             rate_limiter_handles: vec![],
         }
@@ -147,5 +346,774 @@ impl SessionState {
 
     pub fn emit_change(&self) {
         let _ = self.change_sender.send(());
+    }
+}
+
+#[cfg(all(test, feature = "sqlite"))]
+mod tests {
+    use sea_orm::{ColumnTrait, Database, PaginatorTrait, QueryFilter};
+    use warpgate_common::{TargetHTTPOptions, TargetOptions, TargetSessionId, Tls, UserSessionId};
+    use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
+    use warpgate_db_migrations::migrate_database;
+
+    use super::*;
+
+    struct TestHandle;
+
+    impl SessionHandle for TestHandle {
+        fn close(&mut self) {}
+    }
+
+    fn target() -> Target {
+        Target {
+            id: Uuid::new_v4(),
+            name: "web".into(),
+            description: String::new(),
+            allow_roles: vec![],
+            options: TargetOptions::Http(TargetHTTPOptions {
+                url: "http://target".into(),
+                tls: Tls::default(),
+                headers: Default::default(),
+                external_host: None,
+            }),
+            rate_limit_bytes_per_second: None,
+            group_id: None,
+            ticket_max_duration_seconds: None,
+            ticket_requests_disabled: false,
+            ticket_require_approval: false,
+            require_approval: false,
+            ticket_max_uses: None,
+        }
+    }
+
+    async fn kubernetes_session(state: &Arc<Mutex<State>>) -> Arc<Mutex<WarpgateServerHandle>> {
+        State::register_node_local_user_session(
+            state,
+            Protocol::Kubernetes,
+            UserSessionStateInit {
+                remote_address: None,
+                handle: Box::new(TestHandle),
+            },
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn test_db() -> DatabaseConnection {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+        db
+    }
+
+    fn test_state(db: &DatabaseConnection) -> Arc<Mutex<State>> {
+        let rate_limiters = Arc::new(Mutex::new(RateLimiterRegistry::new(db.clone())));
+        State::new(db, &rate_limiters, NodeId(Uuid::new_v4()))
+    }
+
+    /// A revoked login must not keep serving: an administrative close ends the
+    /// row on whichever node runs it, and a node that still holds a view of
+    /// the session has to refuse rather than open something new under it.
+    #[tokio::test]
+    async fn an_ended_login_cannot_open_a_target_session() {
+        let db = test_db().await;
+        let state = test_state(&db);
+        let parent = State::register_nonlocal_user_session(
+            &state,
+            Protocol::Http,
+            UserSessionStateInit {
+                remote_address: None,
+                handle: Box::new(TestHandle),
+            },
+        )
+        .await
+        .unwrap();
+        let user_info = AuthStateUserInfo {
+            id: Uuid::new_v4(),
+            username: "alice".into(),
+        };
+        parent
+            .lock()
+            .await
+            .set_user_info(user_info.clone())
+            .await
+            .unwrap();
+        let parent_id = parent.lock().await.user_session_id();
+
+        // Closed elsewhere in the cluster: only the row changes here.
+        UserSession::mark_ended_including_target_sessions(&db, parent_id)
+            .await
+            .unwrap();
+
+        let refused = parent
+            .lock()
+            .await
+            .start_target_session(crate::TargetAuthorization::for_test(
+                user_info,
+                target(),
+                Protocol::Http,
+            ))
+            .await;
+        assert!(matches!(refused, Err(WarpgateError::UserSessionEnded)));
+    }
+
+    /// Closing by user must reach exactly that user's live connections: a
+    /// deleted account keeps no open handle, and nobody else's is touched.
+    #[tokio::test]
+    async fn target_open_racing_session_end_cannot_leave_an_open_access() {
+        let db = test_db().await;
+        let state = test_state(&db);
+        let parent = State::register_nonlocal_user_session(
+            &state,
+            Protocol::Http,
+            UserSessionStateInit {
+                remote_address: None,
+                handle: Box::new(TestHandle),
+            },
+        )
+        .await
+        .unwrap();
+        let user_info = AuthStateUserInfo {
+            id: Uuid::new_v4(),
+            username: "alice".into(),
+        };
+        parent
+            .lock()
+            .await
+            .set_user_info(user_info.clone())
+            .await
+            .unwrap();
+        let parent_id = parent.lock().await.user_session_id();
+        let access_target = target();
+
+        let opening = TargetSession::open_or_lookup(
+            &db,
+            warpgate_common::TargetSessionId(Uuid::new_v4()),
+            parent_id,
+            &access_target,
+            None,
+            None,
+            &user_info,
+        );
+        let ending = UserSession::mark_ended_including_target_sessions(&db, parent_id);
+        let (opened, ended) = tokio::join!(opening, ending);
+
+        ended.unwrap();
+        assert!(opened.is_ok() || matches!(opened, Err(WarpgateError::UserSessionEnded)));
+        assert_eq!(
+            TargetSession::Entity::find()
+                .filter(TargetSession::Column::UserSessionId.eq(parent_id))
+                .filter(TargetSession::Column::Ended.is_null())
+                .count(&db)
+                .await
+                .unwrap(),
+            0
+        );
+    }
+
+    /// Dropping the last handle of a node-owned session ends the session and
+    /// every access recorded under it — the audit trail's "ended" comes from
+    /// this, not from any per-access teardown.
+    #[tokio::test]
+    async fn dropping_the_handle_ends_the_session_and_its_accesses() {
+        let db = test_db().await;
+        let state = test_state(&db);
+        let parent = State::register_node_local_user_session(
+            &state,
+            Protocol::Ssh,
+            UserSessionStateInit {
+                remote_address: None,
+                handle: Box::new(TestHandle),
+            },
+        )
+        .await
+        .unwrap();
+        let user_info = AuthStateUserInfo {
+            id: Uuid::new_v4(),
+            username: "alice".into(),
+        };
+        parent
+            .lock()
+            .await
+            .set_user_info(user_info.clone())
+            .await
+            .unwrap();
+
+        let target_session_id = parent
+            .lock()
+            .await
+            .start_target_session(crate::TargetAuthorization::for_test(
+                user_info,
+                target(),
+                Protocol::Ssh,
+            ))
+            .await
+            .unwrap()
+            .started()
+            .id();
+
+        // The only reference the connection would have held.
+        drop(parent);
+
+        // Teardown runs on a spawned task; poll for it.
+        for _ in 0..50 {
+            let child = TargetSession::Entity::find_by_id(target_session_id)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap();
+            if child.ended.is_some() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("target session row was not ended");
+    }
+
+    #[tokio::test]
+    async fn user_session_reuses_its_target_session_per_target() {
+        let db = test_db().await;
+        let state = test_state(&db);
+        let parent = State::register_nonlocal_user_session(
+            &state,
+            Protocol::Http,
+            UserSessionStateInit {
+                remote_address: None,
+                handle: Box::new(TestHandle),
+            },
+        )
+        .await
+        .unwrap();
+        let user_info = AuthStateUserInfo {
+            id: Uuid::new_v4(),
+            username: "alice".into(),
+        };
+        parent
+            .lock()
+            .await
+            .set_user_info(user_info.clone())
+            .await
+            .unwrap();
+        let parent_id: UserSessionId = parent.lock().await.user_session_id();
+        let other_target = target();
+        let target = target();
+
+        let first_id = parent
+            .lock()
+            .await
+            .start_target_session(crate::TargetAuthorization::for_test(
+                user_info.clone(),
+                target.clone(),
+                Protocol::Http,
+            ))
+            .await
+            .unwrap()
+            .started()
+            .id();
+        let second_id = parent
+            .lock()
+            .await
+            .start_target_session(crate::TargetAuthorization::for_test(
+                user_info.clone(),
+                target.clone(),
+                Protocol::Http,
+            ))
+            .await
+            .unwrap()
+            .started()
+            .id();
+        assert_eq!(first_id, second_id);
+        assert_eq!(
+            TargetSession::Entity::find()
+                .filter(TargetSession::Column::UserSessionId.eq(parent_id))
+                .count(&db)
+                .await
+                .unwrap(),
+            1
+        );
+
+        let other_id = parent
+            .lock()
+            .await
+            .start_target_session(crate::TargetAuthorization::for_test(
+                user_info,
+                other_target,
+                Protocol::Http,
+            ))
+            .await
+            .unwrap()
+            .started()
+            .id();
+        assert_ne!(first_id, other_id);
+        assert_eq!(
+            TargetSession::Entity::find()
+                .filter(TargetSession::Column::UserSessionId.eq(parent_id))
+                .count(&db)
+                .await
+                .unwrap(),
+            2
+        );
+    }
+
+    /// A node adopting a shared session (created elsewhere, or detached here)
+    /// has no memory of the row another node already recorded for this target;
+    /// the unique (user session, target) pair makes it reuse that row rather
+    /// than record a duplicate.
+    #[tokio::test]
+    async fn adopted_user_session_reuses_the_live_target_session_row() {
+        let db = test_db().await;
+        let state = test_state(&db);
+        let parent = State::register_nonlocal_user_session(
+            &state,
+            Protocol::Http,
+            UserSessionStateInit {
+                remote_address: None,
+                handle: Box::new(TestHandle),
+            },
+        )
+        .await
+        .unwrap();
+        let user_info = AuthStateUserInfo {
+            id: Uuid::new_v4(),
+            username: "alice".into(),
+        };
+        let parent_id: UserSessionId = parent.lock().await.user_session_id();
+        let target = target();
+
+        let first_id = parent
+            .lock()
+            .await
+            .start_target_session(crate::TargetAuthorization::for_test(
+                user_info.clone(),
+                target.clone(),
+                Protocol::Http,
+            ))
+            .await
+            .unwrap()
+            .started()
+            .id();
+
+        let adopted = State::adopt_user_session(
+            &state,
+            parent_id,
+            Protocol::Http,
+            UserSessionStateInit {
+                remote_address: None,
+                handle: Box::new(TestHandle),
+            },
+        )
+        .await;
+        let adopted_id = adopted
+            .lock()
+            .await
+            .start_target_session(crate::TargetAuthorization::for_test(
+                user_info,
+                target,
+                Protocol::Http,
+            ))
+            .await
+            .unwrap()
+            .started()
+            .id();
+
+        assert_eq!(first_id, adopted_id);
+        assert_eq!(
+            TargetSession::Entity::find()
+                .filter(TargetSession::Column::UserSessionId.eq(parent_id))
+                .count(&db)
+                .await
+                .unwrap(),
+            1
+        );
+
+        // The adopting view detaching must not end the shared row.
+        drop(adopted);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(
+            TargetSession::Entity::find_by_id(first_id)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .ended
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_kubernetes_claim_is_won_once_and_replaced_only_as_inspected() {
+        use warpgate_db_entities::KubernetesSession::{self, Claim};
+
+        let db = test_db().await;
+        let state = test_state(&db);
+        let first = kubernetes_session(&state).await;
+        let first = first.lock().await.user_session_id();
+        let second = kubernetes_session(&state).await;
+        let second = second.lock().await.user_session_id();
+        let now = OffsetDateTime::now_utc();
+
+        let claim =
+            |session, replacing| KubernetesSession::claim(&db, "k", session, now, replacing);
+        assert!(matches!(claim(first, None).await.unwrap(), Claim::Won));
+        assert!(matches!(
+            claim(second, None).await.unwrap(),
+            Claim::Lost(row) if row.user_session_id == first
+        ));
+        assert!(matches!(
+            claim(second, Some(UserSessionId(Uuid::new_v4()))).await.unwrap(),
+            Claim::Lost(row) if row.user_session_id == first
+        ));
+        assert!(matches!(
+            claim(second, Some(first)).await.unwrap(),
+            Claim::Won
+        ));
+
+        // The replaced claimant can no longer record an admission.
+        let admitted = TargetSessionId(Uuid::new_v4());
+        KubernetesSession::admit(&db, "k", first, admitted)
+            .await
+            .unwrap();
+        let row = KubernetesSession::Entity::find_by_id("k")
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.target_session_id, None);
+        KubernetesSession::admit(&db, "k", second, admitted)
+            .await
+            .unwrap();
+        let row = KubernetesSession::Entity::find_by_id("k")
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.target_session_id, Some(admitted));
+    }
+
+    #[tokio::test]
+    async fn the_kubernetes_claim_sweep_keeps_only_live_claims() {
+        use warpgate_db_entities::KubernetesSession;
+
+        let db = test_db().await;
+        let state = test_state(&db);
+        let now = OffsetDateTime::now_utc();
+        let cutoff = now - time::Duration::minutes(30);
+
+        let live = kubernetes_session(&state).await;
+        let live = live.lock().await.user_session_id();
+        KubernetesSession::claim(&db, "live", live, now, None)
+            .await
+            .unwrap();
+
+        let aged = kubernetes_session(&state).await;
+        let aged = aged.lock().await.user_session_id();
+        KubernetesSession::claim(&db, "aged", aged, cutoff - time::Duration::seconds(1), None)
+            .await
+            .unwrap();
+
+        let ended = kubernetes_session(&state).await;
+        let ended = ended.lock().await.user_session_id();
+        KubernetesSession::claim(&db, "ended", ended, now, None)
+            .await
+            .unwrap();
+        UserSession::mark_ended_including_target_sessions(&db, ended)
+            .await
+            .unwrap();
+
+        // Abandoned before admission: the provisional parent row is deleted.
+        let gone = UserSessionId(Uuid::new_v4());
+        KubernetesSession::claim(&db, "gone", gone, now, None)
+            .await
+            .unwrap();
+        let (_, parent) = KubernetesSession::find_with_parent(&db, "gone")
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(parent.is_none());
+
+        assert_eq!(KubernetesSession::sweep(&db, cutoff).await.unwrap(), 3);
+        let left: Vec<_> = KubernetesSession::Entity::find()
+            .all(&db)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| row.key)
+            .collect();
+        assert_eq!(left, ["live"]);
+    }
+
+    #[tokio::test]
+    async fn a_node_owned_session_joined_elsewhere_lives_with_its_owner() {
+        let db = test_db().await;
+        let opener_node = test_state(&db);
+        let joining_node = test_state(&db);
+        let user_info = AuthStateUserInfo {
+            id: Uuid::new_v4(),
+            username: "alice".into(),
+        };
+        let target = target();
+        let authorization = || {
+            crate::TargetAuthorization::for_test(
+                user_info.clone(),
+                target.clone(),
+                Protocol::Kubernetes,
+            )
+        };
+
+        let owner = kubernetes_session(&opener_node).await;
+        let session_id = owner.lock().await.user_session_id();
+        let opened = owner
+            .lock()
+            .await
+            .start_target_session(authorization())
+            .await
+            .unwrap()
+            .started()
+            .id();
+
+        let view = State::adopt_user_session(
+            &joining_node,
+            session_id,
+            Protocol::Kubernetes,
+            UserSessionStateInit {
+                remote_address: None,
+                handle: Box::new(TestHandle),
+            },
+        )
+        .await;
+        let joined = view
+            .lock()
+            .await
+            .start_target_session(authorization())
+            .await
+            .unwrap()
+            .started()
+            .id();
+        assert_eq!(opened, joined);
+
+        let ended = || async {
+            UserSession::Entity::find_by_id(session_id)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .ended
+                .is_some()
+        };
+        drop(view);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(!ended().await);
+
+        drop(owner);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(ended().await);
+    }
+
+    #[tokio::test]
+    async fn nodes_racing_a_shared_target_session_adopt_one_row() {
+        let db = test_db().await;
+        let rate_limiters = Arc::new(Mutex::new(RateLimiterRegistry::new(db.clone())));
+        let first_state = State::new(&db, &rate_limiters, NodeId(Uuid::new_v4()));
+        let second_state = State::new(&db, &rate_limiters, NodeId(Uuid::new_v4()));
+        let first_parent = State::register_nonlocal_user_session(
+            &first_state,
+            Protocol::Http,
+            UserSessionStateInit {
+                remote_address: None,
+                handle: Box::new(TestHandle),
+            },
+        )
+        .await
+        .unwrap();
+        let user_info = AuthStateUserInfo {
+            id: Uuid::new_v4(),
+            username: "alice".into(),
+        };
+        first_parent
+            .lock()
+            .await
+            .set_user_info(user_info.clone())
+            .await
+            .unwrap();
+        let parent_id = first_parent.lock().await.user_session_id();
+        let second_parent = State::adopt_user_session(
+            &second_state,
+            parent_id,
+            Protocol::Http,
+            UserSessionStateInit {
+                remote_address: None,
+                handle: Box::new(TestHandle),
+            },
+        )
+        .await;
+        let target = target();
+        let first_authorization =
+            crate::TargetAuthorization::for_test(user_info.clone(), target.clone(), Protocol::Http);
+        let second_authorization =
+            crate::TargetAuthorization::for_test(user_info, target, Protocol::Http);
+
+        let first = async {
+            first_parent
+                .lock()
+                .await
+                .start_target_session(first_authorization)
+                .await
+                .unwrap()
+                .started()
+                .id()
+        };
+        let second = async {
+            second_parent
+                .lock()
+                .await
+                .start_target_session(second_authorization)
+                .await
+                .unwrap()
+                .started()
+                .id()
+        };
+        let (first_id, second_id) = tokio::join!(first, second);
+
+        assert_eq!(first_id, second_id);
+        assert_eq!(
+            TargetSession::Entity::find()
+                .filter(TargetSession::Column::UserSessionId.eq(parent_id))
+                .count(&db)
+                .await
+                .unwrap(),
+            1
+        );
+    }
+
+    /// Which constructor a session registers through — not its protocol — is
+    /// what decides whether the row records an owning node, the only thing the
+    /// reaper reads. An HTTP session held open by a node-local handle (a
+    /// header-borne ticket's) records its owner and so is not swept as an
+    /// unbacked orphan.
+    #[tokio::test]
+    async fn registration_kind_decides_the_owning_node() {
+        let db = test_db().await;
+        let rate_limiters = Arc::new(Mutex::new(RateLimiterRegistry::new(db.clone())));
+        let node_id = NodeId(Uuid::new_v4());
+        let state = State::new(&db, &rate_limiters, node_id);
+
+        let init = || UserSessionStateInit {
+            remote_address: None,
+            handle: Box::new(TestHandle),
+        };
+        let node_of = async |handle: &Arc<Mutex<WarpgateServerHandle>>| {
+            let id = handle.lock().await.user_session_id();
+            UserSession::Entity::find_by_id(id)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .node_id
+        };
+
+        let cookie_backed = State::register_nonlocal_user_session(&state, Protocol::Http, init())
+            .await
+            .unwrap();
+        assert_eq!(node_of(&cookie_backed).await, None);
+
+        let node_local = State::register_node_local_user_session(&state, Protocol::Http, init())
+            .await
+            .unwrap();
+        assert_eq!(node_of(&node_local).await, Some(node_id));
+    }
+
+    #[tokio::test]
+    async fn direct_target_session_has_independent_state() {
+        let db = test_db().await;
+        let state = test_state(&db);
+        let parent = State::register_node_local_user_session(
+            &state,
+            Protocol::Ssh,
+            UserSessionStateInit {
+                remote_address: None,
+                handle: Box::new(TestHandle),
+            },
+        )
+        .await
+        .unwrap();
+        let user_info = AuthStateUserInfo {
+            id: Uuid::new_v4(),
+            username: "alice".into(),
+        };
+        parent
+            .lock()
+            .await
+            .set_user_info(user_info.clone())
+            .await
+            .unwrap();
+        let parent_id = parent.lock().await.user_session_id();
+        let target = target();
+        let wrong_user = AuthStateUserInfo {
+            id: Uuid::new_v4(),
+            username: "mallory".into(),
+        };
+        assert!(
+            parent
+                .lock()
+                .await
+                .start_target_session(crate::TargetAuthorization::for_test(
+                    wrong_user,
+                    target.clone(),
+                    Protocol::Ssh,
+                ))
+                .await
+                .is_err()
+        );
+        assert!(
+            parent
+                .lock()
+                .await
+                .start_target_session(crate::TargetAuthorization::for_test(
+                    user_info.clone(),
+                    target.clone(),
+                    Protocol::Http,
+                ))
+                .await
+                .is_err()
+        );
+        let admitted = parent
+            .lock()
+            .await
+            .start_target_session(crate::TargetAuthorization::for_test(
+                user_info.clone(),
+                target.clone(),
+                Protocol::Ssh,
+            ))
+            .await
+            .unwrap()
+            .started();
+
+        let target_session_id = admitted.id();
+        let approved = admitted.into_approved();
+
+        assert_eq!(approved.target(), &target);
+        let row = TargetSession::Entity::find_by_id(target_session_id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.user_session_id, parent_id);
+        // The ids are independent: nothing may rely on a child sharing its
+        // parent's UUID.
+        assert_ne!(target_session_id.0, parent_id.0);
+
+        let again_id = parent
+            .lock()
+            .await
+            .start_target_session(crate::TargetAuthorization::for_test(
+                user_info,
+                target,
+                Protocol::Ssh,
+            ))
+            .await
+            .unwrap()
+            .started()
+            .id();
+        assert_eq!(again_id, target_session_id);
     }
 }

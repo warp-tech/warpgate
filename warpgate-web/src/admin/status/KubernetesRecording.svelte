@@ -86,7 +86,9 @@
         <div class="d-flex align-items-center gap-2">
             {#if item.responseStatus}
                 <Badge
-                    color={isSuccessStatus(item.responseStatus) ? 'success' : 'danger'}
+                    color={isSuccessStatus(item.responseStatus)
+                        ? 'success'
+                        : 'danger'}
                 >
                     {item.responseStatus}
                 </Badge>
@@ -121,7 +123,8 @@
                         <table class="table">
                             <thead>
                                 <tr>
-                                    {#each item.responseBody.columnDefinitions as colDef (colDef)}
+                                    {#each item.responseBody
+                                        .columnDefinitions as colDef (colDef)}
                                         <th>{colDef.name}</th>
                                     {/each}
                                 </tr>

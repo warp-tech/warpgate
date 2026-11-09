@@ -1,5 +1,7 @@
 <script lang="ts">
     import BannerModal from 'common/BannerModal.svelte'
+    import { controlPlaneOriginForRedirect } from 'common/controlPlane'
+    import { navigateToExternalUrl } from 'common/helpers'
     import { api } from 'gateway/lib/api'
     import { onMount } from 'svelte'
     import logo from '../../public/assets/favicon.svg'
@@ -13,8 +15,9 @@
     let savedPosition = { x: 0.1, y: 0.8 }
     let position = { x: 0.1, y: 0.8 }
     let dragStartCoords: { x: number; y: number } | undefined
-    let externalHost: string | undefined
+    let controlPlane: string | undefined
     let banner = ''
+    let localLogoutDisabled = false
     // The embedded UI is also injected when only the banner is enabled, so the
     // floating menu renders separately from it.
     let showMenu = false
@@ -29,7 +32,8 @@
         const info = await api.getInfo()
         banner = info.banner
         showMenu = info.showSessionMenu
-        externalHost = `${info.externalHosts?.http ?? info.externalHost}:${info.ports.http ?? 443}`
+        localLogoutDisabled = info.localLogoutDisabled
+        controlPlane = controlPlaneOriginForRedirect(info)
     })
 
     function startDragging(e: PointerEvent) {
@@ -71,14 +75,14 @@
     }
 
     function goHome() {
-        if (externalHost) {
-            location.href = `https://${externalHost}/@warpgate`
-        } else {
-            location.href = '/@warpgate'
-        }
+        location.href = `${controlPlane ?? ''}/@warpgate`
     }
 
     async function logout() {
+        if (localLogoutDisabled) {
+            navigateToExternalUrl((await api.initiateSsoLogout()).url)
+            return
+        }
         await api.logout()
         location.reload()
     }
@@ -102,11 +106,11 @@
             on:pointerdown|preventDefault={startDragging}
             on:pointermove={drag}
             on:pointerup|stopPropagation|preventDefault={() => {
-            if (!dragging) {
-                menuVisible = !menuVisible
-            }
-            endDragging()
-        }}
+                if (!dragging) {
+                    menuVisible = !menuVisible
+                }
+                endDragging()
+            }}
             on:pointercancel={endDragging}
         >
 

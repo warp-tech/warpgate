@@ -64,6 +64,9 @@ pub struct S3StorageConfig {
     /// Key prefix prepended to every object path.
     pub prefix: String,
     pub credentials: S3Credentials,
+    /// Local directory buffering recordings before upload, resolved against the
+    /// config file's directory unless absolute. Defaults to `data/recordings-scratch`.
+    pub scratch_path: Option<String>,
 }
 
 impl S3StorageConfig {
@@ -273,6 +276,12 @@ impl S3MultipartUpload {
     }
 
     async fn try_finish(&mut self) -> Result<(), AwsError> {
+        // `upload_part` numbers a part before sending it and records it only once
+        // S3 accepted it, so a shortfall here is a part that never arrived.
+        // Completing would still succeed, with that range silently missing.
+        if usize::try_from(self.part_number).is_ok_and(|sent| self.parts.len() < sent) {
+            return Err(AwsError::Other("a part of the upload failed".into()));
+        }
         if !self.buf.is_empty() || self.parts.is_empty() {
             let chunk = std::mem::take(&mut self.buf);
             self.upload_part(chunk).await?;
@@ -318,6 +327,7 @@ mod tests {
             path_style,
             prefix: String::new(),
             credentials: S3Credentials::Auto(AutoCredentials {}),
+            scratch_path: None,
         }
     }
 

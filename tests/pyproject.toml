@@ -15,23 +15,28 @@ requests = "^2.28.1"
 flask-sock = ">=0.5.2,<0.8.0"
 websocket-client = "^1.3.3"
 PyYAML = "^6.0.2"
-deepmerge = "^2"
+deepmerge = ">=2,<4"
 openapi-client = { path = "./api_sdk", develop = true }
 aiohttp = "^3.11.18"
 boto3 = "^1.35"
-cryptography = ">=46,<50"
+cryptography = ">=46,<51"
 
 [tool.poetry.dev-dependencies]
-flake8 = "^7.3.0"
+flake8 = "^7.4.1"
 black = "^26"
 
 [tool.poetry.group.dev.dependencies]
 pytest-asyncio = ">=0.26,<1.5"
 pytest-timeout = "^2.4.0"
 pyright = "^1.1.408"
+pytest-xdist = "^3.6"
 
 [tool.pytest.ini_options]
 minversion = "6.0"
+# The generated SDK ships its own stub tests. Under xdist (-n), each file
+# stays on one worker so module-scoped fixtures such as the shared k3s start
+# once.
+addopts = "--ignore=api_sdk --dist loadfile"
 filterwarnings = ["ignore::urllib3.exceptions.InsecureRequestWarning"]
 
 [build-system]

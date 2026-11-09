@@ -19,20 +19,18 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use tokio::io::copy_bidirectional;
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncWrite, copy_bidirectional};
 use tokio::sync::mpsc::{Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
 use tokio::time::{Instant, timeout_at};
-use tokio_stream::StreamExt;
 use tracing::{Instrument, debug, error, info, info_span, warn};
-use warpgate_common::helpers::net::detect_port_knock;
-use warpgate_common::{ListenEndpoint, Protocol, Target, TargetOptions, TargetRdpOptions};
+use warpgate_common::helpers::net::accept_loop;
+use warpgate_common::{ListenEndpoint, TargetRdpOptions, WarpgateError};
 use warpgate_core::recordings::DesktopRecorder;
 use warpgate_core::{
-    DesktopInput, Services, SessionStateInit, State, TargetAuthorization, WarpgateServerHandle,
+    DesktopInput, Services, State, TargetAuthorization, UserSessionStateInit, WarpgateServerHandle,
 };
 use warpgate_db_entities::Parameters;
 use warpgate_desktop_ui::{DEFAULT_SCREEN_H, DEFAULT_SCREEN_W};
@@ -41,15 +39,16 @@ use crate::PROTOCOL_NAME;
 use crate::session_handle::RdpSessionHandle;
 
 mod bridge;
+mod clipboard;
 mod hold_screen;
 mod protocol;
 mod rdp;
 
 use bridge::connect_backend;
-use hold_screen::{run_banner_screen, run_hold_screen};
+use hold_screen::{hold_while, run_banner_screen, run_hold_screen};
 use protocol::{AuthVerdict, Event as ServerEvent, Input as ServerInput};
 use warpgate_desktop_auth::{
-    DesktopAuthOutcome, DesktopProtocol, authenticate, finalize_user_auth,
+    AdmissionHold, DesktopAuthOutcome, admit_desktop_session, authenticate, finalize_user_auth,
 };
 
 /// Depth of the feed into the viewer-facing RDP server. Bounded so a slow viewer
@@ -71,6 +70,13 @@ struct BackendBridge {
     /// Shared with `frame_bridge`; used to record viewer input alongside the
     /// framebuffer. `None` when recording is disabled.
     recorder: Option<Arc<DesktopRecorder>>,
+    /// The size the target was dialed at, until the viewer's own negotiated size has been
+    /// reconciled against it; `None` once that has happened. A viewer whose buffered input
+    /// dials the target before the capability exchange reports its resolution is dialed at
+    /// the advertised default, and this is what lets the resolution that follows still reach
+    /// the target. Only the viewer's *first* size is its own — every later one echoes a
+    /// resize the target itself drove, and re-sending that would fight the target.
+    dialed_at: Option<warpgate_desktop_ui::Screen>,
 }
 
 impl BackendBridge {
@@ -88,70 +94,59 @@ pub async fn bind_server(
     cert_pem: String,
     key_pem: String,
 ) -> Result<BoxFuture<'static, Result<()>>> {
-    let mut listener = address.tcp_accept_stream().await?;
+    let listener = address.tcp_accept_stream().await?;
 
     Ok(async move {
-        while let Some(mut stream) = listener.next().await {
-            let _ = stream.set_nodelay(true);
-            if detect_port_knock(&stream).await {
-                continue;
-            }
-            let remote_address = match warpgate_common::helpers::proxy_protocol::remote_address(
-                &mut stream,
-                proxy_protocol,
-            )
-            .await
-            {
-                Ok(remote_address) => remote_address,
-                Err(error) => {
-                    warn!(%error, "Failed to read PROXY protocol header");
-                    continue;
-                }
-            };
+        accept_loop(
+            "RDP connection",
+            listener,
+            proxy_protocol,
+            move |stream, remote_address| {
+                let services = services.clone();
+                let cert_pem = cert_pem.clone();
+                let key_pem = key_pem.clone();
+                async move {
+                    let (session_handle, mut abort_rx) = RdpSessionHandle::new();
 
-            let services = services.clone();
-            let cert_pem = cert_pem.clone();
-            let key_pem = key_pem.clone();
-            tokio::spawn(async move {
-                let (session_handle, mut abort_rx) = RdpSessionHandle::new();
-
-                let server_handle = match State::register_session(
-                    &services.state,
-                    PROTOCOL_NAME,
-                    SessionStateInit {
-                        remote_address: Some(remote_address),
-                        handle: Box::new(session_handle),
-                    },
-                )
-                .await
-                {
-                    Ok(h) => h,
-                    Err(error) => {
-                        error!(%error, "Failed to register session");
-                        return;
-                    }
-                };
-
-                let span = info_span!("RDP", session=%server_handle.lock().await.id());
-
-                tokio::select! {
-                    result = handle_connection(
-                        services,
-                        server_handle.clone(),
+                    let (server_handle, viewer_stream) = State::register_user_session_with_stream(
+                        &services.state,
+                        PROTOCOL_NAME,
+                        UserSessionStateInit {
+                            remote_address: Some(remote_address),
+                            handle: Box::new(session_handle),
+                        },
                         stream,
-                        remote_address,
-                        cert_pem,
-                        key_pem,
-                    ).instrument(span) => match result {
-                        Ok(()) => info!("Session ended"),
-                        Err(error) => error!(%error, "Session failed"),
-                    },
-                    _ = abort_rx.recv() => {
-                        warn!("Session aborted by admin");
+                    )
+                    .await
+                    .context("registering session")?;
+
+                    let span =
+                        info_span!("RDP", session=%server_handle.lock().await.user_session_id());
+
+                    // The outcome logs run in the span too: anything logged outside it is
+                    // not attributed to the session. They are synchronous, so they enter the
+                    // span directly rather than nesting another future in this one.
+                    tokio::select! {
+                        result = handle_connection(
+                            services,
+                            server_handle.clone(),
+                            viewer_stream,
+                            remote_address,
+                            cert_pem,
+                            key_pem,
+                        ).instrument(span.clone()) => span.in_scope(|| match result {
+                            Ok(()) => info!("Session ended"),
+                            Err(error) => error!(%error, "Session failed"),
+                        }),
+                        _ = abort_rx.recv() => span.in_scope(|| {
+                            warn!("Session aborted by admin");
+                        }),
                     }
+                    Ok(())
                 }
-            });
-        }
+            },
+        )
+        .await;
 
         Ok(())
     }
@@ -161,16 +156,11 @@ pub async fn bind_server(
 async fn handle_connection(
     services: Services,
     server_handle: Arc<tokio::sync::Mutex<WarpgateServerHandle>>,
-    stream: TcpStream,
+    mut viewer: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
     remote_address: SocketAddr,
     cert_pem: String,
     key_pem: String,
 ) -> Result<()> {
-    let mut viewer = {
-        let guard = server_handle.lock().await;
-        guard.wrap_stream(stream).await?
-    };
-
     // Warpgate owns the viewer socket and the session; `rdp` runs the RDP server state
     // machine over it and terminates TLS toward the viewer.
     let (server_out_tx, server_out_rx) = unbounded_channel::<ServerEvent>();
@@ -263,7 +253,7 @@ async fn control_loop(
                     // duplicate request by dropping its reply rather than answering twice.
                     continue;
                 }
-                match authenticate::<RdpProto>(
+                match authenticate::<TargetRdpOptions>(
                     &services,
                     &server_handle,
                     &username,
@@ -272,16 +262,13 @@ async fn control_loop(
                 )
                 .await
                 {
-                    Ok(DesktopAuthOutcome::Authorized {
-                        authorization,
-                        options,
-                    }) => {
+                    Ok(DesktopAuthOutcome::Authorized { authorization }) => {
                         // Accept the NLA so the capability exchange proceeds and reports
                         // the viewer's desktop size; defer the target dial to that `Size`.
                         if reply.send(AuthVerdict::StartSession).is_err() {
                             break;
                         }
-                        pending_dial = Some((authorization, options));
+                        pending_dial = Some(authorization);
                         // The banner screen consumes the viewer's `Size` event while it waits,
                         // so dial here once it's dismissed rather than waiting for a `Size`
                         // that has already been delivered.
@@ -290,15 +277,20 @@ async fn control_loop(
                         {
                             BannerOutcome::NotShown => (),
                             BannerOutcome::Acknowledged => {
-                                dial_if_pending(
+                                if !dial_if_pending(
                                     &mut backend,
                                     &mut pending_dial,
                                     &services,
                                     &server_handle,
                                     &server_in_tx,
-                                    screen,
+                                    remote_address,
+                                    &mut events,
+                                    &mut screen,
                                 )
-                                .await?;
+                                .await?
+                                {
+                                    break;
+                                }
                             }
                             BannerOutcome::Disconnected => break,
                         }
@@ -319,18 +311,18 @@ async fn control_loop(
                         )
                         .await
                         {
-                            Ok(Some(user_info)) => {
-                                match finalize_user_auth::<RdpProto>(
+                            Ok(Some(identity)) => {
+                                match finalize_user_auth::<TargetRdpOptions>(
                                     &services,
-                                    &user_info,
+                                    &identity,
                                     &interactive.target_name,
                                 )
                                 .await
                                 {
-                                    Ok((authorization, options)) => {
+                                    Ok(authorization) => {
                                         // `screen` was updated by `run_hold_screen` as the
                                         // viewer negotiated its size during the 2FA prompt.
-                                        pending_dial = Some((authorization, options));
+                                        pending_dial = Some(authorization);
                                         if matches!(
                                             acknowledge_banner(
                                                 &services,
@@ -343,15 +335,20 @@ async fn control_loop(
                                         ) {
                                             break;
                                         }
-                                        dial_if_pending(
+                                        if !dial_if_pending(
                                             &mut backend,
                                             &mut pending_dial,
                                             &services,
                                             &server_handle,
                                             &server_in_tx,
-                                            screen,
+                                            remote_address,
+                                            &mut events,
+                                            &mut screen,
                                         )
-                                        .await?;
+                                        .await?
+                                        {
+                                            break;
+                                        }
                                     }
                                     Err(error) => {
                                         warn!(%error, "Authorization failed after second factor");
@@ -385,15 +382,57 @@ async fn control_loop(
             }
             ServerEvent::Size { width, height } => {
                 screen = warpgate_desktop_ui::Screen { width, height };
-                dial_if_pending(
+                if !dial_if_pending(
                     &mut backend,
                     &mut pending_dial,
                     &services,
                     &server_handle,
                     &server_in_tx,
-                    screen,
+                    remote_address,
+                    &mut events,
+                    &mut screen,
                 )
-                .await?;
+                .await?
+                {
+                    break;
+                }
+                // A target dialed before this arrived is running at the advertised default,
+                // so bring it to the resolution the viewer actually negotiated. `take` spends
+                // the reconciliation whether or not it resizes anything, so the `Size` a
+                // target-driven resize echoes back here is never bounced at the target.
+                if let Some(backend) = &mut backend
+                    && let Some(dialed_at) = backend.dialed_at.take()
+                    && dialed_at != screen
+                    && backend
+                        .input_tx
+                        .send(DesktopInput::Resize { width, height })
+                        .await
+                        .is_err()
+                {
+                    break;
+                }
+                continue;
+            }
+            ServerEvent::ResizeRequest { width, height } => {
+                if let Some(backend) = &mut backend {
+                    // The viewer is driving the size itself now; reconciling the dial size
+                    // afterwards could only replay a stale one.
+                    backend.dialed_at = None;
+                    if backend
+                        .input_tx
+                        .send(DesktopInput::Resize { width, height })
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                } else if server_in_tx
+                    .send(ServerInput::Resize { width, height })
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
                 continue;
             }
             // Viewer input: record it for audit (like native VNC) then forward to the
@@ -401,17 +440,25 @@ async fn control_loop(
             ServerEvent::Input(input) => input,
         };
 
-        // A viewer that never negotiates a size won't emit `Size`; dial the pending target
-        // on its first input so the session still connects (at the advertised default).
-        dial_if_pending(
+        // A viewer that never negotiates a size won't emit `Size`; dial the pending target on
+        // its first input so the session still connects (at the advertised default). Input the
+        // viewer sent during the handshake is delivered ahead of the negotiated size, so this
+        // also fires for viewers that do negotiate one — the `Size` arm resizes the target once
+        // that size arrives.
+        if !dial_if_pending(
             &mut backend,
             &mut pending_dial,
             &services,
             &server_handle,
             &server_in_tx,
-            screen,
+            remote_address,
+            &mut events,
+            &mut screen,
         )
-        .await?;
+        .await?
+        {
+            break;
+        }
 
         // Reached only for the viewer-input variants above.
         let Some(backend) = &backend else {
@@ -434,7 +481,7 @@ async fn control_loop(
 }
 
 /// An authorized target held until the viewer's negotiated size is known.
-type PendingDial = (TargetAuthorization, TargetRdpOptions);
+type PendingDial = TargetAuthorization<TargetRdpOptions>;
 
 enum BannerOutcome {
     /// No banner is configured, so nothing was rendered and no events were consumed.
@@ -467,44 +514,49 @@ async fn acknowledge_banner(
     )
 }
 
-/// Dial the pending target, if there is one and it hasn't been dialed yet, at `screen`.
+/// Connect to target (idempotent) and wait for approval if needed
+///
+/// Returns `false` if an approval is denied
 async fn dial_if_pending(
     backend: &mut Option<BackendBridge>,
     pending: &mut Option<PendingDial>,
     services: &Services,
     server_handle: &Arc<tokio::sync::Mutex<WarpgateServerHandle>>,
     server_in_tx: &Sender<ServerInput>,
-    screen: warpgate_desktop_ui::Screen,
-) -> Result<()> {
+    remote_address: SocketAddr,
+    events: &mut UnboundedReceiver<ServerEvent>,
+    screen: &mut warpgate_desktop_ui::Screen,
+) -> Result<bool> {
     if backend.is_none()
-        && let Some((authorization, options)) = pending.take()
+        && let Some(authorization) = pending.take()
     {
-        *backend = Some(
-            connect_backend(
-                services,
-                server_handle,
-                server_in_tx,
-                authorization,
-                options,
-                screen,
-            )
-            .await?,
+        let hold = AdmissionHold::default();
+        let admitting = admit_desktop_session(
+            services,
+            server_handle,
+            authorization,
+            Some(remote_address.ip()),
+            &hold,
         );
+        let Some(admitted) =
+            hold_while(admitting, events, server_in_tx, screen, || hold.frame()).await?
+        else {
+            // The viewer went away mid-hold. Dropping the hold released what it
+            // was holding: the request row is closed and any ticket use
+            // refunded.
+            return Ok(false);
+        };
+
+        let admitted = match admitted {
+            Ok(admitted) => admitted,
+            Err(WarpgateError::SessionNotApproved) => {
+                warn!("Session was not approved by an administrator");
+                let _ = server_in_tx.send(ServerInput::Shutdown).await;
+                return Ok(false);
+            }
+            Err(error) => return Err(error.into()),
+        };
+        *backend = Some(connect_backend(services, server_in_tx, admitted, *screen).await?);
     }
-    Ok(())
-}
-
-/// RDP's binding to the shared desktop-auth flow.
-struct RdpProto;
-
-impl DesktopProtocol for RdpProto {
-    type Options = TargetRdpOptions;
-    const NAME: Protocol = PROTOCOL_NAME;
-
-    fn options(target: &Target) -> Option<TargetRdpOptions> {
-        match &target.options {
-            TargetOptions::Rdp(options) => Some(options.clone()),
-            _ => None,
-        }
-    }
+    Ok(true)
 }

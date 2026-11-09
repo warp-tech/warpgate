@@ -33,9 +33,14 @@ def _provision(api, otp_key_base64):
     target = api.create_target(
         sdk.TargetDataRequest(
             name=f"rdp-{uuid4()}",
+            require_approval=False,
+            ticket_requests_disabled=False,
+            ticket_require_approval=False,
             options=sdk.TargetOptions(
                 sdk.TargetOptionsTargetRdpOptions(
                     kind="Rdp",
+                    compression=sdk.RdpTargetCompression.REMOTEFX,
+                    tls_security=sdk.RdpTlsSecurity.TLS12,
                     # Never dialed: auth is rejected before Warpgate connects the target.
                     host="localhost",
                     port=3389,
@@ -43,9 +48,36 @@ def _provision(api, otp_key_base64):
                     auth=sdk.RdpTargetAuth(
                         sdk.RdpTargetAuthRdpTargetPasswordAuth(
                             kind="Password", password="123"
-                        )
+                        ),
                     ),
                     verify_tls=False,
+                    interactive_logon=False,
+                )
+            ),
+        )
+    )
+    target = api.create_target(
+        sdk.TargetDataRequest(
+            name=f"rdp-{uuid4()}",
+            require_approval=False,
+            ticket_requests_disabled=False,
+            ticket_require_approval=False,
+            options=sdk.TargetOptions(
+                sdk.TargetOptionsTargetRdpOptions(
+                    kind="Rdp",
+                    compression=sdk.RdpTargetCompression.REMOTEFX,
+                    tls_security=sdk.RdpTlsSecurity.TLS12,
+                    # Never dialed: auth is rejected before Warpgate connects the target.
+                    host="localhost",
+                    port=3389,
+                    username="user",
+                    auth=sdk.RdpTargetAuth(
+                        sdk.RdpTargetAuthRdpTargetPasswordAuth(
+                            kind="Password", password="123"
+                        ),
+                    ),
+                    verify_tls=False,
+                    interactive_logon=False,
                 )
             ),
         )

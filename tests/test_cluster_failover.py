@@ -6,9 +6,8 @@ import requests
 
 from .api_client import admin_client, sdk
 from .conftest import ProcessManager, WarpgateProcess
-from .test_recordings_s3 import _read_until
 from .test_ssh_proto import common_args, setup_user_and_target
-from .util import open_wg_sqlite_db as _db
+from .util import open_wg_sqlite_db as _db, read_until
 from .util import wait_port
 
 
@@ -26,7 +25,7 @@ def _live_session_node(config_path):
     """(session_id, node_id) of the most recent still-open session, or None."""
     with _db(config_path) as db:
         row = db.execute(
-            "SELECT id, node_id FROM sessions"
+            "SELECT id, node_id FROM user_sessions"
             " WHERE ended IS NULL ORDER BY started DESC LIMIT 1"
         ).fetchone()
     return row
@@ -40,10 +39,20 @@ def _node_exists(config_path, node_id):
         )
 
 
+def _expire_heartbeat(config_path, node_id):
+    """Moves the node's last heartbeat back to the year 2000, past any
+    heartbeat timeout, keeping the stored timestamp format intact."""
+    with _db(config_path) as db:
+        db.execute(
+            "UPDATE nodes SET last_seen = '2000' || substr(last_seen, 5) WHERE id = ?",
+            (node_id,),
+        )
+
+
 def _session_ended(config_path, session_id):
     with _db(config_path) as db:
         row = db.execute(
-            "SELECT ended FROM sessions WHERE id = ?", (session_id,)
+            "SELECT ended FROM user_sessions WHERE id = ?", (session_id,)
         ).fetchone()
     return row is not None and row[0] is not None
 
@@ -81,7 +90,7 @@ def _open_session_on_a(processes, node_a, pubkey, timeout):
         f"echo {marker}; sleep 60",
         password="123",
     )
-    output = _read_until(ssh_client.stdout, marker.encode(), time.monotonic() + timeout)
+    output = read_until(ssh_client.stdout, marker.encode(), time.monotonic() + timeout)
     assert marker.encode() in output, "marker never appeared in session output"
 
     deadline = time.monotonic() + 15
@@ -114,9 +123,10 @@ class Test:
         assert _node_exists(node_b.config_path, node_a_id), "node A never registered"
 
         _hard_kill(node_a)
+        _expire_heartbeat(node_b.config_path, node_a_id)
 
-        # Reaper: heartbeat timeout (30s) + reap interval (15s), plus margin.
-        deadline = time.monotonic() + 70
+        # Reaper interval (15s), plus margin.
+        deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             if not _node_exists(node_b.config_path, node_a_id) and _session_ended(
                 node_b.config_path, session_id
@@ -129,6 +139,35 @@ class Test:
         assert _session_ended(
             node_b.config_path, session_id
         ), "dead node's session was not marked ended"
+
+    def test_close_all_sessions_fans_out(
+        self,
+        processes: ProcessManager,
+        timeout,
+        wg_c_ed25519_pubkey,
+    ):
+        # A session lives only on the node that owns it, so close-all issued on
+        # B must reach A's session too.
+        node_a = processes.start_wg()
+        wait_port(node_a.http_port, recv=False)
+        node_b = processes.start_wg(share_with=node_a)
+        wait_port(node_b.http_port, recv=False)
+
+        session_id, _ = _open_session_on_a(
+            processes, node_a, wg_c_ed25519_pubkey, timeout
+        )
+
+        with admin_client(f"https://localhost:{node_b.http_port}") as api:
+            api.close_all_sessions()
+
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline and not _session_ended(
+            node_a.config_path, session_id
+        ):
+            time.sleep(0.5)
+        assert _session_ended(
+            node_a.config_path, session_id
+        ), "close-all on node B did not close node A's session"
 
     def test_proxy_fails_cleanly_when_owner_dies(
         self,

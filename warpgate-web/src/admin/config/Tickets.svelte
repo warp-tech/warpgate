@@ -5,14 +5,7 @@
         faSquareCheck,
         faSquareXmark,
     } from '@fortawesome/free-solid-svg-icons'
-    import {
-        Alert,
-        Button,
-        FormGroup,
-        Modal,
-        ModalBody,
-        ModalFooter,
-    } from '@sveltestrap/sveltestrap'
+    import { Alert, Button, FormGroup } from '@sveltestrap/sveltestrap'
     import {
         api,
         type Ticket,
@@ -20,30 +13,23 @@
         TicketRequestStatus,
     } from 'admin/lib/api'
     import { adminPermissions } from 'admin/lib/store'
-    import AsyncButton from 'common/AsyncButton.svelte'
     import { formatDurationAsHumantime } from 'common/duration'
     import EmptyState from 'common/EmptyState.svelte'
     import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
+    import RelativeDate from 'common/RelativeDate.svelte'
     import { statusColor, statusIcon } from 'common/ticketRequestStatus'
     import Fa from 'svelte-fa'
     import { link } from 'svelte-spa-router'
-    import RelativeDate from 'common/RelativeDate.svelte'
 
     let error: string | undefined = $state()
-    let success: string | undefined = $state()
     let tickets: Ticket[] | undefined = $state()
     let requests: TicketRequest[] | undefined = $state()
     let requestHistoryFilter: TicketRequestStatus | undefined = $state()
-    let userMap: Map<string, string> = $state(new Map())
-    let targetMap: Map<string, string> = $state(new Map())
 
-    let denyModalRequest: TicketRequest | undefined = $state()
-    let denyReason = $state('')
-    let denyError: string | undefined = $state()
-
-    let pendingRequests = $derived(
-        requests?.filter(r => r.status === TicketRequestStatus.Pending) ?? [],
+    let pendingRequestCount = $derived(
+        requests?.filter(r => r.status === TicketRequestStatus.Pending)
+            .length ?? 0,
     )
     let filteredHistory = $derived.by(() => {
         if (!requests) {
@@ -69,17 +55,8 @@
         requests = await api.getTicketRequests({})
     }
 
-    async function loadLookups() {
-        const [users, targets] = await Promise.all([
-            api.getUsers({}),
-            api.getTargets({}),
-        ])
-        userMap = new Map(users.map(u => [u.id, u.username]))
-        targetMap = new Map(targets.map(t => [t.id, t.name]))
-    }
-
     async function load() {
-        await Promise.all([loadTickets(), loadRequests(), loadLookups()])
+        await Promise.all([loadTickets(), loadRequests()])
     }
 
     const initPromise = load()
@@ -92,44 +69,6 @@
             error = await stringifyError(err)
         }
     }
-
-    async function approve(request: TicketRequest) {
-        error = undefined
-        success = undefined
-        try {
-            const result = await api.approveTicketRequest({ id: request.id })
-            const userName = userMap.get(result.userId) ?? result.userId
-            const targetName = targetMap.get(result.targetId) ?? result.targetId
-            success = `Approved ticket request for ${userName} to ${targetName}. The user can now activate it.`
-            await loadRequests()
-        } catch (err) {
-            error = await stringifyError(err)
-            throw err
-        }
-    }
-
-    async function deny() {
-        if (!denyModalRequest) {
-            return
-        }
-        denyError = undefined
-        success = undefined
-        try {
-            await api.denyTicketRequest({
-                id: denyModalRequest.id,
-                denyTicketRequestBody: {
-                    reason: denyReason || undefined,
-                },
-            })
-            success = `Denied ticket request from ${userMap.get(denyModalRequest.userId) ?? denyModalRequest.userId}.`
-            denyModalRequest = undefined
-            denyReason = ''
-            await loadRequests()
-        } catch (err) {
-            denyError = await stringifyError(err)
-            throw err
-        }
-    }
 </script>
 
 <div class="container-max-lg">
@@ -137,15 +76,11 @@
         <Alert color="danger">{error}</Alert>
     {/if}
 
-    {#if success}
-        <Alert color="success">{success}</Alert>
-    {/if}
-
     <div class="page-summary-bar">
-        <h1>Tickets</h1>
+        <h1>tickets</h1>
         <a
             class="btn btn-primary ms-auto"
-            href="/config/tickets/create"
+            href="/manage/tickets/create"
             class:disabled={!$adminPermissions.ticketsCreate}
             use:link
         >
@@ -154,62 +89,12 @@
     </div>
 
     <Loadable promise={initPromise}>
-        {#if $adminPermissions.ticketRequestsManage && pendingRequests.length}
-            <h5 class="mt-4 mb-3">
-                Pending requests
-                <span class="badge bg-warning text-dark"
-                    >{pendingRequests.length}</span
-                >
-            </h5>
-            <div class="list-group list-group-flush mb-4">
-                {#each pendingRequests as request (request.id)}
-                    <div class="list-group-item gap-3">
-                        <span
-                            class={statusColor(request.status)}
-                            title={request.status}
-                        >
-                            <Fa icon={statusIcon(request.status)} fw />
-                        </span>
-                        <div class="me-auto">
-                            <strong>
-                                {userMap.get(request.userId) ?? request.userId}
-                                &rarr;
-                                {targetMap.get(request.targetId) ?? request.targetId}
-                            </strong>
-                            {#if request.description}
-                                <small class="d-block text-muted"
-                                    >{request.description}</small
-                                >
-                            {/if}
-                            {#if request.requestedDurationSeconds}
-                                <small class="d-block text-muted">
-                                    Duration:
-                                    {formatDurationAsHumantime(request.requestedDurationSeconds)}
-                                </small>
-                            {/if}
-                        </div>
-                        <small class="text-muted mx-3">
-                            <RelativeDate date={request.created} />
-                        </small>
-                        <div class="d-flex gap-1">
-                            <AsyncButton
-                                color="success"
-                                class="me-1"
-                                click={() => approve(request)}
-                                >Approve</AsyncButton
-                            >
-                            <Button
-                                color="danger"
-                                onclick={() => {
-                            denyModalRequest = request
-                            denyReason = ''
-                            denyError = undefined
-                        }}
-                                >Deny</Button
-                            >
-                        </div>
-                    </div>
-                {/each}
+        {#if $adminPermissions.ticketRequestsManage && pendingRequestCount}
+            <div class="mt-4 text-muted">
+                {pendingRequestCount}
+                pending request{pendingRequestCount === 1 ? '' : 's'}
+                awaiting action in
+                <a use:link href="/status/requests">Status &rarr; Requests</a>.
             </div>
         {/if}
 
@@ -230,9 +115,9 @@
                                     {ticket.username}
                                 </strong>
                                 {#if ticket.selfService}
-                                    <span class="badge bg-info ms-2"
-                                        >self-service</span
-                                    >
+                                    <span class="badge bg-info ms-2">
+                                        self-service
+                                    </span>
                                 {/if}
                                 {#if ticket.description}
                                     <small class="d-block text-muted">
@@ -244,7 +129,9 @@
                                         class="text-muted d-flex align-items-center gap-2"
                                     >
                                         <Fa
-                                            icon={ticket.expiry > new Date() ? faCalendarCheck : faCalendarXmark}
+                                            icon={ticket.expiry > new Date()
+                                                ? faCalendarCheck
+                                                : faCalendarXmark}
                                         />
                                         Until {ticket.expiry?.toLocaleString()}
                                     </small>
@@ -274,12 +161,13 @@
                             <Button
                                 color="link"
                                 onclick={e => {
-                                deleteTicket(ticket)
-                                e.preventDefault()
-                            }}
+                                    deleteTicket(ticket)
+                                    e.preventDefault()
+                                }}
                                 disabled={!$adminPermissions.ticketsDelete}
-                                >Delete</Button
                             >
+                                Delete
+                            </Button>
                         </div>
                     {/each}
                 </div>
@@ -299,9 +187,11 @@
                         class="form-control form-control-sm"
                         value={requestHistoryFilter ?? ''}
                         onchange={e => {
-                    const v = e.currentTarget.value
-                    requestHistoryFilter = v ? v as TicketRequestStatus : undefined
-                }}
+                            const v = e.currentTarget.value
+                            requestHistoryFilter = v
+                                ? (v as TicketRequestStatus)
+                                : undefined
+                        }}
                     >
                         <option value="">All</option>
                         <option value={TicketRequestStatus.Approved}>
@@ -325,9 +215,9 @@
                             </span>
                             <div class="ms-2 me-auto">
                                 <strong>
-                                    {userMap.get(request.userId) ?? request.userId}
+                                    {request.username ?? request.userId}
                                     &rarr;
-                                    {targetMap.get(request.targetId) ?? request.targetId}
+                                    {request.targetName ?? request.targetId}
                                 </strong>
                                 {#if request.description}
                                     <small class="d-block text-muted"
@@ -337,17 +227,25 @@
                                 {#if request.requestedDurationSeconds}
                                     <small class="d-block text-muted">
                                         Duration:
-                                        {formatDurationAsHumantime(request.requestedDurationSeconds)}
+                                        {formatDurationAsHumantime(
+                                            request.requestedDurationSeconds,
+                                        )}
                                     </small>
                                 {/if}
                                 {#if request.resolvedByUserId}
                                     <small class="d-block text-muted">
-                                        {request.status === TicketRequestStatus.Approved ? 'Approved' : 'Denied'}
+                                        {request.status ===
+                                        TicketRequestStatus.Approved
+                                            ? 'Approved'
+                                            : 'Denied'}
                                         by
-                                        {userMap.get(request.resolvedByUserId) ?? request.resolvedByUserId}
+                                        {request.resolvedByUsername ??
+                                            request.resolvedByUserId}
                                     </small>
                                 {/if}
-                                {#if request.status === TicketRequestStatus.Approved && !request.ticketId}
+                                {#if request.status ===
+                                    TicketRequestStatus.Approved &&
+                                    !request.ticketId}
                                     <small class="d-block text-info">
                                         Awaiting user activation
                                     </small>
@@ -376,46 +274,6 @@
         {/if}
     </Loadable>
 </div>
-
-<Modal isOpen={!!denyModalRequest} toggle={() => denyModalRequest = undefined}>
-    <ModalBody>
-        {#if denyError}
-            <Alert color="danger">{denyError}</Alert>
-        {/if}
-        {#if denyModalRequest}
-            <p>
-                Deny request from
-                <strong
-                    >{userMap.get(denyModalRequest.userId) ?? denyModalRequest.userId}</strong
-                >
-                to
-                <strong
-                    >{targetMap.get(denyModalRequest.targetId) ?? denyModalRequest.targetId}</strong
-                >?
-            </p>
-            <FormGroup floating label="Reason (optional)">
-                <input
-                    type="text"
-                    bind:value={denyReason}
-                    class="form-control"
-                    placeholder="Why is this being denied?"
-                    maxlength="2000"
-                >
-            </FormGroup>
-        {/if}
-    </ModalBody>
-    <ModalFooter>
-        <AsyncButton class="modal-button" color="danger" click={deny}
-            >Deny</AsyncButton
-        >
-        <Button
-            class="modal-button"
-            color="secondary"
-            onclick={() => denyModalRequest = undefined}
-            >Cancel</Button
-        >
-    </ModalFooter>
-</Modal>
 
 <style lang="scss">
     .list-group-item {

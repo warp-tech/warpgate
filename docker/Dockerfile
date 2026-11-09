@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1.3-labs
 # hadolint global ignore=DL3008
-FROM rust:1.97.1-bullseye@sha256:33e0cd779c556a248ac05acabb695c1da0cffaccc1796da507451482ac94d277 AS build
+FROM rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e AS build
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates-java nodejs openjdk-17-jdk \
+    && apt-get install -y --no-install-recommends ca-certificates-java nodejs default-jre-headless \
     && rm -rf /var/lib/apt/lists/* \
     && cargo install --locked just@1.4.0
 
@@ -24,34 +24,28 @@ WORKDIR /opt/warpgate
 RUN just npm ci \
     && just openapi \
     && just npm run build \
-    && cargo build --features mysql,postgres --release
+    && cargo build --features mysql,postgres,rdp-openssl-tls --release
 
-FROM debian:bullseye-20260713@sha256:6cb68b1be980a0e5b19be25582b34b5cf9cb466d52d08ab4354b79051f2cd298
-LABEL maintainer=heywoodlh
 ARG USER_ID=1000
+RUN adduser warpgate --disabled-password --gecos "" --uid ${USER_ID} --home /data --shell /usr/sbin/nologin \
+    && mkdir -p /data \
+    && chown -R ${USER_ID}:${USER_ID} /data
 
-ENV DEBIAN_FRONTEND=noninteractive
-RUN <<EOF
-  set -xe
-  apt-get -y update -qq
-  apt-get install --no-install-recommends --no-install-suggests -y \
-    ca-certificates wget
-  apt-get clean
-  rm -rf /var/lib/apt/lists/*
-EOF
+FROM gcr.io/distroless/cc-debian13
+LABEL maintainer=heywoodlh
 
-# RUN adduser warpgate --system --home /data
-RUN adduser warpgate --disabled-password --gecos "" --uid ${USER_ID} --home /data --shell /usr/sbin/nologin
-
+COPY --from=build /etc/passwd /etc/passwd
+COPY --from=build /etc/group /etc/group
+COPY --from=build --chown=warpgate:warpgate /data /data
 COPY --from=build /opt/warpgate/target/release/warpgate /usr/local/bin/warpgate
 
 VOLUME /data
 
 ENV WARPGATE_CONFIG=/data/warpgate.yaml
 
-HEALTHCHECK CMD warpgate healthcheck
+HEALTHCHECK CMD ["/usr/local/bin/warpgate", "healthcheck"]
 
 ENV DOCKER=1
 USER warpgate
-ENTRYPOINT ["warpgate"]
+ENTRYPOINT ["/usr/local/bin/warpgate"]
 CMD ["run"]

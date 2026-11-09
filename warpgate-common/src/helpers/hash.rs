@@ -4,6 +4,7 @@ use argon2::password_hash::rand_core::OsRng;
 use argon2::password_hash::{Error, PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use data_encoding::HEXLOWER;
 use rand::RngExt;
+use sha2::{Digest, Sha256};
 
 use crate::Secret;
 
@@ -47,4 +48,9 @@ pub fn generate_ticket_secret() -> Secret<String> {
     let mut bytes = [0; 32];
     rand::rng().fill(&mut bytes[..]);
     Secret::new(HEXLOWER.encode(&bytes))
+}
+
+/// Deterministic hash for high-entropy secrets (tokens/tickets)
+pub fn hash_secret(secret: &str) -> String {
+    HEXLOWER.encode(&Sha256::digest(secret.as_bytes()))
 }

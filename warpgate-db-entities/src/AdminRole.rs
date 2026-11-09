@@ -31,6 +31,7 @@ pub struct Model {
 
     pub sessions_view: bool,
     pub sessions_terminate: bool,
+    pub approve_sessions: bool,
 
     pub recordings_view: bool,
 
@@ -84,6 +85,7 @@ impl From<Model> for warpgate_common::AdminRole {
             access_roles_assign: model.access_roles_assign,
             sessions_view: model.sessions_view,
             sessions_terminate: model.sessions_terminate,
+            approve_sessions: model.approve_sessions,
             recordings_view: model.recordings_view,
             tickets_create: model.tickets_create,
             tickets_delete: model.tickets_delete,

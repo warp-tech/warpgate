@@ -1,6 +1,6 @@
 <script lang="ts">
-    import SidebarNavContainer from 'admin/config/SidebarNavContainer.svelte'
-    import NavListItem from 'common/NavListItem.svelte'
+    import { useSidebar } from 'common/sidebarState.svelte'
+    import Router from 'svelte-spa-router'
     import { wrap } from 'svelte-spa-router/wrap'
 
     const routes = {
@@ -10,6 +10,9 @@
         '/sessions/:id': wrap({
             asyncComponent: () => import('./Session.svelte'),
         }),
+        '/requests': wrap({
+            asyncComponent: () => import('./Requests.svelte'),
+        }),
         '/login-protection': wrap({
             asyncComponent: () => import('./LoginProtection.svelte'),
         }),
@@ -17,32 +20,25 @@
             asyncComponent: () => import('./NetworkStatus.svelte'),
         }),
     }
+
+    useSidebar(() => [
+        {
+            title: 'Sessions',
+            href: '/status/sessions',
+        },
+        {
+            title: 'Requests',
+            href: '/status/requests',
+        },
+        {
+            title: 'Login protection',
+            href: '/status/login-protection',
+        },
+        {
+            title: 'Network status',
+            href: '/status/network',
+        },
+    ])
 </script>
 
-<SidebarNavContainer {routes} prefix="/status">
-    {#snippet navItems()}
-        <NavListItem
-            small
-            class="mb-2"
-            title="Sessions"
-            description="Active and past connections"
-            href="/status/sessions"
-        />
-
-        <NavListItem
-            small
-            class="mb-2"
-            title="Login protection"
-            description="View blocked IPs and locked users"
-            href="/status/login-protection"
-        />
-
-        <NavListItem
-            small
-            class="mb-2"
-            title="Network status"
-            description="Listeners, certificates and client IP detection"
-            href="/status/network"
-        />
-    {/snippet}
-</SidebarNavContainer>
+<Router {routes} prefix="/status" />

@@ -9,9 +9,9 @@
     import AsyncButton from 'common/AsyncButton.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import { stringifyError } from 'common/errors'
+    import RelativeDate from 'common/RelativeDate.svelte'
     import StatCard from 'common/StatCard.svelte'
     import { onMount } from 'svelte'
-    import RelativeDate from 'common/RelativeDate.svelte'
 
     let loading = $state(true)
     let error: string | undefined = $state()
@@ -86,7 +86,13 @@
     </div>
 
     {#if error}
-        <Alert color="danger" dismissible onclose={() => { error = undefined }}>
+        <Alert
+            color="danger"
+            dismissible
+            onclose={() => {
+                error = undefined
+            }}
+        >
             {error}
             <Button color="link" size="sm" onclick={load}>Retry</Button>
         </Alert>
@@ -122,7 +128,7 @@
             </div>
         {/if}
 
-        {#if blockedIps && (blockedIps.length > 0)}
+        {#if blockedIps && blockedIps.length > 0}
             <div class="section-header">
                 <h5 class="m-0">Blocked IPs</h5>
                 <span class="badge text-bg-danger">{blockedIps.length}</span>
@@ -145,15 +151,16 @@
                                 class="ms-auto"
                                 color="link"
                                 click={() => unblockIp(ip.ipAddress)}
-                                >Unblock</AsyncButton
                             >
+                                Unblock
+                            </AsyncButton>
                         </div>
                     </div>
                 {/each}
             </div>
         {/if}
 
-        {#if lockedUsers && (lockedUsers.length > 0)}
+        {#if lockedUsers && lockedUsers.length > 0}
             <div class="section-header">
                 <h5 class="m-0">Locked users</h5>
                 <span class="badge text-bg-warning">{lockedUsers.length}</span>
@@ -179,8 +186,9 @@
                                 class="ms-auto"
                                 color="link"
                                 click={() => unlockUser(user.username)}
-                                >Unlock</AsyncButton
                             >
+                                Unlock
+                            </AsyncButton>
                         </div>
                     </div>
                 {/each}

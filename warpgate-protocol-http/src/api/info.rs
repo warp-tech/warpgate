@@ -7,13 +7,16 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{EntityTrait, IntoActiveModel, Set};
 use serde::Serialize;
 use warpgate_common::version::warpgate_version;
-use warpgate_common::{AdminPermission, AdminPermissionSet};
+use warpgate_common::{AdminPermission, AdminPermissionSet, warnings};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
-use warpgate_common_http::{AuthenticatedRequestContext, SessionAuthorization};
+use warpgate_common_http::{
+    AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
+};
 use warpgate_core::ConfigProvider;
 use warpgate_db_entities::{LdapServer, Parameters};
 
+use crate::api::common::local_logout_disabled;
 use crate::common::{SessionExt, is_user_admin};
 
 pub struct Api;
@@ -70,6 +73,7 @@ pub struct AdminPermissions {
 
     sessions_view: bool,
     sessions_terminate: bool,
+    approve_sessions: bool,
 
     recordings_view: bool,
 
@@ -96,6 +100,7 @@ impl From<AdminPermissionSet> for AdminPermissions {
             access_roles_assign: set.contains(AdminPermission::AccessRolesAssign),
             sessions_view: set.contains(AdminPermission::SessionsView),
             sessions_terminate: set.contains(AdminPermission::SessionsTerminate),
+            approve_sessions: set.contains(AdminPermission::ApproveSessions),
             recordings_view: set.contains(AdminPermission::RecordingsView),
             tickets_create: set.contains(AdminPermission::TicketsCreate),
             tickets_delete: set.contains(AdminPermission::TicketsDelete),
@@ -113,12 +118,12 @@ pub struct Info {
     selected_target: Option<String>,
     external_host: Option<String>,
     external_hosts: Option<ExternalHostsInfo>,
+    control_plane_host: Option<String>,
     ports: PortsInfo,
     password_login_mode: Parameters::PasswordLoginMode,
-    /// Deprecated in 0.26: superseded by `password_login_mode`
-    minimize_password_login: bool,
     authorized_via_ticket: bool,
     authorized_via_sso_with_single_logout: bool,
+    local_logout_disabled: bool,
     own_credential_management_allowed: bool,
     ticket_self_service_enabled: bool,
     ticket_max_duration_seconds: Option<i64>,
@@ -126,9 +131,12 @@ pub struct Info {
     ticket_require_description: bool,
     ticket_request_show_all_targets: bool,
     target_click_action: Parameters::TargetClickAction,
+    open_targets_in_new_tab: Parameters::OpenTargetsInNewTabMode,
     max_api_token_duration_seconds: Option<i64>,
     web_clients_enabled: bool,
     has_ldap: bool,
+    needs_mfa_setup: bool,
+    otp_setup_enforced: bool,
     setup_state: Option<SetupState>,
     admin_permissions: Option<AdminPermissions>,
     running_on_ec2: Option<bool>,
@@ -136,6 +144,8 @@ pub struct Info {
     /// Login banner, shown to unauthenticated visitors too. Empty when unset.
     banner: String,
     show_session_menu: bool,
+    logo_etag: Option<String>,
+    config_warnings: Option<Vec<String>>,
 }
 
 #[derive(ApiResponse)]
@@ -194,6 +204,29 @@ impl Api {
             } else {
                 None
             }
+        };
+
+        let live_user_id = auth_ctx.as_ref().and_then(|auth_ctx| match &auth_ctx.auth {
+            RequestAuthorization::Session(SessionAuthorization::User { user_id, .. }) => {
+                Some(*user_id)
+            }
+            _ => None,
+        });
+        let (needs_mfa_setup, otp_setup_enforced) = match live_user_id {
+            Some(user_id) if parameters.mfa_enforcement != Parameters::MfaEnforcement::Off => {
+                let enforced = ctx
+                    .services()
+                    .effective_mfa_enforcement(parameters, user_id)
+                    .await?
+                    != Parameters::MfaEnforcement::Off;
+                let needs_setup = enforced
+                    && ctx
+                        .services()
+                        .mfa_setup_required(parameters, user_id)
+                        .await?;
+                (needs_setup, enforced)
+            }
+            _ => (false, false),
         };
 
         let has_ldap = LdapServer::Entity::find()
@@ -261,12 +294,14 @@ impl Api {
             None => None,
         };
 
+        let can_edit_config = admin_permissions.as_ref().is_some_and(|p| p.config_edit);
+
         let should_prompt_analytics = {
             let instance_older_than_a_week = time::OffsetDateTime::now_utc()
                 - parameters.instance_created_at
                 >= time::Duration::weeks(1);
 
-            admin_permissions.as_ref().is_some_and(|p| p.config_edit)
+            can_edit_config
                 && parameters.analytics_consent == Parameters::AnalyticsConsent::Undecided
                 && setup_state.is_none()
                 && instance_older_than_a_week
@@ -280,8 +315,6 @@ impl Api {
             selected_target: session.get_target_name(),
             external_host,
             password_login_mode: parameters.password_login_mode,
-            minimize_password_login: parameters.password_login_mode
-                == Parameters::PasswordLoginMode::Minimized,
             authorized_via_ticket: matches!(
                 session.get_auth(),
                 Some(SessionAuthorization::Ticket { .. })
@@ -289,6 +322,7 @@ impl Api {
             authorized_via_sso_with_single_logout: session
                 .get_sso_login_state()
                 .is_some_and(|state| state.supports_single_logout),
+            local_logout_disabled: local_logout_disabled(session, &config),
             external_hosts: protocol_external_hosts,
             ports: if auth_ctx.is_some() {
                 PortsInfo {
@@ -335,6 +369,9 @@ impl Api {
                     rdp: None,
                 }
             },
+            control_plane_host: config
+                .control_plane_host()
+                .or_else(|| fallback_host.clone()),
             own_credential_management_allowed: parameters.allow_own_credential_management,
             ticket_self_service_enabled: parameters.ticket_self_service_enabled,
             ticket_max_duration_seconds: parameters.ticket_max_duration_seconds,
@@ -342,8 +379,11 @@ impl Api {
             ticket_require_description: parameters.ticket_require_description,
             ticket_request_show_all_targets: parameters.ticket_request_show_all_targets,
             target_click_action: parameters.target_click_action,
+            open_targets_in_new_tab: parameters.open_targets_in_new_tab,
             max_api_token_duration_seconds: parameters.max_api_token_duration_seconds,
             web_clients_enabled: parameters.web_clients_enabled,
+            needs_mfa_setup,
+            otp_setup_enforced,
             setup_state,
             has_ldap: auth_ctx.is_some() && has_ldap,
             admin_permissions,
@@ -354,7 +394,9 @@ impl Api {
             },
             should_prompt_analytics,
             banner: parameters.banner.clone(),
+            logo_etag: parameters.logo_etag(),
             show_session_menu: parameters.show_session_menu,
+            config_warnings: can_edit_config.then(warnings),
         })))
     }
 

@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-admin"
-version = "0.27.0-beta.3"
+version = "0.30.3"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -31,8 +31,8 @@ tokio.workspace = true
 tokio-tungstenite.workspace = true
 tracing.workspace = true
 uuid.workspace = true
-warpgate-ca = { path = "../warpgate-ca" }
 warpgate-aws = { path = "../warpgate-aws" }
+warpgate-ca = { path = "../warpgate-ca" }
 warpgate-common = { path = "../warpgate-common" }
 warpgate-common-http = { path = "../warpgate-common-http" }
 warpgate-core = { path = "../warpgate-core" }
@@ -41,3 +41,6 @@ warpgate-ldap = { path = "../warpgate-ldap" }
 warpgate-protocol-kubernetes = { path = "../warpgate-protocol-kubernetes" }
 warpgate-protocol-ssh = { path = "../warpgate-protocol-ssh" }
 warpgate-tls = { path = "../warpgate-tls" }
+
+[dev-dependencies]
+warpgate-db-migrations = { path = "../warpgate-db-migrations", features = ["sqlite"] }

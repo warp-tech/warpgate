@@ -7,7 +7,8 @@ use sha1::Sha1;
 use tokio::net::TcpStream;
 use tracing::{debug, info};
 use warpgate_common::helpers::rng::get_crypto_rng;
-use warpgate_common::{TargetMySqlOptions, WarpgateError};
+use warpgate_common::{SecretResolver, TargetMySqlOptions, WarpgateError};
+use warpgate_core::AdmittedTarget;
 use warpgate_database_protocols::io::Decode;
 use warpgate_database_protocols::mysql::protocol::Capabilities;
 use warpgate_database_protocols::mysql::protocol::auth::AuthPlugin;
@@ -23,6 +24,9 @@ use crate::stream::MySqlStream;
 
 pub struct MySqlClient {
     pub stream: MySqlStream<TcpStream, ClientTlsStream<TcpStream>>,
+    /// Negotiated with the target. A subset of what the client negotiated with
+    /// us, except for `SSL`, which is settled per target connection and says
+    /// nothing about the client's.
     pub capabilities: Capabilities,
 }
 
@@ -33,35 +37,13 @@ pub struct ConnectionOptions {
     pub capabilities: Capabilities,
 }
 
-impl Default for ConnectionOptions {
-    fn default() -> Self {
-        Self {
-            collation: 33,
-            database: None,
-            max_packet_size: 0xffff_ffff,
-            capabilities: Capabilities::PROTOCOL_41
-                | Capabilities::PLUGIN_AUTH
-                | Capabilities::FOUND_ROWS
-                | Capabilities::LONG_FLAG
-                | Capabilities::NO_SCHEMA
-                | Capabilities::PLUGIN_AUTH_LENENC_DATA
-                | Capabilities::CONNECT_WITH_DB
-                | Capabilities::SESSION_TRACK
-                | Capabilities::IGNORE_SPACE
-                | Capabilities::INTERACTIVE
-                | Capabilities::TRANSACTIONS
-                | Capabilities::DEPRECATE_EOF
-                | Capabilities::SECURE_CONNECTION
-                | Capabilities::SSL,
-        }
-    }
-}
-
 impl MySqlClient {
     pub async fn connect(
-        target: &TargetMySqlOptions,
+        approved: AdmittedTarget<TargetMySqlOptions>,
         mut options: ConnectionOptions,
+        secrets: &dyn SecretResolver,
     ) -> Result<Self, MySqlError> {
+        let target = approved.specific_target().options().clone();
         let stream = TcpStream::connect((target.host.clone(), target.port)).await?;
         stream.set_nodelay(true)?;
 
@@ -112,9 +94,14 @@ impl MySqlClient {
             info!("Target connection upgraded to TLS");
         }
 
-        // Resolve the effective password (may be an IAM-generated token or legacy field)
-        let effective_password = match &target.effective_auth() {
-            warpgate_common::DatabaseTargetAuth::Password(auth) => auth.password.clone(),
+        // An IAM role yields a short-lived token in place of a stored password
+        let effective_password = match &target.auth {
+            warpgate_common::DatabaseTargetAuth::Password(auth) => auth
+                .password
+                .resolve(secrets)
+                .await?
+                .expose_secret()
+                .clone(),
             warpgate_common::DatabaseTargetAuth::IamRole(_) => {
                 warpgate_aws::generate_rds_auth_token(&target.host, target.port, &target.username)
                     .await
@@ -131,6 +118,15 @@ impl MySqlClient {
             &handshake.auth_plugin_data.last_ref()[..],
         ]
         .concat();
+
+        // The handshake response only carries a database name under
+        // CONNECT_WITH_DB; against a target without it the selection has to be
+        // repeated as a COM_INIT_DB once authenticated, or the session would
+        // start with no schema and fail every unqualified query.
+        let deferred_database = options
+            .database
+            .clone()
+            .filter(|_| !options.capabilities.contains(Capabilities::CONNECT_WITH_DB));
 
         let response = HandshakeResponse {
             auth_plugin: Some(auth_plugin),
@@ -179,9 +175,13 @@ impl MySqlClient {
                         Some(&3) => (),
                         // Server requests full authentication
                         Some(&4) => {
-                            let response =
-                                caching_sha2_full_auth(&mut stream, &nonce, &effective_password)
-                                    .await?;
+                            let response = caching_sha2_full_auth(
+                                &mut stream,
+                                &nonce,
+                                &effective_password,
+                                target.tls.mode,
+                            )
+                            .await?;
                             stream.push(&&response[..], ())?;
                             stream.flush().await?;
                         }
@@ -201,6 +201,23 @@ impl MySqlClient {
         }
 
         stream.reset_sequence_id();
+
+        if let Some(database) = deferred_database {
+            let mut packet = vec![0x02]; // COM_INIT_DB
+            packet.extend_from_slice(database.as_bytes());
+            stream.push(&&packet[..], ())?;
+            stream.flush().await?;
+
+            let Some(payload) = stream.recv().await? else {
+                return Err(MySqlError::Eof);
+            };
+            if payload.first() == Some(&0xff) {
+                let error = ErrPacket::decode_with(payload, options.capabilities)?;
+                return Err(MySqlError::ProtocolError(format!(
+                    "could not select database {database:?}: {error:?}"
+                )));
+            }
+        }
 
         Ok(Self {
             stream,
@@ -252,9 +269,16 @@ async fn caching_sha2_full_auth(
     stream: &mut MySqlStream<TcpStream, ClientTlsStream<TcpStream>>,
     nonce: &[u8],
     password: &str,
+    tls_mode: TlsMode,
 ) -> Result<Vec<u8>, MySqlError> {
     if stream.is_tls() {
         return Ok(password_nul(password));
+    }
+    if tls_mode != TlsMode::Disabled {
+        return Err(MySqlError::ProtocolError(
+            "target requests caching_sha2_password full authentication over a plaintext connection"
+                .to_owned(),
+        ));
     }
 
     stream.push(&&[2_u8][..], ())?;
@@ -268,9 +292,7 @@ async fn caching_sha2_full_auth(
         .ok_or_else(|| {
             MySqlError::ProtocolError("expected an RSA public key response".to_owned())
         })?;
-    let key =
-        RsaPublicKey::from_public_key_pem(std::str::from_utf8(pem).map_err(MySqlError::other)?)
-            .map_err(MySqlError::other)?;
+    let key = RsaPublicKey::from_public_key_pem(std::str::from_utf8(pem)?)?;
 
     let mut masked_password = password_nul(password);
     masked_password
@@ -278,6 +300,5 @@ async fn caching_sha2_full_auth(
         .zip(nonce.iter().cycle())
         .for_each(|(byte, nonce_byte)| *byte ^= *nonce_byte);
 
-    key.encrypt(&mut get_crypto_rng(), Oaep::<Sha1>::new(), &masked_password)
-        .map_err(MySqlError::other)
+    Ok(key.encrypt(&mut get_crypto_rng(), Oaep::<Sha1>::new(), &masked_password)?)
 }

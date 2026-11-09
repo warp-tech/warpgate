@@ -18,7 +18,7 @@
     async function create() {
         try {
             const r = await api.createAdminRole({ adminRoleDataRequest: role })
-            replace(`/config/admin-roles/${r.id}`)
+            replace(`/manage/admin-roles/${r.id}`)
         } catch (err) {
             error = await stringifyError(err)
         }
@@ -48,9 +48,9 @@
             {/if}
 
             <div class="d-flex mt-3">
-                <AsyncButton color="primary" class="ms-auto" click={create}
-                    >Create</AsyncButton
-                >
+                <AsyncButton color="primary" class="ms-auto" click={create}>
+                    Create
+                </AsyncButton>
             </div>
         </div>
     </PermissionGate>

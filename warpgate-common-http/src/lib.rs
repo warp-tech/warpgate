@@ -1,16 +1,36 @@
 pub mod auth;
+pub mod cluster_tls;
+pub mod errors;
 pub mod ext;
+pub mod internal_page;
 mod keepalive;
 pub mod logging;
+pub mod mtls_acceptor;
 mod request;
 
 pub use auth::{AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization};
-pub use keepalive::SessionKeepalive;
-use poem::http::HeaderName;
+pub use cluster_tls::{ClusterPeer, cluster_peer, cluster_peer_extension, is_cluster_peer_request};
+pub use keepalive::{SessionKeepalive, SessionKeepaliveGuard};
+use poem::Request;
+use poem::http::{HeaderMap, HeaderName, HeaderValue, header};
+pub use warpgate_common::http_headers::{
+    X_WARPGATE_CLUSTER_CLIENT_IP, X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_NODE,
+    X_WARPGATE_TOKEN,
+};
 
-pub static X_WARPGATE_TOKEN: HeaderName = HeaderName::from_static("x-warpgate-token");
-pub static X_WARPGATE_CLUSTER_TOKEN: HeaderName =
-    HeaderName::from_static("x-warpgate-cluster-token");
+/// The credential from the first `Authorization` header using `scheme`
+/// (compared case-insensitively, as RFC 7235 requires).
+pub fn authorization_token<'a>(req: &'a Request, scheme: &str) -> Option<&'a str> {
+    req.headers()
+        .get_all(poem::http::header::AUTHORIZATION)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .find_map(|v| {
+            v.split_once(' ')
+                .filter(|(s, _)| s.eq_ignore_ascii_case(scheme))
+                .map(|(_, token)| token)
+        })
+}
 
 // style-src unsafe-inline for Svelte
 // img-src data: for TOTP codes
@@ -38,6 +58,16 @@ pub fn warpgate_csp_with_connect_src(extra_origin: Option<&str>) -> String {
     }
 }
 
+/// [`WARPGATE_CSP`] with a single-use nonce added to `script-src`, for a page
+/// that must run one inline script under the strict policy (the SSO POST
+/// redirect interstitial). The same nonce must appear on the `<script>` tag.
+pub fn warpgate_csp_with_script_nonce(nonce: &str) -> String {
+    WARPGATE_CSP.replace(
+        "script-src 'self';",
+        &format!("script-src 'self' 'nonce-{nonce}';"),
+    )
+}
+
 pub const WARPGATE_PLAYGROUND_CSP: &str = "default-src 'self'; \
 script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com; \
 style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com; \
@@ -45,6 +75,29 @@ font-src 'self' data: https://unpkg.com https://fonts.gstatic.com; \
 img-src 'self' data: https://unpkg.com; \
 connect-src 'self' https://unpkg.com; \
 object-src 'none'";
+
+/// Adds the baseline security headers to a Warpgate-generated response,
+/// keeping any value the response already carries (e.g. a custom CSP).
+///
+/// Never apply this to proxied target responses: it would override the
+/// upstream application's own policy.
+pub fn insert_security_headers(headers: &mut HeaderMap) {
+    fn insert_if_absent(headers: &mut HeaderMap, name: HeaderName, value: &'static str) {
+        if !headers.contains_key(&name) {
+            headers.insert(name, HeaderValue::from_static(value));
+        }
+    }
+
+    insert_if_absent(headers, header::CONTENT_SECURITY_POLICY, WARPGATE_CSP);
+    // Prevent MIME type sniffing - not covered by CSP.
+    insert_if_absent(headers, header::X_CONTENT_TYPE_OPTIONS, "nosniff");
+    // Don't leak Warpgate URLs (which may contain target names or tickets)
+    // to third-party origins.
+    insert_if_absent(headers, header::REFERRER_POLICY, "same-origin");
+    // Legacy clickjacking protection for user agents that predate the CSP
+    // `frame-ancestors` directive, which takes precedence when both are present.
+    insert_if_absent(headers, header::X_FRAME_OPTIONS, "SAMEORIGIN");
+}
 
 #[cfg(test)]
 mod tests {

@@ -14,8 +14,9 @@
     import { adminPermissions } from 'admin/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
-    import GroupColorCircle from 'common/GroupColorCircle.svelte'
+    import GroupColorIcon from 'common/GroupColorIcon.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import { setCurrentSidebarSubtitle } from 'common/sidebarState.svelte'
     import { replace } from 'svelte-spa-router'
     import { VALID_CHOICES } from './common'
 
@@ -27,6 +28,7 @@
     let groupId = $derived(params.id)
 
     let group: TargetGroup | undefined = $state()
+    setCurrentSidebarSubtitle(() => group?.name)
     let error: string | undefined = $state()
     let saving = $state(false)
 
@@ -81,7 +83,7 @@
         try {
             await api.deleteTargetGroup({ id: groupId })
             // Redirect to groups list
-            replace('/config/target-groups')
+            replace('/manage/target-groups')
         } catch (e) {
             error = await stringifyError(e)
             throw e
@@ -104,9 +106,9 @@
 
             <form
                 onsubmit={e => {
-            e.preventDefault()
-            update()
-        }}
+                    e.preventDefault()
+                    update()
+                }}
             >
                 <FormGroup>
                     <Label for="name">Name</Label>
@@ -140,13 +142,13 @@
                                 class="btn btn-secondary gap-2 d-flex align-items-center"
                                 class:active={color === value}
                                 disabled={saving}
-                                onclick={(e) => {
-                                e.preventDefault()
-                                color = value
-                            }}
+                                onclick={e => {
+                                    e.preventDefault()
+                                    color = value
+                                }}
                                 title={value || 'None'}
                             >
-                                <GroupColorCircle color={value} />
+                                <GroupColorIcon color={value} />
                                 <span>{value || 'None'}</span>
                             </button>
                         {/each}
@@ -158,14 +160,16 @@
                         click={update}
                         color="primary"
                         disabled={!$adminPermissions.targetsEdit}
-                        >Update</AsyncButton
                     >
+                        Update
+                    </AsyncButton>
                     <Button
                         color="danger"
                         onclick={remove}
                         disabled={!$adminPermissions.targetsDelete}
-                        >Remove</Button
                     >
+                        Remove
+                    </Button>
                 </div>
             </form>
         </div>

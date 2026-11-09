@@ -14,7 +14,7 @@ impl Framebuffer {
     pub fn new(width: u32, height: u32, fill: Rgb888) -> Self {
         let pattern = [fill.r(), fill.g(), fill.b()];
         let mut pixels = vec![0u8; (width * height * 3) as usize];
-        for px in pixels.chunks_exact_mut(3) {
+        for px in pixels.as_chunks_mut::<3>().0 {
             px.copy_from_slice(&pattern);
         }
         Self {

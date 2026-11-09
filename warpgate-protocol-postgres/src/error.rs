@@ -1,4 +1,3 @@
-use std::error::Error;
 use std::string::FromUtf8Error;
 
 use pgwire::error::PgWireError;
@@ -24,6 +23,8 @@ pub enum PostgresError {
     Stream(#[from] PostgresStreamError),
     #[error("server doesn't offer TLS")]
     TlsNotSupported,
+    #[error("server requests password authentication over a plaintext connection")]
+    PasswordAuthWithoutTls,
     #[error("TLS setup failed: {0}")]
     TlsSetup(#[from] RustlsSetupError),
     #[error("TLS stream error: {0}")]
@@ -42,14 +43,6 @@ pub enum PostgresError {
     SaslSession(#[from] SessionError),
     #[error(transparent)]
     Warpgate(#[from] WarpgateError),
-    #[error(transparent)]
-    Other(Box<dyn Error + Send + Sync>),
-}
-
-impl PostgresError {
-    pub fn other<E: Error + Send + Sync + 'static>(err: E) -> Self {
-        Self::Other(Box::new(err))
-    }
 }
 
 impl From<ErrorResponse> for PostgresError {

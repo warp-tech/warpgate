@@ -5,12 +5,13 @@ use sea_orm::{DatabaseConnection, EntityTrait};
 use tokio::sync::Mutex;
 use tracing::debug;
 use uuid::Uuid;
-use warpgate_common::WarpgateError;
+use warpgate_common::auth::AuthStateUserInfo;
+use warpgate_common::{Target as TargetConfig, WarpgateError};
 use warpgate_db_entities::{Parameters, Target, User};
 
 use super::shared_limiter::SharedWarpgateRateLimiter;
 use super::{RateLimiterStackHandle, WarpgateRateLimiter};
-use crate::{SessionState, State};
+use crate::{State, UserSessionState};
 
 pub struct RateLimiterRegistry {
     db: DatabaseConnection,
@@ -97,34 +98,35 @@ impl RateLimiterRegistry {
             .map(|r| r as u32))
     }
 
-    pub async fn update_all_rate_limiters(
+    /// Re-derives the user, target, and global limits onto every stream of
+    /// one session, from the session's own state — the target cell mirrors
+    /// `state.target`, which is never unset once a target session starts.
+    pub async fn update_session_rate_limiters(
         &mut self,
-        state: &mut SessionState,
+        state: &mut UserSessionState,
     ) -> Result<(), WarpgateError> {
-        async fn inner(
-            this: &mut RateLimiterRegistry,
-            state: &SessionState,
-            handles: &mut [RateLimiterStackHandle],
-        ) -> Result<(), WarpgateError> {
-            for handle in handles.iter_mut() {
-                this.update_rate_limiters(state, handle).await?;
+        let handles = std::mem::take(&mut state.rate_limiter_handles);
+        let result = async {
+            for handle in &handles {
+                self.update_user_rate_limiter(state.user_info.as_ref(), handle)
+                    .await?;
+                self.update_target_rate_limiter(state.target.as_ref(), handle)
+                    .await?;
+                self.update_global_rate_limiter(handle)?;
             }
             Ok(())
         }
-
-        let mut handles = std::mem::take(&mut state.rate_limiter_handles);
-        // Defer result handling so that we can put back the handles
-        let result = inner(self, state, &mut handles).await;
+        .await;
         state.rate_limiter_handles = handles;
         result
     }
 
-    pub async fn update_rate_limiters(
+    pub async fn update_user_rate_limiter(
         &mut self,
-        state: &SessionState,
+        user_info: Option<&AuthStateUserInfo>,
         handle: &RateLimiterStackHandle,
     ) -> Result<(), WarpgateError> {
-        if let Some(user_info) = &state.user_info {
+        if let Some(user_info) = user_info {
             let user_limiter = self.user(&user_info.id).await?;
             debug!("Setting user rate limit {user_limiter:?}");
             handle.user.replace(Some(user_limiter));
@@ -132,14 +134,33 @@ impl RateLimiterRegistry {
             handle.user.replace(None);
         }
 
-        if let Some(target) = &state.target {
+        let global = self.global();
+        debug!("Setting global rate limit {global:?}");
+        handle.global.replace(Some(global));
+
+        Ok(())
+    }
+
+    async fn update_target_rate_limiter(
+        &mut self,
+        target: Option<&TargetConfig>,
+        handle: &RateLimiterStackHandle,
+    ) -> Result<(), WarpgateError> {
+        if let Some(target) = target {
             let target_limiter = self.target(&target.id).await?;
-            debug!("Setting user rate limit {target_limiter:?}");
+            debug!("Setting target rate limit {target_limiter:?}");
             handle.target.replace(Some(target_limiter));
         } else {
             handle.target.replace(None);
         }
 
+        Ok(())
+    }
+
+    fn update_global_rate_limiter(
+        &mut self,
+        handle: &RateLimiterStackHandle,
+    ) -> Result<(), WarpgateError> {
         let global = self.global();
         debug!("Setting global rate limit {global:?}");
         handle.global.replace(Some(global));
@@ -162,13 +183,16 @@ pub async fn apply_new_rate_limits(
     // Refresh the global rate limiter
     registry.lock().await.refresh().await?;
 
-    let sessions: Vec<_> = state.lock().await.sessions.values().cloned().collect();
-    for session_state in sessions {
+    let user_sessions: Vec<_> = {
+        let state = state.lock().await;
+        state.user_sessions.values().cloned().collect()
+    };
+    for session_state in user_sessions {
         let mut session_state = session_state.lock().await;
         registry
             .lock()
             .await
-            .update_all_rate_limiters(&mut session_state)
+            .update_session_rate_limiters(&mut session_state)
             .await?;
     }
     Ok(())

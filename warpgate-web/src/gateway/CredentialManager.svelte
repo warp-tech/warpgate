@@ -128,9 +128,9 @@
         <div class="list-group list-group-flush mb-3">
             <div class="list-group-item credential">
                 {#if creds.password === PasswordState.Unset}
-                    <span class="label ms-3"
-                        >Your account has no password set</span
-                    >
+                    <span class="label ms-3">
+                        Your account has no password set
+                    </span>
                 {/if}
                 {#if creds.password === PasswordState.Set}
                     <Fa fw icon={faKeyboard} />
@@ -146,9 +146,9 @@
                     class="ms-2"
                     color="link"
                     onclick={e => {
-                    changingPassword = true
-                    e.preventDefault()
-                }}
+                        changingPassword = true
+                        e.preventDefault()
+                    }}
                 >
                     {#if creds.password === PasswordState.Unset}
                         Set password
@@ -163,7 +163,10 @@
             </div>
         </div>
 
-        {#if creds.publicKeys.length === 0 && Object.values(creds.credentialPolicy).some(l => l?.includes(CredentialKind.Password))}
+        {#if creds.password === PasswordState.Unset &&
+            Object.values(creds.credentialPolicy).some(l =>
+                l?.includes(CredentialKind.Password),
+            )}
             <Alert color="warning">
                 Your credential policy requires using a password for
                 authentication. Without one, you won't be able to log in.
@@ -176,11 +179,12 @@
             <Button
                 color="link"
                 onclick={e => {
-            creatingOtpCredential = true
-            e.preventDefault()
-        }}
-                >Add device</Button
+                    creatingOtpCredential = true
+                    e.preventDefault()
+                }}
             >
+                Add device
+            </Button>
         </div>
 
         <div class="list-group list-group-flush mb-3">
@@ -192,10 +196,16 @@
                     <Button
                         class="ms-2"
                         color="link"
+                        disabled={($serverInfo?.otpSetupEnforced ?? false) &&
+                            creds.otp.length === 1}
+                        title={($serverInfo?.otpSetupEnforced ?? false) &&
+                        creds.otp.length === 1
+                            ? 'One-time passwords are required on this server - add another device first'
+                            : ''}
                         onclick={e => {
-                    deleteOtp(credential)
-                    e.preventDefault()
-                }}
+                            deleteOtp(credential)
+                            e.preventDefault()
+                        }}
                     >
                         Delete
                     </Button>
@@ -203,11 +213,22 @@
             {/each}
         </div>
 
-        {#if creds.otp.length === 0 && Object.values(creds.credentialPolicy).some(l => l?.includes(CredentialKind.Totp))}
+        {#if creds.otp.length === 0 &&
+            Object.values(creds.credentialPolicy).some(l =>
+                l?.includes(CredentialKind.Totp),
+            )}
             <Alert color="warning">
                 Your credential policy requires using a one-time password for
                 authentication. Without one, you won't be able to log in.
             </Alert>
+        {:else if $serverInfo?.otpSetupEnforced}
+            <Alert color="info">
+                One-time passwords are required on this server.
+            </Alert>
+        {:else if creds.otp.length === 0}
+            <p class="text-muted small">
+                Add an authenticator app as a second factor for logging in.
+            </p>
         {/if}
 
         <div class="d-flex align-items-center mt-4 mb-2">
@@ -218,17 +239,22 @@
                 id="addPublicKeyCredentialButton"
                 title={creds.ldapLinked ? 'SSH keys are managed by LDAP' : ''}
                 onclick={e => {
-                if (creds?.ldapLinked) {
-                    return
-                }
-                creatingPublicKeyCredential = true
-                e.preventDefault()
-            }}
-                >Add key</Button
+                    if (creds?.ldapLinked) {
+                        return
+                    }
+                    creatingPublicKeyCredential = true
+                    e.preventDefault()
+                }}
             >
-            <Tooltip delay="250" target="addPublicKeyCredentialButton" animation
-                >Public key credentials will be loaded from LDAP</Tooltip
+                Add key
+            </Button>
+            <Tooltip
+                delay="250"
+                target="addPublicKeyCredentialButton"
+                animation
             >
+                Public key credentials will be loaded from LDAP
+            </Tooltip>
         </div>
 
         <div class="list-group list-group-flush mb-3">
@@ -247,11 +273,13 @@
                         class="ms-2"
                         color="link"
                         disabled={creds.ldapLinked}
-                        title={creds.ldapLinked ? 'SSH keys are managed by LDAP' : ''}
+                        title={creds.ldapLinked
+                            ? 'SSH keys are managed by LDAP'
+                            : ''}
                         onclick={e => {
-                    deletePublicKey(credential)
-                    e.preventDefault()
-                }}
+                            deletePublicKey(credential)
+                            e.preventDefault()
+                        }}
                     >
                         Delete
                     </Button>
@@ -259,11 +287,17 @@
             {/each}
         </div>
 
-        {#if creds.publicKeys.length === 0 && creds.credentialPolicy.ssh?.includes(CredentialKind.PublicKey)}
+        {#if creds.publicKeys.length === 0 &&
+            creds.credentialPolicy.ssh?.includes(CredentialKind.PublicKey)}
             <Alert color="warning">
                 Your credential policy requires using a public key for
                 authentication. Without one, you won't be able to log in.
             </Alert>
+        {:else if creds.publicKeys.length === 0 && !creds.ldapLinked}
+            <p class="text-muted small">
+                Add an SSH public key to connect to SSH targets without a
+                password.
+            </p>
         {/if}
 
         <div class="d-flex align-items-center mt-4 mb-2">
@@ -272,11 +306,12 @@
             <Button
                 color="link"
                 onclick={e => {
-            issuingCertificateCredential = true
-            e.preventDefault()
-        }}
-                >Issue certificate</Button
+                    issuingCertificateCredential = true
+                    e.preventDefault()
+                }}
             >
+                Issue certificate
+            </Button>
         </div>
 
         <div class="list-group list-group-flush mb-3">
@@ -296,9 +331,9 @@
                         color="link"
                         class="ms-2"
                         onclick={e => {
-                    deleteCertificate(credential)
-                    e.preventDefault()
-                }}
+                            deleteCertificate(credential)
+                            e.preventDefault()
+                        }}
                     >
                         Delete
                     </Button>
@@ -306,11 +341,18 @@
             {/each}
         </div>
 
-        {#if creds.certificates.length === 0 && creds.credentialPolicy.kubernetes?.includes(CredentialKind.Certificate)}
+        {#if creds.certificates.length === 0 &&
+            creds.credentialPolicy.kubernetes?.includes(
+                CredentialKind.Certificate,
+            )}
             <Alert color="warning">
                 Your credential policy requires using a certificate for
                 authentication. Without one, you won't be able to log in.
             </Alert>
+        {:else if creds.certificates.length === 0}
+            <p class="text-muted small">
+                Issue a client certificate to connect to Kubernetes targets.
+            </p>
         {/if}
 
         {#if creds.sso.length > 0}
@@ -363,8 +405,8 @@
         save={issueCertificate}
         username={$serverInfo.username}
         onClose={() => {
-        issuingCertificateCredential = false
-    }}
+            issuingCertificateCredential = false
+        }}
     />
 {/if}
 

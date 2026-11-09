@@ -1,11 +1,11 @@
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, SqlErr};
+use tracing::info;
 use uuid::Uuid;
-use warpgate_common::{
-    GlobalParams, Secret, UserPasswordCredential, UserRequireCredentialsPolicy, WarpgateError,
-};
+use warpgate_common::{GlobalParams, Secret, UserPasswordCredential, WarpgateError};
 use warpgate_core::Services;
 use warpgate_db_entities::{
-    AdminRole, PasswordCredential, Role, User, UserAdminRoleAssignment, UserRoleAssignment,
+    AdminRole, Parameters, PasswordCredential, Role, User, UserAdminRoleAssignment,
+    UserRoleAssignment,
 };
 
 use crate::config::load_config;
@@ -15,42 +15,62 @@ pub async fn command(
     username: &str,
     password: &Secret<String>,
     role: Option<&String>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     let config = load_config(params, true)?;
     let services = Services::new(config.clone(), None, params.clone()).await?;
 
     let db = &services.db;
+    let parameters = Parameters::Entity::get(db).await?;
 
-    let db_user = if let Some(x) = User::Entity::find()
+    let existing_user = User::Entity::find()
         .filter(User::Entity::username_eq_ci(username))
         .all(db)
         .await?
         .first()
-    {
-        x.to_owned()
+        .map(ToOwned::to_owned);
+
+    let (db_user, created) = if let Some(x) = existing_user {
+        info!("User {username} already exists, leaving its credentials untouched");
+        (x, false)
     } else {
         let values = User::ActiveModel {
             id: Set(Uuid::new_v4()),
             username: Set(username.to_owned()),
             description: Set("".into()),
-            credential_policy: Set(serde_json::to_value(None::<UserRequireCredentialsPolicy>)?),
+            credential_policy: Set(serde_json::to_value(
+                parameters.default_credential_policy()?,
+            )?),
             rate_limit_bytes_per_second: Set(None),
             ldap_server_id: Set(None),
             ldap_object_uuid: Set(None),
             allowed_ip_ranges: Set(serde_json::Value::Null),
         };
-        values.insert(db).await.map_err(WarpgateError::from)?
+        match values.insert(db).await {
+            Ok(user) => {
+                PasswordCredential::ActiveModel {
+                    user_id: Set(user.id),
+                    id: Set(Uuid::new_v4()),
+                    ..UserPasswordCredential::from_password(password).into()
+                }
+                .insert(db)
+                .await?;
+                (user, true)
+            }
+            // Another node raced, realistically during DB bootstrap in cluster
+            Err(err) if matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) => {
+                info!("User {username} was just created elsewhere");
+                let user = User::Entity::find()
+                    .filter(User::Entity::username_eq_ci(username))
+                    .one(db)
+                    .await?
+                    .ok_or_else(|| anyhow::anyhow!("User {username} vanished after a conflict"))?;
+                (user, false)
+            }
+            Err(err) => return Err(WarpgateError::from(err).into()),
+        }
     };
 
     Role::Entity::grant_default_roles(db, db_user.id).await?;
-
-    PasswordCredential::ActiveModel {
-        user_id: Set(db_user.id),
-        id: Set(Uuid::new_v4()),
-        ..UserPasswordCredential::from_password(password).into()
-    }
-    .insert(db)
-    .await?;
 
     if let Some(role_name) = role {
         // try regular role first
@@ -77,11 +97,10 @@ pub async fn command(
             let values = UserAdminRoleAssignment::ActiveModel {
                 user_id: Set(db_user.id),
                 admin_role_id: Set(db_admin.id),
-                ..Default::default()
             };
             values.insert(db).await.map_err(WarpgateError::from)?;
         }
     }
 
-    Ok(())
+    Ok(created)
 }

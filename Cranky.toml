@@ -33,4 +33,5 @@ allow = [
   "clippy::redundant_closure_for_method_calls",
   "clippy::manual_string_new",
   "clippy::implicit_hasher",
+  "clippy::unused_async_trait_impl",
 ]

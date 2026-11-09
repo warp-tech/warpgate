@@ -35,6 +35,27 @@ def assert_401():
     assert e.value.status == 401
 
 
+def _ssh_target_request(name: str) -> sdk.TargetDataRequest:
+    return sdk.TargetDataRequest(
+        name=name,
+        require_approval=False,
+        ticket_requests_disabled=False,
+        ticket_require_approval=False,
+        options=sdk.TargetOptions(
+            sdk.TargetOptionsTargetSSHOptions(
+                kind="Ssh",
+                allow_insecure_algos=False,
+                host="127.0.0.1",
+                port=22,
+                username="user",
+                auth=sdk.SSHTargetAuth(
+                    sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
+                ),
+            )
+        ),
+    )
+
+
 def make_limited_admin_role_payload(**overrides):
     return {
         "name": overrides.get("name", f"limited-{uuid4()}"),
@@ -51,6 +72,7 @@ def make_limited_admin_role_payload(**overrides):
         "access_roles_assign": False,
         "sessions_view": False,
         "sessions_terminate": False,
+        "approve_sessions": False,
         "recordings_view": False,
         "tickets_create": False,
         "tickets_delete": False,
@@ -91,6 +113,31 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         permission="sessions_terminate",
         call=lambda api, r: api.close_all_sessions_with_http_info(),
         expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="get_session_approvals",
+        permission="approve_sessions",
+        call=lambda api, r: api.get_session_approvals_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="approve_session",
+        permission="approve_sessions",
+        call=lambda api, r: api.approve_session_with_http_info(
+            r["session_id"],
+            sdk.ApproveSessionRequest(
+                scope=sdk.ApprovalScope.ONCE, target="no-such-target"
+            ),
+        ),
+        expected_statuses={200, 404},
+    ),
+    AdminApiTestCase(
+        id="reject_session",
+        permission="approve_sessions",
+        call=lambda api, r: api.reject_session_with_http_info(
+            r["session_id"], sdk.RejectSessionRequest(target="no-such-target")
+        ),
+        expected_statuses={200, 404},
     ),
     AdminApiTestCase(
         id="get_recording",
@@ -235,10 +282,97 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         expected_statuses={200},
     ),
     AdminApiTestCase(
+        id="import_ssh_own_key_reference",
+        permission="config_edit",
+        call=lambda api, r: api.import_ssh_own_key_reference_with_http_info(
+            sdk.ImportSshClientKeyReferenceRequest(
+                label=f"key-{uuid4()}",
+                reference="secret://not-configured/secret/key#private_key",
+                is_default=False,
+            )
+        ),
+        expected_statuses={400},
+    ),
+    AdminApiTestCase(
+        id="get_secret_backends",
+        permission="config_edit",
+        call=lambda api, r: api.get_secret_backends_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_secret_backends_summary",
+        permission=None,
+        call=lambda api, r: api.get_secret_backends_summary_with_http_info(),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
+        id="get_secret_reference_usage",
+        permission="targets_edit",
+        call=lambda api, r: api.get_secret_reference_usage_with_http_info(str(uuid4())),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="create_secret_backend",
+        permission="config_edit",
+        call=lambda api, r: api.create_secret_backend_with_http_info(
+            sdk.SecretBackendRequest(
+                name=f"vault-{uuid4().hex[:8]}",
+                backend_type="vault",
+                address="https://vault.invalid:8200",
+                auth=sdk.SecretBackendAuth(
+                    sdk.SecretBackendAuthVaultTokenAuth(method="Token", token="test")
+                ),
+            )
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="get_secret_backend",
+        permission=None,
+        call=lambda api, r: api.get_secret_backend_with_http_info(str(uuid4())),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="update_secret_backend",
+        permission="config_edit",
+        call=lambda api, r: api.update_secret_backend_with_http_info(
+            str(uuid4()),
+            sdk.SecretBackendRequest(
+                name="vault-missing",
+                backend_type="vault",
+                address="https://vault.invalid:8200",
+                auth=sdk.SecretBackendAuth(sdk.SecretBackendAuthVaultTokenAuth(method="Token", token="")),
+            ),
+        ),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="delete_secret_backend",
+        permission="config_edit",
+        call=lambda api, r: api.delete_secret_backend_with_http_info(str(uuid4())),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="check_secret_backend_health",
+        permission="config_edit",
+        call=lambda api, r: api.check_secret_backend_health_with_http_info(str(uuid4())),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
+        id="test_secret_resolve",
+        permission="targets_edit",
+        call=lambda api, r: api.test_secret_resolve_with_http_info(
+            sdk.TestResolveRequest(
+                reference="secret://not-configured/secret/x#password"
+            )
+        ),
+        expected_statuses={404},
+    ),
+    AdminApiTestCase(
         id="import_ssh_own_key",
         permission="config_edit",
         call=lambda api, r: api.import_ssh_own_key_with_http_info(
-            sdk.ImportSSHClientKeyRequest(
+            sdk.ImportSshClientKeyRequest(
                 label=f"key-{uuid4()}",
                 secret_key=open("ssh-keys/id_ed25519").read(),
                 is_default=False,
@@ -276,7 +410,11 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     AdminApiTestCase(
         id="get_logs",
         permission=None,
-        call=lambda api, r: api.get_logs_with_http_info(sdk.GetLogsRequest(search="")),
+        # A non-empty search is what actually exercises the filter - an empty one
+        # is skipped, hiding e.g. Postgres rejecting lower() on the JSON column
+        call=lambda api, r: api.get_logs_with_http_info(
+            sdk.GetLogsRequest(search="test")
+        ),
         expected_statuses={200},
     ),
     AdminApiTestCase(
@@ -289,20 +427,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         id="create_target",
         permission="targets_create",
         call=lambda api, r: api.create_target_with_http_info(
-            sdk.TargetDataRequest(
-                name=f"target-{uuid4()}",
-                options=sdk.TargetOptions(
-                    sdk.TargetOptionsTargetSSHOptions(
-                        kind="Ssh",
-                        host="127.0.0.1",
-                        port=22,
-                        username="user",
-                        auth=sdk.SSHTargetAuth(
-                            sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
-                        ),
-                    )
-                ),
-            ),
+            _ssh_target_request(f"target-{uuid4()}"),
         ),
         expected_statuses={201},
     ),
@@ -317,20 +442,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         permission="targets_edit",
         call=lambda api, r: api.update_target_with_http_info(
             r["target_id"],
-            sdk.TargetDataRequest(
-                name=f"target-{uuid4()}",
-                options=sdk.TargetOptions(
-                    sdk.TargetOptionsTargetSSHOptions(
-                        kind="Ssh",
-                        host="127.0.0.1",
-                        port=22,
-                        username="user",
-                        auth=sdk.SSHTargetAuth(
-                            sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
-                        ),
-                    )
-                ),
-            ),
+            _ssh_target_request(f"target-{uuid4()}"),
         ),
         expected_statuses={200},
     ),
@@ -695,7 +807,6 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         call=lambda api, r: api.update_parameters_with_http_info(
             sdk.ParameterUpdate(
                 allow_own_credential_management=True,
-                minimize_password_login=False,
                 rate_limit_bytes_per_second=None,
                 ssh_client_auth_keyboard_interactive=True,
                 ssh_client_auth_password=True,
@@ -806,7 +917,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     ),
     AdminApiTestCase(
         id="update_user_role",
-        permission=None,
+        permission="access_roles_assign",
         call=lambda api, r: api.update_user_role_with_http_info(
             r["user_id"],
             r["role_id"],
@@ -861,7 +972,9 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     AdminApiTestCase(
         id="unblock_ip",
         permission="config_edit",
-        call=lambda api, r: api.unblock_ip_with_http_info(sdk.UnblockIpRequest(ip="127.0.0.1")),
+        call=lambda api, r: api.unblock_ip_with_http_info(
+            sdk.UnblockIpRequest(ip="127.0.0.1")
+        ),
         expected_statuses={200},
     ),
     AdminApiTestCase(
@@ -1006,22 +1119,7 @@ def api_test_resources(
     resources["ssh_client_key_id"] = str(uuid4())
     resources["ticket_request_id"] = str(uuid4())
 
-    target = ac.create_target(
-        sdk.TargetDataRequest(
-            name=f"target-{uuid4()}",
-            options=sdk.TargetOptions(
-                sdk.TargetOptionsTargetSSHOptions(
-                    kind="Ssh",
-                    host="127.0.0.1",
-                    port=22,
-                    username="user",
-                    auth=sdk.SSHTargetAuth(
-                        sdk.SSHTargetAuthSshTargetPublicKeyAuth(kind="PublicKey")
-                    ),
-                )
-            ),
-        )
-    )
+    target = ac.create_target(_ssh_target_request(f"target-{uuid4()}"))
     resources["target_id"] = target.id
     resources["target_name"] = target.name
 
@@ -1098,12 +1196,12 @@ def test_admin_api_permission_enforcement(
     with new_admin_client(url, token) as allowed_api:
         try:
             response = case.call(allowed_api, api_test_resources)
-            (status, body) = response.status_code, response.data
+            status, body = response.status_code, response.data
         except sdk.ApiException as e:
-            (status, body) = e.status, e.body
-        assert status in case.expected_statuses, (
-            f"{case.id} expected {case.expected_statuses} but got {status}: {body}"
-        )
+            status, body = e.status, e.body
+        assert (
+            status in case.expected_statuses
+        ), f"{case.id} expected {case.expected_statuses} but got {status}: {body}"
 
     if case.permission:
         denied_role = _create_admin_role(
@@ -1118,9 +1216,215 @@ def test_admin_api_permission_enforcement(
     with new_admin_client(url, denied_token) as denied_api:
         try:
             response = case.call(denied_api, api_test_resources)
-            (status, body) = response.status_code, response.data
+            status, body = response.status_code, response.data
         except sdk.ApiException as e:
-            (status, body) = e.status, e.body
-        assert status in {401, 403}, (
-            f"{case.id} should be forbidden without {case.permission}, got {status}: {body}"
+            status, body = e.status, e.body
+        assert status in {
+            401,
+            403,
+        }, f"{case.id} should be forbidden without {case.permission}, got {status}: {body}"
+
+
+def test_admin_cannot_edit_user_with_broader_admin_permissions(
+    pg_wg: WarpgateProcess,
+    admin_client: sdk.DefaultApi,
+):
+    url = f"https://localhost:{pg_wg.http_port}"
+
+    narrow_role = _create_admin_role(
+        admin_client, make_limited_admin_role_payload(users_edit=True)
+    )
+    broad_role = _create_admin_role(
+        admin_client,
+        make_limited_admin_role_payload(users_edit=True, config_edit=True),
+    )
+    actor = _create_user_with_role(admin_client, narrow_role.id)
+    peer = _create_user_with_role(admin_client, narrow_role.id)
+    superior = _create_user_with_role(admin_client, broad_role.id)
+
+    token = _create_user_api_token(url, actor.username, "123")
+    with new_admin_client(url, token) as api:
+        api.create_password_credential(
+            peer.id, sdk.NewPasswordCredential(password="456")
         )
+
+        with pytest.raises(sdk.ApiException) as e:
+            api.create_password_credential(
+                superior.id, sdk.NewPasswordCredential(password="456")
+            )
+        assert e.value.status == 403
+
+        with pytest.raises(sdk.ApiException) as e:
+            api.update_user(
+                superior.id, sdk.UserDataRequest(username=superior.username)
+            )
+        assert e.value.status == 403
+
+
+def test_update_target_must_state_the_approval_gate(
+    pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
+):
+    # The gate is a required field of every target write: a client that
+    # predates it — or simply doesn't set it — is rejected outright rather
+    # than silently taking the gate off a target by saving the rest of it.
+    # The generated client can't express the omission, so raw JSON it is.
+    gated = _ssh_target_request(f"gated-{uuid4()}")
+    gated.require_approval = True
+    target = admin_client.create_target(gated)
+    assert target.require_approval
+
+    url = f"https://localhost:{pg_wg.http_port}"
+    session = requests.Session()
+    session.verify = False
+    session.headers["X-Warpgate-Token"] = "token-value"
+    body = admin_client.get_target(target.id).to_dict()
+    del body["require_approval"]
+    silent = session.put(f"{url}/@warpgate/admin/api/targets/{target.id}", json=body)
+    assert silent.status_code == 400, (
+        "an update that says nothing about the gate must be refused, "
+        f"got {silent.status_code}"
+    )
+    assert admin_client.get_target(
+        target.id
+    ).require_approval, "and must not have touched it"
+
+    # Turning it off is an ordinary, explicit edit.
+    off = _ssh_target_request(target.name)
+    off.require_approval = False
+    admin_client.update_target(target.id, off)
+    assert not admin_client.get_target(target.id).require_approval
+
+
+def test_approval_parameters_can_be_cleared_and_reject_nonsense(
+    pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
+):
+    # The generated clients omit a `None` field rather than sending `null`, so
+    # clearing one is only reachable over raw JSON — which is what the admin UI
+    # sends when the field is blanked.
+    url = f"https://localhost:{pg_wg.http_port}"
+    session = requests.Session()
+    session.verify = False
+    session.headers["X-Warpgate-Token"] = "token-value"
+    endpoint = f"{url}/@warpgate/admin/api/parameters"
+
+    def put(**overrides):
+        body = admin_client.get_parameters().to_dict()
+        body.update(overrides)
+        return session.put(endpoint, json=body)
+
+    assert put(admin_approval_grace_period_seconds=300).status_code // 100 == 2
+    assert admin_client.get_parameters().admin_approval_grace_period_seconds == 300
+
+    assert put(admin_approval_grace_period_seconds=None).status_code // 100 == 2
+    assert (
+        admin_client.get_parameters().admin_approval_grace_period_seconds is None
+    ), "an explicit null must turn approval caching off, not be ignored"
+
+    for field in (
+        "admin_approval_grace_period_seconds",
+        "admin_approval_timeout_seconds",
+    ):
+        assert (
+            put(**{field: -1}).status_code == 400
+        ), f"{field} must reject a negative window"
+
+
+def test_update_target_rejects_duplicate_name(admin_client: sdk.DefaultApi):
+    first = admin_client.create_target(_ssh_target_request(f"dup-a-{uuid4()}"))
+    second = admin_client.create_target(_ssh_target_request(f"dup-b-{uuid4()}"))
+    with pytest.raises(sdk.ApiException) as err:
+        admin_client.update_target(second.id, _ssh_target_request(first.name))
+    assert err.value.status == 409
+    still = admin_client.get_target(second.id)
+    assert still.name == second.name
+
+    renamed = admin_client.update_target(second.id, _ssh_target_request(second.name))
+    assert renamed.name == second.name
+
+
+def test_update_target_rejects_empty_name(admin_client: sdk.DefaultApi):
+    target = admin_client.create_target(_ssh_target_request(f"empty-{uuid4()}"))
+    with pytest.raises(sdk.ApiException) as err:
+        admin_client.update_target(target.id, _ssh_target_request(""))
+    assert err.value.status == 400
+    assert admin_client.get_target(target.id).name == target.name
+
+
+HTTP_HEADER_SECRET = "Bearer s3cr3t-upstream"
+HTTP_URL_PASSWORD = "p4ss"
+
+
+def _http_target_request(name: str) -> sdk.TargetDataRequest:
+    return sdk.TargetDataRequest(
+        name=name,
+        require_approval=False,
+        ticket_requests_disabled=False,
+        ticket_require_approval=False,
+        options=sdk.TargetOptions(
+            sdk.TargetOptionsTargetHTTPOptions(
+                kind="Http",
+                headers={"Authorization": HTTP_HEADER_SECRET},
+                url=f"https://u:{HTTP_URL_PASSWORD}@upstream.example/",
+                tls=sdk.Tls(mode=sdk.TlsMode.PREFERRED, verify=True),
+            )
+        ),
+    )
+
+
+def test_http_target_credentials_are_redacted_for_admins_without_targets_edit(
+    pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
+):
+    url = f"https://localhost:{pg_wg.http_port}"
+    target = admin_client.create_target(_http_target_request(f"http-{uuid4()}"))
+    role = admin_client.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
+    admin_client.add_target_role(target.id, role.id)
+
+    lesser_role = _create_admin_role(
+        admin_client, make_limited_admin_role_payload(recordings_view=True)
+    )
+    lesser = _create_user_with_role(admin_client, lesser_role.id)
+    token = _create_user_api_token(url, lesser.username, "123")
+
+    s = requests.Session()
+    s.verify = False
+    s.headers["X-Warpgate-Token"] = token
+    api = f"{url}/@warpgate/admin/api"
+    bodies = {}
+    for path in ["/targets", f"/targets/{target.id}", f"/role/{role.id}/targets"]:
+        resp = s.get(f"{api}{path}")
+        assert resp.status_code == 200, (path, resp.status_code)
+        # The target must be in the response, or the absence checks prove nothing.
+        assert "upstream.example" in resp.text, path
+        bodies[path] = resp.text
+    leaks = {
+        path: [v for v in (HTTP_HEADER_SECRET, HTTP_URL_PASSWORD) if v in body]
+        for path, body in bodies.items()
+    }
+    assert not any(leaks.values()), f"credentials visible to a RecordingsView admin: {leaks}"
+
+    # Redacted values must not be writable back through this admin.
+    resp = s.put(
+        f"{api}/targets/{target.id}",
+        json=s.get(f"{api}/targets/{target.id}").json()
+        | {"ticket_requests_disabled": False, "ticket_require_approval": False},
+    )
+    assert resp.status_code in {401, 403}, resp.status_code
+
+    # A TargetsEdit admin still sees the values and an edit round-trips them.
+    full = admin_client.get_target(target.id)
+    http = full.options.actual_instance
+    assert http.headers == {"Authorization": HTTP_HEADER_SECRET}
+    assert http.url == f"https://u:{HTTP_URL_PASSWORD}@upstream.example/"
+    admin_client.update_target(
+        target.id,
+        sdk.TargetDataRequest(
+            name=full.name,
+            options=full.options,
+            require_approval=False,
+            ticket_requests_disabled=False,
+            ticket_require_approval=False,
+        ),
+    )
+    after = admin_client.get_target(target.id).options.actual_instance
+    assert after.headers == http.headers
+    assert after.url == http.url

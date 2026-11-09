@@ -22,12 +22,11 @@ export function formatDurationAsHumantime(totalSeconds: number): string {
     if (minutes) {
         parts.push(`${minutes}m`)
     }
-    if (seconds && !days && !hours) {
+    if (seconds) {
         parts.push(`${seconds}s`)
     }
     return parts.join(' ') || '0m'
 }
-
 /**
  * Parse a humantime crate format duration string into seconds.
  * Accepts: "8h", "1h 30m", "2d", "90m", "1h30m", or plain number (treated as seconds).
@@ -95,4 +94,42 @@ export function humantimeDuration(
             node.removeEventListener('change', handleChange)
         },
     }
+}
+
+export interface DurationUnit {
+    label: string
+    seconds: number
+}
+
+const SECONDS: DurationUnit = { label: 'seconds', seconds: 1 }
+const MINUTES: DurationUnit = { label: 'minutes', seconds: 60 }
+const HOURS: DurationUnit = { label: 'hours', seconds: MINUTES.seconds * 60 }
+const DAYS: DurationUnit = { label: 'days', seconds: HOURS.seconds * 24 }
+const WEEKS: DurationUnit = { label: 'weeks', seconds: DAYS.seconds * 7 }
+
+export const DURATION_UNITS: DurationUnit[] = [
+    WEEKS,
+    DAYS,
+    HOURS,
+    MINUTES,
+    SECONDS,
+]
+
+export function bestDurationUnit(
+    totalSeconds: number | undefined,
+): DurationUnit | undefined {
+    if (totalSeconds == null) {
+        return MINUTES
+    }
+    for (const [index, unit] of DURATION_UNITS.entries()) {
+        if (totalSeconds % unit.seconds !== 0) {
+            continue
+        }
+        const larger = DURATION_UNITS[index - 1]
+        const carry =
+            larger &&
+            totalSeconds / unit.seconds >= larger.seconds / unit.seconds
+        return carry ? undefined : unit
+    }
+    return undefined
 }

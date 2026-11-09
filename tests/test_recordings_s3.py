@@ -1,7 +1,5 @@
 import base64
 import json
-import os
-import select
 import signal
 import time
 from uuid import uuid4
@@ -13,27 +11,28 @@ import requests
 from .api_client import admin_client, sdk
 from .conftest import ProcessManager
 from .test_ssh_proto import common_args, setup_user_and_target
-from .util import wait_port
+from .util import read_until, wait_port
 
-MINIO_USER = "minioadmin"
-MINIO_PASSWORD = "minioadmin"
+S3_ACCESS_KEY = "warpgate"
+S3_SECRET_KEY = "warpgate-secret"
 BUCKET = "warpgate-recordings"
 
 
 @pytest.fixture(scope="session")
-def minio(processes: ProcessManager):
-    port = processes.start_minio(MINIO_USER, MINIO_PASSWORD)
+def s3_server(processes: ProcessManager):
+    port = processes.start_s3(S3_ACCESS_KEY, S3_SECRET_KEY)
     wait_port(port, recv=False)
     endpoint = f"http://localhost:{port}"
     s3 = boto3.client(
         "s3",
         endpoint_url=endpoint,
-        aws_access_key_id=MINIO_USER,
-        aws_secret_access_key=MINIO_PASSWORD,
+        aws_access_key_id=S3_ACCESS_KEY,
+        aws_secret_access_key=S3_SECRET_KEY,
         region_name="us-east-1",
     )
-    # MinIO needs a moment after the port opens before it serves the S3 API.
-    deadline = time.monotonic() + 30
+    # The S3 gateway opens its port before the master/volume/filer behind it
+    # are ready, which takes a while on a cold container.
+    deadline = time.monotonic() + 90
     while True:
         try:
             s3.create_bucket(Bucket=BUCKET)
@@ -61,8 +60,8 @@ def _configure_s3(url, endpoint):
                         credentials=sdk.S3Credentials(
                             sdk.S3CredentialsStaticCredentials(
                                 mode="Static",
-                                access_key_id=MINIO_USER,
-                                secret_access_key=MINIO_PASSWORD,
+                                access_key_id=S3_ACCESS_KEY,
+                                secret_access_key=S3_SECRET_KEY,
                             )
                         ),
                     )
@@ -82,23 +81,15 @@ def _find_completed_terminal_recording(api):
 
 
 def _find_in_progress_terminal_session(api):
+    """The recording's own session id: recordings are stored (and keyed in S3)
+    under the target session id, which is distinct from the API session id."""
     for session in sorted(
         api.get_sessions().items, key=lambda s: s.started, reverse=True
     ):
         for rec in api.get_session_recordings(session.id):
             if rec.kind == sdk.RecordingKind.TERMINAL and rec.ended is None:
-                return session.id
+                return rec.session_id
     return None
-
-
-def _read_until(stream, needle: bytes, deadline: float) -> bytes:
-    """Read from `stream` (a pipe) until `needle` appears or `deadline` passes."""
-    buf = b""
-    while time.monotonic() < deadline and needle not in buf:
-        ready, _, _ = select.select([stream], [], [], 1)
-        if ready:
-            buf += os.read(stream.fileno(), 4096)
-    return buf
 
 
 class Test:
@@ -107,9 +98,9 @@ class Test:
         processes: ProcessManager,
         timeout,
         wg_c_ed25519_pubkey,
-        minio,
+        s3_server,
     ):
-        endpoint, s3 = minio
+        endpoint, s3 = s3_server
 
         wg = processes.start_wg(config_patch={"recordings": {"enable": True}})
         wait_port(wg.http_port, recv=False)
@@ -175,9 +166,9 @@ class Test:
         processes: ProcessManager,
         timeout,
         wg_c_ed25519_pubkey,
-        minio,
+        s3_server,
     ):
-        endpoint, s3 = minio
+        endpoint, s3 = s3_server
 
         wg = processes.start_wg(config_patch={"recordings": {"enable": True}})
         wait_port(wg.http_port, recv=False)
@@ -204,7 +195,7 @@ class Test:
 
         # The marker round-tripping back through the gateway proves the session is
         # up and the output has reached the recorder's queue.
-        output = _read_until(
+        output = read_until(
             ssh_client.stdout, marker.encode(), time.monotonic() + timeout
         )
         assert marker.encode() in output, "marker never appeared in session output"

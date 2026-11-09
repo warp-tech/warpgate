@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use sea_orm::DatabaseConnection;
+use sea_orm::{DatabaseBackend, DatabaseConnection, TransactionTrait};
 use sea_orm_migration::MigrationTrait;
 use sea_orm_migration::prelude::*;
 
@@ -73,6 +73,32 @@ mod m00066_cluster_token;
 mod m00067_node_tls_pin;
 mod m00068_rename_ssh_banner;
 mod m00069_ssh_client_keys;
+mod m00070_http_sessions;
+mod m00071_ssh_host_key_verification;
+mod m00072_session_node_id_not_null;
+mod m00073_redact_session_target_snapshots;
+mod m00074_encryption_key_rotation;
+mod m00075_hash_ticket_and_api_token_secrets;
+mod m00076_open_targets_in_new_tab;
+mod m00077_session_user_target_id;
+mod m00078_assignment_composite_pks;
+mod m00079_unique_target_and_group_names;
+mod m00080_user_and_target_sessions;
+mod m00081_http_session_user_session_id;
+mod m00082_target_session_columns;
+mod m00083_record_desktop_keyboard_input;
+mod m00084_mfa_enforcement;
+mod m00085_default_credential_policy;
+mod m00086_jit_session_approval;
+mod m00087_drop_null_target_options;
+mod m00088_ssh_host_keys;
+mod m00089_secret_backends;
+mod m00090_logo;
+mod m00091_drop_cluster_token;
+mod m00092_http_session_sso_identity;
+mod m00093_log_session_id_nullable;
+mod m00094_unique_role_names;
+mod m00095_kubernetes_sessions;
 
 pub(crate) mod helpers;
 
@@ -151,6 +177,32 @@ impl MigratorTrait for Migrator {
             Box::new(m00067_node_tls_pin::Migration),
             Box::new(m00068_rename_ssh_banner::Migration),
             Box::new(m00069_ssh_client_keys::Migration),
+            Box::new(m00070_http_sessions::Migration),
+            Box::new(m00071_ssh_host_key_verification::Migration),
+            Box::new(m00072_session_node_id_not_null::Migration),
+            Box::new(m00073_redact_session_target_snapshots::Migration),
+            Box::new(m00074_encryption_key_rotation::Migration),
+            Box::new(m00075_hash_ticket_and_api_token_secrets::Migration),
+            Box::new(m00076_open_targets_in_new_tab::Migration),
+            Box::new(m00077_session_user_target_id::Migration),
+            Box::new(m00078_assignment_composite_pks::Migration),
+            Box::new(m00079_unique_target_and_group_names::Migration),
+            Box::new(m00080_user_and_target_sessions::Migration),
+            Box::new(m00081_http_session_user_session_id::Migration),
+            Box::new(m00082_target_session_columns::Migration),
+            Box::new(m00083_record_desktop_keyboard_input::Migration),
+            Box::new(m00084_mfa_enforcement::Migration),
+            Box::new(m00085_default_credential_policy::Migration),
+            Box::new(m00086_jit_session_approval::Migration),
+            Box::new(m00087_drop_null_target_options::Migration),
+            Box::new(m00088_ssh_host_keys::Migration),
+            Box::new(m00089_secret_backends::Migration),
+            Box::new(m00090_logo::Migration),
+            Box::new(m00091_drop_cluster_token::Migration),
+            Box::new(m00092_http_session_sso_identity::Migration),
+            Box::new(m00093_log_session_id_nullable::Migration),
+            Box::new(m00094_unique_role_names::Migration),
+            Box::new(m00095_kubernetes_sessions::Migration),
         ]
     }
 }
@@ -204,9 +256,11 @@ async fn run_locked<
     }
 }
 
+/// Migrations need an explicit TX on SQLite, otherwise pooled connections
+/// might see different DB state
 pub async fn migrate_database(connection: &DatabaseConnection) -> Result<(), DbErr> {
     run_locked(connection, MIGRATION_LOCK_KEY, async move || {
-        Migrator::up(connection, None).await
+        run_maybe_in_tx(connection, Direction::Up, None).await
     })
     .await?;
 
@@ -215,7 +269,7 @@ pub async fn migrate_database(connection: &DatabaseConnection) -> Result<(), DbE
 
 /// Apply `steps` pending migrations.
 pub async fn migrate_database_up(connection: &DatabaseConnection, steps: u32) -> Result<(), DbErr> {
-    Migrator::up(connection, Some(steps)).await
+    run_maybe_in_tx(connection, Direction::Up, Some(steps)).await
 }
 
 /// Revert `steps` applied migrations.
@@ -223,5 +277,66 @@ pub async fn migrate_database_down(
     connection: &DatabaseConnection,
     steps: u32,
 ) -> Result<(), DbErr> {
-    Migrator::down(connection, Some(steps)).await
+    run_maybe_in_tx(connection, Direction::Down, Some(steps)).await
+}
+
+enum Direction {
+    Up,
+    Down,
+}
+
+/// Migrations need an explicit TX on SQLite (only), otherwise pooled connections
+/// might see different DB state
+async fn run_maybe_in_tx(
+    connection: &DatabaseConnection,
+    direction: Direction,
+    steps: Option<u32>,
+) -> Result<(), DbErr> {
+    if connection.get_database_backend() == DatabaseBackend::Sqlite {
+        let tx = connection.begin().await?;
+        run(&tx, direction, steps).await?;
+        tx.commit().await
+    } else {
+        run(connection, direction, steps).await
+    }
+}
+
+async fn run<'c, C: IntoSchemaManagerConnection<'c>>(
+    db: C,
+    direction: Direction,
+    steps: Option<u32>,
+) -> Result<(), DbErr> {
+    match direction {
+        Direction::Up => Migrator::up(db, steps).await,
+        Direction::Down => Migrator::down(db, steps).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sea_orm::{ConnectOptions, Database};
+    use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
+
+    use super::{migrate_database, migrate_database_down, migrate_database_up};
+
+    /// The full chain, and a step back and forth, through a pooled file-backed
+    /// SQLite connection - the shape a real install uses.
+    #[tokio::test]
+    async fn sqlite_migrations_run_through_a_pool() {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let path = std::env::temp_dir().join(format!(
+            "warpgate-migrations-{}.sqlite3",
+            std::process::id()
+        ));
+        let mut opt = ConnectOptions::new(format!("sqlite://{}?mode=rwc", path.display()));
+        opt.max_connections(100);
+        let db = Database::connect(opt).await.unwrap();
+
+        migrate_database(&db).await.unwrap();
+        migrate_database_down(&db, 1).await.unwrap();
+        migrate_database_up(&db, 1).await.unwrap();
+
+        db.close().await.unwrap();
+        std::fs::remove_file(path).unwrap();
+    }
 }

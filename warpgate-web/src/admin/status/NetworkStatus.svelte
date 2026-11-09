@@ -4,8 +4,8 @@
     import { api, ListenerState } from 'admin/lib/api'
     import HelpText from 'admin/lib/HelpText.svelte'
     import Loadable from 'common/Loadable.svelte'
-    import Fa from 'svelte-fa'
     import RelativeDate from 'common/RelativeDate.svelte'
+    import Fa from 'svelte-fa'
 
     const stateBadges: Record<ListenerState, string> = {
         [ListenerState.Listening]: 'success',
@@ -43,14 +43,17 @@
                                 {/if}
                                 {#each listener.certificates as cert, index}
                                     <small class="d-block text-muted">
-                                        {(listener.certificates.length > 1)
-                                    ? (index === 0 ? 'Default certificate' : 'SNI certificate')
-                                    : 'Certificate'}:
+                                        {listener.certificates.length > 1
+                                            ? index === 0
+                                                ? 'Default certificate'
+                                                : 'SNI certificate'
+                                            : 'Certificate'}:
                                         {cert.domains.join(', ')}
                                         {#if cert.expiry}
                                             &middot;
                                             <span
-                                                class:text-danger={cert.expiry < new Date()}
+                                                class:text-danger={cert.expiry <
+                                                    new Date()}
                                             >
                                                 expires
                                                 <RelativeDate
@@ -108,7 +111,8 @@
                 <div class="list-group-item d-flex">
                     <span>Trust X-Forwarded-* headers</span>
                     <span class="ms-auto">
-                        {#if !ipEcho.trustXForwardedHeaders && ipEcho.xForwardedFor}
+                        {#if !ipEcho.trustXForwardedHeaders &&
+                            ipEcho.xForwardedFor}
                             <span
                                 class="d-flex gap-2 align-items-center text-warning"
                             >
@@ -116,7 +120,9 @@
                                 disabled
                             </span>
                         {:else}
-                            {ipEcho.trustXForwardedHeaders ? 'enabled' : 'disabled'}
+                            {ipEcho.trustXForwardedHeaders
+                                ? 'enabled'
+                                : 'disabled'}
                         {/if}
                     </span>
                 </div>

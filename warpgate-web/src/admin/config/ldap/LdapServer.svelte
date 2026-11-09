@@ -10,6 +10,7 @@
     import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
+    import { setCurrentSidebarSubtitle } from 'common/sidebarState.svelte'
     import { push } from 'svelte-spa-router'
     import { defaultLdapPortForTlsMode, testLdapConnection } from './common'
     import LdapConnectionFields from './LdapConnectionFields.svelte'
@@ -21,6 +22,7 @@
     let { params }: Props = $props()
 
     let server = $state<LdapServerResponse | null>(null)
+    setCurrentSidebarSubtitle(() => server?.name)
     let name = $state('')
     let host = $state('')
     let port = $state(389)
@@ -44,11 +46,17 @@
     let testResult = $state<{ success: boolean; message: string } | null>(null)
     let isLoaded = $state(false)
 
-    // Auto-update port based on TLS mode (only after initial load)
+    // The port follows the TLS mode only when the mode is changed here. Loading the server
+    // must keep its stored port, which may well be custom (e.g. Global Catalog on 3268).
+    let portFollowsMode: TlsMode | undefined
     $effect(() => {
-        if (isLoaded) {
+        if (!isLoaded) {
+            return
+        }
+        if (portFollowsMode !== undefined && tls.mode !== portFollowsMode) {
             port = defaultLdapPortForTlsMode(tls.mode)
         }
+        portFollowsMode = tls.mode
     })
 
     async function load() {
@@ -143,7 +151,7 @@
 </script>
 
 <Loadable promise={load()}>
-    <div class="container-max-md">
+    <div>
         <div class="page-summary-bar">
             <div>
                 <h1>{name}</h1>
@@ -151,7 +159,12 @@
             </div>
         </div>
 
-        <form onsubmit={(e) => { e.preventDefault(); save() }}>
+        <form
+            onsubmit={e => {
+                e.preventDefault()
+                save()
+            }}
+        >
             <FormGroup floating label="Name">
                 <Input bind:value={name} required />
             </FormGroup>
@@ -222,7 +235,9 @@
 
             {#if testResult}
                 <div
-                    class="alert {testResult.success ? 'alert-success' : 'alert-danger'}"
+                    class="alert {testResult.success
+                        ? 'alert-success'
+                        : 'alert-danger'}"
                     role="alert"
                 >
                     {testResult.message}

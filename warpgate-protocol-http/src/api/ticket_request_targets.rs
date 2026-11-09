@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use serde::Serialize;
@@ -63,7 +65,7 @@ impl Api {
 
         if !policy.ticket_request_show_all_targets {
             let authorized_ids = match &ctx.auth {
-                warpgate_common_http::RequestAuthorization::AdminToken => Default::default(),
+                warpgate_common_http::RequestAuthorization::AdminToken => HashSet::default(),
                 auth => {
                     services
                         .config_provider

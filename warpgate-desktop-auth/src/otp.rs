@@ -10,10 +10,9 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 use tracing::warn;
-use warpgate_common::Secret;
 use warpgate_common::auth::{AuthCredential, AuthState};
 use warpgate_common::helpers::otp::OTP_DIGITS;
-use warpgate_common::Protocol;
+use warpgate_common::{Protocol, Secret};
 use warpgate_core::Services;
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
@@ -93,10 +92,10 @@ impl OtpEntry {
             &mut *state.lock().await,
             credential,
             services.config_provider.as_ref(),
+            &services.login_protection,
         )
         .await
-        .map(|outcome| outcome.is_valid())
-        .unwrap_or(false);
+        .is_ok_and(|outcome| outcome.is_valid());
         if valid {
             return OtpActionApplyOutcome::AcceptedAndValidated;
         }

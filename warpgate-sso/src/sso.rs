@@ -2,24 +2,26 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use openidconnect::core::{
-    CoreAuthDisplay, CoreAuthPrompt, CoreAuthenticationFlow, CoreErrorResponseType,
-    CoreGenderClaim, CoreJsonWebKey, CoreJweContentEncryptionAlgorithm, CoreJwsSigningAlgorithm,
-    CoreRevocableToken, CoreRevocationErrorResponse, CoreTokenIntrospectionResponse, CoreTokenType,
+    CoreAuthDisplay, CoreAuthPrompt, CoreAuthenticationFlow, CoreClientAuthMethod,
+    CoreErrorResponseType, CoreGenderClaim, CoreJsonWebKey, CoreJweContentEncryptionAlgorithm,
+    CoreJwsSigningAlgorithm, CoreRevocableToken, CoreRevocationErrorResponse,
+    CoreTokenIntrospectionResponse, CoreTokenType,
 };
 use openidconnect::url::Url;
 use openidconnect::{
-    AccessTokenHash, AdditionalClaims, Audience, AuthorizationCode, Client, CsrfToken,
-    EmptyExtraTokenFields, EndpointMaybeSet, EndpointNotSet, EndpointSet, HttpClientError, IdToken,
-    IdTokenClaims, IdTokenFields, LogoutRequest, Nonce, OAuth2TokenResponse, PkceCodeChallenge,
-    PkceCodeVerifier, PostLogoutRedirectUrl, RedirectUrl, RequestTokenError, Scope,
-    StandardErrorResponse, StandardTokenResponse, TokenResponse, UserInfoClaims, reqwest,
+    AccessTokenHash, AdditionalClaims, Audience, AuthType, AuthorizationCode, Client, ClientSecret,
+    CsrfToken, EmptyExtraTokenFields, EndpointMaybeSet, EndpointNotSet, EndpointSet,
+    HttpClientError, IdToken, IdTokenClaims, IdTokenFields, LogoutRequest, Nonce,
+    OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, PostLogoutRedirectUrl,
+    ProviderMetadataWithLogout, RedirectUrl, RequestTokenError, Scope, StandardErrorResponse,
+    StandardTokenResponse, TokenResponse, UserInfoClaims, UserInfoError, reqwest,
 };
 use serde::{Deserialize, Serialize};
-use tracing::error;
+use tracing::{debug, info, warn};
 
 use crate::config::SsoInternalProviderConfig;
 use crate::request::SsoLoginRequest;
-use crate::{SsoError, discover_metadata};
+use crate::{BackchannelLogout, SsoError, discover_metadata, refresh_metadata};
 
 /// A single entry in a group-style claim: either a bare string, or a
 /// SCIM-style object (RFC 7643) from which we take `value` (stable group ID)
@@ -148,20 +150,80 @@ pub fn unverified_issuer(id_token_str: &str) -> Option<String> {
         .iss
 }
 
+/// `UserInfoError`'s own Display drops the response body and its Debug renders
+/// it as a byte array, both of which hide the provider's actual error message.
+fn describe_userinfo_error(err: &UserInfoError<HttpClientError<reqwest::Error>>) -> String {
+    match err {
+        UserInfoError::Response(status, body, _) => {
+            format!("HTTP {status}: {}", String::from_utf8_lossy(body))
+        }
+        e => format!("{e}"),
+    }
+}
+
+/// Whether HTTP Basic client authentication would transmit this secret intact.
+///
+/// RFC 6749 section 2.3.1 requires the client secret to be form-urlencoded before it
+/// is base64'd into the `Authorization: Basic` credentials, and `oauth2` does
+/// exactly that. Providers are supposed to decode it again, but several
+/// (Authentik among them) compare the raw header value against the stored
+/// secret, so a secret containing `+`, `=` or `/` arrives as its percent-encoded
+/// form and is rejected as `invalid_client`.
+fn secret_survives_basic_auth(secret: &ClientSecret) -> bool {
+    let raw = secret.secret();
+    form_urlencoded::byte_serialize(raw.as_bytes()).collect::<String>() == *raw
+}
+
+/// A provider that omits `token_endpoint_auth_methods_supported` defaults to
+/// `client_secret_basic` alone (OIDC Discovery section 3), so an absent list is a no.
+fn advertises_secret_post(metadata: &ProviderMetadataWithLogout) -> bool {
+    metadata
+        .token_endpoint_auth_methods_supported()
+        .is_some_and(|methods| methods.contains(&CoreClientAuthMethod::ClientSecretPost))
+}
+
+/// Pick the client authentication method for the token endpoint.
+///
+/// Basic auth is the RFC's recommendation and stays the default, but it is only
+/// unambiguous for secrets that form-urlencoding leaves alone. For the rest,
+/// `client_secret_post` carries the secret verbatim and both sides agree on it.
+fn resolve_auth_type(
+    configured: AuthType,
+    secret: &ClientSecret,
+    metadata: &ProviderMetadataWithLogout,
+) -> AuthType {
+    if !matches!(configured, AuthType::BasicAuth) || secret_survives_basic_auth(secret) {
+        return configured;
+    }
+    if advertises_secret_post(metadata) {
+        debug!("Client secret needs escaping for basic auth; using client_secret_post instead");
+        return AuthType::RequestBody;
+    }
+    warn!(
+        "Client secret contains characters that must be escaped for basic auth, and the provider does not advertise client_secret_post. If authentication fails with invalid_client, rotate the secret to one made up of letters, digits and `-._*`."
+    );
+    configured
+}
+
+fn client_from_metadata(
+    config: &SsoInternalProviderConfig,
+    metadata: ProviderMetadataWithLogout,
+) -> Result<WarpgateClient, SsoError> {
+    let secret = config.client_secret()?;
+    let auth_type = resolve_auth_type(config.auth_type(), &secret, &metadata);
+
+    let client =
+        WarpgateClient::from_provider_metadata(metadata, config.client_id().clone(), Some(secret))
+            .set_auth_type(auth_type);
+
+    Ok(client)
+}
+
 async fn make_client(
     config: &SsoInternalProviderConfig,
     http_client: &reqwest::Client,
 ) -> Result<WarpgateClient, SsoError> {
-    let metadata = discover_metadata(config, http_client).await?;
-
-    let client = WarpgateClient::from_provider_metadata(
-        metadata,
-        config.client_id().clone(),
-        Some(config.client_secret()?),
-    )
-    .set_auth_type(config.auth_type());
-
-    Ok(client)
+    client_from_metadata(config, discover_metadata(config, http_client).await?)
 }
 
 impl SsoClient {
@@ -170,6 +232,21 @@ impl SsoClient {
             config,
             http_client: reqwest::ClientBuilder::new().build()?,
         })
+    }
+
+    /// Run `verify` against `metadata` and retry once with refreshed metadata if the token is signed with unknown (rotated) key
+    async fn retry_on_unknown_key<T>(
+        &self,
+        metadata: &ProviderMetadataWithLogout,
+        action: impl Fn(&ProviderMetadataWithLogout) -> Result<T, SsoError>,
+    ) -> Result<T, SsoError> {
+        match action(metadata) {
+            Err(error) if error.is_unknown_signing_key() => {
+                info!("Token signed with a key missing from the cached JWKS, re-fetching it");
+                action(&refresh_metadata(&self.config, &self.http_client).await?)
+            }
+            result => result,
+        }
     }
 
     pub async fn supports_single_logout(&self) -> Result<bool, SsoError> {
@@ -226,9 +303,9 @@ impl SsoClient {
         nonce: &Nonce,
         code: String,
     ) -> Result<SsoResult, SsoError> {
-        let client: WarpgateClient = make_client(&self.config, &self.http_client)
-            .await?
-            .set_redirect_uri(redirect_url);
+        let metadata = discover_metadata(&self.config, &self.http_client).await?;
+        let client =
+            client_from_metadata(&self.config, metadata.clone())?.set_redirect_uri(redirect_url);
 
         let mut req = client.exchange_code(AuthorizationCode::new(code))?;
         if let Some(verifier) = pkce_verifier {
@@ -254,25 +331,44 @@ impl SsoClient {
             },
         )?;
 
-        let mut token_verifier = client.id_token_verifier();
-
-        if let Some(trusted_audiences) = self.config.additional_trusted_audiences() {
-            token_verifier = token_verifier.set_other_audience_verifier_fn(|aud: &Audience| {
-                trusted_audiences.contains(&**aud)
-            });
-        }
-
-        if self.config.trust_unknown_audiences() {
-            token_verifier = token_verifier.set_other_audience_verifier_fn(|_aud| true);
-        }
-
         let id_token: &WarpgateIdToken = token_response.id_token().ok_or(SsoError::NotOidc)?;
-        let claims = id_token.claims(&token_verifier, nonce)?;
+        let claims = self
+            .retry_on_unknown_key(&metadata, |metadata| {
+                let client = client_from_metadata(&self.config, metadata.clone())?;
+                let mut token_verifier = client.id_token_verifier();
+
+                if let Some(trusted_audiences) = self.config.additional_trusted_audiences() {
+                    token_verifier =
+                        token_verifier.set_other_audience_verifier_fn(|aud: &Audience| {
+                            trusted_audiences.contains(&**aud)
+                        });
+                }
+
+                if self.config.trust_unknown_audiences() {
+                    token_verifier = token_verifier.set_other_audience_verifier_fn(|_aud| true);
+                }
+
+                let claims = id_token.claims(&token_verifier, nonce)?;
+
+                if let Some(expected_access_token_hash) = claims.access_token_hash() {
+                    let actual_access_token_hash = AccessTokenHash::from_token(
+                        token_response.access_token(),
+                        id_token.signing_alg()?,
+                        id_token.signing_key(&token_verifier)?,
+                    )?;
+                    if actual_access_token_hash != *expected_access_token_hash {
+                        return Err(SsoError::Mitm);
+                    }
+                }
+
+                Ok(claims.clone())
+            })
+            .await?;
 
         let user_info_req = client
             .user_info(token_response.access_token().to_owned(), None)
             .map_err(|err| {
-                error!("Failed to fetch userinfo: {err:?}");
+                debug!("Provider has no usable userinfo endpoint: {err}");
                 err
             })
             .ok();
@@ -282,7 +378,10 @@ impl SsoClient {
                 match user_info_req.request_async(&self.http_client).await {
                     Ok(userinfo) => Some(userinfo),
                     Err(err) => {
-                        error!("Failed to fetch userinfo: {err:?}");
+                        warn!(
+                            "Failed to fetch userinfo: {}",
+                            describe_userinfo_error(&err)
+                        );
                         None
                     }
                 }
@@ -290,21 +389,10 @@ impl SsoClient {
                 None
             };
 
-        if let Some(expected_access_token_hash) = claims.access_token_hash() {
-            let actual_access_token_hash = AccessTokenHash::from_token(
-                token_response.access_token(),
-                id_token.signing_alg()?,
-                id_token.signing_key(&token_verifier)?,
-            )?;
-            if actual_access_token_hash != *expected_access_token_hash {
-                return Err(SsoError::Mitm);
-            }
-        }
-
         Ok(SsoResult {
             token: id_token.clone(),
             userinfo_claims,
-            claims: claims.clone(),
+            claims,
         })
     }
 
@@ -328,16 +416,21 @@ impl SsoClient {
         let trust_unknown = self.config.trust_unknown_audiences();
         let client_id = self.config.client_id().as_str().to_owned();
 
-        let client: WarpgateClient = make_client(&self.config, &self.http_client).await?;
+        let metadata = discover_metadata(&self.config, &self.http_client).await?;
 
-        // Disable the built-in audience check so we can enforce it ourselves
-        // below.  Signature / iss / exp are still fully enforced.
-        let token_verifier = client.id_token_verifier().require_audience_match(false);
+        let claims = self
+            .retry_on_unknown_key(&metadata, |metadata| {
+                let client = client_from_metadata(&self.config, metadata.clone())?;
+                // Disable the built-in audience check so we can enforce it ourselves
+                // below.  Signature / iss / exp are still fully enforced.
+                let token_verifier = client.id_token_verifier().require_audience_match(false);
 
-        // No nonce in a non-interactive flow: accept any (absent) nonce.
-        let claims = id_token
-            .claims(&token_verifier, |_: Option<&Nonce>| Ok::<(), String>(()))?
-            .clone();
+                // No nonce in a non-interactive flow: accept any (absent) nonce.
+                Ok(id_token
+                    .claims(&token_verifier, |_: Option<&Nonce>| Ok::<(), String>(()))?
+                    .clone())
+            })
+            .await?;
 
         // Manual audience enforcement: a token is accepted iff its audience
         // contains Warpgate's own client_id OR any configured trusted audience.
@@ -387,13 +480,82 @@ impl SsoClient {
         req = req.set_post_logout_redirect_uri(PostLogoutRedirectUrl::from_url(redirect_url));
         Ok(req.http_get_url())
     }
+
+    pub async fn verify_logout_token(&self, token: &str) -> Result<BackchannelLogout, SsoError> {
+        let metadata = discover_metadata(&self.config, &self.http_client).await?;
+        self.retry_on_unknown_key(&metadata, |metadata| {
+            crate::logout_token::verify(&self.config, metadata, token)
+        })
+        .await
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
-    use super::{GroupClaim, flatten_group_claim};
+    use super::{
+        AuthType, ClientSecret, GroupClaim, advertises_secret_post, flatten_group_claim,
+        resolve_auth_type, secret_survives_basic_auth,
+    };
+    use crate::metadata::tests::metadata;
+
+    fn survives(secret: &str) -> bool {
+        secret_survives_basic_auth(&ClientSecret::new(secret.to_owned()))
+    }
+
+    #[test]
+    fn url_safe_secrets_survive_basic_auth() {
+        assert!(survives(""));
+        assert!(survives("abcXYZ0189"));
+        assert!(survives("a-b_c.d*e"));
+    }
+
+    #[test]
+    fn secrets_needing_escaping_do_not() {
+        // The characters from issue #1815, plus the rest of base64's alphabet
+        // and a few that form-urlencoding also rewrites.
+        for secret in ["a+b", "ab==", "a/b", "a b", "a:b", "a%b", "pä"] {
+            assert!(!survives(secret), "{secret} was considered safe");
+        }
+    }
+
+    #[test]
+    fn secret_post_is_taken_from_the_discovery_document() {
+        assert!(!advertises_secret_post(&metadata(&json!({}))));
+        assert!(!advertises_secret_post(&metadata(&json!({
+            "token_endpoint_auth_methods_supported": ["client_secret_basic"],
+        }))));
+        assert!(advertises_secret_post(&metadata(&json!({
+            "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+        }))));
+    }
+
+    fn resolved(secret: &str, extra: &serde_json::Value) -> AuthType {
+        resolve_auth_type(
+            AuthType::BasicAuth,
+            &ClientSecret::new(secret.to_owned()),
+            &metadata(extra),
+        )
+    }
+
+    #[test]
+    fn only_an_unsafe_secret_switches_to_secret_post() {
+        let both = json!({
+            "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+        });
+
+        assert!(matches!(resolved("urlsafe", &both), AuthType::BasicAuth));
+        assert!(matches!(
+            resolved("has+plus=", &both),
+            AuthType::RequestBody
+        ));
+        // Nothing to switch to: basic auth is attempted and the admin is warned.
+        assert!(matches!(
+            resolved("has+plus=", &json!({})),
+            AuthType::BasicAuth
+        ));
+    }
 
     fn flat(j: serde_json::Value) -> Vec<String> {
         flatten_group_claim(serde_json::from_value::<GroupClaim>(j).unwrap())

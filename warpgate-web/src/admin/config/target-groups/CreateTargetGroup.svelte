@@ -3,7 +3,7 @@
     import { api, type BootstrapThemeColor } from 'admin/lib/api'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
-    import GroupColorCircle from 'common/GroupColorCircle.svelte'
+    import GroupColorIcon from 'common/GroupColorIcon.svelte'
     import { link, replace } from 'svelte-spa-router'
     import { VALID_CHOICES } from './common'
 
@@ -29,7 +29,7 @@
                 },
             })
             // Redirect to groups list
-            replace('/config/target-groups')
+            replace('/manage/target-groups')
         } catch (e) {
             error = await stringifyError(e)
             throw e
@@ -48,9 +48,9 @@
 
     <form
         onsubmit={e => {
-        e.preventDefault()
-        save()
-    }}
+            e.preventDefault()
+            save()
+        }}
     >
         <FormGroup>
             <Label for="name">Name</Label>
@@ -79,7 +79,7 @@
                         }}
                         title={value || 'None'}
                     >
-                        <GroupColorCircle color={value} />
+                        <GroupColorIcon color={value} />
                         <span>{value || 'None'}</span>
                     </button>
                 {/each}
@@ -88,7 +88,7 @@
 
         <div class="d-flex gap-2 mt-5">
             <AsyncButton click={save} color="primary">Create</AsyncButton>
-            <a class="btn btn-secondary" href="/config/target-groups" use:link>
+            <a class="btn btn-secondary" href="/manage/target-groups" use:link>
                 Cancel
             </a>
         </div>

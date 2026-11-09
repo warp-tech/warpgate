@@ -1,5 +1,4 @@
-use std::error::Error;
-
+use aws_lc_rs::error::KeyRejected;
 use x509_parser::error::{PEMError, X509Error};
 
 #[derive(thiserror::Error, Debug)]
@@ -18,10 +17,12 @@ pub enum CaError {
     Asn1Pem(#[from] x509_parser::asn1_rs::Err<PEMError>),
     #[error("rcgen: {0}")]
     RcGen(#[from] rcgen::Error),
+    #[error("PEM: {0}")]
+    Pem(#[from] pem::PemError),
+    #[error("key rejected: {0}")]
+    KeyRejected(#[from] KeyRejected),
     #[error("Invalid key format")]
     InvalidKeyFormat,
     #[error("Invalid certificate format")]
     InvalidCertificateFormat,
-    #[error(transparent)]
-    Other(Box<dyn Error + Send + Sync>),
 }

@@ -1,5 +1,7 @@
 <script lang="ts">
-    import { onDestroy, onMount } from 'svelte'
+    import { logoUrl } from 'common/helpers'
+    import { serverInfo } from 'gateway/lib/store'
+    import { onDestroy } from 'svelte'
     import { get } from 'svelte/store'
     import { currentThemeFile } from 'theme'
     import logo from '../../public/assets/brand.svg?raw'
@@ -30,16 +32,23 @@
         }
     }
 
-    onMount(() => {
-        colorizeByTheme()
+    $effect(() => {
+        // react to logo changes
+        if (element) {
+            colorizeByTheme()
+        }
     })
 
     onDestroy(s)
 </script>
 
-<div bind:this={element} class="brand">
-    {@html logo}
-</div>
+{#if $serverInfo?.logoEtag}
+    <img class="custom-logo" src={logoUrl($serverInfo.logoEtag)} alt="Logo">
+{:else}
+    <div bind:this={element} class="brand">
+        {@html logo}
+    </div>
+{/if}
 
 <style lang="scss">
     :global(svg) {
@@ -50,5 +59,15 @@
 
     .brand {
         height: 22px;
+    }
+
+    // fixed height and max width + object-fit prefer max height while keepng aspect ratio
+    .custom-logo {
+        display: block;
+        height: 32px;
+        width: auto;
+        max-width: 200px;
+        object-fit: contain;
+        object-position: left center;
     }
 </style>

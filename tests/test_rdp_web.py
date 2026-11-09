@@ -42,9 +42,14 @@ class Test:
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=f"rdp-{uuid4()}",
+                    require_approval=False,
+                    ticket_requests_disabled=False,
+                    ticket_require_approval=False,
                     options=sdk.TargetOptions(
                         sdk.TargetOptionsTargetRdpOptions(
                             kind="Rdp",
+                            compression=sdk.RdpTargetCompression.REMOTEFX,
+                            tls_security=sdk.RdpTlsSecurity.TLS12,
                             host="localhost",
                             port=rdp_backend_port,
                             username="user",  # the xrdp login baked into the image
@@ -54,6 +59,7 @@ class Test:
                                 )
                             ),
                             verify_tls=False,
+                            interactive_logon=False,
                         )
                     ),
                 )
@@ -106,7 +112,7 @@ class Test:
                     messages.append(parsed)
                     if parsed.get("type") == "resize":
                         got_resize = True
-                    if parsed.get("type") == "error":
+                    if parsed.get("type") == "state" and parsed.get("phase") == "closed":
                         break
                 else:  # CLOSED / CLOSING / ERROR
                     break

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use sea_orm::ActiveValue::Set;
+use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter,
     QueryOrder, TransactionTrait,
@@ -9,7 +10,8 @@ use sea_orm::{
 use time::{Duration, OffsetDateTime};
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::helpers::hash::generate_ticket_secret;
+use warpgate_common::audit::AuditEvent;
+use warpgate_common::helpers::hash::{generate_ticket_secret, hash_secret};
 use warpgate_common::{Secret, WarpgateError};
 use warpgate_db_entities::TicketRequest::TicketRequestStatus;
 use warpgate_db_entities::{Parameters, Target, Ticket, TicketRequest};
@@ -18,7 +20,14 @@ use crate::{ConfigProvider, ConfigProviderEnum};
 
 pub struct TicketRequestResult {
     pub request: TicketRequest::Model,
+    pub target: Target::Model,
     pub auto_approved_secret: Option<Secret<String>>,
+}
+
+pub struct ActivatedTicket {
+    pub request: TicketRequest::Model,
+    pub target: Target::Model,
+    pub secret: Secret<String>,
 }
 
 pub struct CreateTicketRequestParams {
@@ -29,21 +38,17 @@ pub struct CreateTicketRequestParams {
     pub description: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum CreateTicketRequestError {
+    #[error("{0}")]
     InvalidInput(String),
-    Internal(WarpgateError),
+    #[error(transparent)]
+    Internal(#[from] WarpgateError),
 }
 
 impl From<sea_orm::DbErr> for CreateTicketRequestError {
     fn from(e: sea_orm::DbErr) -> Self {
         Self::Internal(e.into())
-    }
-}
-
-impl From<WarpgateError> for CreateTicketRequestError {
-    fn from(e: WarpgateError) -> Self {
-        Self::Internal(e)
     }
 }
 
@@ -181,6 +186,12 @@ pub async fn create_ticket_request(
 
         txn.commit().await?;
 
+        audit_self_service_ticket(
+            ticket_id,
+            params.user_id,
+            params.username.clone(),
+            params.target_name.clone(),
+        );
         info!(
             "Auto-approved ticket request {} for user {} to target {}",
             request_id, params.username, params.target_name
@@ -188,6 +199,7 @@ pub async fn create_ticket_request(
 
         Ok(TicketRequestResult {
             request: request_model,
+            target,
             auto_approved_secret: Some(secret),
         })
     } else {
@@ -214,9 +226,23 @@ pub async fn create_ticket_request(
 
         Ok(TicketRequestResult {
             request: request_model,
+            target,
             auto_approved_secret: None,
         })
     }
+}
+
+/// A self-service ticket is a working credential, so it is audited like an admin-issued one;
+/// the user it was issued to is the actor. Emitted only after the minting transaction commits.
+fn audit_self_service_ticket(ticket_id: Uuid, user_id: Uuid, username: String, target: String) {
+    AuditEvent::TicketCreated {
+        ticket_id,
+        user_id,
+        username,
+        target,
+        actor_user_id: user_id,
+    }
+    .emit();
 }
 
 async fn insert_self_service_ticket(
@@ -233,7 +259,7 @@ async fn insert_self_service_ticket(
 
     let ticket = Ticket::ActiveModel {
         id: Set(ticket_id),
-        secret: Set(secret.expose_secret().clone()),
+        secret_hash: Set(hash_secret(secret.expose_secret())),
         user_id: Set(user_id),
         target_id: Set(target_id),
         created: Set(OffsetDateTime::now_utc()),
@@ -294,12 +320,16 @@ pub async fn approve_ticket_request(
     Ok(Some(updated))
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ActivateTicketRequestError {
+    #[error("ticket request not found")]
     NotFound,
+    #[error("ticket request already activated")]
     AlreadyActivated,
+    #[error("the requested target no longer exists")]
     TargetGone,
-    Internal(WarpgateError),
+    #[error(transparent)]
+    Internal(#[from] WarpgateError),
 }
 
 impl From<sea_orm::DbErr> for ActivateTicketRequestError {
@@ -308,17 +338,11 @@ impl From<sea_orm::DbErr> for ActivateTicketRequestError {
     }
 }
 
-impl From<WarpgateError> for ActivateTicketRequestError {
-    fn from(e: WarpgateError) -> Self {
-        Self::Internal(e)
-    }
-}
-
 pub async fn activate_ticket_request(
     db: &sea_orm::DatabaseConnection,
     request_id: Uuid,
     user_id: Uuid,
-) -> Result<(TicketRequest::Model, Secret<String>), ActivateTicketRequestError> {
+) -> Result<ActivatedTicket, ActivateTicketRequestError> {
     let db_conn = db;
 
     let Some(request) = TicketRequest::Entity::find_by_id(request_id)
@@ -358,6 +382,13 @@ pub async fn activate_ticket_request(
 
     let max_uses = target.ticket_max_uses.or(policy.ticket_max_uses);
 
+    // Looked up before minting, so a failure here cannot leave a ticket the user never receives.
+    let username = warpgate_db_entities::User::Entity::find_by_id(user_id)
+        .one(db_conn)
+        .await?
+        .map(|user| user.username)
+        .unwrap_or_default();
+
     let txn = db_conn.begin().await?;
 
     let (ticket_id, secret) = insert_self_service_ticket(
@@ -370,18 +401,36 @@ pub async fn activate_ticket_request(
     )
     .await?;
 
-    let mut active: TicketRequest::ActiveModel = request.into();
-    active.ticket_id = Set(Some(ticket_id));
-    let updated = active.update(&txn).await?;
+    let update_res = TicketRequest::Entity::update_many()
+        .col_expr(
+            TicketRequest::Column::TicketId,
+            Expr::value(Some(ticket_id)),
+        )
+        .filter(TicketRequest::Column::Id.eq(request_id))
+        .filter(TicketRequest::Column::Status.eq(TicketRequestStatus::Approved))
+        .filter(TicketRequest::Column::TicketId.is_null())
+        .exec(&txn)
+        .await?;
+    if update_res.rows_affected == 0 {
+        return Err(ActivateTicketRequestError::AlreadyActivated);
+    }
+
+    let mut updated = request;
+    updated.ticket_id = Some(ticket_id);
 
     txn.commit().await?;
 
+    audit_self_service_ticket(ticket_id, user_id, username, target.name.clone());
     info!(
         "User activated approved ticket request {}, ticket {} created",
         request_id, ticket_id
     );
 
-    Ok((updated, secret))
+    Ok(ActivatedTicket {
+        request: updated,
+        target,
+        secret,
+    })
 }
 
 pub async fn deny_ticket_request(

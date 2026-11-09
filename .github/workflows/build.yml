@@ -4,6 +4,10 @@ permissions:
 
 on: [push, pull_request]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     strategy:
@@ -19,16 +23,6 @@ jobs:
             os: ubuntu-22.04-arm # older image for glibc compatibility
             cyclonedx-build: cyclonedx-linux-arm64
             cargo-cross: false
-          - arch: x86_64-macos
-            target: x86_64-apple-darwin
-            os: macos-latest
-            cyclonedx-build: cyclonedx-osx-x64
-            cargo-cross: false
-          - arch: arm64-macos
-            target: aarch64-apple-darwin
-            os: macos-latest
-            cyclonedx-build: cyclonedx-osx-arm64
-            cargo-cross: true
       fail-fast: false
 
     name: Build (${{ matrix.arch }})
@@ -45,20 +39,20 @@ jobs:
           sudo apt update
           sudo apt install -y libssl-dev pkg-config
 
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@v7.0.1
         with:
           submodules: recursive
 
-      - uses: rlespinasse/github-slug-action@ef93b2ea4b6405d06fd8684fc3ff795d262ecae8
+      - uses: rlespinasse/github-slug-action@v5.7.1
 
       - name: Add Rust target
         run: rustup target add ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+      - uses: Swatinem/rust-cache@v2.9.3
         with:
           key: "build"
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: 24
 
@@ -93,7 +87,7 @@ jobs:
           cd warpgate-web && NODE_ENV=dev cyclonedx-npm --output-format xml > ../cdx/admin-ui.cdx.xml
 
       - name: Build
-        uses: actions-rs/cargo@844f36862e911db73fe0815f00a4a2602c279505
+        uses: actions-rs/cargo@v1.0.3
         with:
           command: build
           use-cross: ${{ matrix.cargo-cross }}
@@ -114,7 +108,7 @@ jobs:
         run: ./cyclonedx merge --input-files cdx/* --input-format xml --output-format xml > cdx.xml
 
       - name: Attest build
-        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6
+        uses: actions/attest@v4.2.2
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           subject-path: target/${{ matrix.target }}/release/warpgate
@@ -137,12 +131,29 @@ jobs:
           mv target/${{ matrix.target }}/release/warpgate dist/warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}
           mv cdx.xml dist/warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}.cdx.xml
 
+      # Updating a release with generate_release_notes appends a fresh copy of the
+      # generated notes to whatever body is already there, so only ask for them
+      # while the release has none - otherwise every arch of every rerun grows
+      # the notes and buries any hand-written ones.
+      - name: Check for existing release notes
+        id: release_notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          body=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null || true)
+          if [ -z "$body" ]; then
+            echo "generate=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "generate=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Upload release
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
+        uses: softprops/action-gh-release@v3.0.3
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           draft: true
-          generate_release_notes: true
+          generate_release_notes: ${{ steps.release_notes.outputs.generate == 'true' }}
           files: dist/*
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -156,7 +167,7 @@ jobs:
           sudo apt update
           sudo apt install --no-install-recommends -y libssl-dev pkg-config
 
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@v7.0.1
         with:
           submodules: recursive
 

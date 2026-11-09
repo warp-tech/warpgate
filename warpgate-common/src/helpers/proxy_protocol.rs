@@ -3,22 +3,21 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use anyhow::{Context, bail};
-use poem::http::uri::Scheme;
 use poem::listener::Acceptor;
 use poem::web::{LocalAddr, RemoteAddr};
 use ppp::{HeaderResult, PartialResult};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
-use tracing::warn;
+
+use crate::helpers::concurrent_acceptor::{Accepted, ConcurrentAcceptor};
 
 const V2_MINIMUM_HEADER_LENGTH: usize = 16;
 const V1_MAX_HEADER_LENGTH: usize = 108;
 const MAX_PROXY_PROTOCOL_HEADER_LENGTH: usize = V2_MINIMUM_HEADER_LENGTH + u16::MAX as usize;
 
 /// A conforming peer sends the whole header up front, so the budget only has to
-/// outlast network latency. It bounds how long a stalled connection can hold up
-/// the accept loop of the protocols that read the header inline.
+/// outlast network latency.
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub async fn remote_address(
@@ -33,43 +32,43 @@ pub async fn remote_address(
     Ok(read_header(stream).await?.unwrap_or(peer_address))
 }
 
-pub struct ProxyProtocolAcceptor<A> {
-    inner: A,
-    proxy_protocol: bool,
+pub enum MaybeProxyProtocolAcceptor<A: Acceptor> {
+    Direct(A),
+    Reading(ConcurrentAcceptor<A::Io>),
 }
 
-impl<A> ProxyProtocolAcceptor<A> {
-    pub const fn new(inner: A, proxy_protocol: bool) -> Self {
-        Self {
-            inner,
-            proxy_protocol,
+impl<A: Acceptor + 'static> MaybeProxyProtocolAcceptor<A> {
+    pub fn new(inner: A, proxy_protocol: bool) -> Self {
+        if !proxy_protocol {
+            return Self::Direct(inner);
         }
+        Self::Reading(ConcurrentAcceptor::new(
+            inner,
+            |(mut io, local_addr, remote_addr, scheme): Accepted<A::Io>| async move {
+                let remote_addr = match read_header(&mut io).await? {
+                    Some(address) => RemoteAddr(address.into()),
+                    None => remote_addr,
+                };
+                Ok((io, local_addr, remote_addr, scheme))
+            },
+        ))
     }
 }
 
-impl<A: Acceptor> Acceptor for ProxyProtocolAcceptor<A> {
+impl<A: Acceptor + 'static> Acceptor for MaybeProxyProtocolAcceptor<A> {
     type Io = A::Io;
 
     fn local_addr(&self) -> Vec<LocalAddr> {
-        self.inner.local_addr()
+        match self {
+            Self::Direct(inner) => inner.local_addr(),
+            Self::Reading(inner) => inner.local_addr(),
+        }
     }
 
-    async fn accept(&mut self) -> IoResult<(Self::Io, LocalAddr, RemoteAddr, Scheme)> {
-        loop {
-            let (mut io, local_addr, remote_addr, scheme) = self.inner.accept().await?;
-            if !self.proxy_protocol {
-                return Ok((io, local_addr, remote_addr, scheme));
-            }
-
-            match read_header(&mut io).await {
-                Ok(Some(remote_addr)) => {
-                    return Ok((io, local_addr, RemoteAddr(remote_addr.into()), scheme));
-                }
-                Ok(None) => return Ok((io, local_addr, remote_addr, scheme)),
-                Err(error) => {
-                    warn!(%error, "Failed to read PROXY protocol header");
-                }
-            }
+    async fn accept(&mut self) -> IoResult<Accepted<Self::Io>> {
+        match self {
+            Self::Direct(inner) => inner.accept().await,
+            Self::Reading(inner) => inner.accept().await,
         }
     }
 }
@@ -184,7 +183,43 @@ fn source_address_v2(header: &ppp::v2::Header<'_>) -> anyhow::Result<Option<Sock
 mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr};
 
+    use poem::listener::{Listener, TcpListener};
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::TcpStream;
+
     use super::*;
+
+    #[tokio::test]
+    async fn stalled_header_does_not_block_later_connections() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .into_acceptor()
+            .await
+            .unwrap();
+        let address = listener
+            .local_addr()
+            .into_iter()
+            .find_map(|address| address.0.as_socket_addr().copied())
+            .unwrap();
+
+        // Queued before the acceptor starts polling, so it is accepted first.
+        let _stalled = TcpStream::connect(address).await.unwrap();
+        let mut acceptor = MaybeProxyProtocolAcceptor::new(listener, true);
+
+        let mut second = TcpStream::connect(address).await.unwrap();
+        second
+            .write_all(b"PROXY TCP4 203.0.113.10 10.0.0.2 42300 443\r\n")
+            .await
+            .unwrap();
+
+        let (_io, _, remote_addr, _) = timeout(Duration::from_secs(5), acceptor.accept())
+            .await
+            .expect("a peer that sent no header blocked the next connection")
+            .unwrap();
+        assert_eq!(
+            remote_addr.as_socket_addr(),
+            Some(&"203.0.113.10:42300".parse().unwrap())
+        );
+    }
 
     async fn read_header_from(bytes: &[u8]) -> anyhow::Result<Option<SocketAddr>> {
         let mut input = bytes;

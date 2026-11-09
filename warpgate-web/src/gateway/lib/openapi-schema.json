@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.27.0-beta.2-27-gd137485f-modified"
+    "version": "v0.30.0-modified"
   },
   "servers": [
     {
@@ -76,6 +76,9 @@
         "responses": {
           "201": {
             "description": ""
+          },
+          "403": {
+            "description": ""
           }
         },
         "operationId": "logout"
@@ -145,6 +148,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_web_auth_requests"
@@ -186,6 +192,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_auth_state"
@@ -218,14 +227,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthStateResponseInternal"
-                }
-              }
-            }
+            "description": ""
           },
           "404": {
             "description": ""
@@ -237,6 +239,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "approve_auth"
@@ -259,14 +264,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthStateResponseInternal"
-                }
-              }
-            }
+            "description": ""
           },
           "404": {
             "description": ""
@@ -278,6 +276,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "reject_auth"
@@ -348,6 +349,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_targets"
@@ -470,6 +474,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": ""
           }
         },
         "security": [
@@ -478,6 +485,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_sso_kubernetes_configs"
@@ -528,6 +538,35 @@
         "operationId": "start_sso"
       }
     },
+    "/sso/providers/{name}/backchannel-logout": {
+      "post": {
+        "summary": "OpenID Connect Back-Channel Logout endpoint, called by the identity\nprovider when a user's session there ends.",
+        "parameters": [
+          {
+            "name": "name",
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "operationId": "sso_backchannel_logout"
+      }
+    },
     "/profile/credentials": {
       "get": {
         "responses": {
@@ -551,6 +590,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_my_credentials"
@@ -602,6 +644,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "change_my_password"
@@ -640,6 +685,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "add_my_public_key"
@@ -667,6 +715,9 @@
           "401": {
             "description": ""
           },
+          "403": {
+            "description": ""
+          },
           "404": {
             "description": ""
           }
@@ -677,6 +728,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "delete_my_public_key"
@@ -707,6 +761,9 @@
           },
           "401": {
             "description": ""
+          },
+          "403": {
+            "description": ""
           }
         },
         "security": [
@@ -715,6 +772,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "add_my_otp"
@@ -742,6 +802,9 @@
           "401": {
             "description": ""
           },
+          "403": {
+            "description": ""
+          },
           "404": {
             "description": ""
           }
@@ -752,6 +815,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "delete_my_otp"
@@ -790,6 +856,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "issue_my_certificate"
@@ -827,6 +896,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "revoke_my_certificate"
@@ -858,6 +930,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_my_api_tokens"
@@ -904,6 +979,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "create_api_token"
@@ -941,6 +1019,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "delete_my_api_token"
@@ -999,6 +1080,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "create_ticket_request"
@@ -1028,6 +1112,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_my_ticket_requests"
@@ -1072,6 +1159,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_my_ticket_request"
@@ -1136,6 +1226,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "activate_ticket_request"
@@ -1167,6 +1260,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_my_tickets"
@@ -1204,6 +1300,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "delete_my_ticket"
@@ -1245,6 +1344,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_ticket_request_targets"
@@ -1268,7 +1370,7 @@
             "content": {
               "application/json; charset=utf-8": {
                 "schema": {
-                  "$ref": "#/components/schemas/WebSshSessionCreated"
+                  "$ref": "#/components/schemas/WebClientSessionCreated"
                 }
               }
             }
@@ -1292,6 +1394,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "create_web_ssh_session"
@@ -1318,7 +1423,7 @@
             "content": {
               "application/json; charset=utf-8": {
                 "schema": {
-                  "$ref": "#/components/schemas/WebSshSessionInfo"
+                  "$ref": "#/components/schemas/WebClientSessionInfo"
                 }
               }
             }
@@ -1333,6 +1438,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_web_ssh_session"
@@ -1355,9 +1463,6 @@
           "204": {
             "description": ""
           },
-          "403": {
-            "description": ""
-          },
           "404": {
             "description": ""
           }
@@ -1368,6 +1473,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "delete_web_ssh_session"
@@ -1391,7 +1499,7 @@
             "content": {
               "application/json; charset=utf-8": {
                 "schema": {
-                  "$ref": "#/components/schemas/WebDesktopSessionCreated"
+                  "$ref": "#/components/schemas/WebClientSessionCreated"
                 }
               }
             }
@@ -1415,6 +1523,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "create_web_desktop_session"
@@ -1441,7 +1552,7 @@
             "content": {
               "application/json; charset=utf-8": {
                 "schema": {
-                  "$ref": "#/components/schemas/WebDesktopSessionInfo"
+                  "$ref": "#/components/schemas/WebClientSessionInfo"
                 }
               }
             }
@@ -1456,6 +1567,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "get_web_desktop_session"
@@ -1478,9 +1592,6 @@
           "204": {
             "description": ""
           },
-          "403": {
-            "description": ""
-          },
           "404": {
             "description": ""
           }
@@ -1491,6 +1602,9 @@
           },
           {
             "CookieSecurityScheme": []
+          },
+          {
+            "ClusterSecurityScheme": []
           }
         ],
         "operationId": "delete_web_desktop_session"
@@ -1503,13 +1617,40 @@
         "type": "object",
         "title": "ActivatedTicketModel",
         "required": [
-          "request"
+          "request",
+          "target"
         ],
         "properties": {
           "request": {
             "$ref": "#/components/schemas/TicketRequest"
           },
+          "target": {
+            "$ref": "#/components/schemas/ActivatedTicketTargetInfo"
+          },
           "secret": {
+            "type": "string"
+          }
+        }
+      },
+      "ActivatedTicketTargetInfo": {
+        "type": "object",
+        "title": "ActivatedTicketTargetInfo",
+        "description": "Just the slim view of fields that the UI needs to show connection instructions\nsince the user might not have full role based access to the target",
+        "required": [
+          "name",
+          "kind"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TargetKind"
+          },
+          "external_host": {
+            "type": "string"
+          },
+          "default_database_name": {
             "type": "string"
           }
         }
@@ -1530,6 +1671,7 @@
           "access_roles_assign",
           "sessions_view",
           "sessions_terminate",
+          "approve_sessions",
           "recordings_view",
           "tickets_create",
           "tickets_delete",
@@ -1574,6 +1716,9 @@
           "sessions_terminate": {
             "type": "boolean"
           },
+          "approve_sessions": {
+            "type": "boolean"
+          },
           "recordings_view": {
             "type": "boolean"
           },
@@ -1610,6 +1755,15 @@
           "IpRejected"
         ]
       },
+      "ApprovalScope": {
+        "type": "string",
+        "description": "\"Remember decision\" scope for approvals",
+        "enum": [
+          "Once",
+          "Target",
+          "AllTargets"
+        ]
+      },
       "ApproveAuthRequest": {
         "type": "object",
         "title": "ApproveAuthRequest",
@@ -1618,7 +1772,7 @@
         ],
         "properties": {
           "scope": {
-            "$ref": "#/components/schemas/WebApprovalScope"
+            "$ref": "#/components/schemas/ApprovalScope"
           }
         }
       },
@@ -1713,6 +1867,15 @@
           "target_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "width": {
+            "type": "integer",
+            "format": "uint16",
+            "description": "Initial desktop resolution to request from the target, measured by the browser.\nBoth must be present to take effect; otherwise a default is used."
+          },
+          "height": {
+            "type": "integer",
+            "format": "uint16"
           }
         }
       },
@@ -1733,11 +1896,15 @@
         "type": "object",
         "title": "CreatedRequest",
         "required": [
-          "request"
+          "request",
+          "target"
         ],
         "properties": {
           "request": {
             "$ref": "#/components/schemas/TicketRequest"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ActivatedTicketTargetInfo"
           },
           "auto_approved_ticket_secret": {
             "type": "string"
@@ -1978,16 +2145,19 @@
         "required": [
           "ports",
           "password_login_mode",
-          "minimize_password_login",
           "authorized_via_ticket",
           "authorized_via_sso_with_single_logout",
+          "local_logout_disabled",
           "own_credential_management_allowed",
           "ticket_self_service_enabled",
           "ticket_require_description",
           "ticket_request_show_all_targets",
           "target_click_action",
+          "open_targets_in_new_tab",
           "web_clients_enabled",
           "has_ldap",
+          "needs_mfa_setup",
+          "otp_setup_enforced",
           "should_prompt_analytics",
           "banner",
           "show_session_menu"
@@ -2008,20 +2178,22 @@
           "external_hosts": {
             "$ref": "#/components/schemas/ExternalHostsInfo"
           },
+          "control_plane_host": {
+            "type": "string"
+          },
           "ports": {
             "$ref": "#/components/schemas/PortsInfo"
           },
           "password_login_mode": {
             "$ref": "#/components/schemas/PasswordLoginMode"
           },
-          "minimize_password_login": {
-            "type": "boolean",
-            "description": "Deprecated in 0.26: superseded by `password_login_mode`"
-          },
           "authorized_via_ticket": {
             "type": "boolean"
           },
           "authorized_via_sso_with_single_logout": {
+            "type": "boolean"
+          },
+          "local_logout_disabled": {
             "type": "boolean"
           },
           "own_credential_management_allowed": {
@@ -2047,6 +2219,9 @@
           "target_click_action": {
             "$ref": "#/components/schemas/TargetClickAction"
           },
+          "open_targets_in_new_tab": {
+            "$ref": "#/components/schemas/OpenTargetsInNewTabMode"
+          },
           "max_api_token_duration_seconds": {
             "type": "integer",
             "format": "int64"
@@ -2055,6 +2230,12 @@
             "type": "boolean"
           },
           "has_ldap": {
+            "type": "boolean"
+          },
+          "needs_mfa_setup": {
+            "type": "boolean"
+          },
+          "otp_setup_enforced": {
             "type": "boolean"
           },
           "setup_state": {
@@ -2075,6 +2256,15 @@
           },
           "show_session_menu": {
             "type": "boolean"
+          },
+          "logo_etag": {
+            "type": "string"
+          },
+          "config_warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -2225,6 +2415,16 @@
             "type": "string"
           }
         }
+      },
+      "OpenTargetsInNewTabMode": {
+        "type": "string",
+        "description": "How the portal decides whether targets open in a new browser tab.",
+        "enum": [
+          "DefaultOn",
+          "DefaultOff",
+          "ForcedOn",
+          "ForcedOff"
+        ]
       },
       "OtpLoginRequest": {
         "type": "object",
@@ -2710,18 +2910,9 @@
           }
         }
       },
-      "WebApprovalScope": {
-        "type": "string",
-        "description": "How an web approval should be remembered for bypass",
-        "enum": [
-          "Once",
-          "Target",
-          "AllTargets"
-        ]
-      },
-      "WebDesktopSessionCreated": {
+      "WebClientSessionCreated": {
         "type": "object",
-        "title": "WebDesktopSessionCreated",
+        "title": "WebClientSessionCreated",
         "required": [
           "session_id"
         ],
@@ -2732,38 +2923,9 @@
           }
         }
       },
-      "WebDesktopSessionInfo": {
+      "WebClientSessionInfo": {
         "type": "object",
-        "title": "WebDesktopSessionInfo",
-        "required": [
-          "target_name",
-          "target_kind"
-        ],
-        "properties": {
-          "target_name": {
-            "type": "string"
-          },
-          "target_kind": {
-            "$ref": "#/components/schemas/TargetKind"
-          }
-        }
-      },
-      "WebSshSessionCreated": {
-        "type": "object",
-        "title": "WebSshSessionCreated",
-        "required": [
-          "session_id"
-        ],
-        "properties": {
-          "session_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
-      "WebSshSessionInfo": {
-        "type": "object",
-        "title": "WebSshSessionInfo",
+        "title": "WebClientSessionInfo",
         "required": [
           "target_name",
           "target_kind"
@@ -2779,6 +2941,12 @@
       }
     },
     "securitySchemes": {
+      "ClusterSecurityScheme": {
+        "type": "apiKey",
+        "description": "Requests forwarded by a cluster peer are authenticated by the peer's TLS\nclient certificate at the listener (plus the forwarded user identity\nresolved into the request authorization — see\n`cluster_request_authorization`). The node id header only lets this scheme\nfire: the checker reads the context that `inject_request_authorization`\nattaches, so a header alone never authenticates.",
+        "name": "x-warpgate-cluster-node",
+        "in": "header"
+      },
       "CookieSecurityScheme": {
         "type": "apiKey",
         "name": "warpgate-http-session",

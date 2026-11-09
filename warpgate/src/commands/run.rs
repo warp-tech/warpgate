@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use futures::FutureExt;
@@ -10,6 +11,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, error, info, warn};
+use warpgate_common::encryption::validate_encryption_config;
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{GlobalParams, WarpgateConfig};
 use warpgate_core::db::cleanup_db;
@@ -47,9 +49,7 @@ async fn spawn_supervisor(
         validate_tls(&params.tls)
             .await
             .with_context(|| format!("{name} listener: TLS setup failed"))?;
-        // Fail fast if the port can't be bound; the probe listeners drop here and
-        // the supervisor rebinds. ponytail: tiny drop→rebind window, fine at startup.
-        params.endpoint.tcp_listeners().await.with_context(|| {
+        params.endpoint.probe().with_context(|| {
             format!("{name} listener: cannot bind {}", params.endpoint.address())
         })?;
     }
@@ -80,11 +80,35 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
 
     let services = Services::new(config.clone(), admin_token, params.clone()).await?;
 
+    validate_encryption_config(&config);
+
+    // Join the cluster before the credential backfill below
+    services.start_cluster().await?;
+
     install_database_logger(services.db.clone());
 
     // Runs even when the SSH listener is disabled so that the admin UI can
     // manage the keys and other protocols' features relying on them work.
-    warpgate_protocol_ssh::ensure_client_keys(&services.db, &config, params).await?;
+    let keys_path = config.store.ssh.keys_path(params);
+    warpgate_protocol_ssh::ensure_host_keys(&services.db, &keys_path).await?;
+    warpgate_protocol_ssh::ensure_client_keys(&services.db, &keys_path).await?;
+
+    // Encrypt before listeners start
+    if warpgate_core::backfill_credential_encryption(&services.db).await?
+        == warpgate_core::BackfillOutcome::AwaitingCluster
+    {
+        let db = services.db.clone();
+        tokio::spawn(async move {
+            loop {
+                match warpgate_core::backfill_credential_encryption(&db).await {
+                    Ok(warpgate_core::BackfillOutcome::Settled) => break,
+                    Ok(warpgate_core::BackfillOutcome::AwaitingCluster) => {}
+                    Err(error) => warn!(%error, "Deferred credential encryption failed"),
+                }
+                tokio::time::sleep(Duration::from_secs(rand::random_range(3..7))).await;
+            }
+        });
+    }
 
     if console::user_attended() {
         info!("--------------------------------------------");
@@ -215,10 +239,9 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
                 let retention = { services.config.lock().await.store.log.retention };
                 let audit_retention = { services.config.lock().await.store.log.audit_retention };
                 let interval = std::cmp::min(retention, audit_retention) / 10;
-                #[allow(clippy::explicit_auto_deref)]
                 match cleanup_db(
                     &services.db,
-                    &*services.recordings.lock().await,
+                    &services.recordings,
                     &retention,
                     &audit_retention,
                 )
@@ -280,7 +303,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
     }
 
     let cleanup = async {
-        services.recordings.lock().await.shutdown().await;
+        services.recordings.shutdown().await;
         if let Err(error) = services.cluster.shutdown().await {
             warn!(%error, "Failed to deregister cluster node");
         }

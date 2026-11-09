@@ -9,13 +9,12 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, trace, warn};
 use url::Url;
-use uuid::Uuid;
-use warpgate_common::auth::AuthSelector;
+use warpgate_common::auth::{AuthSelector, redacted_selector};
 use warpgate_common::helpers::rng::get_crypto_rng;
-use warpgate_common::{Protocol, Secret, TargetMySqlOptions, TargetOptions};
+use warpgate_common::{Protocol, Secret, TargetMySqlOptions, UserSessionId};
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::{
-    AuthOkPermit, DbAuthTransport, Services, TargetAuthorization, WarpgateServerHandle,
+    AdmittedTarget, ApprovedTarget, AuthOkPermit, DbAuthTransport, Services, WarpgateServerHandle,
     run_db_authorization,
 };
 use warpgate_database_protocols::io::{BufExt, Decode};
@@ -30,6 +29,7 @@ use warpgate_tls::ServerTlsStream;
 
 use crate::client::{ConnectionOptions, MySqlClient};
 use crate::error::MySqlError;
+use crate::relay::{Relayed, ResponseRelay};
 use crate::stream::MySqlStream;
 
 pub struct MySqlSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
@@ -40,7 +40,7 @@ pub struct MySqlSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
     database: Option<String>,
     tls_config: Arc<ServerConfig>,
     server_handle: Arc<Mutex<WarpgateServerHandle>>,
-    id: Uuid,
+    id: UserSessionId,
     services: Services,
     remote_address: SocketAddr,
     /// MySQL carries the password in the handshake, so the shared auth flow can
@@ -102,10 +102,13 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         tls_config: ServerConfig,
         remote_address: SocketAddr,
     ) -> Self {
-        let id = server_handle.lock().await.id();
+        let id = server_handle.lock().await.user_session_id();
         Self {
             services,
             stream: MySqlStream::new(stream),
+            // The target is only picked after this handshake is already on the
+            // wire, so it can turn out to lack capabilities offered here.
+            // [`ResponseRelay`] rewrites its responses into this framing.
             capabilities: Capabilities::PROTOCOL_41
                 | Capabilities::PLUGIN_AUTH
                 | Capabilities::FOUND_ROWS
@@ -170,8 +173,11 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
             let resp = HandshakeResponse::decode_with(payload, &mut self.capabilities)
                 .map_err(MySqlError::decode)?;
 
-            trace!(?resp, "Handshake response");
-            info!(capabilities=?self.capabilities, username=%resp.username, "User handshake");
+            // `resp` carries the raw username (possibly a ticket secret) and the
+            // auth response (cleartext under mysql_clear_password), so only the
+            // harmless fields are traced.
+            trace!(database=?resp.database, auth_plugin=?resp.auth_plugin, "Handshake response");
+            info!(capabilities=?self.capabilities, username=%redacted_selector(&resp.username), "User handshake");
 
             if self.capabilities.contains(Capabilities::SSL) {
                 if self.stream.is_tls() {
@@ -231,28 +237,26 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
     ) -> Result<(), MySqlError> {
         let selector: AuthSelector = handshake.username.deref().into();
         let remote_ip = self.remote_address.ip();
-        let session_id = self.server_handle.lock().await.id();
+        let session_id = self.server_handle.lock().await.user_session_id();
 
         self.handshake_password = Some(password);
 
         let services = self.services.clone();
-        let Some(authorization) =
+        let Some(approved) =
             run_db_authorization(&mut self, &services, session_id, selector, remote_ip).await?
         else {
             return Ok(());
         };
 
-        self.run_authorized(handshake, authorization).await
+        self.run_authorized(handshake, approved).await
     }
 
     async fn run_authorized(
         mut self,
         handshake: HandshakeResponse,
-        authorization: TargetAuthorization,
+        approved: ApprovedTarget,
     ) -> Result<(), MySqlError> {
-        let (user_info, target) = authorization.into_parts();
-
-        let TargetOptions::MySql(ref mysql_options) = target.options else {
+        let Ok(approved) = approved.narrow::<TargetMySqlOptions>() else {
             warn!("Selected target is not a MySQL target");
             self.stream.push(
                 &ErrPacket {
@@ -266,36 +270,36 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
             return Ok(());
         };
 
-        let mysql_options = mysql_options.clone();
+        let admitted = self
+            .server_handle
+            .lock()
+            .await
+            .register_approved_target_session(approved)
+            .await?;
 
-        {
-            let handle = self.server_handle.lock().await;
-            handle.set_user_info(user_info).await?;
-            handle.set_target(&target).await?;
-        }
-
-        self.run_authorized_inner(handshake, mysql_options).await
+        self.run_authorized_inner(handshake, admitted).await
     }
 
     async fn run_authorized_inner(
         mut self,
         handshake: HandshakeResponse,
-        options: TargetMySqlOptions,
+        admitted: AdmittedTarget<TargetMySqlOptions>,
     ) -> Result<(), MySqlError> {
         self.database = handshake.database.clone();
-        self.username = Some(handshake.username);
+        self.username = Some(redacted_selector(&handshake.username).to_owned());
         if let Some(ref database) = handshake.database {
             info!("Selected database: {database}");
         }
 
         let mut client = match MySqlClient::connect(
-            &options,
+            admitted,
             ConnectionOptions {
                 collation: handshake.collation,
                 database: handshake.database,
                 max_packet_size: handshake.max_packet_size,
                 capabilities: self.capabilities,
             },
+            &*self.services.secret_backends,
         )
         .await
         {
@@ -331,49 +335,8 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                 client.stream.push(&query, ())?;
                 client.stream.flush().await?;
 
-                let mut eof_ctr = 0;
-                let mut first_packet = true;
-                loop {
-                    let Some(response) = client.stream.recv().await? else {
-                        return Err(MySqlError::Eof);
-                    };
-                    trace!(?response, "client got packet");
-                    self.stream.push(&&response[..], ())?;
-                    self.stream.flush().await?;
-
-                    let com = response.first();
-                    if first_packet {
-                        first_packet = false;
-                        // OK or ERR as the first packet means there is no
-                        // result set; later packets starting with 0x00 are
-                        // rows with an empty first column
-                        if com == Some(&0) || com == Some(&0xff) {
-                            break;
-                        }
-                        continue;
-                    }
-                    // 0xff is not a valid length-encoded value prefix, so
-                    // no row or column definition can start with it
-                    if com == Some(&0xff) {
-                        break;
-                    }
-                    if com == Some(&0xfe) {
-                        // Rows can also start with 0xfe (a length-encoded
-                        // value >= 2^24); real EOF and terminating OK
-                        // packets are shorter than these thresholds
-                        if client.capabilities.contains(Capabilities::DEPRECATE_EOF) {
-                            if response.len() < 0xff_ffff {
-                                break;
-                            }
-                        } else if response.len() < 9 {
-                            eof_ctr += 1;
-                            if eof_ctr == 2 {
-                                // todo check multiple results
-                                break;
-                            }
-                        }
-                    }
-                }
+                let relay = ResponseRelay::result_set(self.capabilities, client.capabilities);
+                self.relay_response(&mut client, relay).await?;
             // COM_QUIT
             } else if com == Some(&0x01) {
                 break;
@@ -386,12 +349,14 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
                 info!("Selected database: {db}");
                 client.stream.push(&&payload[..], ())?;
                 client.stream.flush().await?;
-                self.passthrough_until_result(&mut client).await?;
+                let relay = ResponseRelay::single(self.capabilities, client.capabilities);
+                self.relay_response(&mut client, relay).await?;
             // COM_FIELD_LIST, COM_PING, COM_RESET_CONNECTION
             } else if com == Some(&0x04) || com == Some(&0x0e) || com == Some(&0x1f) {
                 client.stream.push(&&payload[..], ())?;
                 client.stream.flush().await?;
-                self.passthrough_until_result(&mut client).await?;
+                let relay = ResponseRelay::single(self.capabilities, client.capabilities);
+                self.relay_response(&mut client, relay).await?;
             } else if let Some(com) = com {
                 warn!("Unknown packet type {com}");
                 self.send_error(1047, "Not implemented").await?;
@@ -403,20 +368,28 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> MySqlSession<S> {
         Ok(())
     }
 
-    async fn passthrough_until_result(
+    /// Forwards one target response to the client, packet by packet, until the
+    /// relay says it's complete.
+    async fn relay_response(
         &mut self,
         client: &mut MySqlClient,
+        mut relay: ResponseRelay,
     ) -> Result<(), MySqlError> {
         loop {
             let Some(response) = client.stream.recv().await? else {
                 return Err(MySqlError::Eof);
             };
             trace!(?response, "client got packet");
-            self.stream.push(&&response[..], ())?;
+
+            let (relayed, complete) = relay.next(&response)?;
+            match relayed {
+                Relayed::Verbatim => self.stream.push(&&response[..], ())?,
+                Relayed::Rewritten(ref packet) => self.stream.push(&&packet[..], ())?,
+                Relayed::Dropped => (),
+            }
             self.stream.flush().await?;
-            if let Some(com) = response.first()
-                && (com == &0 || com == &0xff || com == &0xfe)
-            {
+
+            if complete {
                 break;
             }
         }

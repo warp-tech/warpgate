@@ -1,8 +1,13 @@
+use std::collections::HashMap;
+
 use poem_openapi::{Enum, Object};
 use sea_orm::entity::prelude::*;
 use serde::Serialize;
 use uuid::Uuid;
+use warpgate_common::fuzzy::fuzzy_rank;
 use warpgate_common::{Target, TargetOptions};
+
+use crate::TargetGroup;
 
 #[derive(Debug, PartialEq, Eq, Serialize, Clone, Copy, Enum, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
@@ -54,6 +59,7 @@ pub struct Model {
     pub ticket_requests_disabled: bool,
     pub ticket_require_approval: bool,
     pub ticket_max_uses: Option<i16>,
+    pub require_approval: bool,
 }
 
 impl Related<super::Role::Entity> for Entity {
@@ -101,6 +107,34 @@ impl TryFrom<Model> for Target {
             ticket_requests_disabled: model.ticket_requests_disabled,
             ticket_require_approval: model.ticket_require_approval,
             ticket_max_uses: model.ticket_max_uses,
+            require_approval: model.require_approval,
         })
     }
+}
+
+pub fn fuzzy_filter_targets<'a, M>(
+    targets: &'a [M],
+    groups: &'a [TargetGroup::Model],
+    query: &str,
+) -> Vec<&'a M>
+where
+    Target: TryFrom<M>,
+    M: Clone,
+{
+    let targets: Vec<(&M, Target)> = targets
+        .iter()
+        .filter_map(|x| x.clone().try_into().ok().map(|t| (x, t)))
+        .collect::<Vec<_>>();
+    let group_map: HashMap<Uuid, &TargetGroup::Model> = groups.iter().map(|g| (g.id, g)).collect();
+    fuzzy_rank(&targets, query, |(_, t)| {
+        let group = t.group_id.and_then(|group_id| group_map.get(&group_id));
+        [
+            t.name.as_str(),
+            t.description.as_str(),
+            group.map(|g| g.name.as_str()).unwrap_or_default(),
+        ]
+    })
+    .iter()
+    .map(|x| x.0)
+    .collect()
 }

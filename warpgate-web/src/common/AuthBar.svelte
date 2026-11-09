@@ -8,6 +8,7 @@
         DropdownToggle,
     } from '@sveltestrap/sveltestrap'
 
+    import { navigateToExternalUrl } from 'common/helpers'
     import { api } from 'gateway/lib/api'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import Fa from 'svelte-fa'
@@ -20,7 +21,7 @@
 
     async function singleLogout() {
         const response = await api.initiateSsoLogout()
-        location.href = response.url
+        navigateToExternalUrl(response.url)
     }
 </script>
 
@@ -33,7 +34,17 @@
             <span class="ml-2">(ticket auth)</span>
         {/if}
 
-        {#if $serverInfo?.authorizedViaSsoWithSingleLogout}
+        {#if $serverInfo.localLogoutDisabled}
+            <Button
+                color="link"
+                on:click={singleLogout}
+                title="Log out everywhere"
+                size="sm"
+                class="p-0 ms-2"
+            >
+                <Fa icon={faSignOut} fw />
+            </Button>
+        {:else if $serverInfo.authorizedViaSsoWithSingleLogout}
             <Dropdown>
                 <DropdownToggle color="link" title="Log out options" size="sm">
                     <Fa icon={faSignOut} fw />

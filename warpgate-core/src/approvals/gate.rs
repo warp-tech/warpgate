@@ -1,0 +1,334 @@
+use std::net::IpAddr;
+use std::sync::Arc;
+
+use tokio::sync::Mutex;
+use tracing::warn;
+use warpgate_common::auth::{ApprovalKind, RememberApprovalBy};
+use warpgate_common::{UserSessionId, WarpgateError};
+use warpgate_db_entities::SessionApprovalRequest;
+use warpgate_db_entities::SessionApprovalRequest::{Advertised, mark_consumed};
+
+use super::*;
+use crate::cluster::ClusterNotification;
+use crate::config_providers::{ApprovedTarget, TargetAuthorization};
+use crate::protocols::AdmittedTarget;
+use crate::services::Services;
+use crate::{TargetSessionStart, WarpgateServerHandle};
+
+#[must_use]
+pub enum GateOutcome<O = warpgate_common::TargetOptions> {
+    Approved(ApprovedTarget<O>),
+    Refused,
+    // timeout / disconnected / gone from the DB (may ask again)
+    Expired,
+}
+
+impl<O> GateOutcome<O> {
+    pub fn approved(self) -> Option<ApprovedTarget<O>> {
+        match self {
+            Self::Approved(target) => Some(target),
+            Self::Refused | Self::Expired => None,
+        }
+    }
+}
+
+/// Current state of an approval gate
+#[must_use]
+pub enum PolledGate<O = warpgate_common::TargetOptions> {
+    Approved(ApprovedTarget<O>),
+    Refused,
+    /// no response (yet or ever)
+    Pending,
+}
+
+/// User session derived gate context
+pub struct GatedConnection {
+    pub remote_ip: Option<IpAddr>,
+    pub credentials: RememberApprovalBy,
+}
+
+impl GatedConnection {
+    /// Combine this user session context with the target session authorization context
+    fn subject_for<O>(
+        self,
+        session_id: UserSessionId,
+        authorization: &TargetAuthorization<O>,
+    ) -> ApprovalSubject {
+        ApprovalSubject {
+            kind: ApprovalKind::Admin,
+            session_id,
+            user_info: authorization.user_info().clone(),
+            protocol: authorization.protocol(),
+            target_name: authorization.target().name.clone(),
+            remote_ip: self.remote_ip,
+            remember_by: self.credentials,
+            ticket_id: authorization.ticket_id(),
+        }
+    }
+}
+
+#[must_use]
+pub enum Admission<O = warpgate_common::TargetOptions> {
+    Admitted(AdmittedTarget<O>),
+    Refused,
+    Expired,
+}
+
+impl<O> Admission<O> {
+    pub fn admitted(self) -> Result<AdmittedTarget<O>, WarpgateError> {
+        match self {
+            Self::Admitted(admitted) => Ok(admitted),
+            Self::Refused | Self::Expired => Err(WarpgateError::SessionNotApproved),
+        }
+    }
+}
+
+/// Start a target session, waiting for approval if needed
+/// and handle approval result. This is the only transition path from "authorized" to "admitted" for protocols that can wait for approval.
+///
+/// protocols that can communicate with the user during the wait, must drive require_admin_approval() + poll_admin_approval() themselves
+///
+/// `notify_waiting` is called if waiting for an administrator (TODO use a more explicit event sender)
+///
+/// This wraps require_admin_approval()
+///
+/// Protocols that can communicate with the user during the wait must drive
+/// `require_admin_approval()` + `poll_admin_approval()` themselves.
+pub async fn admit_target_session<O, F, Fut>(
+    services: &Services,
+    handle: &Arc<Mutex<WarpgateServerHandle>>,
+    authorization: TargetAuthorization<O>,
+    connection: GatedConnection,
+    notify_waiting: F,
+) -> Result<Admission<O>, WarpgateError>
+where
+    O: Send + Sync,
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<(), WarpgateError>>,
+{
+    let started = handle
+        .lock()
+        .await
+        .start_target_session(authorization)
+        .await?;
+    let authorization = match started {
+        TargetSessionStart::Started(admitted) => {
+            handle.lock().await.confirm();
+            return Ok(Admission::Admitted(admitted));
+        }
+        TargetSessionStart::NeedsApproval(authorization) => authorization,
+    };
+
+    let session_id = handle.lock().await.user_session_id();
+
+    let outcome: GateOutcome<O> = services
+        .require_admin_approval(authorization, session_id, connection, notify_waiting)
+        .await?;
+
+    let approved = match outcome {
+        GateOutcome::Approved(approved) => approved,
+        GateOutcome::Refused => {
+            warn!(%session_id, "Session was refused by an administrator");
+            return Ok(Admission::Refused);
+        }
+        GateOutcome::Expired => {
+            warn!(%session_id, "Session approval expired without a decision");
+            return Ok(Admission::Expired);
+        }
+    };
+
+    let mut handle = handle.lock().await;
+    let admitted = handle.register_approved_target_session(approved).await?;
+    handle.confirm();
+    Ok(Admission::Admitted(admitted))
+}
+
+impl Services {
+    /// Wait for an admin approval. Dropping the future cancels the appoval requet
+    pub async fn require_admin_approval<E, F, Fut, O>(
+        &self,
+        authorization: TargetAuthorization<O>,
+        session_id: UserSessionId,
+        connection: GatedConnection,
+        notify_waiting: F,
+    ) -> Result<GateOutcome<O>, E>
+    where
+        E: From<WarpgateError>,
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<(), E>>,
+    {
+        let subject = connection.subject_for(session_id, &authorization);
+        if !authorization.target().require_approval {
+            return Ok(GateOutcome::Approved(ApprovedTarget::new(authorization)));
+        }
+
+        let session_id = subject.session_id;
+
+        if self.admin_approval_is_remembered(&subject).await? {
+            subject.emit_bypassed_event();
+            return Ok(GateOutcome::Approved(ApprovedTarget::new(authorization)));
+        }
+
+        let mut guard = PendingApproval::guarding(self.db.clone(), &subject);
+        if matches!(
+            self.announce_admin_request(&subject).await?,
+            Advertised::TicketExhausted
+        ) {
+            return Ok(GateOutcome::Refused);
+        }
+
+        notify_waiting().await?;
+
+        let timeout = self.admin_approval_timeout().await?;
+        // audite event has already been emitted by the resolving code
+        let decision = match await_row_decision(
+            &self.db,
+            session_id,
+            ApprovalKind::Admin,
+            &subject.target_name,
+            timeout,
+        )
+        .await?
+        {
+            DecisionWaitOutcome::Decided(decision) => {
+                guard.decided();
+                decision
+            }
+            DecisionWaitOutcome::TimedOut => {
+                // `Expired` ends the session, so the question is closed before
+                // returning rather than by the guard's drop task: a row left
+                // pending past this point could still be approved with nobody
+                // waiting on it.
+                guard.timed_out();
+                if close_timed_out(&self.db, &subject).await? {
+                    return Ok(GateOutcome::Expired);
+                }
+                // A decision landed between the last poll and the close
+                match row_decision(
+                    &self.db,
+                    session_id,
+                    ApprovalKind::Admin,
+                    &subject.target_name,
+                )
+                .await?
+                {
+                    Some(decision) => {
+                        guard.decided();
+                        decision
+                    }
+                    None => return Ok(GateOutcome::Expired),
+                }
+            }
+            DecisionWaitOutcome::Ended => return Ok(GateOutcome::Expired),
+        };
+
+        match decision {
+            ApprovalDecision::Approved(_) => {
+                Ok(GateOutcome::Approved(ApprovedTarget::new(authorization)))
+            }
+            ApprovalDecision::Rejected => Ok(GateOutcome::Refused),
+        }
+    }
+
+    async fn announce_admin_request(
+        &self,
+        subject: &ApprovalSubject,
+    ) -> Result<Advertised, WarpgateError> {
+        let advertised = advertise_admin_request(&self.db, self.cluster.node_id, subject).await?;
+        // idempotent
+        if matches!(advertised, Advertised::Asked) {
+            subject.emit_requested_event();
+            self.cluster
+                .notify_global(ClusterNotification::SessionApprovalsChanged);
+        }
+        Ok(advertised)
+    }
+
+    /// Non-blocking `require_admin_approval`
+    pub async fn poll_admin_approval<O>(
+        &self,
+        authorization: TargetAuthorization<O>,
+        session_id: UserSessionId,
+        connection: GatedConnection,
+    ) -> Result<PolledGate<O>, WarpgateError> {
+        if !authorization.target().require_approval {
+            return Ok(PolledGate::Approved(ApprovedTarget::new(authorization)));
+        }
+
+        let subject = connection.subject_for(session_id, &authorization);
+
+        if self.admin_approval_is_remembered(&subject).await? {
+            subject.emit_bypassed_event();
+            return Ok(PolledGate::Approved(ApprovedTarget::new(authorization)));
+        }
+
+        let key = SessionApprovalRequest::Key::new(
+            subject.session_id,
+            ApprovalKind::Admin,
+            &subject.target_name,
+        );
+        let Some(row) = find_row(
+            &self.db,
+            subject.session_id,
+            ApprovalKind::Admin,
+            &subject.target_name,
+        )
+        .await?
+        else {
+            // A fresh question is paid for by the use taken at authentication,
+            // so this cannot come back exhausted; matched anyway so the enum
+            // stays honest.
+            return Ok(match self.announce_admin_request(&subject).await? {
+                Advertised::TicketExhausted => PolledGate::Refused,
+                _ => PolledGate::Pending,
+            });
+        };
+
+        match row_state(&row)? {
+            RowState::Ended => {
+                // request again, spending the ticket if needed
+                Ok(match self.announce_admin_request(&subject).await? {
+                    Advertised::TicketExhausted => PolledGate::Refused,
+                    _ => PolledGate::Pending,
+                })
+            }
+            RowState::Pending => {
+                let timeout = self.admin_approval_timeout().await?;
+                #[allow(clippy::cast_possible_wrap)]
+                let window = time::Duration::seconds(timeout.as_secs() as i64);
+                if time::OffsetDateTime::now_utc() - row.started >= window {
+                    close_timed_out(&self.db, &subject).await?;
+                    if matches!(
+                        self.announce_admin_request(&subject).await?,
+                        Advertised::TicketExhausted
+                    ) {
+                        return Ok(PolledGate::Refused);
+                    }
+                }
+                Ok(PolledGate::Pending)
+            }
+            RowState::Decided(decision) => {
+                mark_consumed(&self.db, key).await?;
+                match decision {
+                    ApprovalDecision::Approved(_) => {
+                        Ok(PolledGate::Approved(ApprovedTarget::new(authorization)))
+                    }
+                    ApprovalDecision::Rejected => Ok(PolledGate::Refused),
+                }
+            }
+        }
+    }
+
+    async fn admin_approval_is_remembered(
+        &self,
+        subject: &ApprovalSubject,
+    ) -> Result<bool, WarpgateError> {
+        let Some(key) = subject.match_key() else {
+            return Ok(false);
+        };
+        let Some(grace) = self.admin_approval_grace_period().await? else {
+            return Ok(false);
+        };
+        approval_is_remembered(&self.db, &key, grace).await
+    }
+}

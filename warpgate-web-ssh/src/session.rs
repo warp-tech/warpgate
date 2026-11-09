@@ -1,38 +1,37 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
+use std::sync::{Arc, OnceLock};
 
 use bytes::Bytes;
-use russh::keys::PublicKey;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, oneshot};
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 use uuid::Uuid;
+use warpgate_common::{TargetSSHOptions, TargetSessionId, UserSessionId};
 use warpgate_core::WarpgateServerHandle;
-use warpgate_core::recordings::{SessionRecordings, TerminalRecorder, TerminalRecordingStreamId};
+use warpgate_core::recordings::{SessionRecordings, TerminalRecorder};
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_protocol_ssh::{
-    ChannelOperation, PtyRequest, RCCommand, RCCommandReply, SshClientError, SshRecordingMetadata,
+    ChannelAudit, ChannelOperation, PtyRequest, RCCommand, RCCommandReply, SshClientError,
+    SshRecordingMetadata,
 };
 use warpgate_web_clients_common::{ManagedSession, Sheddable, WebSession};
 
 use crate::protocol::ServerMessage;
 
-/// Terminal output ring: the whole byte stream is droppable, so an idle/slow client's backlog
-/// is capped at the most recent [`OUTPUT_BUFFER_CAPACITY`] messages.
+/// Terminal output ring: the byte stream is droppable, so an idle/slow client's backlog is
+/// capped at the most recent [`OUTPUT_BUFFER_CAPACITY`] output messages.
 const OUTPUT_BUFFER_CAPACITY: usize = 2048;
 
 impl Sheddable for ServerMessage {
     fn is_droppable(&self) -> bool {
-        true
+        matches!(self, Self::Output { .. })
     }
 }
 
 pub struct PendingHostKey {
     pub reply: oneshot::Sender<bool>,
-    pub key: PublicKey,
-    pub host: String,
-    pub port: u16,
 }
 
 pub struct WebSshSession {
@@ -41,22 +40,24 @@ pub struct WebSshSession {
     command_tx: UnboundedSender<(RCCommand, Option<RCCommandReply>)>,
 
     channel_counter: Arc<AtomicUsize>,
-    recordings: Arc<Mutex<SessionRecordings>>,
-    channel_recorders: Arc<Mutex<HashMap<Uuid, TerminalRecorder>>>,
+    /// Bound once the target is admitted; recordings need it, so no channel is opened before.
+    target_session_id: OnceLock<TargetSessionId>,
+    recordings: Arc<SessionRecordings>,
+    channel_audits: Arc<Mutex<HashMap<Uuid, ChannelAudit>>>,
     pending_host_key: Arc<Mutex<Option<PendingHostKey>>>,
 }
 
 impl WebSshSession {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        id: Uuid,
+        id: UserSessionId,
         user_id: Uuid,
         target_name: String,
         target_kind: TargetKind,
         server_handle: Arc<Mutex<WarpgateServerHandle>>,
+        cancel: CancellationToken,
         command_tx: UnboundedSender<(RCCommand, Option<RCCommandReply>)>,
-        abort_tx: UnboundedSender<()>,
-        recordings: Arc<Mutex<SessionRecordings>>,
+        recordings: Arc<SessionRecordings>,
     ) -> Self {
         Self {
             core: WebSession::new(
@@ -65,16 +66,21 @@ impl WebSshSession {
                 target_name,
                 target_kind,
                 server_handle,
-                abort_tx,
+                cancel,
                 OUTPUT_BUFFER_CAPACITY,
                 OUTPUT_BUFFER_CAPACITY,
             ),
             command_tx,
             channel_counter: Arc::new(AtomicUsize::new(0)),
+            target_session_id: OnceLock::new(),
             recordings,
-            channel_recorders: Arc::new(Mutex::new(HashMap::new())),
+            channel_audits: Arc::new(Mutex::new(HashMap::new())),
             pending_host_key: Arc::new(Mutex::new(None)),
         }
+    }
+
+    pub fn bind_target_session(&self, id: TargetSessionId) {
+        let _ = self.target_session_id.set(id);
     }
 
     pub async fn set_pending_host_key(&self, pending: PendingHostKey) {
@@ -85,45 +91,39 @@ impl WebSshSession {
         self.pending_host_key.lock().await.take()
     }
 
-    pub async fn with_recorder<F: AsyncFnOnce(&TerminalRecorder)>(&self, channel_id: Uuid, f: F) {
-        let recorders = self.channel_recorders.lock().await;
-        if let Some(r) = recorders.get(&channel_id) {
-            f(r).await;
-        }
+    pub fn connect(&self, chain: Vec<TargetSSHOptions>) {
+        let _ = self.command_tx.send((RCCommand::Connect(chain), None));
     }
 
-    pub async fn start_recording(&self, channel_id: Uuid) {
+    async fn start_recording(
+        &self,
+        target_session_id: &TargetSessionId,
+        channel_id: Uuid,
+    ) -> Option<TerminalRecorder> {
         let channel_number = self
             .channel_counter
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         match self
             .recordings
-            .lock()
-            .await
             .start::<TerminalRecorder, _>(
-                &self.id(),
-                Some(channel_id.to_string()),
+                target_session_id,
+                None,
                 SshRecordingMetadata::Shell {
                     channel: channel_number,
                 },
             )
             .await
         {
-            Ok(recorder) => {
-                self.channel_recorders
-                    .lock()
-                    .await
-                    .insert(channel_id, recorder);
-            }
-            Err(warpgate_core::recordings::Error::Disabled) => {}
+            Ok(recorder) => recorder,
             Err(e) => {
                 error!(%channel_id, ?e, "Failed to start terminal recording");
+                None
             }
         }
     }
 
-    pub async fn stop_recording(&self, channel_id: Uuid) {
-        self.channel_recorders.lock().await.remove(&channel_id);
+    pub async fn end_channel(&self, channel_id: Uuid) {
+        self.channel_audits.lock().await.remove(&channel_id);
     }
 
     fn command(&self, cmd: RCCommand) -> Option<oneshot::Receiver<Result<(), SshClientError>>> {
@@ -136,52 +136,57 @@ impl WebSshSession {
         Some(rx)
     }
 
-    pub async fn open_shell_channel(&self, cols: u32, rows: u32) -> Uuid {
+    pub async fn open_shell_channel(&self, cols: u32, rows: u32) -> Option<Uuid> {
+        let target_session_id = self.target_session_id.get()?;
         let channel_id = Uuid::new_v4();
 
         info!(session=%self.id(), channel=%channel_id, "Opening session channel");
 
-        self.start_recording(channel_id).await;
-        self.with_recorder(channel_id, async move |r: &TerminalRecorder| {
-            if let Err(e) = r.write_pty_resize(cols, rows).await {
-                error!(%channel_id, ?e, "Failed to write initial PTY size to recording");
-            }
-        })
-        .await;
+        let pty_request = make_pty_request(cols, rows);
+        let mut audit = ChannelAudit::new(channel_id);
+        let (cols, rows) = pty_request.screen_size();
+        audit.start_command_detection(cols, rows);
+        if let Some(recorder) = self.start_recording(target_session_id, channel_id).await {
+            audit.set_recorder(recorder);
+        }
+        // seeds the recording with the initial screen size
+        audit.on_resize(&pty_request).await;
+        self.channel_audits.lock().await.insert(channel_id, audit);
 
         self.command(RCCommand::Channel(channel_id, ChannelOperation::OpenShell));
         self.command(RCCommand::Channel(
             channel_id,
-            ChannelOperation::RequestPty(make_pty_request(cols, rows)),
+            ChannelOperation::RequestPty(pty_request),
         ));
         self.command(RCCommand::Channel(
             channel_id,
             ChannelOperation::RequestShell,
         ));
-        channel_id
+        Some(channel_id)
     }
 
     pub async fn send_input(&self, channel_id: Uuid, data: Bytes) {
-        self.with_recorder(channel_id, async |r| {
-            if let Err(e) = r.write(TerminalRecordingStreamId::Input, &data).await {
-                error!(%channel_id, ?e, "Failed to record terminal input");
-            }
-        })
-        .await;
+        if let Some(audit) = self.channel_audits.lock().await.get_mut(&channel_id) {
+            audit.on_input(&data).await;
+        }
         self.command(RCCommand::Channel(channel_id, ChannelOperation::Data(data)));
     }
 
+    pub async fn on_output(&self, channel_id: Uuid, data: &[u8]) {
+        if let Some(audit) = self.channel_audits.lock().await.get_mut(&channel_id) {
+            audit.on_output(data).await;
+        }
+    }
+
     pub async fn resize_channel(&self, channel_id: Uuid, cols: u32, rows: u32) {
+        let pty_request = make_pty_request(cols, rows);
+        if let Some(audit) = self.channel_audits.lock().await.get_mut(&channel_id) {
+            audit.on_resize(&pty_request).await;
+        }
         self.command(RCCommand::Channel(
             channel_id,
-            ChannelOperation::ResizePty(make_pty_request(cols, rows)),
+            ChannelOperation::ResizePty(pty_request),
         ));
-        self.with_recorder(channel_id, async move |r| {
-            if let Err(e) = r.write_pty_resize(cols, rows).await {
-                error!(%channel_id, ?e, "Failed to record PTY resize");
-            }
-        })
-        .await;
     }
 
     pub fn close_channel(&self, channel_id: Uuid) {
@@ -197,7 +202,7 @@ impl std::ops::Deref for WebSshSession {
 }
 
 impl ManagedSession for WebSshSession {
-    fn id(&self) -> Uuid {
+    fn id(&self) -> UserSessionId {
         self.core.id()
     }
 

@@ -9,10 +9,14 @@ use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use serde::Deserialize;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
+use url::form_urlencoded;
+use uuid::Uuid;
 use warpgate_common::WarpgateError;
 use warpgate_common::auth::AuthCredential;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::ext::construct_external_url;
+use warpgate_common_http::logging::get_client_ip_addr;
+use warpgate_common_http::warpgate_csp_with_script_nonce;
 use warpgate_core::ConfigProvider;
 use warpgate_core::auth::submit_credential;
 use warpgate_sso::{SsoClient, SsoInternalProviderConfig};
@@ -99,11 +103,16 @@ pub struct SsoKubernetesConfigDescription {
 enum GetSsoKubernetesConfigsResponse {
     #[oai(status = 200)]
     Ok(Json<Vec<SsoKubernetesConfigDescription>>),
+    #[oai(status = 403)]
+    Forbidden,
 }
 
 fn make_redirect_url(err: &str) -> String {
     error!("SSO error: {err}");
-    format!("/@warpgate?login_error={err}")
+    let query = form_urlencoded::Serializer::new(String::new())
+        .append_pair("login_error", err)
+        .finish();
+    format!("/@warpgate?{query}")
 }
 
 /// Only site-relative paths are accepted as post-login redirect targets. An
@@ -197,7 +206,7 @@ impl Api {
         ctx: Data<&UnauthenticatedRequestContext>,
         data: Form<ReturnToSsoFormData>,
         state: Query<Option<String>>,
-    ) -> Result<ReturnToSsoPostResponse, WarpgateError> {
+    ) -> Result<Response<ReturnToSsoPostResponse>, WarpgateError> {
         let url = self
             .api_return_to_sso_get_common(
                 req,
@@ -208,22 +217,26 @@ impl Api {
             )
             .await?
             .unwrap_or_else(|x| make_redirect_url(&x));
-        let serialized_url = serde_json::to_string(&url)?;
+
+        let csp_nonce = Uuid::new_v4().simple().to_string();
+        let serialized_url = html_escape::encode_script(&serde_json::to_string(&url)?).to_string();
         let attr_url = html_escape::encode_double_quoted_attribute(&url);
         let text_url = html_escape::encode_text(&url);
-        Ok(ReturnToSsoPostResponse::Redirect(
+        Ok(Response::new(ReturnToSsoPostResponse::Redirect(
             poem_openapi::payload::Html(format!(
                 "<!doctype html>\n
                 <html>
-                    <script>
-                        location.href = {serialized_url};
-                    </script>
+                    <script nonce=\"{csp_nonce}\">location.href = {serialized_url};</script>
                     <body>
                         Redirecting to <a href=\"{attr_url}\">{text_url}</a>...
                     </body>
                 </html>
             "
             )),
+        ))
+        .header(
+            "content-security-policy",
+            warpgate_csp_with_script_nonce(&csp_nonce),
         ))
     }
 
@@ -237,6 +250,7 @@ impl Api {
     ) -> Result<Result<String, String>, WarpgateError> {
         // pull services locally for convenience
         let services = ctx.services();
+        let client_ip = get_client_ip_addr(req, services).await;
         let Some(context) = session.get::<SsoContext>(SSO_CONTEXT_SESSION_KEY) else {
             return Ok(Err("Not in an active SSO process".to_string()));
         };
@@ -312,15 +326,14 @@ impl Api {
             let session_id = session_id_for_request(req, &ctx).await?;
             emit_unknown_authentication_failed_event(
                 session_id,
-                req.remote_addr().as_socket_addr().map(|a| a.ip()),
+                client_ip,
                 email,
-                &cred.safe_description(),
+                &cred.readable_description(),
                 "unknown user",
             );
             return Ok(Err(format!("No user matching {email}")));
         };
 
-        let remote_ip = req.remote_addr().as_socket_addr().map(|a| a.ip());
         let state_arc = match get_or_create_auth_state_for_request(req, &username, &ctx, None).await
         {
             Ok(state) => state,
@@ -329,9 +342,9 @@ impl Api {
                     let session_id = session_id_for_request(req, &ctx).await?;
                     emit_unknown_authentication_failed_event(
                         session_id,
-                        remote_ip,
+                        client_ip,
                         &username,
-                        &cred.safe_description(),
+                        &cred.readable_description(),
                         "IP address not allowed",
                     );
                     return Ok(Err(
@@ -345,25 +358,44 @@ impl Api {
 
         let mut state = state_arc.lock().await;
 
-        let outcome =
-            submit_credential(&mut state, cred, ctx.services().config_provider.as_ref()).await?;
+        let outcome = submit_credential(
+            &mut state,
+            cred,
+            ctx.services().config_provider.as_ref(),
+            &ctx.services().login_protection,
+        )
+        .await?;
 
         if !outcome.is_valid() {
+            crate::api::auth::record_failed_login_attempt(services, client_ip, &username, "sso")
+                .await;
             return Ok(Err(format!(
                 "Failed to validate SSO credential for {username}"
             )));
         }
 
+        // Stored before any remaining factor so back-channel logout and SLO
+        // can find the session even when TOTP or an approval is still pending.
+        session.remove(SSO_CONTEXT_SESSION_KEY);
+        session.set_sso_login_state(SsoLoginState {
+            provider: context.provider,
+            token: response.id_token.clone(),
+            supports_single_logout: context.supports_single_logout,
+            subject: Some(response.subject.clone()),
+            sid: response.sid.clone(),
+        });
+
         if let Ok(user_info) = outcome.into_accepted() {
             authorize_session(req, &ctx, user_info).await?;
             state.emit_authenticated_event_once();
-            drop(state);
-            session.set_sso_login_state(SsoLoginState {
-                provider: context.provider,
-                token: response.id_token.clone(),
-                supports_single_logout: context.supports_single_logout,
-            });
+            if let Some(ip) = client_ip {
+                let _ = services
+                    .login_protection
+                    .clear_failed_attempts(&ip, &username)
+                    .await;
+            }
         }
+        drop(state);
 
         warpgate_core::resolve_and_map_sso_user(
             services.config_provider.as_ref(),
@@ -391,6 +423,7 @@ impl Api {
         session_middleware: Data<&Arc<Mutex<SessionStore>>>,
     ) -> Result<StartSloResponse, WarpgateError> {
         let Some(state) = session.get_sso_login_state() else {
+            warn!("SSO logout requested for a session that did not log in via SSO");
             return Ok(StartSloResponse::NotInSsoSession);
         };
 
@@ -405,6 +438,7 @@ impl Api {
             .iter()
             .find(|p| p.name == state.provider)
         else {
+            warn!(provider = %state.provider, "SSO logout requested for a provider that is no longer configured");
             return Ok(StartSloResponse::NotFound);
         };
 
@@ -427,6 +461,9 @@ impl Api {
         &self,
         ctx: AuthedSession,
     ) -> Result<GetSsoKubernetesConfigsResponse, WarpgateError> {
+        if ctx.auth.as_full_user().is_none() {
+            return Ok(GetSsoKubernetesConfigsResponse::Forbidden);
+        }
         let mut providers = ctx
             .services()
             .config
@@ -457,7 +494,15 @@ impl Api {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_safe_redirect_target, post_login_redirect};
+    use super::{is_safe_redirect_target, make_redirect_url, post_login_redirect};
+
+    #[test]
+    fn error_redirect_is_site_relative_and_escaped() {
+        assert_eq!(
+            make_redirect_url("No user matching a&b@example.com"),
+            "/@warpgate?login_error=No+user+matching+a%26b%40example.com"
+        );
+    }
 
     #[test]
     fn accepts_relative_paths() {

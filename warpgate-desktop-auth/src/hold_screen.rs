@@ -9,6 +9,7 @@
 //! kept as separate objects so the driver can await input and paint without aliasing one
 //! `&mut` across the `select!`.
 
+use std::convert::Infallible;
 use std::future::Future;
 use std::net::IpAddr;
 use std::pin::Pin;
@@ -17,12 +18,10 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use tokio::time::{MissedTickBehavior, Sleep, interval, sleep};
 use tracing::warn;
-use uuid::Uuid;
 use warpgate_common::auth::AuthResult;
-use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_common::Protocol;
-use warpgate_core::{Services, TIMEOUT};
-use warpgate_desktop_ui::AuthPrompt;
+use warpgate_common::{Protocol, UserSessionId};
+use warpgate_core::{AuthorizedIdentity, Services, TIMEOUT};
+use warpgate_desktop_ui::{self as ui, AuthPrompt, Screen};
 
 use crate::{OtpAction, OtpActionApplyOutcome, OtpEntry, auth_prompt};
 
@@ -45,6 +44,18 @@ pub enum HoldFrame<'a> {
     Prompt(&'a AuthPrompt),
     /// A "connecting to target" screen, shown once authentication completes.
     Connecting,
+    /// Waiting on an admin approval
+    AwaitingApproval,
+}
+
+impl HoldFrame<'_> {
+    pub fn render(&self, screen: Screen, tick: u64) -> Result<Vec<u8>, Infallible> {
+        match self {
+            Self::Prompt(prompt) => ui::render_authentication(screen, tick, prompt),
+            Self::Connecting => ui::render_connecting(screen, tick),
+            Self::AwaitingApproval => ui::render_awaiting_approval(screen, tick),
+        }
+    }
 }
 
 /// Reads viewer input for the hold screen, mapping the protocol's raw keyboard encoding
@@ -95,6 +106,35 @@ impl Deadline {
     }
 }
 
+/// Await `until` while sending frames from `frame()` and draining input events
+/// Return `None` if the viewer disconnected before `until`
+pub async fn hold_while<T, I, P>(
+    until: impl Future<Output = T>,
+    input: &mut I,
+    painter: &mut P,
+    frame: impl Fn() -> HoldFrame<'static>,
+) -> Result<Option<T>>
+where
+    I: HoldInputSource,
+    P: HoldPainter,
+{
+    let mut ticker = interval(painter.render_interval());
+    ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    tokio::pin!(until);
+
+    loop {
+        tokio::select! {
+            done = &mut until => return Ok(Some(done)),
+            event = input.next() => {
+                if matches!(event, HoldEvent::Disconnected) {
+                    return Ok(None);
+                }
+            }
+            _ = ticker.tick() => painter.paint(frame()).await?,
+        }
+    }
+}
+
 /// Drive the interactive second-factor hold screen until the auth state is accepted.
 ///
 /// Returns the authenticated user on success, or `None` on rejection, timeout, an
@@ -104,14 +144,14 @@ impl Deadline {
 #[allow(clippy::too_many_arguments)]
 pub async fn run_hold_screen<I, P>(
     services: &Services,
-    state_id: Uuid,
+    state_id: UserSessionId,
     protocol: Protocol,
     username: &str,
     remote_ip: IpAddr,
     input: &mut I,
     painter: &mut P,
     mut deadline: Deadline,
-) -> Result<Option<AuthStateUserInfo>>
+) -> Result<Option<AuthorizedIdentity>>
 where
     I: HoldInputSource,
     P: HoldPainter,
@@ -131,19 +171,23 @@ where
     'next_prompt: loop {
         // Bind to a local so the `state` guard drops here — the arms below re-lock the same
         // mutex (`auth_prompt`, OTP validation).
-        let verification = state.lock().await.verify();
-        let need = match verification {
-            AuthResult::Accepted { user_info } => {
-                let _ = services
-                    .login_protection
-                    .clear_failed_attempts(&remote_ip, &user_info.username)
-                    .await;
-                // Feedback before the caller blocks on the backend connect.
-                let _ = painter.paint(HoldFrame::Connecting).await;
-                return Ok(Some(user_info));
+        let need = {
+            let state = state.lock().await;
+            match state.verify() {
+                AuthResult::Accepted { user_info } => {
+                    let identity = AuthorizedIdentity::from_auth_state(&state);
+                    drop(state);
+                    let _ = services
+                        .login_protection
+                        .clear_failed_attempts(&remote_ip, &user_info.username)
+                        .await;
+                    // Feedback before the caller blocks on the backend connect
+                    let _ = painter.paint(HoldFrame::Connecting).await;
+                    return Ok(identity);
+                }
+                AuthResult::Rejected => return Ok(None),
+                AuthResult::Need(need) => need,
             }
-            AuthResult::Rejected => return Ok(None),
-            AuthResult::Need(need) => need,
         };
 
         let Some(mut prompt) = auth_prompt(services, &state, &need, otp.entered()).await else {

@@ -8,18 +8,23 @@
         type TargetOptionsTargetSSHOptions,
     } from 'admin/lib/api'
     import { adminPermissions } from 'admin/lib/store'
+    import SecretRefInput, {
+        loadSecretBackends,
+    } from 'common/SecretRefInput.svelte'
     import { TargetKind } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
     import { untrack } from 'svelte'
     import Fa from 'svelte-fa'
+    import CertificateOptions from './CertificateOptions.svelte'
     import TargetSshHostKeyChecker from './KeyChecker.svelte'
 
     interface Props {
         id: string
+        name: string
         options: TargetOptionsTargetSSHOptions
     }
 
-    let { id, options }: Props = $props()
+    let { id, name, options }: Props = $props()
 
     let hostKeyCheckInvalidated = $state(false)
     let sshTargets = $state<Target[]>([])
@@ -27,6 +32,11 @@
 
     api.getSshOwnKeys().then(keys => {
         clientKeys = keys
+    })
+
+    let hasSecretBackends = $state(false)
+    loadSecretBackends().then(backends => {
+        hasSecretBackends = backends.length > 0
     })
 
     $effect(() => {
@@ -101,7 +111,7 @@
             <input
                 class="form-control"
                 bind:value={options.host}
-                onchange={() => hostKeyCheckInvalidated = true}
+                onchange={() => (hostKeyCheckInvalidated = true)}
             >
         </FormGroup>
     </div>
@@ -114,7 +124,7 @@
                 min="1"
                 max="65535"
                 step="1"
-                onchange={() => hostKeyCheckInvalidated = true}
+                onchange={() => (hostKeyCheckInvalidated = true)}
             >
         </FormGroup>
     </div>
@@ -147,8 +157,13 @@
         <select bind:value={options.auth.kind} class="form-control">
             <option value="PublicKey">Warpgate's own private keys</option>
             <option value="Password">Password</option>
+            {#if hasSecretBackends || options.auth.kind === 'Certificate'}
+                <option value="Certificate">
+                    Certificate signed by a secret backend's SSH CA
+                </option>
+            {/if}
             {#if $serverInfo?.runningOnEc2}
-                <option value="IamRole">IAM Role (experimental)</option>
+                <option value="IamRole">IAM Role</option>
             {/if}
         </select>
     </FormGroup>
@@ -166,23 +181,31 @@
         </FormGroup>
         <a
             class="btn btn-link mb-3 d-flex align-items-center"
-            href="/@warpgate/admin#/config/ssh"
+            href="/@warpgate/admin#/manage/ssh"
             target="_blank"
         >
             <Fa fw icon={faExternalLink} />
         </a>
     {/if}
     {#if options.auth.kind === 'Password'}
-        <FormGroup floating label="Password" class="w-100 ms-3">
-            <input
-                class="form-control"
-                type="password"
-                autocomplete="off"
+        <div class="w-100 ms-3 d-flex align-items-center">
+            <SecretRefInput
                 bind:value={options.auth.password}
-            >
-        </FormGroup>
+                inlineLabel="Password"
+                disabled={!$adminPermissions.targetsEdit}
+                intendedUsage={{
+                    kind: 'Target',
+                    id,
+                    name,
+                }}
+            />
+        </div>
     {/if}
 </div>
+
+{#if options.auth.kind === 'Certificate'}
+    <CertificateOptions bind:auth={options.auth} />
+{/if}
 
 <div class="d-flex">
     <Input

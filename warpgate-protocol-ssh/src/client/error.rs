@@ -1,6 +1,6 @@
-use std::error::Error;
+use warpgate_common::{UserFacingReason, WarpgateError};
 
-use warpgate_common::WarpgateError;
+use super::ConnectionError;
 
 #[derive(thiserror::Error, Debug)]
 pub enum SshClientError {
@@ -9,13 +9,34 @@ pub enum SshClientError {
     #[error("russh error: {0}")]
     Russh(#[from] russh::Error),
     #[error(transparent)]
-    Warpgate(#[from] WarpgateError),
+    Connection(#[from] ConnectionError),
     #[error(transparent)]
-    Other(Box<dyn Error + Send + Sync>),
+    Warpgate(#[from] WarpgateError),
 }
 
-impl SshClientError {
-    pub fn other<E: Error + Send + Sync + 'static>(err: E) -> Self {
-        Self::Other(Box::new(err))
+impl UserFacingReason for SshClientError {
+    fn user_facing_reason(&self) -> String {
+        match self {
+            Self::MpscError => "Internal connection error".into(),
+            Self::Russh(_) => "SSH protocol error".into(),
+            Self::Connection(e) => e.user_facing_reason(),
+            Self::Warpgate(e) => e.user_facing_reason(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use warpgate_common::{UserFacingReason, WarpgateError};
+
+    use super::SshClientError;
+
+    #[test]
+    fn a_transparent_error_does_not_show_its_text() {
+        let leaky = SshClientError::Warpgate(WarpgateError::Other(
+            "database error: SELECT secret FROM credentials".into(),
+        ));
+        assert!(leaky.to_string().contains("SELECT"));
+        assert!(!leaky.user_facing_reason().contains("SELECT"));
     }
 }

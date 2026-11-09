@@ -15,14 +15,13 @@ use tokio::sync::Mutex;
 use tokio::time;
 use tracing::{debug, error, info, info_span, warn};
 use url::Url;
-use uuid::Uuid;
-use warpgate_common::auth::AuthSelector;
+use warpgate_common::auth::{AuthSelector, redacted_selector};
 use warpgate_common::{
-    PostgresProtocolVersion, Protocol, Secret, TargetOptions, TargetPostgresOptions,
+    PostgresProtocolVersion, Protocol, Secret, TargetPostgresOptions, UserSessionId, WarpgateError,
 };
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::{
-    AuthOkPermit, DbAuthTransport, Services, TargetAuthorization, WarpgateServerHandle,
+    AdmittedTarget, ApprovedTarget, AuthOkPermit, DbAuthTransport, Services, WarpgateServerHandle,
     run_db_authorization,
 };
 use warpgate_tls::ServerTlsStream;
@@ -40,7 +39,7 @@ pub struct PostgresSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
     username: Option<String>,
     database: Option<String>,
     server_handle: Arc<Mutex<WarpgateServerHandle>>,
-    id: Uuid,
+    id: UserSessionId,
     services: Services,
     remote_address: SocketAddr,
     decode_context: DecodeContext,
@@ -123,6 +122,29 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> DbAuthTransport for PostgresSessi
         Ok(true)
     }
 
+    /// The notice needs an authenticated connection to travel on, so the
+    /// `Authentication::Ok` goes out ahead of it when it hasn't already.
+    async fn notify_awaiting_admin_approval(
+        &mut self,
+        auth_ok: &mut Option<AuthOkPermit>,
+    ) -> Result<(), PostgresError> {
+        if let Some(permit) = auth_ok.take() {
+            self.send_auth_ok(permit).await?;
+        }
+        self.stream
+            .push(pgwire::messages::response::NoticeResponse::new(vec![
+                (b'S', "NOTICE".into()),
+                (b'V', "NOTICE".into()),
+                (b'C', "WG002".into()),
+                (
+                    b'M',
+                    "Warpgate: waiting for an administrator to approve this session...".into(),
+                ),
+            ]))?;
+        self.stream.flush().await?;
+        Ok(())
+    }
+
     async fn send_denied(&mut self) -> Result<(), PostgresError> {
         let error_info = ErrorInfo::new(
             "FATAL".to_owned(),
@@ -144,7 +166,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         tls_config: ServerConfig,
         remote_address: SocketAddr,
     ) -> Self {
-        let id = server_handle.lock().await.id();
+        let id = server_handle.lock().await.user_session_id();
 
         Self {
             services,
@@ -171,23 +193,12 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
     }
 
     pub async fn run(mut self) -> Result<(), PostgresError> {
-        let Some(mut initial_message) = self
-            .stream
-            .recv::<PgWireStartupOrSslRequest>(&self.decode_context)
-            .await?
-        else {
-            return Err(PostgresError::Eof);
-        };
+        let mut tls_established = false;
 
-        if let PgWireStartupOrSslRequest::SslRequest(_) = &initial_message {
-            debug!("Received SslRequest");
-            self.stream
-                .push(pgwire::messages::response::SslResponse::Accept)?;
-            self.stream.flush().await?;
-            self.stream = self.stream.upgrade(self.tls_config.clone()).await?;
-            debug!("TLS setup complete");
-
-            let Some(next_message) = self
+        // libpq negotiates in up to three steps: an optional GSSAPI encryption
+        // request, an optional SSL request, then the StartupMessage.
+        let startup = loop {
+            let Some(message) = self
                 .stream
                 .recv::<PgWireStartupOrSslRequest>(&self.decode_context)
                 .await?
@@ -195,20 +206,40 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                 return Err(PostgresError::Eof);
             };
 
-            initial_message = next_message;
-        } else {
-            self.send_error_response(
-                "08P01".into(),
-                "SSL connection required - please enable SSL in your client (e.g., add `sslmode=require` to your connection string)".into(),
-            )
-            .await?;
-            return Ok(());
-        }
-
-        self.decode_context.awaiting_frontend_ssl = false;
-
-        let PgWireStartupOrSslRequest::Startup(startup) = initial_message else {
-            return Err(PostgresError::ProtocolError("expected Startup".into()));
+            match message {
+                PgWireStartupOrSslRequest::GssEncRequest(_) => {
+                    debug!("Received GssEncRequest, refusing");
+                    self.stream
+                        .push(pgwire::messages::response::GssEncResponse::Refuse)?;
+                    self.stream.flush().await?;
+                }
+                PgWireStartupOrSslRequest::SslRequest(_) => {
+                    if tls_established {
+                        return Err(PostgresError::ProtocolError(
+                            "unexpected SslRequest inside a TLS session".into(),
+                        ));
+                    }
+                    debug!("Received SslRequest");
+                    self.stream
+                        .push(pgwire::messages::response::SslResponse::Accept)?;
+                    self.stream.flush().await?;
+                    self.stream = self.stream.upgrade(self.tls_config.clone()).await?;
+                    self.decode_context.awaiting_frontend_ssl = false;
+                    tls_established = true;
+                    debug!("TLS setup complete");
+                }
+                PgWireStartupOrSslRequest::Startup(startup) => {
+                    if !tls_established {
+                        self.send_error_response(
+                            "08P01".into(),
+                            "SSL connection required - please enable SSL in your client (e.g., add `sslmode=require` to your connection string)".into(),
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+                    break startup;
+                }
+            }
         };
 
         self.decode_context.awaiting_frontend_startup = false;
@@ -235,7 +266,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
 
         let username = startup.parameters.get("user").cloned();
         self.decode_context.protocol_version = protocol_version;
-        self.username = username.clone();
+        self.username = username.as_deref().map(|u| redacted_selector(u).to_owned());
         self.database = startup.parameters.get("database").cloned();
 
         self.run_authorization(startup, &username.unwrap_or_else(|| "".into()))
@@ -249,26 +280,26 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
     ) -> Result<(), PostgresError> {
         let selector: AuthSelector = username.into();
         let remote_ip = self.remote_address.ip();
-        let session_id = self.server_handle.lock().await.id();
+        let session_id = self.server_handle.lock().await.user_session_id();
 
         let services = self.services.clone();
-        let Some(authorization) =
+        let Some(approved) =
             run_db_authorization(&mut self, &services, session_id, selector, remote_ip).await?
         else {
             return Ok(());
         };
 
-        self.run_authorized(startup, authorization).await
+        self.run_authorized(startup, approved).await
     }
 
     async fn run_authorized(
         mut self,
         startup: pgwire::messages::startup::Startup,
-        authorization: TargetAuthorization,
+        approved: ApprovedTarget,
     ) -> Result<(), PostgresError> {
         if let Some(banner) = warpgate_db_entities::Parameters::Entity::get(&self.services.db)
             .await
-            .map_err(PostgresError::other)?
+            .map_err(WarpgateError::from)?
             .banner_text()
         {
             self.stream
@@ -282,26 +313,28 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
 
         self.stream.flush().await?;
 
-        let (user_info, target) = authorization.into_parts();
-
-        let TargetOptions::Postgres(ref postgres_options) = target.options else {
-            warn!("Selected target is not a PostgreSQL target");
-            self.send_error_response(
-                "0W001".into(),
-                format!("Warpgate target {} not found", target.name),
-            )
-            .await?;
-            return Ok(());
+        let target_name = approved.target().name.clone();
+        let approved = match approved.narrow::<TargetPostgresOptions>() {
+            Ok(approved) => approved,
+            Err(_) => {
+                warn!("Selected target is not a PostgreSQL target");
+                self.send_error_response(
+                    "0W001".into(),
+                    format!("Warpgate target {target_name} not found"),
+                )
+                .await?;
+                return Ok(());
+            }
         };
-        let postgres_options = postgres_options.clone();
 
-        {
-            let handle = self.server_handle.lock().await;
-            handle.set_user_info(user_info).await?;
-            handle.set_target(&target).await?;
-        }
+        let admitted = self
+            .server_handle
+            .lock()
+            .await
+            .register_approved_target_session(approved)
+            .await?;
 
-        self.run_authorized_inner(startup, postgres_options).await
+        self.run_authorized_inner(startup, admitted).await
     }
 
     async fn send_error_response(
@@ -319,19 +352,21 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
     async fn run_authorized_inner(
         mut self,
         startup: pgwire::messages::startup::Startup,
-        options: TargetPostgresOptions,
+        admitted: AdmittedTarget<TargetPostgresOptions>,
     ) -> Result<(), PostgresError> {
-        let target_protocol_version = match options.protocol_version.unwrap_or_default() {
+        let options = admitted.options().clone();
+        let target_protocol_version = match options.protocol_version {
             PostgresProtocolVersion::V3_0 => ProtocolVersion::PROTOCOL3_0,
             PostgresProtocolVersion::V3_2 => ProtocolVersion::PROTOCOL3_2,
         };
 
         let mut client = match PostgresClient::connect(
-            &options,
+            admitted,
             ConnectionOptions {
                 protocol_version: target_protocol_version,
                 parameters: startup.parameters,
             },
+            &*self.services.secret_backends,
         )
         .await
         {
@@ -515,7 +550,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
     }
 }
 
-const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(60 * 10);
+const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_mins(10);
 
 enum IdlePolicy {
     /// No idle timeout: the proxy never closes an idle session.

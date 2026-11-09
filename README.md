@@ -32,6 +32,7 @@ Warpgate is a smart & fully transparent SSH, HTTPS, Kubernetes, MySQL, PostgreSQ
 
 * Set it up in your DMZ, add user accounts and easily assign them to specific hosts and URLs within the network.
 * Warpgate will record every session for you to view (live) and replay later through a built-in admin web UI.
+* Browser-based SSH, RDP and VNC access is built in; native clients continue to work.
 * Not a jump host - forwards connection straight to the target in a way that's fully transparent to the client.
 * Native 2FA and SSO support (TOTP & OpenID Connect)
 * Built-in brute-force protection with IP blocking and user lockout
@@ -56,6 +57,9 @@ Full documentation is available at [warpgate.null.page](https://warpgate.null.pa
 * [Login Protection](https://warpgate.null.page/login-protection/) - Configure brute-force protection
 * [SSO](https://warpgate.null.page/sso/) - Single Sign-On with OpenID Connect
 * [Tickets](https://warpgate.null.page/tickets/) - Temporary access credentials
+
+For `warpgate.yaml` file options, see the [configuration schema](config-schema.json).
+Setup-generated config files include a `yaml-language-server` schema reference for editor completion and validation.
 
 ## How is Warpgate different from a jump host / VPN / Teleport?
 
@@ -96,6 +100,8 @@ Please use GitHub's [vulnerability reporting system](https://github.com/warp-tec
 ## Project Status
 
 Warpgate is being actively used in enterprise settings.
+
+What's planned and being worked on next is tracked on the public [roadmap](https://github.com/orgs/warp-tech/projects/1/views/2).
 
 ## How it works
 
@@ -188,6 +194,30 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/alistarle"><img src="https://avatars.githubusercontent.com/u/4499513?v=4?s=100" width="100px;" alt="Victor Coutellier"/><br /><sub><b>Victor Coutellier</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=alistarle" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Hexalyse"><img src="https://avatars.githubusercontent.com/u/4415295?v=4?s=100" width="100px;" alt="Hexalyse"/><br /><sub><b>Hexalyse</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=Hexalyse" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/LarsSven"><img src="https://avatars.githubusercontent.com/u/60571459?v=4?s=100" width="100px;" alt="Lars"/><br /><sub><b>Lars</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=LarsSven" title="Code">💻</a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/basti-nis"><img src="https://avatars.githubusercontent.com/u/22980626?v=4?s=100" width="100px;" alt="basti-nis"/><br /><sub><b>basti-nis</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=basti-nis" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Chanta007"><img src="https://avatars.githubusercontent.com/u/105554003?v=4?s=100" width="100px;" alt="Chanta007"/><br /><sub><b>Chanta007</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=Chanta007" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/snkolev18"><img src="https://avatars.githubusercontent.com/u/56872319?v=4?s=100" width="100px;" alt="Stoyan Kolev"/><br /><sub><b>Stoyan Kolev</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=snkolev18" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/britbennett"><img src="https://avatars.githubusercontent.com/u/160669068?v=4?s=100" width="100px;" alt="britbennett"/><br /><sub><b>britbennett</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=britbennett" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/PokAhonTAS911"><img src="https://avatars.githubusercontent.com/u/208599324?v=4?s=100" width="100px;" alt="PokAhonTAS911"/><br /><sub><b>PokAhonTAS911</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=PokAhonTAS911" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://jwillmer.de"><img src="https://avatars.githubusercontent.com/u/1503577?v=4?s=100" width="100px;" alt="Jens Willmer"/><br /><sub><b>Jens Willmer</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=jwillmer" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/huguesgr"><img src="https://avatars.githubusercontent.com/u/6720382?v=4?s=100" width="100px;" alt="Hugues Granger"/><br /><sub><b>Hugues Granger</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=huguesgr" title="Code">💻</a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/sravan-blitz"><img src="https://avatars.githubusercontent.com/u/279685696?v=4?s=100" width="100px;" alt="sravan-blitz"/><br /><sub><b>sravan-blitz</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=sravan-blitz" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/EdMcBane"><img src="https://avatars.githubusercontent.com/u/8511142?v=4?s=100" width="100px;" alt="Francesco Degrassi"/><br /><sub><b>Francesco Degrassi</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=EdMcBane" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="http://betterspace.top"><img src="https://avatars.githubusercontent.com/u/141388234?v=4?s=100" width="100px;" alt="Yuzhong Zhang"/><br /><sub><b>Yuzhong Zhang</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=BetterAndBetterII" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://fergusean.com"><img src="https://avatars.githubusercontent.com/u/1029297?v=4?s=100" width="100px;" alt="Sean Ferguson"/><br /><sub><b>Sean Ferguson</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=fergusean" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/sthalbert"><img src="https://avatars.githubusercontent.com/u/79840652?v=4?s=100" width="100px;" alt="Steve ALBERT"/><br /><sub><b>Steve ALBERT</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=sthalbert" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/megative"><img src="https://avatars.githubusercontent.com/u/29413909?v=4?s=100" width="100px;" alt="Pavel K"/><br /><sub><b>Pavel K</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=megative" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/vitaly-sinev"><img src="https://avatars.githubusercontent.com/u/48276666?v=4?s=100" width="100px;" alt="vitaly-sinev"/><br /><sub><b>vitaly-sinev</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=vitaly-sinev" title="Code">💻</a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="http://perdu.com"><img src="https://avatars.githubusercontent.com/u/854038?v=4?s=100" width="100px;" alt="Max:"/><br /><sub><b>Max:</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=askz" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Mac898"><img src="https://avatars.githubusercontent.com/u/9291773?v=4?s=100" width="100px;" alt="Mac Lim"/><br /><sub><b>Mac Lim</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=Mac898" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/impuls42"><img src="https://avatars.githubusercontent.com/u/74369328?v=4?s=100" width="100px;" alt="Alex K"/><br /><sub><b>Alex K</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=impuls42" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://unsungmoments.bearblog.dev"><img src="https://avatars.githubusercontent.com/u/65853605?v=4?s=100" width="100px;" alt="Boen"/><br /><sub><b>Boen</b></sub></a><br /><a href="https://github.com/warp-tech/warpgate/commits?author=boenshao" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>

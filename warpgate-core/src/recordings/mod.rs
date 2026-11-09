@@ -12,8 +12,7 @@ use tokio_util::task::TaskTracker;
 use tracing::{info, warn};
 use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_directory;
-use warpgate_common::{GlobalParams, SessionId};
-use warpgate_db_entities::Parameters;
+use warpgate_common::{GlobalParams, TargetSessionId};
 use warpgate_db_entities::Recording::{self, RecordingKind};
 mod desktop;
 mod storage;
@@ -25,12 +24,14 @@ pub use storage::FileAccess;
 use storage::Storage;
 pub use terminal::*;
 pub use traffic::*;
-use writer::WriterShutdown;
 pub use writer::{LiveChunk, NDJsonRecordingWriter, RawRecordingWriter};
+use writer::{RecordingCompletion, WriterShutdown};
 
 /// How long `SessionRecordings::shutdown` waits
 /// (just under kubernetes default)
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(25);
+
+const RECORDING_GENERATION: i32 = 3;
 
 /// The live-broadcast channel for a recording's primary data stream, keyed by
 /// recording id. Each item carries its end byte offset so a viewer can splice
@@ -67,6 +68,12 @@ pub enum Error {
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("Creating recording directory {}: {source}", path.display())]
+    CreateDirectory {
+        path: std::path::PathBuf,
+        source: std::io::Error,
+    },
+
     #[error("Database: {0}")]
     Database(#[from] sea_orm::DbErr),
 
@@ -81,9 +88,6 @@ pub enum Error {
 
     #[error("Writer is closed")]
     Closed,
-
-    #[error("Disabled")]
-    Disabled,
 
     #[error("Invalid recording path")]
     InvalidPath,
@@ -102,6 +106,7 @@ pub struct RecordingWriterOpener {
     params: GlobalParams,
     shutdown: CancellationToken,
     shutdown_tracker: TaskTracker,
+    completion: Arc<RecordingCompletion>,
 }
 
 impl RecordingWriterOpener {
@@ -134,13 +139,12 @@ impl RecordingWriterOpener {
 
         RawRecordingWriter::new(
             sink,
-            self.model.clone(),
-            self.db.clone(),
             live,
             WriterShutdown {
                 token: self.shutdown.clone(),
                 tracker: self.shutdown_tracker.clone(),
             },
+            self.completion.register_writer().await,
         )
         .await
     }
@@ -176,7 +180,7 @@ impl SessionRecordings {
     /// Signal every in-flight writer to finalize, then wait (bounded)
     pub async fn shutdown(&self) {
         self.shutdown.cancel();
-        if self.shutdown_tracker.len() > 0 {
+        if !self.shutdown_tracker.is_empty() {
             info!(
                 count = self.shutdown_tracker.len(),
                 "Waiting for session recording uploads to finish..."
@@ -196,28 +200,37 @@ impl SessionRecordings {
         Storage::load(&self.db, &self.params).await
     }
 
-    pub async fn is_enabled(&self) -> Result<bool> {
-        Ok(Parameters::Entity::get(&self.db).await?.recordings_enable)
-    }
-
-    /// Starting a recording with the same name again will append to it
-    pub async fn start<T, M>(&self, id: &SessionId, name: Option<String>, metadata: M) -> Result<T>
+    /// Starting a recording with the same name again will append to it. On S3
+    /// storage this is not supported: each start completes its own upload of the
+    /// same keys, and `ended` is not reset on append.
+    /// `None` when recording is disabled.
+    pub async fn start<T, M>(
+        &self,
+        id: &TargetSessionId,
+        name: Option<String>,
+        metadata: M,
+    ) -> Result<Option<T>>
     where
         T: Recorder,
         M: Serialize + Debug,
     {
         let storage = self.storage().await?;
         if !storage.enabled() {
-            return Err(Error::Disabled);
+            return Ok(None);
         }
 
         let name = name.unwrap_or_else(|| Uuid::new_v4().to_string());
-        // Gen-2 recordings are folders holding fixed-name files (`data.ndjson`, and a
-        // desktop `index.json`), so the recording path is a directory we create here.
+        // Gen 2+ recordings are folders holding fixed-name files (`data.ndjson`, and an
+        // index `index.json`), so the recording path is a directory we create here.
         // On S3 this folder is a scratch copy, live-readable while the session runs and
         // dropped once each file finishes uploading.
         let folder = storage.recording_folder(id, &name);
-        tokio::fs::create_dir_all(&folder).await?;
+        tokio::fs::create_dir_all(&folder)
+            .await
+            .map_err(|source| Error::CreateDirectory {
+                path: folder.clone(),
+                source,
+            })?;
         if self.params.should_secure_files() {
             secure_directory(&folder)?;
         }
@@ -227,7 +240,7 @@ impl SessionRecordings {
             let existing = Recording::Entity::find()
                 .filter(
                     Recording::Column::SessionId
-                        .eq(*id)
+                        .eq(id.0)
                         .and(Recording::Column::Name.eq(name.clone()))
                         .and(Recording::Column::Kind.eq(T::kind())),
                 )
@@ -245,7 +258,7 @@ impl SessionRecordings {
                     name: Set(name.clone()),
                     kind: Set(T::kind()),
                     metadata: Set(serde_json::to_string(&metadata)?),
-                    generation: Set(2),
+                    generation: Set(RECORDING_GENERATION),
                     ..Default::default()
                 };
                 values.insert(db).await.map_err(Error::Database)?
@@ -254,6 +267,7 @@ impl SessionRecordings {
 
         let opener = RecordingWriterOpener {
             storage,
+            completion: RecordingCompletion::new(self.db.clone(), model.id),
             model,
             db: self.db.clone(),
             live: self.live.clone(),
@@ -262,7 +276,12 @@ impl SessionRecordings {
             shutdown_tracker: self.shutdown_tracker.clone(),
         };
 
-        T::new(&opener).await
+        // Held until every file is open, so a recorder that fails or is cancelled
+        // half-way cannot let its first file end the recording.
+        let construction = opener.completion.register_writer().await;
+        let recorder = T::new(&opener).await?;
+        construction.finished(None).await?;
+        Ok(Some(recorder))
     }
 
     pub async fn subscribe_live(&self, id: &Uuid) -> Option<broadcast::Receiver<LiveChunk>> {
@@ -270,7 +289,7 @@ impl SessionRecordings {
         live.get(id).map(broadcast::Sender::subscribe)
     }
 
-    pub async fn remove(&self, session_id: &SessionId, name: &str) -> Result<()> {
+    pub async fn remove(&self, session_id: &TargetSessionId, name: &str) -> Result<()> {
         self.storage().await?.remove(session_id, name).await
     }
 
@@ -285,3 +304,7 @@ impl SessionRecordings {
         Ok(self.storage().await?.access(recording, file))
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "sqlite")]
+mod tests;

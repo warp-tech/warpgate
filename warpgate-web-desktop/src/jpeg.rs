@@ -20,15 +20,23 @@ const MIN_RAW_BYTES: usize = 4096;
 
 /// Re-encode a raw BGRA tile as JPEG, leaving every other event untouched.
 ///
-/// Falls back to the original event if encoding fails — a degraded-but-correct frame
-/// beats dropping it.
-pub async fn encode_raw_images(event: DesktopEvent) -> DesktopEvent {
+/// A re-encoded tile is returned together with its original BGRA payload, so the recorder
+/// can composite its keyframe surface from the pixels directly instead of decoding the
+/// JPEG back. Falls back to the original event (with no raw copy) if encoding fails — a
+/// degraded-but-correct frame beats dropping it.
+pub async fn encode_raw_images(event: DesktopEvent) -> (DesktopEvent, Option<Bytes>) {
     let DesktopEvent::RawImage { rect, data } = event else {
-        return event;
+        return (event, None);
     };
 
+    // Tiles below the size floor come back unchanged from `encode`; skip the blocking-pool
+    // round-trip for them entirely (they dominate during small-update floods).
+    if data.len() < MIN_RAW_BYTES {
+        return (DesktopEvent::RawImage { rect, data }, None);
+    }
+
     // `Bytes` clones are refcount bumps, so the fallback copy is free. Encoding is
-    // CPU-bound: run it off the async worker, but await it here so frames stay ordered.
+    // CPU-bound: run it off the async worker.
     let encoded = tokio::task::spawn_blocking({
         let data = data.clone();
         move || encode(rect, &data)
@@ -36,8 +44,8 @@ pub async fn encode_raw_images(event: DesktopEvent) -> DesktopEvent {
     .await;
 
     match encoded {
-        Ok(Some(data)) => DesktopEvent::JpegImage { rect, data },
-        _ => DesktopEvent::RawImage { rect, data },
+        Ok(Some(jpeg)) => (DesktopEvent::JpegImage { rect, data: jpeg }, Some(data)),
+        _ => (DesktopEvent::RawImage { rect, data }, None),
     }
 }
 
@@ -118,7 +126,10 @@ mod tests {
     #[tokio::test]
     async fn passes_through_non_raw_events() {
         let event = DesktopEvent::Bell;
-        assert!(matches!(encode_raw_images(event).await, DesktopEvent::Bell));
+        assert!(matches!(
+            encode_raw_images(event).await,
+            (DesktopEvent::Bell, None)
+        ));
     }
 
     #[tokio::test]
@@ -129,7 +140,19 @@ mod tests {
         };
         assert!(matches!(
             encode_raw_images(event).await,
-            DesktopEvent::RawImage { .. }
+            (DesktopEvent::RawImage { .. }, None)
         ));
+    }
+
+    #[tokio::test]
+    async fn returns_the_raw_pixels_alongside_a_reencoded_tile() {
+        let tile = Bytes::from([0xffu8; 64 * 64 * 4].to_vec());
+        let (event, raw) = encode_raw_images(DesktopEvent::RawImage {
+            rect: rect(64, 64),
+            data: tile.clone(),
+        })
+        .await;
+        assert!(matches!(event, DesktopEvent::JpegImage { .. }));
+        assert_eq!(raw, Some(tile));
     }
 }

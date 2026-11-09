@@ -126,15 +126,19 @@
 <div class="sectioned-form-container {props.class ?? ''}">
     {#if sections.length > 0}
         <div
-            class="sectioned-form-tabs-slot {showSectionLinks ? 'is-visible' : 'is-hidden'}"
+            class="sectioned-form-tabs-slot {showSectionLinks
+                ? 'is-visible'
+                : 'is-hidden'}"
         >
             <nav class="sectioned-form-tabs" bind:this={tabsElement}>
                 <div class="nav nav-pills gap-2 p-2 overflow-x-auto">
                     {#each sections as section (section.id)}
                         <a
                             href={`#${section.id}-heading`}
-                            class="nav-link {activeSection === section.id ? 'active' : ''}"
-                            onclick={(event) => {
+                            class="nav-link {activeSection === section.id
+                                ? 'active'
+                                : ''}"
+                            onclick={event => {
                                 event.preventDefault()
                                 scrollToSection(section.id)
                             }}

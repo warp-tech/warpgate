@@ -2,15 +2,18 @@
     import { Alert, Button, Form, FormGroup } from '@sveltestrap/sveltestrap'
     import {
         api,
+        RdpTargetCompression,
+        RdpTlsSecurity,
         type TargetGroup,
         type TargetOptions,
         TlsMode,
     } from 'admin/lib/api'
+    import { adminPermissions } from 'admin/lib/store'
+    import { DEFAULT_PORTS } from 'admin/lib/targetAddress'
     import { stringifyError } from 'common/errors'
     import { TargetKind } from 'gateway/lib/api'
     import { onMount } from 'svelte'
     import { replace } from 'svelte-spa-router'
-    import { adminPermissions } from '../../lib/store'
 
     interface Props {
         params: { kind: string }
@@ -29,8 +32,9 @@
                 Ssh: {
                     kind: TargetKind.Ssh,
                     host: '192.168.0.1',
-                    port: 22,
+                    port: DEFAULT_PORTS.Ssh,
                     username: 'root',
+                    allowInsecureAlgos: false,
                     auth: {
                         kind: 'PublicKey' as const,
                     },
@@ -42,13 +46,14 @@
                         mode: TlsMode.Preferred,
                         verify: true,
                     },
+                    headers: {},
                 },
                 MySql: {
                     kind: TargetKind.MySql,
                     host: '192.168.0.1',
-                    port: 3306,
+                    port: DEFAULT_PORTS.MySql,
                     tls: {
-                        mode: TlsMode.Preferred,
+                        mode: TlsMode.Required,
                         verify: true,
                     },
                     username: 'root',
@@ -60,12 +65,13 @@
                 Postgres: {
                     kind: TargetKind.Postgres,
                     host: '192.168.0.1',
-                    port: 5432,
+                    port: DEFAULT_PORTS.Postgres,
                     tls: {
-                        mode: TlsMode.Preferred,
+                        mode: TlsMode.Required,
                         verify: true,
                     },
                     username: 'postgres',
+                    protocolVersion: '3.2' as const,
                     auth: {
                         kind: 'Password' as const,
                         password: '',
@@ -87,7 +93,7 @@
                 Vnc: {
                     kind: TargetKind.Vnc,
                     host: '192.168.0.1',
-                    port: 5900,
+                    port: DEFAULT_PORTS.Vnc,
                     auth: {
                         kind: 'None' as const,
                     },
@@ -95,13 +101,16 @@
                 Rdp: {
                     kind: TargetKind.Rdp,
                     host: '192.168.0.1',
-                    port: 3389,
+                    port: DEFAULT_PORTS.Rdp,
                     username: 'Administrator',
                     auth: {
                         kind: 'Password' as const,
                         password: '',
                     },
                     verifyTls: false,
+                    interactiveLogon: false,
+                    tlsSecurity: RdpTlsSecurity.Tls12,
+                    compression: RdpTargetCompression.Remotefx,
                 },
             }[params.kind]
             if (!options) {
@@ -112,9 +121,12 @@
                     name,
                     options,
                     groupId: selectedGroupId,
+                    requireApproval: false,
+                    ticketRequestsDisabled: false,
+                    ticketRequireApproval: false,
                 },
             })
-            replace(`/config/targets/${target.id}`)
+            replace(`/manage/targets/${target.id}`)
         } catch (err) {
             error = await stringifyError(err)
         }
@@ -146,9 +158,9 @@
     <div class="narrow-page">
         <Form
             on:submit={e => {
-            create()
-            e.preventDefault()
-        }}
+                create()
+                e.preventDefault()
+            }}
         >
             <!-- Defualt button for key handling -->
             <Button class="d-none" type="submit"></Button>

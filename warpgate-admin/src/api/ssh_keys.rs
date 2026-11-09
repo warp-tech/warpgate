@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
@@ -6,7 +8,8 @@ use sea_orm::{ActiveModelTrait, EntityTrait, ModelTrait, PaginatorTrait, Set, Un
 use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::helpers::rng::get_crypto_rng;
-use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common::{AdminPermission, SecretRef, WarpgateError};
+use warpgate_common_http::errors::bad_request;
 use warpgate_db_entities::SshClientKey;
 
 use super::AdminContext;
@@ -19,24 +22,26 @@ struct SSHClientKey {
     pub label: String,
     pub kind: String,
     pub public_key: String,
-    /// The base64 body without the algorithm prefix — kept for the
-    /// backwards-compatible `own-keys` consumers.
-    pub public_key_base64: String,
     pub is_default: bool,
+    pub secret_backend: Option<String>,
 }
 
 impl From<SshClientKey::Model> for SSHClientKey {
     fn from(model: SshClientKey::Model) -> Self {
-        let mut parts = model.public_key.split_whitespace();
-        let kind = parts.next().unwrap_or_default().into();
-        let public_key_base64 = parts.next().unwrap_or_default().into();
+        let kind = model
+            .public_key
+            .split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .into();
+        let backend = model.secret_key.as_reference().map(|r| r.backend.clone());
         Self {
             id: model.id,
             label: model.label,
             kind,
-            public_key_base64,
             public_key: model.public_key,
             is_default: model.is_default,
+            secret_backend: backend,
         }
     }
 }
@@ -50,8 +55,8 @@ enum SSHClientKeyKind {
 impl From<SSHClientKeyKind> for Algorithm {
     fn from(kind: SSHClientKeyKind) -> Self {
         match kind {
-            SSHClientKeyKind::Ed25519 => Algorithm::Ed25519,
-            SSHClientKeyKind::Rsa => Algorithm::Rsa {
+            SSHClientKeyKind::Ed25519 => Self::Ed25519,
+            SSHClientKeyKind::Rsa => Self::Rsa {
                 hash: Some(HashAlg::Sha512),
             },
         }
@@ -65,7 +70,7 @@ enum GetSSHOwnKeysResponse {
 }
 
 #[derive(Object)]
-struct ImportSSHClientKeyRequest {
+struct ImportSshClientKeyRequest {
     label: String,
     /// Private key in OpenSSH or PKCS#8 PEM format, without a passphrase
     secret_key: String,
@@ -76,6 +81,17 @@ struct ImportSSHClientKeyRequest {
 struct GenerateSSHClientKeyRequest {
     label: String,
     kind: SSHClientKeyKind,
+}
+
+#[derive(Object)]
+struct ImportSshClientKeyReferenceRequest {
+    #[oai(validator(max_length = 255))]
+    label: String,
+    /// A `secret://backend/mount/path#field` reference; the field must resolve to
+    /// a private key in OpenSSH or PKCS#8 PEM format.
+    #[oai(validator(max_length = 1024))]
+    reference: String,
+    is_default: bool,
 }
 
 #[derive(ApiResponse)]
@@ -140,20 +156,20 @@ impl Api {
     async fn api_import_client_key(
         &self,
         admin: AdminContext,
-        body: Json<ImportSSHClientKeyRequest>,
+        body: Json<ImportSshClientKeyRequest>,
     ) -> Result<CreateSSHClientKeyResponse, WarpgateError> {
         admin.require(AdminPermission::ConfigEdit)?;
 
         let key = match russh::keys::decode_secret_key(&body.secret_key, None) {
             Ok(key) => key,
             Err(e) => {
-                return Ok(CreateSSHClientKeyResponse::BadRequest(Json(format!(
-                    "Could not parse the private key: {e}"
-                ))));
+                return Ok(CreateSSHClientKeyResponse::BadRequest(bad_request(
+                    format!("Could not parse the private key: {e}"),
+                )));
             }
         };
 
-        Ok(store_new_key(&admin, &body.label, &key, body.is_default).await?)
+        store_new_key(&admin, &body.label, &key, body.is_default).await
     }
 
     #[oai(
@@ -172,7 +188,41 @@ impl Api {
         let key = PrivateKey::random(&mut get_crypto_rng(), kind.into())
             .map_err(russh::keys::Error::from)?;
 
-        Ok(store_new_key(&admin, &label, &key, false).await?)
+        store_new_key(&admin, &label, &key, false).await
+    }
+
+    #[oai(
+        path = "/ssh/own-keys/reference",
+        method = "post",
+        operation_id = "import_ssh_own_key_reference"
+    )]
+    async fn api_import_client_key_reference(
+        &self,
+        admin: AdminContext,
+        body: Json<ImportSshClientKeyReferenceRequest>,
+    ) -> Result<CreateSSHClientKeyResponse, WarpgateError> {
+        admin.require(AdminPermission::ConfigEdit)?;
+
+        let reference = SecretRef::from_str(&body.reference)?;
+
+        let model = warpgate_protocol_ssh::import_client_key_reference(
+            &admin.services().db,
+            &body.label,
+            &reference,
+            &*admin.services().secret_backends,
+            body.is_default,
+        )
+        .await;
+
+        match model {
+            Ok(Some(model)) => Ok(CreateSSHClientKeyResponse::Created(Json(model.into()))),
+            Ok(None) => Ok(CreateSSHClientKeyResponse::Conflict(Json(
+                "This key is already imported".into(),
+            ))),
+            Err(e) => Ok(CreateSSHClientKeyResponse::BadRequest(Json(format!(
+                "Could not resolve the referenced key: {e}"
+            )))),
+        }
     }
 
     #[oai(
@@ -223,8 +273,8 @@ impl Api {
         };
 
         if SshClientKey::Entity::find().count(db).await? <= 1 {
-            return Ok(DeleteSSHClientKeyResponse::BadRequest(Json(
-                "At least one SSH client key must remain".into(),
+            return Ok(DeleteSSHClientKeyResponse::BadRequest(bad_request(
+                "At least one SSH client key must remain",
             )));
         }
 

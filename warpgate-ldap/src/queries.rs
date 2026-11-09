@@ -385,7 +385,8 @@ mod tests {
         let mut config = config();
         config.user_filter = "(&(objectClass=person)(!(disabled=TRUE)))".into();
         assert!(
-            username_filter(&config, "alice").starts_with("(&(&(objectClass=person)(!(disabled=TRUE)))")
+            username_filter(&config, "alice")
+                .starts_with("(&(&(objectClass=person)(!(disabled=TRUE)))")
         );
     }
 }

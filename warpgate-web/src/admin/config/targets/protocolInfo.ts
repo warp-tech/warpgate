@@ -73,6 +73,7 @@ export const protocolInfo: Partial<Record<TargetKind, string>> = {
 
 * Warpgate advertises itself as \`8.0.3-Warpgate\` (configurable).
 * Minimum target: MySQL 5.x+ or MariaDB 10.x+.
+* Warpgate will emulate MySQL protocol capabilities missing at the target: \`DEPRECATE_EOF\`, \`SESSION_TRACK\`, \`CONNECT_WITH_DB\`.
 
 ## Supported Warpgate credentials
 
@@ -96,6 +97,7 @@ export const protocolInfo: Partial<Record<TargetKind, string>> = {
 
 * Wire protocol 3.0 and 3.2 (configurable).
 * Minimum target: PostgreSQL 7.4+
+* Warpgate will translate between protocol versions 3.0 and 3.2 in case of a mismatch.
 
 ## Supported Warpgate credentials
 
@@ -131,7 +133,7 @@ export const protocolInfo: Partial<Record<TargetKind, string>> = {
 ## Warpgate ↔ target
 
 * Authenticates over CredSSP/NLA with a username and password.
-* TLS 1.2 at target is required.
+* TLS at target is required.
 * \`Verify TLS certificate\` is off by default (RDP servers commonly self-sign)
 
 ## Warpgate ↔ client
@@ -143,7 +145,7 @@ export const protocolInfo: Partial<Record<TargetKind, string>> = {
 
 * CredSSP/NLA logon
 * Legacy Standard RDP Security is not supported
-* Minimum target: Windows 8 / Server 2012+ (or any NLA/CredSSP server over TLS 1.2, e.g. xrdp)
+* Minimum target: Windows Server 2008 (or any NLA/CredSSP enabled server with TLS support, e.g. xrdp)
 
 ## Supported Warpgate credentials
 

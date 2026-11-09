@@ -90,22 +90,22 @@ pub fn _default_rdp_listen() -> ListenEndpoint {
 
 #[inline]
 pub const fn _default_retention() -> Duration {
-    Duration::from_secs(60 * 60 * 24 * 7)
+    Duration::from_hours(168)
 }
 
 #[inline]
 pub const fn _default_audit_retention() -> Duration {
-    Duration::from_secs(60 * 60 * 24 * 365)
+    Duration::from_hours(8760)
 }
 
 #[inline]
 pub const fn _default_session_max_age() -> Duration {
-    Duration::from_secs(60 * 30)
+    Duration::from_mins(30)
 }
 
 #[inline]
 pub const fn _default_cookie_max_age() -> Duration {
-    Duration::from_secs(60 * 60 * 24)
+    Duration::from_hours(24)
 }
 
 #[inline]
@@ -117,12 +117,17 @@ pub fn _default_ssh_listen() -> ListenEndpoint {
     ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 2222))
 }
 
-pub fn _default_ssh_keys_path() -> String {
-    "./data/keys".to_owned()
+pub const fn _default_ssh_inactivity_timeout() -> Duration {
+    Duration::from_mins(5)
 }
 
-pub const fn _default_ssh_inactivity_timeout() -> Duration {
-    Duration::from_secs(60 * 5)
+pub const fn _default_ssh_target_handshake_timeout() -> Duration {
+    Duration::from_secs(30)
+}
+
+#[inline]
+pub fn _default_ssh_ca_mount() -> String {
+    "ssh".to_owned()
 }
 
 #[allow(clippy::unnecessary_wraps)]

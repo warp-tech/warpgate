@@ -2,8 +2,7 @@
     import { faArrowRight } from '@fortawesome/free-solid-svg-icons'
     import type { Snippet } from 'svelte'
     import Fa from 'svelte-fa'
-    import { link } from 'svelte-spa-router'
-    import { router } from 'svelte-spa-router'
+    import { link, router } from 'svelte-spa-router'
     import { classnames } from './helpers'
 
     interface Props {
