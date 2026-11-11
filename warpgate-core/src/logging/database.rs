@@ -1,9 +1,12 @@
+use std::future::Future;
 use std::sync::OnceLock;
 
 use sea_orm::query::JsonValue;
 use sea_orm::{ActiveModelTrait, DatabaseConnection};
 use time::OffsetDateTime;
-use tracing::{Subscriber, error};
+use tokio::sync::broadcast::Receiver;
+use tokio::sync::broadcast::error::RecvError;
+use tracing::{Subscriber, error, warn};
 use tracing_subscriber::Layer;
 use tracing_subscriber::registry::LookupSpan;
 use uuid::Uuid;
@@ -33,21 +36,35 @@ where
 pub fn install_database_logger(database: DatabaseConnection) {
     tokio::spawn(async move {
         #[allow(clippy::expect_used)]
-        let mut receiver = LOG_SENDER
+        let receiver = LOG_SENDER
             .get()
             .expect("Log sender not ready yet")
             .subscribe();
-        loop {
-            match receiver.recv().await {
-                Err(_) => break,
-                Ok(log_entry) => {
-                    if let Err(error) = log_entry.insert(&database).await {
-                        error!(?error, "Failed to store log entry");
-                    }
-                }
+        consume_log_entries(receiver, |log_entry| async {
+            if let Err(error) = log_entry.insert(&database).await {
+                error!(?error, "Failed to store log entry");
             }
-        }
+        })
+        .await;
     });
+}
+
+async fn consume_log_entries<T: Clone, F: Future<Output = ()>>(
+    mut receiver: Receiver<T>,
+    mut sink: impl FnMut(T) -> F,
+) {
+    loop {
+        match receiver.recv().await {
+            Ok(entry) => sink(entry).await,
+            Err(RecvError::Lagged(skipped)) => {
+                warn!(
+                    skipped,
+                    "Database log consumer lagged; skipping log entries"
+                );
+            }
+            Err(RecvError::Closed) => break,
+        }
+    }
 }
 
 fn values_to_log_entry_data(
@@ -94,4 +111,54 @@ fn values_to_log_entry_data(
         related_admin_roles: Set(related_admin_roles),
         timestamp: Set(OffsetDateTime::now_utc()),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use tokio::sync::{broadcast, mpsc, oneshot};
+    use tokio::time::timeout;
+
+    use super::consume_log_entries;
+
+    #[tokio::test]
+    async fn consumer_continues_after_lag_and_stops_when_closed() {
+        timeout(Duration::from_secs(5), async {
+            let (sender, receiver) = broadcast::channel(2);
+            let (delivered, mut received) = mpsc::unbounded_channel();
+            let (release, blocked) = oneshot::channel();
+            let mut blocked = Some(blocked);
+            let consumer = tokio::spawn(consume_log_entries(receiver, move |entry| {
+                let delivered = delivered.clone();
+                let blocked = blocked.take();
+                async move {
+                    delivered.send(entry).unwrap();
+                    if let Some(blocked) = blocked {
+                        blocked.await.unwrap();
+                    }
+                }
+            }));
+
+            sender.send(0).unwrap();
+            assert_eq!(received.recv().await, Some(0));
+
+            // The first sink call is blocked, so three sends overflow capacity two.
+            for entry in 1..=3 {
+                sender.send(entry).unwrap();
+            }
+            release.send(()).unwrap();
+            assert_eq!(received.recv().await, Some(2));
+
+            sender.send(4).unwrap();
+            assert_eq!(received.recv().await, Some(3));
+            assert_eq!(received.recv().await, Some(4));
+
+            drop(sender);
+            consumer.await.unwrap();
+            assert_eq!(received.recv().await, None);
+        })
+        .await
+        .expect("consumer must deliver entries after lag and terminate when closed");
+    }
 }
