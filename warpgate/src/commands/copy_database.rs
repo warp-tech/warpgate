@@ -45,6 +45,7 @@ macro_rules! with_every_table_in_order {
             PasswordCredential,
             PublicKeyCredential,
             OtpCredential,
+            OracleCredential,
             SsoCredential,
             CertificateCredential,
             SessionApprovalRequest,

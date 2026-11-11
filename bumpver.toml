@@ -48,6 +48,12 @@ push = false
 "warpgate-protocol-postgres/Cargo.toml" = [
     '^version = "{version}"'
 ]
+"warpgate-protocol-oracle/Cargo.toml" = [
+    '^version = "{version}"'
+]
+"warpgate-oracle-tns/Cargo.toml" = [
+    '^version = "{version}"'
+]
 "warpgate-protocol-ssh/Cargo.toml" = [
     '^version = "{version}"'
 ]

@@ -1,0 +1,17 @@
+[package]
+name = "warpgate-oracle-tns"
+version = "0.30.2"
+description = "Oracle TNS/TTC wire protocol and O5LOGON crypto for the Warpgate Oracle protocol"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+# Pure protocol + crypto, no async or TLS. O5LOGON needs AES-CBC and PBKDF2 over
+# SHA-512, which the RustCrypto crates provide in the digest 0.10 generation
+# (aes 0.8, pbkdf2 0.12), so sha2 is pinned to that generation here instead of
+# the workspace's 0.11. These versions are already in the dependency tree.
+[dependencies]
+aes = "0.8"
+hex = { workspace = true, features = ["alloc"] }
+pbkdf2 = "0.12"
+sha2 = "0.10"

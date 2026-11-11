@@ -19,6 +19,7 @@ mod ldap_servers;
 mod login_protection;
 mod logs;
 mod network_status;
+mod oracle_connection_test;
 mod otp_credentials;
 mod pagination;
 mod parameters;
@@ -82,6 +83,7 @@ pub fn get() -> impl OpenApi {
             parameters::Api,
             (
                 ssh_connection_test::Api,
+                oracle_connection_test::Api,
                 login_protection::Api,
                 network_status::Api,
             ),

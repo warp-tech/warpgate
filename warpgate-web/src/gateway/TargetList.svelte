@@ -443,6 +443,10 @@
                 instructionsTarget.kind === TargetKind.Postgres
                     ? instructionsTarget.defaultDatabaseName
                     : undefined}
+                targetServiceName={instructionsTarget.kind === TargetKind.Oracle
+                    ? instructionsTarget.defaultDatabaseName
+                    : undefined}
+                targetTlsEnabled={instructionsTarget.tlsEnabled}
             />
         {/if}
     </ModalBody>

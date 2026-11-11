@@ -106,6 +106,28 @@ export const protocolInfo: Partial<Record<TargetKind, string>> = {
 * Web approval (browser link prompt)
 `,
 
+    [TargetKind.Oracle]: `
+## Warpgate ↔ target
+
+* Authenticates with a stored password via O5LOGON challenge-response.
+* IAM-role auth is not supported.
+* Connects to the Oracle listener; TLS (TCPS) is used per the target's TLS mode.
+
+## Warpgate ↔ client
+
+* The client connects over plain TCP or TCPS on the same port; the connection instructions use TCPS only when the target's TLS is enabled.
+* The client authenticates with its Warpgate password via O5LOGON, which needs a 12c verifier of that password. The verifier is only stored when the password is set while the Oracle listener is enabled, so users whose password predates that must set it again.
+
+## Oracle protocol
+
+* Transparent TNS/TTC relay.
+* The target is chosen by its configured service name; a connection whose \`CONNECT_DATA\` carries no \`SERVICE_NAME\` is refused.
+
+## Supported Warpgate credentials
+
+* Password (Oracle verifier)
+`,
+
     [TargetKind.Kubernetes]: `
 ## Warpgate ↔ target
 

@@ -14,6 +14,7 @@ mod db_auth;
 pub(crate) mod helpers;
 mod listener_status;
 pub mod logging;
+pub mod oracle_verifier;
 pub mod login_protection;
 mod protocols;
 pub mod rate_limiting;
