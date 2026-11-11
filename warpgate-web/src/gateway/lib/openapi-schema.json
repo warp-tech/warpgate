@@ -2683,6 +2683,10 @@
           "external_host": {
             "type": "string"
           },
+          "http_landing_path": {
+            "type": "string",
+            "description": "Initial HTTP path and query, omitted for the root path without a query."
+          },
           "group": {
             "$ref": "#/components/schemas/GroupInfo"
           },

@@ -6,7 +6,7 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::EntityTrait;
 use serde::Serialize;
 use uuid::Uuid;
-use warpgate_common::{Target as TargetConfig, WarpgateError};
+use warpgate_common::{Target as TargetConfig, TargetOptions, WarpgateError};
 use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
 use warpgate_core::ConfigProvider;
 use warpgate_db_entities::Target::fuzzy_filter_targets;
@@ -31,6 +31,8 @@ pub struct TargetSnapshot {
     pub description: String,
     pub kind: Target::TargetKind,
     pub external_host: Option<String>,
+    /// Initial HTTP path and query, omitted for the root path without a query.
+    pub http_landing_path: Option<String>,
     pub group: Option<GroupInfo>,
     pub default_database_name: Option<String>,
 }
@@ -97,6 +99,10 @@ impl Api {
                     description: t.description.clone(),
                     kind: (&t.options).into(),
                     external_host: t.options.external_host().map(ToString::to_string),
+                    http_landing_path: match &t.options {
+                        TargetOptions::Http(options) => http_landing_path(&options.url),
+                        _ => None,
+                    },
                     default_database_name: t
                         .options
                         .default_database_name()
@@ -107,5 +113,44 @@ impl Api {
             .collect();
 
         Ok(GetTargetsResponse::Ok(Json(result)))
+    }
+}
+
+fn http_landing_path(url: &str) -> Option<String> {
+    let url = url::Url::parse(url).ok()?;
+    let path = &url[url::Position::BeforePath..url::Position::AfterQuery];
+    if path.is_empty() || path == "/" {
+        None
+    } else {
+        Some(path.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::http_landing_path;
+
+    #[test]
+    fn extracts_http_landing_path() {
+        for (url, expected) in [
+            ("https://cluster.example.com", None),
+            ("https://cluster.example.com/", None),
+            ("", None),
+            (
+                "https://cluster.example.com/prometheus/",
+                Some("/prometheus/"),
+            ),
+            (
+                "https://cluster.example.com/prometheus/?view=graph&name=a%2Fb#section",
+                Some("/prometheus/?view=graph&name=a%2Fb"),
+            ),
+            (
+                "https://cluster.example.com/?view=graph",
+                Some("/?view=graph"),
+            ),
+            ("https://cluster.example.com/#section", None),
+        ] {
+            assert_eq!(http_landing_path(url).as_deref(), expected, "{url}");
+        }
     }
 }

@@ -80,12 +80,20 @@
 
     function urlForTarget(target: TargetSnapshot): string | undefined {
         if (target.kind === TargetKind.Http) {
+            const url = new URL(location.origin)
             if (target.externalHost) {
-                const port = location.port ? `:${location.port}` : ''
-                return `${location.protocol}//${target.externalHost}${port}`
-            } else {
-                return `/?warpgate-target=${encodeURIComponent(target.name)}`
+                url.hostname = target.externalHost
             }
+            // Keep the configured path on the portal origin, even if it starts with //.
+            const [path = '/', query] = (target.httpLandingPath ?? '/').split(
+                /\?(.*)/s,
+            )
+            url.pathname = path
+            url.search = query ?? ''
+            if (!target.externalHost) {
+                url.searchParams.set('warpgate-target', target.name)
+            }
+            return url.href
         } else if (target.kind === TargetKind.Ssh) {
             return `/@warpgate/#/web-ssh/start/${target.id}`
         } else if (
