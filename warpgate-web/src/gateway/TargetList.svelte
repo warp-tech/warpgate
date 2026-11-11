@@ -85,7 +85,9 @@
                 url.hostname = target.externalHost
             }
             // Keep the configured path on the portal origin, even if it starts with //.
-            const [path = '/', query] = (target.httpLandingPath ?? '/').split(/\?(.*)/s)
+            const [path = '/', query] = (target.httpLandingPath ?? '/').split(
+                /\?(.*)/s,
+            )
             url.pathname = path
             url.search = query ?? ''
             if (!target.externalHost) {
