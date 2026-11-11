@@ -9,7 +9,7 @@ use poem::{Request, Response};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ConnectionTrait, Database, IntoActiveModel};
 use tokio::io::AsyncReadExt;
-use warpgate_aws::{S3Credentials, S3Storage, S3StorageConfig, StaticCredentials};
+use warpgate_aws::{AwsError, S3Credentials, S3Storage, S3StorageConfig, StaticCredentials};
 use warpgate_db_entities::Parameters::{
     self, ConfigMigrationValues, RecordingsStorageConfig, set_config_migration_values,
 };
@@ -51,10 +51,19 @@ struct FakeS3 {
     failed_completes: Vec<String>,
     completed: Vec<String>,
     aborted: Vec<String>,
+    /// (key suffix, body) of objects that HEAD and GET can read.
+    objects: Vec<(String, Vec<u8>)>,
 }
 
 impl FakeS3 {
-    fn handle(&mut self, method: &Method, path: &str, query: &str, len: usize) -> Response {
+    fn handle(
+        &mut self,
+        method: &Method,
+        path: &str,
+        query: &str,
+        range: Option<&str>,
+        len: usize,
+    ) -> Response {
         let part = query
             .split('&')
             .find_map(|pair| pair.strip_prefix("partNumber="))
@@ -99,6 +108,29 @@ impl FakeS3 {
                     "<CompleteMultipartUploadResult><ETag>\"e\"</ETag></CompleteMultipartUploadResult>",
                 )
             }
+            (&Method::HEAD | &Method::GET, None) => {
+                let Some((_, body)) = self.objects.iter().find(|(key, _)| path.ends_with(key))
+                else {
+                    return Response::builder().status(StatusCode::NOT_FOUND).body("");
+                };
+                if method == Method::HEAD {
+                    return Response::builder()
+                        .header("Content-Length", body.len())
+                        .body(());
+                }
+                let start = range
+                    .and_then(|r| r.strip_prefix("bytes="))
+                    .and_then(|r| r.strip_suffix('-'))
+                    .and_then(|r| r.parse::<usize>().ok())
+                    .unwrap_or(0);
+                Response::builder()
+                    .status(StatusCode::PARTIAL_CONTENT)
+                    .header(
+                        "Content-Range",
+                        format!("bytes {start}-{}/{}", body.len() - 1, body.len()),
+                    )
+                    .body(body[start..].to_vec())
+            }
             (&Method::DELETE, _) => {
                 self.aborted.push(path.into());
                 Response::builder().status(StatusCode::NO_CONTENT).body("")
@@ -140,9 +172,10 @@ impl Harness {
                 prefix: String::new(),
                 credentials: S3Credentials::Static(StaticCredentials {
                     access_key_id: "test".into(),
-                    secret_access_key: Some("test".into()),
+                    secret_access_key: Some(String::from("test").into()),
                 }),
                 scratch_path: Some(root.join("scratch").to_string_lossy().into_owned()),
+                serve_through_warpgate: false,
             })
         } else {
             None
@@ -247,10 +280,12 @@ async fn serve(s3: Arc<std::sync::Mutex<FakeS3>>) -> std::net::SocketAddr {
                 .map(|b| b.len())
                 .unwrap_or_default();
             let uri = request.uri();
+            let range = request.headers().get("range").and_then(|v| v.to_str().ok());
             s3.lock().unwrap().handle(
                 request.method(),
                 uri.path(),
                 uri.query().unwrap_or_default(),
+                range,
                 len,
             )
         }
@@ -569,4 +604,29 @@ async fn a_recorder_cancelled_while_opening_its_files_does_not_end() {
     );
     assert_eq!(h.ended().await, None);
     assert!(exists(&h.scratch(RecordingFile::NDJsonData).await));
+}
+
+/// Streaming S3 through Warpgate answers the players' `Range: bytes=N-` from
+/// here, so the 206 needs the object's full size and a start at the end has
+/// to come back as the 416 the players treat as end-of-recording.
+#[tokio::test]
+async fn s3_ranged_reads_report_the_size_and_refuse_past_the_end() {
+    let h = Harness::new(Some(FakeS3::default())).await;
+    h.s3.lock()
+        .unwrap()
+        .objects
+        .push(("rec.bin".into(), b"0123456789".to_vec()));
+    let s3 = S3Storage::new(h.s3_config.as_ref().unwrap()).await.unwrap();
+
+    let mut read = s3.get_reader_from("rec.bin", 4).await.unwrap();
+    assert_eq!((read.len, read.total), (6, 10));
+    let mut body = Vec::new();
+    read.reader.read_to_end(&mut body).await.unwrap();
+    assert_eq!(body, b"456789");
+
+    match s3.get_reader_from("rec.bin", 10).await {
+        Err(AwsError::RangeNotSatisfiable { total }) => assert_eq!(total, 10),
+        Err(e) => panic!("expected RangeNotSatisfiable, got {e}"),
+        Ok(_) => panic!("a read starting at the end should not be satisfiable"),
+    }
 }

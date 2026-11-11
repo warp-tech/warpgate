@@ -80,7 +80,12 @@ async fn recordings_s3_browser_origin(ctx: &UnauthenticatedRequestContext) -> Op
         .recordings_storage_config()
         .ok()?
     {
+        // Streaming through Warpgate keeps the fetch same-origin, so storage
+        // only needs allow-listing when the browser is redirected to it.
+        RecordingsStorageConfig::S3(s3) if s3.serve_through_warpgate => None,
+        RecordingsStorageConfig::Azure(azure) if azure.serve_through_warpgate => None,
         RecordingsStorageConfig::S3(s3) => s3.browser_origin(),
+        RecordingsStorageConfig::Azure(azure) => azure.browser_origin(),
         RecordingsStorageConfig::Disk(_) => None,
     }
 }

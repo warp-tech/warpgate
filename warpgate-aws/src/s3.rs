@@ -8,6 +8,7 @@ use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use poem_openapi::{Object, Union};
 use serde::{Deserialize, Serialize};
 use tracing::error;
+use warpgate_common::{RangedRead, StoredSecret};
 
 use crate::AwsError;
 
@@ -29,23 +30,42 @@ pub struct AutoCredentials {}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Object)]
 pub struct StaticCredentials {
     pub access_key_id: String,
-    /// `None` on the admin API means "keep the stored secret" (it's never sent
-    /// out); always `Some` in a stored config.
-    pub secret_access_key: Option<String>,
+    /// Encrypted at rest. Blank in responses; absent or blank in an update
+    /// keeps the stored secret.
+    pub secret_access_key: Option<StoredSecret>,
 }
 
 impl S3Credentials {
-    #[must_use]
-    pub fn setup_config_loader(&self, loader: ConfigLoader) -> ConfigLoader {
-        match self {
+    pub fn setup_config_loader(&self, loader: ConfigLoader) -> Result<ConfigLoader, AwsError> {
+        Ok(match self {
             Self::Auto(_) => loader,
-            Self::Static(creds) => loader.credentials_provider(Credentials::new(
-                creds.access_key_id.clone(),
-                creds.secret_access_key.clone().unwrap_or_default(),
-                None,
-                None,
-                "warpgate-static",
-            )),
+            Self::Static(creds) => {
+                let secret = match &creds.secret_access_key {
+                    Some(secret) => secret
+                        .reveal()
+                        .map_err(|e| AwsError::Other(Box::new(e)))?
+                        .expose_secret()
+                        .clone(),
+                    None => String::new(),
+                };
+                loader.credentials_provider(Credentials::new(
+                    creds.access_key_id.clone(),
+                    secret,
+                    None,
+                    None,
+                    "warpgate-static",
+                ))
+            }
+        })
+    }
+
+    /// The secret Warpgate stores for this mode, if any. An absent static
+    /// secret is materialised as blank so it can be redacted, restored and
+    /// encrypted like any other.
+    pub fn stored_secret_mut(&mut self) -> Option<&mut StoredSecret> {
+        match self {
+            Self::Auto(_) => None,
+            Self::Static(creds) => Some(creds.secret_access_key.get_or_insert_default()),
         }
     }
 }
@@ -67,6 +87,13 @@ pub struct S3StorageConfig {
     /// Local directory buffering recordings before upload, resolved against the
     /// config file's directory unless absolute. Defaults to `data/recordings-scratch`.
     pub scratch_path: Option<String>,
+    /// Stream recordings through Warpgate instead of redirecting the browser to
+    /// a presigned URL. Needed when the browser cannot reach the bucket, e.g.
+    /// behind a private endpoint. Off by default, so existing setups keep
+    /// redirecting.
+    #[serde(default)]
+    #[oai(default)]
+    pub serve_through_warpgate: bool,
 }
 
 impl S3StorageConfig {
@@ -95,13 +122,14 @@ pub struct S3Storage {
     client: aws_sdk_s3::Client,
     bucket: String,
     prefix: String,
+    serve_through_warpgate: bool,
 }
 
 impl S3Storage {
     pub async fn new(config: &S3StorageConfig) -> Result<Self, AwsError> {
         let mut loader = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .region(aws_sdk_s3::config::Region::new(config.region.clone()));
-        loader = config.credentials.setup_config_loader(loader);
+        loader = config.credentials.setup_config_loader(loader)?;
 
         let sdk_config = loader.load().await;
 
@@ -117,7 +145,12 @@ impl S3Storage {
             client: aws_sdk_s3::Client::from_conf(builder.build()),
             bucket: config.bucket.clone(),
             prefix: config.prefix.clone(),
+            serve_through_warpgate: config.serve_through_warpgate,
         })
+    }
+
+    pub const fn serves_through_warpgate(&self) -> bool {
+        self.serve_through_warpgate
     }
 
     fn prefix_no_trailing_slash(&self) -> &str {
@@ -142,6 +175,48 @@ impl S3Storage {
             .await
             .map_err(AwsError::sdk_error)?;
         Ok(Box::new(output.body.into_async_read()))
+    }
+
+    /// Read from `offset` to the end, reporting the object's full size.
+    ///
+    /// The size comes from a HEAD first: S3 answers a range past the end with
+    /// a bare 416, and the caller's 416 has to state the size.
+    pub async fn get_reader_from(&self, path: &str, offset: u64) -> Result<RangedRead, AwsError> {
+        let key = self.key(path);
+        let head = self
+            .client
+            .head_object()
+            .bucket(&self.bucket)
+            .key(&key)
+            .send()
+            .await
+            .map_err(AwsError::sdk_error)?;
+        let total = head.content_length().map_or(0, |len| len.max(0) as u64);
+        if offset >= total {
+            if total == 0 && offset == 0 {
+                return Ok(RangedRead {
+                    reader: Box::new(tokio::io::empty()),
+                    len: 0,
+                    total: 0,
+                });
+            }
+            return Err(AwsError::RangeNotSatisfiable { total });
+        }
+
+        let output = self
+            .client
+            .get_object()
+            .bucket(&self.bucket)
+            .key(&key)
+            .range(format!("bytes={offset}-"))
+            .send()
+            .await
+            .map_err(AwsError::sdk_error)?;
+        Ok(RangedRead {
+            reader: Box::new(output.body.into_async_read()),
+            len: total - offset,
+            total,
+        })
     }
 
     /// Presigned GET URL the browser can fetch directly (supports `Range`).
@@ -328,6 +403,7 @@ mod tests {
             prefix: String::new(),
             credentials: S3Credentials::Auto(AutoCredentials {}),
             scratch_path: None,
+            serve_through_warpgate: false,
         }
     }
 
