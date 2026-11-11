@@ -49,7 +49,12 @@ pub async fn catchall_endpoint(
         return Ok(target_select_redirect());
     };
 
-    session.set_target_name(authorization.target().name.clone());
+    if should_remember_target(
+        authorization.options(),
+        ctx.trusted_hostname(req).as_deref(),
+    ) {
+        session.set_target_name(authorization.target().name.clone());
+    }
 
     let RequestAuthorization::Session(_) = &ctx.auth else {
         return Err(poem::Error::from_status(
@@ -123,6 +128,15 @@ fn is_http_authorization(
     authorization: TargetAuthorization,
 ) -> Option<TargetAuthorization<TargetHTTPOptions>> {
     authorization.narrow().ok()
+}
+
+/// A target served on its own bound domain is selected by the host on every
+/// request, so remembering it would only make the main host proxy to it too.
+fn should_remember_target(options: &TargetHTTPOptions, request_host: Option<&str>) -> bool {
+    options
+        .external_host
+        .as_deref()
+        .is_none_or(|external_host| Some(external_host) != request_host)
 }
 
 async fn get_target_for_request(
@@ -237,4 +251,42 @@ async fn get_target_for_request(
     }
 
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_options(external_host: Option<&str>) -> TargetHTTPOptions {
+        TargetHTTPOptions {
+            url: "http://target.internal".to_string(),
+            tls: Default::default(),
+            headers: Default::default(),
+            external_host: external_host.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn target_on_its_bound_domain_is_not_remembered() {
+        let options = make_options(Some("a.wg.example.com"));
+        assert!(!should_remember_target(&options, Some("a.wg.example.com")));
+    }
+
+    #[test]
+    fn target_without_bound_domain_is_remembered() {
+        let options = make_options(None);
+        assert!(should_remember_target(&options, Some("wg.example.com")));
+    }
+
+    #[test]
+    fn target_on_another_domain_is_remembered() {
+        let options = make_options(Some("a.wg.example.com"));
+        assert!(should_remember_target(&options, Some("wg.example.com")));
+    }
+
+    #[test]
+    fn target_without_request_host_is_remembered() {
+        let options = make_options(Some("a.wg.example.com"));
+        assert!(should_remember_target(&options, None));
+    }
 }
