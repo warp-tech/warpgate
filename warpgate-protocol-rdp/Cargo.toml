@@ -10,18 +10,18 @@ anyhow.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
 futures.workspace = true
-ironrdp = { version = "0.17", features = [
-    "cliprdr",
-    "connector",
-    "session",
-    "graphics",
-    "input",
-    "dvc",
-    "displaycontrol",
-] }
-ironrdp-egfx = "0.3"
-ironrdp-server = "0.13"
-ironrdp-tokio = "0.10"
+ironrdp-cliprdr = "0.9"
+ironrdp-connector = "0.12"
+ironrdp-core = "0.3"
+ironrdp-displaycontrol = "0.10"
+ironrdp-dvc = "0.10"
+ironrdp-egfx = "0.5"
+ironrdp-graphics = "0.11"
+ironrdp-input = "0.9"
+ironrdp-pdu = "0.11"
+ironrdp-server = "0.14"
+ironrdp-session = "0.13"
+ironrdp-tokio = "0.12"
 libz-sys = { version = "1", features = ["static"] } # winscard (via sspi) links C zlib
 openssl = { version = "0.10", optional = true, features = ["vendored"] }
 rustls = { version = "0.23", default-features = false, features = [
@@ -42,6 +42,7 @@ tokio = { workspace = true, features = [
     "fs",
 ] }
 tokio-openssl = { version = "0.6", optional = true }
+tokio-rustls = "0.26"
 tokio-stream.workspace = true
 tracing.workspace = true
 uuid.workspace = true
