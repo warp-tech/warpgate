@@ -562,6 +562,10 @@ pub struct HttpConfig {
 
     #[serde(default)]
     pub sni_certificates: Vec<SniCertificateConfig>,
+
+    /// API endpoints allowed when using token auth. Each item is a "<METHOD> <path>".
+    #[serde(default)]
+    pub user_api_token_allowed_endpoints: Option<Vec<String>>,
 }
 
 impl Default for HttpConfig {
@@ -577,6 +581,7 @@ impl Default for HttpConfig {
             session_max_age: _default_session_max_age(),
             cookie_max_age: _default_cookie_max_age(),
             sni_certificates: vec![],
+            user_api_token_allowed_endpoints: None,
         }
     }
 }
