@@ -157,6 +157,44 @@ jobs:
           files: dist/*
           token: ${{ secrets.GITHUB_TOKEN }}
 
+  build-windows:
+    # Builds and tests on Windows so it keeps compiling there; no release
+    # artifact yet (the ACL work comes in a later PR).
+    name: Build (x86_64-windows)
+    runs-on: windows-2025
+    env:
+      # openssl-src builds OpenSSL with Perl; the runner's Git Perl lacks modules it needs
+      OPENSSL_SRC_PERL: C:\Strawberry\perl\bin\perl.exe
+      # the web UI's npm scripts use POSIX shell syntax
+      npm_config_script_shell: C:\Program Files\Git\bin\bash.exe
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: recursive
+
+      - uses: Swatinem/rust-cache@v2.9.3
+        with:
+          key: "build-windows"
+
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+
+      - name: Build admin UI
+        run: |
+          cd warpgate-web
+          npm ci
+          npm run build
+
+      - name: Build
+        run: cargo build --all-features
+
+      - name: Test
+        run: cargo test --all-features -p warpgate-common -p warpgate-core -p warpgate -p warpgate-protocol-ssh
+
   config-schema:
     name: Config schema check
     runs-on: ubuntu-24.04

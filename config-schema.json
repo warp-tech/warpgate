@@ -4,6 +4,7 @@
   "type": "object",
   "properties": {
     "database_url": {
+      "description": "For SQLite, `sqlite:<directory>`: the database is\n`<directory>/db.sqlite3`, relative to the config file's directory.\nAs in any URL, write `%`, `?` and `#` in the path as `%25`, `%3F` and\n`%23`.",
       "type": "string",
       "default": "sqlite:data/db"
     },

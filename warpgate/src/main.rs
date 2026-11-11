@@ -10,6 +10,7 @@ use anyhow::Result;
 use clap::{ArgAction, Parser};
 use logging::init_logging;
 use tracing::error;
+use warpgate_common::helpers::fs::ensure_files_can_be_secured;
 use warpgate_common::version::warpgate_version;
 use warpgate_common::{GlobalParams, LogFormat, Secret};
 
@@ -31,7 +32,8 @@ pub struct Cli {
     #[clap(long, value_enum)]
     log_format: Option<LogFormat>,
 
-    /// Do not tighten UNIX modes of config and data files
+    /// Do not tighten UNIX modes of config and data files (required on
+    /// Windows, where you restrict access to them yourself)
     #[clap(long)]
     skip_securing_files: bool,
 }
@@ -197,7 +199,25 @@ async fn _main() -> Result<()> {
     #[cfg(debug_assertions)]
     let _ = dotenv::dotenv();
 
-    init_logging(load_config(&params, false).ok().as_ref(), &cli).await?;
+    let config = load_config(&params, false).ok();
+    init_logging(config.as_ref(), &cli).await?;
+
+    // Everything else reads or writes the config and data files
+    if !matches!(cli.command, Commands::Version | Commands::Healthcheck) {
+        ensure_files_can_be_secured(&params)?;
+
+        // Log forwarding uses a Unix datagram socket. Refuse a configured one
+        // rather than drop the logs it would have carried.
+        #[cfg(windows)]
+        if config
+            .as_ref()
+            .is_some_and(|config| config.store.log.send_to.is_some())
+        {
+            anyhow::bail!(
+                "log.send_to is not supported on Windows (log forwarding uses a Unix datagram socket); remove it from the config"
+            );
+        }
+    }
 
     #[allow(clippy::unwrap_used)]
     rustls::crypto::aws_lc_rs::default_provider()

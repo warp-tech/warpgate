@@ -182,11 +182,16 @@ mod tests {
         drop(client);
         drop(listener);
 
-        let plain = Socket::new(Domain::IPV4, Type::STREAM, None).unwrap();
-        assert!(
-            plain.bind(&addr.into()).is_err(),
-            "port should be held by TIME_WAIT without SO_REUSEADDR"
-        );
+        // Windows lets a plain bind through TIME_WAIT, so there is no
+        // precondition to check there.
+        #[cfg(not(windows))]
+        {
+            let plain = Socket::new(Domain::IPV4, Type::STREAM, None).unwrap();
+            assert!(
+                plain.bind(&addr.into()).is_err(),
+                "port should be held by TIME_WAIT without SO_REUSEADDR"
+            );
+        }
 
         let endpoint = ListenEndpoint::from(addr);
         endpoint.probe().unwrap();
