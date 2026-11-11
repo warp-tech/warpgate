@@ -23,6 +23,7 @@ members = [
     "warpgate-protocol-rdp",
     "warpgate-protocol-ssh",
     "warpgate-protocol-vnc",
+    "warpgate-scim",
     "warpgate-desktop-ui",
     "warpgate-sso",
     "warpgate-web",

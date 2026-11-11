@@ -20,6 +20,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 pub use specific_target::*;
 pub use target::*;
+use time::OffsetDateTime;
 use uuid::Uuid;
 pub use warnings::{clear_config_warnings, emit_config_warning, emit_runtime_warning, warnings};
 use warpgate_sso::SsoProviderConfig;
@@ -159,6 +160,12 @@ pub struct User {
     pub rate_limit_bytes_per_second: Option<i64>,
     pub ldap_server_id: Option<Uuid>,
     pub allowed_ip_ranges: Option<Vec<WarpgateIpNet>>,
+    /// A disabled account can't log in anywhere.
+    pub enabled: bool,
+    /// Set when an identity provider manages this user over SCIM.
+    pub scim_external_id: Option<String>,
+    pub created_at: Option<OffsetDateTime>,
+    pub updated_at: Option<OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, Object)]
@@ -182,6 +189,8 @@ pub struct Role {
     pub name: String,
     pub description: String,
     pub is_default: bool,
+    pub created_at: Option<OffsetDateTime>,
+    pub updated_at: Option<OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Object)]

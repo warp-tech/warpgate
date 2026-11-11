@@ -10,8 +10,9 @@ use warpgate_db_entities::{AdminRole, User};
 /// permission model from the DB. `has_admin_permission`, `is_user_admin` and the `/info` UI
 /// serialization all read the result instead of re-deriving it three different ways.
 ///
-/// An admin token holds every permission; a ticket, a bare cluster peer, or an unauthenticated
-/// caller holds none (a ticket is scoped to one target and must never confer admin rights).
+/// An admin token holds every permission; a ticket, a bare cluster peer, a disabled user or an
+/// unauthenticated caller holds none (a ticket is scoped to one target and must never confer
+/// admin rights).
 pub async fn admin_permission_set(
     ctx: &warpgate_common_http::AuthenticatedRequestContext,
 ) -> Result<AdminPermissionSet, WarpgateError> {
@@ -32,6 +33,10 @@ pub async fn user_admin_permission_set(
     let Some(user_model) = User::Entity::find_by_id(user_id).one(db).await? else {
         return Ok(AdminPermissionSet::none());
     };
+    // A disabled administrator's open session loses its admin standing at once.
+    if !user_model.enabled {
+        return Ok(AdminPermissionSet::none());
+    }
 
     let roles = user_model.find_related(AdminRole::Entity).all(db).await?;
     Ok(AdminPermissionSet::from_roles(
