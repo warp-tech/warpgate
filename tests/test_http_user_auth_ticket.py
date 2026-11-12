@@ -85,6 +85,17 @@ class TestHTTPUserAuthTicket:
         assert response.status_code // 100 == 2
         assert response.json()["path"] == "/some/path"
 
+        # Ticket as X-Warpgate-Ticket header
+        response = session.get(
+            f"{url}/some/path?warpgate-target={echo_target.name}",
+            allow_redirects=False,
+            headers={
+                "X-Warpgate-Ticket": secret,
+            },
+        )
+        assert response.status_code // 100 == 2
+        assert response.json()["path"] == "/some/path"
+
         # Bad ticket
         response = session.get(
             f"{url}/some/path?warpgate-target={echo_target.name}",
