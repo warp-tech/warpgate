@@ -118,6 +118,10 @@ spec:
             - -c
             - /data/warpgate.yaml
             - run
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- else }}
           readinessProbe:
             exec:
               command:
@@ -125,6 +129,7 @@ spec:
                 - --config=/data/warpgate.yaml
                 - healthcheck
             timeoutSeconds: 10
+          {{- end }}
           ports:
             {{- if .Values.setup.ssh }}
             - name: ssh
