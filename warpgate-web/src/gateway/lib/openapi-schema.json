@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.30.0-modified"
+    "version": "v0.30.3-33-g6a4e1873-modified"
   },
   "servers": [
     {
@@ -971,6 +971,9 @@
           },
           "401": {
             "description": ""
+          },
+          "403": {
+            "description": "Issuing a token from a token would let a leaked token renew itself\nindefinitely, so a fresh token requires a web session."
           }
         },
         "security": [

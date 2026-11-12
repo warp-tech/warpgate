@@ -26,7 +26,8 @@
         "proxy_protocol": false,
         "session_max_age": "30m",
         "sni_certificates": [],
-        "trust_x_forwarded_headers": false
+        "trust_x_forwarded_headers": false,
+        "user_api_token_allowed_endpoints": null
       }
     },
     "kubernetes": {
@@ -189,6 +190,17 @@
         "trust_x_forwarded_headers": {
           "type": "boolean",
           "default": false
+        },
+        "user_api_token_allowed_endpoints": {
+          "description": "API endpoints allowed when using token auth. Each item is a \"<METHOD> <path>\".",
+          "type": [
+            "array",
+            "null"
+          ],
+          "default": null,
+          "items": {
+            "type": "string"
+          }
         }
       }
     },

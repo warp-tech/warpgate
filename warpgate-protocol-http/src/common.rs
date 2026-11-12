@@ -601,6 +601,24 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
         {
             Some(RequestAuthorization::AdminToken)
         } else if let Some(user) = user_for_api_token(&req, &ctx, token_from_header).await? {
+            let endpoint = format!("{} {}", req.method(), req.uri().path());
+            let allowed = ctx
+                .services()
+                .config
+                .lock()
+                .await
+                .store
+                .http
+                .user_api_token_allowed_endpoints
+                .as_ref()
+                .is_none_or(|list| list.iter().any(|e| e.eq_ignore_ascii_case(&endpoint)));
+            if !allowed {
+                tracing::warn!(
+                    session_username = %user.username,
+                    "API token denied for {endpoint}: not in http.user_api_token_allowed_endpoints"
+                );
+                return Err(poem::Error::from_status(StatusCode::FORBIDDEN));
+            }
             Some(RequestAuthorization::UserToken {
                 user_id: user.id,
                 username: user.username,
