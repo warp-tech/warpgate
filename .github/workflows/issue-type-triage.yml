@@ -42,7 +42,7 @@ jobs:
 
       - name: Guess issue type
         id: guess
-        uses: actions/ai-inference@v1.2.8
+        uses: actions/ai-inference@v2.1.1
         with:
           model: openai/gpt-4.1
           max-tokens: 8

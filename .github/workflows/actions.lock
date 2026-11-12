@@ -4,7 +4,7 @@
 version: 'v0.0.3'
 workflows:
     '.github/workflows/ai-comment-check.yml':
-        - 'actions/ai-inference@v1.2.8'
+        - 'actions/ai-inference@v2.1.1'
     '.github/workflows/autolabel.yml':
         - 'actions/github-script@v7.1.0'
     '.github/workflows/biome.yml':
@@ -50,7 +50,7 @@ workflows:
         - 'azure/setup-helm@v5.0.1'
         - 'docker/login-action@v4.7.0'
     '.github/workflows/issue-type-triage.yml':
-        - 'actions/ai-inference@v1.2.8'
+        - 'actions/ai-inference@v2.1.1'
     '.github/workflows/lockfile.yml':
         - 'actions/checkout@v7.0.0'
     '.github/workflows/reprotest.yml':
@@ -73,9 +73,9 @@ dependencies:
         commit: 'sha1-844f36862e911db73fe0815f00a4a2602c279505'
         owner_id: 55226457
         repo_id: 208143758
-    'actions/ai-inference@v1.2.8':
-        ref: 'v1.2.8'
-        commit: 'sha1-b81b2afb8390ee6839b494a404766bef6493c7d9'
+    'actions/ai-inference@v2.1.1':
+        ref: 'v2.1.1'
+        commit: 'sha1-a7805884c80886efc241e94a5351df715968a0ad'
         owner_id: 44036562
         repo_id: 960077787
     'actions/attest-build-provenance@v4.2.2':
