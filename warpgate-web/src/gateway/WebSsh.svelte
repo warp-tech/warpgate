@@ -98,6 +98,16 @@
         localStorage.warpgateWebSSHFontSize = String(fontSize)
     })
 
+    // Optional user-chosen font (e.g. a locally installed Nerd Font), tried
+    // before the bundled fallback. Stored per browser, like the font size.
+    let fontFamily = $state(localStorage.warpgateWebSSHFontFamily ?? '')
+    let fontFamilyDraft = $state('')
+    let showFontSettings = $state(false)
+
+    $effect(() => {
+        localStorage.warpgateWebSSHFontFamily = fontFamily
+    })
+
     function zoomIn() {
         fontSize = Math.min(FONT_SIZE_MAX, fontSize + FONT_SIZE_STEP)
     }
@@ -329,6 +339,7 @@
                     bind:this={tabs[id]}
                     active={id === activeChannelId}
                     {fontSize}
+                    {fontFamily}
                     readOnly={!connected}
                     onInput={data =>
                         send({
@@ -443,6 +454,15 @@
                         <Fa icon={faPlus} />
                     </button>
                 </div>
+                <DropdownItem
+                    onclick={() => {
+                        fontFamilyDraft = fontFamily
+                        showFontSettings = true
+                        menuOpen = false
+                    }}
+                >
+                    Terminal font
+                </DropdownItem>
                 {#if sessionInfo}
                     <DropdownItem divider />
                     <DropdownItem
@@ -458,6 +478,48 @@
         </Dropdown>
     </div>
 </div>
+
+<Modal isOpen={showFontSettings} toggle={() => (showFontSettings = false)}>
+    <form
+        onsubmit={e => {
+            e.preventDefault()
+            fontFamily = fontFamilyDraft.trim()
+            showFontSettings = false
+        }}
+    >
+        <ModalBody>
+            <label class="form-label" for="web-ssh-font-family">
+                Terminal font
+            </label>
+            <input
+                id="web-ssh-font-family"
+                class="form-control"
+                type="text"
+                placeholder="e.g. JetBrainsMono Nerd Font Mono"
+                autocomplete="off"
+                spellcheck="false"
+                bind:value={fontFamilyDraft}
+            >
+            <div class="form-text">
+                Name of a monospace font installed on this computer. Leave empty
+                to use the default font. Saved in this browser only.
+            </div>
+        </ModalBody>
+        <ModalFooter>
+            <Button
+                color="secondary"
+                class="modal-button"
+                type="button"
+                onclick={() => (showFontSettings = false)}
+            >
+                Cancel
+            </Button>
+            <Button color="primary" class="modal-button" type="submit">
+                Save
+            </Button>
+        </ModalFooter>
+    </form>
+</Modal>
 
 {#if sessionInfo}
     <Modal

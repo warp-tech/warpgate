@@ -1,4 +1,14 @@
 <script lang="ts" module>
+    // Bundled font first, then the browser's generic monospace font.
+    const DEFAULT_FONT_STACK = 'monospace-fallback, monospace'
+
+    // Turns a user-entered font name into a single quoted CSS family name,
+    // so names with spaces or digits ("JetBrainsMono Nerd Font Mono") work.
+    function quoteFontFamily(name: string): string {
+        const bare = name.trim().replace(/^(["'])(.*)\1$/, '$2')
+        return `"${bare.replace(/["\\]/g, '\\$&')}"`
+    }
+
     export const THEME = {
         foreground: '#cacaca',
         background: '#171717',
@@ -221,6 +231,7 @@
     interface Props {
         active: boolean
         fontSize: number
+        fontFamily: string
         readOnly: boolean
         onInput: (data: Uint8Array) => void
         onResize: (cols: number, rows: number) => void
@@ -230,6 +241,7 @@
     let {
         active,
         fontSize,
+        fontFamily,
         readOnly,
         onInput,
         onResize,
@@ -260,7 +272,7 @@
             brightCyan: THEME.colors[14],
             brightWhite: THEME.colors[15],
         },
-        fontFamily: 'monospace-fallback, monospace',
+        fontFamily: DEFAULT_FONT_STACK,
     })
 
     const fitAddon = new FitAddon()
@@ -281,6 +293,9 @@
 
     $effect(() => {
         terminal.options.fontSize = fontSize
+        terminal.options.fontFamily = fontFamily
+            ? `${quoteFontFamily(fontFamily)}, ${DEFAULT_FONT_STACK}`
+            : DEFAULT_FONT_STACK
         fitAddon.fit()
         onResize(terminal.cols, terminal.rows)
     })
