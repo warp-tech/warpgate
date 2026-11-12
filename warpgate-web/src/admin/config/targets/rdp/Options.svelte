@@ -42,7 +42,11 @@
 <h4 class="mt-4">Authentication</h4>
 
 <FormGroup floating label="Username">
-    <input class="form-control" bind:value={options.username}>
+    <input
+        class="form-control"
+        placeholder="Use the currently logged in user's name"
+        bind:value={options.username}
+    >
 </FormGroup>
 
 <FormGroup floating label="Domain (optional)">
