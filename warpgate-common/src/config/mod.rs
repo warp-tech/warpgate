@@ -267,6 +267,12 @@ impl AdminRole {
             AdminPermission::TicketRequestsManage => self.ticket_requests_manage,
         }
     }
+
+    pub fn permissions(&self) -> Vec<AdminPermission> {
+        AdminPermission::iter()
+            .filter(|perm| self.has_permission(*perm))
+            .collect()
+    }
 }
 
 use strum::IntoEnumIterator;

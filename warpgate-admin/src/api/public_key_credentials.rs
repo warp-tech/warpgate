@@ -215,7 +215,7 @@ impl DetailApi {
         let db = &admin.services().db;
 
         // Ensure user exists and is not LDAP-linked
-        let Some(_) = User::Entity::find_by_id(*user_id).one(db).await? else {
+        let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
             return Ok(UpdatePublicKeyCredentialResponse::NotFound);
         };
 
@@ -243,6 +243,16 @@ impl DetailApi {
         else {
             return Ok(UpdatePublicKeyCredentialResponse::NotFound);
         };
+
+        AuditEvent::CredentialUpdated {
+            credential_type: "public_key".to_string(),
+            credential_name: Some(model.label.clone()),
+            via: CredentialChangedVia::Admin,
+            user_id: *user_id,
+            username: user.username,
+            actor_user_id: admin.auth.user_id(),
+        }
+        .emit();
 
         Ok(UpdatePublicKeyCredentialResponse::Updated(Json(
             model.into(),
