@@ -1030,7 +1030,7 @@ impl ConfigProvider for DatabaseConfigProvider {
 mod tests {
     use sea_orm::ActiveValue::Set;
     use sea_orm::{ActiveModelTrait, Database};
-    use warpgate_common::auth::StoredCredentials;
+    use warpgate_common::auth::{CredentialPolicyResponse, StoredCredentials};
     use warpgate_common::helpers::hash::hash_password;
     use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
     use warpgate_db_migrations::migrate_database;
@@ -1375,5 +1375,36 @@ mod tests {
                 .unwrap(),
             None,
         );
+    }
+
+    #[tokio::test]
+    async fn default_postgres_policy_offers_web_approval_only_without_a_password() {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+        user_named(&db, "sso-only").await;
+        user_with_password(&db, "has-password", "password").await;
+
+        let provider = DatabaseConfigProvider::new(&db);
+        for (username, expected) in [
+            ("sso-only", CredentialKind::WebUserApproval),
+            ("has-password", CredentialKind::Password),
+        ] {
+            let policy = provider
+                .get_credential_policy(
+                    username,
+                    &[CredentialKind::Password, CredentialKind::WebUserApproval],
+                )
+                .await
+                .unwrap()
+                .expect("the user must have a credential policy");
+
+            let CredentialPolicyResponse::Need(needed) =
+                policy.is_sufficient(Protocol::Postgres, &HashSet::new())
+            else {
+                panic!("expected Need for {username}");
+            };
+            assert_eq!(needed, [expected].into_iter().collect(), "user: {username}");
+        }
     }
 }
