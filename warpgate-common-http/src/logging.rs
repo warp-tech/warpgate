@@ -6,6 +6,7 @@ use poem::web::RemoteAddr;
 use poem::{Addr, Request};
 use tracing::*;
 use url::form_urlencoded;
+use warpgate_common::UserSessionId;
 use warpgate_core::{Services, WarpgateServerHandle};
 
 use crate::request::trusted_client_ip;
@@ -41,24 +42,53 @@ pub async fn get_client_ip_addr(req: &Request, services: &Services) -> Option<Ip
         .and_then(|ip| ip.parse().ok())
 }
 
+/// Who a request is attributed to in its log span.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct SpanIdentity {
+    pub session: Option<UserSessionId>,
+    pub username: Option<String>,
+}
+
+impl SpanIdentity {
+    pub fn or(self, fallback: Self) -> Self {
+        Self {
+            session: self.session.or(fallback.session),
+            username: self.username.or(fallback.username),
+        }
+    }
+}
+
 pub async fn span_for_request(
     req: &Request,
     services: &Services,
     handle: Option<&WarpgateServerHandle>,
+    fallback: SpanIdentity,
 ) -> poem::Result<Span> {
     let client_ip = get_client_ip(req, services)
         .await
         .unwrap_or_else(|| "<unknown>".into());
 
-    Ok(if let Some(handle) = handle {
+    let identity = if let Some(handle) = handle {
         let ss = handle.user_session_state().lock().await;
-        if let Some(ref user_info) = ss.user_info.clone() {
-            info_span!("HTTP", session=%handle.user_session_id(), session_username=%user_info.username, %client_ip)
-        } else {
-            info_span!("HTTP", session=%handle.user_session_id(), %client_ip)
+        SpanIdentity {
+            session: Some(handle.user_session_id()),
+            username: ss
+                .user_info
+                .as_ref()
+                .map(|user_info| user_info.username.clone()),
         }
     } else {
-        info_span!("HTTP")
+        SpanIdentity::default()
+    }
+    .or(fallback);
+
+    Ok(match (identity.session, identity.username) {
+        (Some(id), Some(username)) => {
+            info_span!("HTTP", session=%id, session_username=%username, %client_ip)
+        }
+        (Some(id), None) => info_span!("HTTP", session=%id, %client_ip),
+        (None, Some(username)) => info_span!("HTTP", session_username=%username, %client_ip),
+        (None, None) => info_span!("HTTP"),
     })
 }
 
@@ -89,6 +119,34 @@ pub fn redacted_uri(uri: &Uri) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn span_identity_uses_fallback_for_missing_fields() {
+        let fallback = SpanIdentity {
+            session: Some(UserSessionId(uuid::Uuid::from_u128(1))),
+            username: Some("cookie-user".into()),
+        };
+        assert_eq!(SpanIdentity::default().or(fallback.clone()), fallback);
+
+        let live_session = Some(UserSessionId(uuid::Uuid::from_u128(2)));
+        assert_eq!(
+            SpanIdentity {
+                session: live_session,
+                username: None,
+            }
+            .or(fallback.clone()),
+            SpanIdentity {
+                session: live_session,
+                username: fallback.username.clone(),
+            }
+        );
+
+        let live = SpanIdentity {
+            session: live_session,
+            username: Some("live-user".into()),
+        };
+        assert_eq!(live.clone().or(fallback), live);
+    }
 
     #[test]
     fn ticket_query_value_is_redacted() {

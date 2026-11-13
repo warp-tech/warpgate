@@ -20,7 +20,7 @@ use futures::future::BoxFuture;
 use http::HeaderValue;
 use poem::endpoint::{EmbeddedFileEndpoint, EmbeddedFilesEndpoint};
 use poem::middleware::SetHeader;
-use poem::session::ServerSession;
+use poem::session::{ServerSession, Session};
 use poem::web::Data;
 use poem::{Endpoint, EndpointExt, FromRequest, IntoEndpoint, IntoResponse, Route, Server};
 use poem_openapi::OpenApiService;
@@ -35,7 +35,7 @@ use warpgate_common_http::cluster_tls::{ClusterTlsConfigs, cluster_aware_tls_acc
 use warpgate_common_http::errors::render_errors;
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_common_http::logging::{
-    get_client_ip, log_request_error, log_request_result, span_for_request,
+    SpanIdentity, get_client_ip, log_request_error, log_request_result, span_for_request,
 };
 use warpgate_common_http::{
     WARPGATE_PLAYGROUND_CSP, cluster_peer_extension, warpgate_csp_with_connect_src,
@@ -51,7 +51,7 @@ use warpgate_web_ssh::api::ws_handler as ssh_web_client_ws_handler;
 
 use crate::api::common::forward_ws_to_session_owner;
 use crate::client_cache::HttpClientCache;
-use crate::common::{endpoint_auth, page_auth};
+use crate::common::{SessionExt, endpoint_auth, page_auth};
 use crate::middleware::{CookieHostMiddleware, SecurityHeadersMiddleware, TicketMiddleware};
 use crate::session::SessionStore;
 use crate::session_handle::warpgate_server_handle_for_request;
@@ -288,13 +288,20 @@ impl ProtocolServer for HTTPProtocolServer {
                     .clone();
 
                 let req = { sm.lock().await.process_request(req).await? };
+                let fallback = {
+                    let session = <&Session>::from_request_without_body(&req).await?;
+                    SpanIdentity {
+                        session: session.get_session_id(),
+                        username: session.get_auth().map(|auth| auth.username().clone()),
+                    }
+                };
                 let handle = warpgate_server_handle_for_request(&req).await.ok();
                 let span = match handle {
                     Some(ref handle) => {
                         let handle = handle.lock().await;
-                        span_for_request(&req, ctx.services(), Some(&*handle)).await?
+                        span_for_request(&req, ctx.services(), Some(&*handle), fallback).await?
                     }
-                    None => span_for_request(&req, ctx.services(), None).await?,
+                    None => span_for_request(&req, ctx.services(), None, fallback).await?,
                 };
 
                 ep.call(req).instrument(span).await
