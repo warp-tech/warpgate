@@ -82,6 +82,7 @@ struct ParameterValues {
     pub max_api_token_duration_seconds: Option<i64>,
     pub record_scp: bool,
     pub record_desktop_keyboard_input: bool,
+    pub desktop_recording_frame_rate: i16,
     pub login_protection_enabled: bool,
     pub login_protection_retention_seconds: i32,
     pub lp_ip_max_attempts: i32,
@@ -138,6 +139,8 @@ struct ParameterUpdate {
     pub max_api_token_duration_seconds: Option<Option<i64>>,
     pub record_scp: Option<bool>,
     pub record_desktop_keyboard_input: Option<bool>,
+    #[oai(validator(minimum(value = "1"), maximum(value = "30")))]
+    pub desktop_recording_frame_rate: Option<i16>,
     pub login_protection_enabled: Option<bool>,
     #[oai(validator(minimum(value = "1")))]
     pub login_protection_retention_seconds: Option<i32>,
@@ -260,6 +263,7 @@ impl Api {
             max_api_token_duration_seconds: parameters.max_api_token_duration_seconds,
             record_scp: parameters.record_scp,
             record_desktop_keyboard_input: parameters.record_desktop_keyboard_input,
+            desktop_recording_frame_rate: parameters.desktop_recording_frame_rate,
             login_protection_enabled: parameters.login_protection_enabled,
             login_protection_retention_seconds: parameters.login_protection_retention_seconds,
             lp_ip_max_attempts: parameters.lp_ip_max_attempts,
@@ -377,6 +381,8 @@ impl Api {
         parameters.record_scp = body.record_scp.map_or(NotSet, Set);
         parameters.record_desktop_keyboard_input =
             body.record_desktop_keyboard_input.map_or(NotSet, Set);
+        parameters.desktop_recording_frame_rate =
+            body.desktop_recording_frame_rate.map_or(NotSet, Set);
 
         #[allow(clippy::cast_possible_wrap)]
         if let Some(ref policy) = body.password_policy {

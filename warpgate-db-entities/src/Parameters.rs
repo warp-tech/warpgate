@@ -238,6 +238,8 @@ pub struct Model {
     pub record_scp: bool,
     /// Whether keystrokes are kept in desktop session recordings.
     pub record_desktop_keyboard_input: bool,
+    /// Most frames per second written to desktop session recordings (1-30).
+    pub desktop_recording_frame_rate: i16,
     pub tutorial_dismissed: bool,
     pub login_protection_enabled: bool,
     pub login_protection_retention_seconds: i32,
@@ -473,6 +475,7 @@ mod tests {
             max_api_token_duration_seconds: None,
             record_scp: true,
             record_desktop_keyboard_input: true,
+            desktop_recording_frame_rate: 30,
             admin_approval_timeout_seconds: None,
             admin_approval_grace_period_seconds: None,
             tutorial_dismissed: false,
