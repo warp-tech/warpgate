@@ -9,6 +9,8 @@ mod logon;
 mod tls;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use bytes::Bytes;
@@ -27,6 +29,7 @@ use ironrdp_egfx::client::{GraphicsPipelineClient, GraphicsPipelineHandler};
 use ironrdp_egfx::pdu::{Codec1Type, GfxPdu};
 use ironrdp_graphics::image_processing::PixelFormat;
 use ironrdp_graphics::pointer::DecodedPointer;
+use ironrdp_input::Operation;
 use ironrdp_pdu::gcc::{ConnectionType, KeyboardType};
 use ironrdp_pdu::geometry::InclusiveRectangle;
 use ironrdp_pdu::rdp::capability_sets::{
@@ -39,6 +42,7 @@ use ironrdp_tokio::reqwest::ReqwestNetworkClient;
 use ironrdp_tokio::{FramedWrite as _, TokioFramed};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::time::Instant;
 use tracing::{debug, warn};
 use warpgate_common::{RdpTargetAuth, RdpTargetCompression, SecretResolver, TargetRdpOptions};
 use warpgate_core::{
@@ -52,6 +56,21 @@ use crate::desktop_size::bound_desktop_size;
 
 type Framed = TokioFramed<tls::TargetTlsStream>;
 
+/// A target that never answers a clipboard announcement must not freeze viewer input.
+const CLIPBOARD_ANNOUNCE_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// Viewer input held back until the target has taken in an announced clipboard.
+struct HeldInput {
+    deadline: Instant,
+    ops: Vec<Operation>,
+}
+
+impl HeldInput {
+    fn is_due(&self, unanswered: usize, now: Instant) -> bool {
+        unanswered == 0 || now >= self.deadline
+    }
+}
+
 /// Signals that the session was aborted from the Warpgate side.
 struct Aborted;
 
@@ -60,18 +79,35 @@ struct Aborted;
 enum ClipboardOut {
     Request(ClipboardMessage),
     Text(String),
+    FormatListSettled,
 }
 
 #[derive(Debug, Clone)]
-struct ClientClipboardSink(UnboundedSender<ClipboardOut>);
+struct ClientClipboardSink {
+    out: UnboundedSender<ClipboardOut>,
+    /// Format lists sent to the target and not answered yet.
+    unanswered_format_lists: Arc<AtomicUsize>,
+}
 
 impl ClipboardSink for ClientClipboardSink {
     fn request(&self, message: ClipboardMessage) {
-        let _ = self.0.send(ClipboardOut::Request(message));
+        if matches!(message, ClipboardMessage::SendInitiateCopy(_)) {
+            self.unanswered_format_lists.fetch_add(1, Ordering::SeqCst);
+        }
+        let _ = self.out.send(ClipboardOut::Request(message));
     }
 
     fn text_received(&self, text: String) {
-        let _ = self.0.send(ClipboardOut::Text(text));
+        let _ = self.out.send(ClipboardOut::Text(text));
+    }
+
+    fn format_list_settled(&self) {
+        let _ = self.unanswered_format_lists.fetch_update(
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+            |count| count.checked_sub(1),
+        );
+        let _ = self.out.send(ClipboardOut::FormatListSettled);
     }
 }
 
@@ -105,7 +141,10 @@ pub async fn run(
     );
 
     let (clipboard_tx, clipboard_rx) = unbounded_channel();
-    let clipboard = Clipboard::deferred(ClientClipboardSink(clipboard_tx));
+    let clipboard = Clipboard::deferred(ClientClipboardSink {
+        out: clipboard_tx,
+        unanswered_format_lists: Arc::new(AtomicUsize::new(0)),
+    });
 
     let (connection_result, framed) = within_deadline(
         DESKTOP_HANDSHAKE_TIMEOUT,
@@ -182,6 +221,8 @@ async fn active_loop(
     }
     .build();
     let mut input_db = ironrdp_input::Database::new();
+    let unanswered_format_lists = Arc::clone(&clipboard.sink().unanswered_format_lists);
+    let mut held: Option<HeldInput> = None;
     // The Display Control channel only becomes usable once the target has created it and
     // sent its capabilities, which happens after the connection is already active. A
     // resize requested before then (notably the viewer's initial size) is held here and
@@ -200,6 +241,37 @@ async fn active_loop(
     }
 
     loop {
+        if let Some(held) = held.take_if(|held| {
+            held.is_due(
+                unanswered_format_lists.load(Ordering::SeqCst),
+                Instant::now(),
+            )
+        }) {
+            if Instant::now() >= held.deadline {
+                // Forget lost responses so they cannot delay every subsequent paste.
+                unanswered_format_lists.store(0, Ordering::SeqCst);
+            }
+            if !held.ops.is_empty() {
+                let events = input_db.apply(held.ops);
+                let outputs = active_stage
+                    .process_fastpath_input(image, &events)
+                    .context("processing input")?;
+                match process_outputs(
+                    &mut framed,
+                    image,
+                    &mut reported_size,
+                    outputs,
+                    event_tx,
+                    abort_rx,
+                )
+                .await
+                {
+                    Ok(true) | Err(Aborted) => return Ok(()),
+                    Ok(false) => {}
+                }
+            }
+        }
+
         if let Some((width, height)) = pending_resize
             && send_resize(&mut framed, &mut active_stage, width, height).await?
         {
@@ -207,9 +279,13 @@ async fn active_loop(
             pending_resize = None;
         }
 
+        let deadline = held
+            .as_ref()
+            .map_or_else(Instant::now, |held| held.deadline);
         let outputs = tokio::select! {
             biased;
             _ = abort_rx.recv() => return Ok(()),
+            _ = tokio::time::sleep_until(deadline), if held.is_some() => continue,
             input = input_rx.recv() => {
                 let Some(first) = input else {
                     return Ok(());
@@ -226,14 +302,24 @@ async fn active_loop(
                 {
                     match input {
                         DesktopInput::Resize { width, height } => resize = Some((width, height)),
-                        DesktopInput::Clipboard(text) => clipboard.offer(text),
-                        other => input::translate(other, &mut ops),
+                        DesktopInput::Clipboard(text) => {
+                            if clipboard.offer(text) {
+                                let deadline = Instant::now() + CLIPBOARD_ANNOUNCE_TIMEOUT;
+                                if let Some(held) = &mut held {
+                                    held.deadline = deadline;
+                                } else {
+                                    held = Some(HeldInput { deadline, ops: Vec::new() });
+                                }
+                            }
+                        }
+                        other => input::translate(other, match &mut held {
+                            Some(held) => &mut held.ops,
+                            None => &mut ops,
+                        }),
                     }
                 }
 
-                // flush cliprdr offers enqueued in the loop above
-                // flushed before the the fastpath messages below
-                // so that clipboard is written before ctrl-v arrives
+                // Flush clipboard announcements before waiting for their responses.
                 while let Ok(out) = clipboard_rx.try_recv() {
                     if !handle_clipboard_out(out, &mut framed, &mut active_stage, event_tx, abort_rx)
                         .await?
@@ -380,6 +466,7 @@ async fn handle_clipboard_out(
     abort_rx: &mut UnboundedReceiver<()>,
 ) -> Result<bool> {
     match out {
+        ClipboardOut::FormatListSettled => Ok(true),
         ClipboardOut::Request(message) => {
             send_clipboard(framed, active_stage, message).await?;
             Ok(true)
@@ -980,12 +1067,77 @@ fn connector_error(step: &'static str, error: connector::ConnectorError) -> Desk
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use ironrdp_cliprdr::backend::ClipboardMessage;
+    use ironrdp_cliprdr::pdu::ClipboardFormatId;
     use ironrdp_graphics::image_processing::PixelFormat;
     use ironrdp_graphics::pointer::DecodedPointer;
     use ironrdp_session::image::DecodedImage;
+    use tokio::sync::mpsc::unbounded_channel;
+    use tokio::time::Instant;
     use warpgate_core::{DesktopEvent, DesktopRect};
 
-    use super::{GraphicsPipelineOutput, connector, encode_pointer, encode_resized_keyframe};
+    use super::{
+        CLIPBOARD_ANNOUNCE_TIMEOUT, ClientClipboardSink, ClipboardOut, ClipboardSink,
+        GraphicsPipelineOutput, HeldInput, connector, encode_pointer, encode_resized_keyframe,
+    };
+
+    #[test]
+    fn clipboard_sink_counts_only_format_lists_and_settles_each_response() {
+        let (out, mut rx) = unbounded_channel();
+        let sink = ClientClipboardSink {
+            out,
+            unanswered_format_lists: Arc::new(AtomicUsize::new(0)),
+        };
+        for count in 1..=2 {
+            sink.request(ClipboardMessage::SendInitiateCopy(vec![]));
+            assert_eq!(sink.unanswered_format_lists.load(Ordering::SeqCst), count);
+            assert!(matches!(
+                rx.try_recv(),
+                Ok(ClipboardOut::Request(ClipboardMessage::SendInitiateCopy(formats)))
+                    if formats.is_empty()
+            ));
+        }
+
+        sink.request(ClipboardMessage::SendInitiatePaste(
+            ClipboardFormatId::CF_UNICODETEXT,
+        ));
+        assert_eq!(sink.unanswered_format_lists.load(Ordering::SeqCst), 2);
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(ClipboardOut::Request(ClipboardMessage::SendInitiatePaste(
+                ClipboardFormatId::CF_UNICODETEXT
+            )))
+        ));
+
+        // Cloned backends share the count; extra responses must not underflow it.
+        for remaining in [1, 0, 0] {
+            sink.clone().format_list_settled();
+            assert_eq!(
+                sink.unanswered_format_lists.load(Ordering::SeqCst),
+                remaining
+            );
+            assert!(matches!(rx.try_recv(), Ok(ClipboardOut::FormatListSettled)));
+            assert!(rx.try_recv().is_err());
+        }
+    }
+
+    #[test]
+    fn held_input_waits_for_all_format_lists_or_the_deadline() {
+        let now = Instant::now();
+        let held = HeldInput {
+            deadline: now + CLIPBOARD_ANNOUNCE_TIMEOUT,
+            ops: Vec::new(),
+        };
+
+        assert!(!held.is_due(2, now));
+        assert!(!held.is_due(1, now));
+        assert!(held.is_due(0, now));
+        assert!(held.is_due(1, held.deadline));
+        assert!(held.is_due(2, held.deadline + CLIPBOARD_ANNOUNCE_TIMEOUT));
+    }
 
     #[test]
     fn unhandled_graphics_are_reported_once_per_codec() {

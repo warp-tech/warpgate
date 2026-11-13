@@ -48,6 +48,9 @@ fn preferred_text_format(formats: &[ClipboardFormat]) -> Option<ClipboardFormatI
 pub(crate) trait ClipboardSink: core::fmt::Debug + Send + 'static {
     fn request(&self, message: ClipboardMessage);
     fn text_received(&self, text: String);
+
+    /// The remote answered a format list we sent, accepting or rejecting it.
+    fn format_list_settled(&self) {}
 }
 
 #[derive(Clone, Debug, Default)]
@@ -110,12 +113,16 @@ impl<S: ClipboardSink + Clone> Clipboard<S> {
         }
     }
 
-    /// Offer local clipboard contents to remote
-    pub(crate) fn offer(&self, mut text: String) {
+    /// Offer local clipboard contents to remote, returning whether the format list was
+    /// advertised. If the channel is not ready, only store the text and return false.
+    pub(crate) fn offer(&self, mut text: String) -> bool {
         truncate_for_wire(&mut text, MAX_CLIPBOARD_BYTES);
         self.store.set(text);
         if self.ready.load(Ordering::SeqCst) {
             advertise_text(&self.sink);
+            true
+        } else {
+            false
         }
     }
 }
@@ -170,6 +177,10 @@ impl<S: ClipboardSink> CliprdrBackend for TextClipboard<S> {
         } else {
             advertise_text(&self.sink);
         }
+    }
+
+    fn on_format_list_response(&mut self, _ok: bool) {
+        self.sink.format_list_settled();
     }
 
     fn on_process_negotiated_capabilities(
@@ -235,6 +246,7 @@ mod tests {
     struct TestSink {
         requests: Sender<ClipboardMessage>,
         texts: Sender<String>,
+        settled: Sender<()>,
     }
 
     impl ClipboardSink for TestSink {
@@ -245,6 +257,10 @@ mod tests {
         fn text_received(&self, text: String) {
             let _ = self.texts.send(text);
         }
+
+        fn format_list_settled(&self) {
+            let _ = self.settled.send(());
+        }
     }
 
     type Fixture = (
@@ -252,6 +268,7 @@ mod tests {
         TextClipboard<TestSink>,
         std::sync::mpsc::Receiver<ClipboardMessage>,
         std::sync::mpsc::Receiver<String>,
+        std::sync::mpsc::Receiver<()>,
     );
 
     fn fixture() -> Fixture {
@@ -265,9 +282,51 @@ mod tests {
     fn build_fixture(make: fn(TestSink) -> Clipboard<TestSink>) -> Fixture {
         let (requests, requests_rx) = channel();
         let (texts, texts_rx) = channel();
-        let clipboard = make(TestSink { requests, texts });
+        let (settled, settled_rx) = channel();
+        let clipboard = make(TestSink {
+            requests,
+            texts,
+            settled,
+        });
         let backend = clipboard.backend();
-        (clipboard, backend, requests_rx, texts_rx)
+        (clipboard, backend, requests_rx, texts_rx, settled_rx)
+    }
+
+    #[test]
+    fn offer_reports_whether_the_format_list_was_advertised() {
+        let (clipboard, _backend, requests, _texts, _settled) = fixture();
+        assert!(clipboard.offer("ready".to_owned()));
+        assert_eq!(
+            offered_formats(requests.try_recv().unwrap()),
+            [ClipboardFormatId::CF_UNICODETEXT]
+        );
+
+        let (clipboard, mut backend, requests, _texts, _settled) = deferred_fixture();
+        assert!(!clipboard.offer("early".to_owned()));
+        assert!(requests.try_recv().is_err());
+
+        backend.on_ready();
+        assert_eq!(
+            offered_formats(requests.try_recv().unwrap()),
+            [ClipboardFormatId::CF_UNICODETEXT]
+        );
+        assert!(clipboard.offer("later".to_owned()));
+        assert_eq!(
+            offered_formats(requests.try_recv().unwrap()),
+            [ClipboardFormatId::CF_UNICODETEXT]
+        );
+    }
+
+    #[test]
+    fn format_list_responses_notify_the_sink_once_each() {
+        let (_clipboard, mut backend, _requests, _texts, settled) = fixture();
+        assert!(settled.try_recv().is_err());
+
+        for ok in [true, false] {
+            backend.on_format_list_response(ok);
+            assert_eq!(settled.try_recv(), Ok(()));
+            assert!(settled.try_recv().is_err());
+        }
     }
 
     fn offered_formats(message: ClipboardMessage) -> Vec<ClipboardFormatId> {
@@ -282,7 +341,7 @@ mod tests {
     /// A remote copy has to be pulled: the format list only names what is available.
     #[test]
     fn remote_text_copy_triggers_a_paste_request() {
-        let (_clipboard, mut backend, requests, _texts) = fixture();
+        let (_clipboard, mut backend, requests, _texts, _settled) = fixture();
 
         backend.on_remote_copy(&[ClipboardFormat::new(ClipboardFormatId::CF_DIB)]);
         assert!(requests.try_recv().is_err());
@@ -298,7 +357,7 @@ mod tests {
 
     #[test]
     fn ansi_text_copy_is_used_as_a_fallback() {
-        let (_clipboard, mut backend, requests, texts) = fixture();
+        let (_clipboard, mut backend, requests, texts, _settled) = fixture();
 
         backend.on_remote_copy(&[ClipboardFormat::new(ClipboardFormatId::CF_TEXT)]);
         assert!(matches!(
@@ -316,7 +375,7 @@ mod tests {
     /// renders, and back again.
     #[test]
     fn text_is_rendered_and_received_as_utf16() {
-        let (clipboard, mut backend, requests, texts) = fixture();
+        let (clipboard, mut backend, requests, texts, _settled) = fixture();
         clipboard.offer("héllo".to_owned());
         assert!(matches!(
             requests.try_recv(),
@@ -336,7 +395,7 @@ mod tests {
 
     #[test]
     fn a_non_text_request_is_refused_rather_than_answered_with_text() {
-        let (clipboard, mut backend, requests, _texts) = fixture();
+        let (clipboard, mut backend, requests, _texts, _settled) = fixture();
         clipboard.offer("secret".to_owned());
         let _ = requests.try_recv();
 
@@ -354,7 +413,7 @@ mod tests {
     /// surrogate pair (🦀 is 4 wire bytes) is kept or dropped whole.
     #[test]
     fn oversized_text_is_capped_by_its_wire_size() {
-        let (clipboard, _backend, _requests, _texts) = fixture();
+        let (clipboard, _backend, _requests, _texts, _settled) = fixture();
         clipboard.offer("🦀".repeat(MAX_CLIPBOARD_BYTES / 3));
         let stored = clipboard.store.get();
         let wire_len = stored.encode_utf16().count() * 2;
@@ -368,7 +427,7 @@ mod tests {
     /// staying silent. Text copied through a previous channel generation is re-advertised.
     #[test]
     fn channel_bringup_always_answers_with_a_format_list() {
-        let (clipboard, mut backend, requests, _texts) = fixture();
+        let (clipboard, mut backend, requests, _texts, _settled) = fixture();
         backend.on_request_format_list();
         assert_eq!(offered_formats(requests.try_recv().unwrap()), []);
 
@@ -387,7 +446,7 @@ mod tests {
     /// announced once the channel reports itself ready.
     #[test]
     fn a_deferred_clipboard_holds_offers_until_ready() {
-        let (clipboard, mut backend, requests, _texts) = deferred_fixture();
+        let (clipboard, mut backend, requests, _texts, _settled) = deferred_fixture();
 
         clipboard.offer("early".to_owned());
         assert!(requests.try_recv().is_err());
@@ -416,7 +475,7 @@ mod tests {
     /// announce — the initialization reply already said as much.
     #[test]
     fn an_idle_deferred_clipboard_announces_nothing_when_ready() {
-        let (_clipboard, mut backend, requests, _texts) = deferred_fixture();
+        let (_clipboard, mut backend, requests, _texts, _settled) = deferred_fixture();
 
         backend.on_request_format_list();
         assert_eq!(offered_formats(requests.try_recv().unwrap()), []);
@@ -429,7 +488,7 @@ mod tests {
     /// earliest legal moment to announce it.
     #[test]
     fn early_text_rides_the_initialization_format_list() {
-        let (clipboard, mut backend, requests, _texts) = deferred_fixture();
+        let (clipboard, mut backend, requests, _texts, _settled) = deferred_fixture();
 
         clipboard.offer("early".to_owned());
         backend.on_request_format_list();
