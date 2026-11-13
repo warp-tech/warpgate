@@ -1483,4 +1483,59 @@ mod tests {
         );
         assert!(!error.user_facing_reason().contains("admin"));
     }
+
+    struct TestHandler;
+
+    impl russh::client::Handler for TestHandler {
+        type Error = russh::Error;
+    }
+
+    #[tokio::test]
+    async fn legacy_ssh_1_99_banner_with_bare_lf_is_accepted() {
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // Regression for https://github.com/warp-tech/warpgate/issues/989.
+        let (client_io, mut server_io) = tokio::io::duplex(65536);
+        let task = tokio::spawn(russh::client::connect_stream(
+            Arc::new(russh::client::Config::default()),
+            client_io,
+            TestHandler,
+        ));
+
+        server_io
+            .write_all(b"SSH-1.99-OpenSSH_6.0\n")
+            .await
+            .expect("failed to write the legacy server banner");
+
+        let mut received = Vec::new();
+        let id_end = tokio::time::timeout(Duration::from_secs(5), async {
+            let mut chunk = [0; 4096];
+            loop {
+                let count = server_io
+                    .read(&mut chunk)
+                    .await
+                    .expect("failed to read the client identification and KEXINIT");
+                assert!(
+                    count > 0,
+                    "client closed the connection before sending KEXINIT"
+                );
+                received.extend_from_slice(&chunk[..count]);
+                if let Some(position) = received.windows(2).position(|bytes| bytes == b"\r\n") {
+                    let id_end = position + 2;
+                    if received.len() >= id_end + 6 {
+                        break id_end;
+                    }
+                }
+            }
+        })
+        .await
+        .expect("client did not send KEXINIT after the bare-LF SSH-1.99 banner");
+
+        assert!(received[..id_end].starts_with(b"SSH-2.0-"));
+        assert_eq!(received[id_end + 5], 20, "expected SSH_MSG_KEXINIT");
+        task.abort();
+    }
 }
