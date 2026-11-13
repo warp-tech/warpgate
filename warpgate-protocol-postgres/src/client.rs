@@ -3,6 +3,8 @@ use std::fmt::Debug;
 use std::io::Write;
 use std::sync::Arc;
 
+use pgwire::messages::cancel::CancelRequest;
+use pgwire::messages::startup::SecretKey;
 use pgwire::messages::{DecodeContext, PgWireBackendMessage, ProtocolVersion};
 use rsasl::config::SASLConfig;
 use rsasl::prelude::{Mechname, SASLClient};
@@ -52,28 +54,23 @@ impl Write for SaslBufferWriter<'_> {
 }
 
 impl PostgresClient {
-    pub const fn protocol_version(&self) -> ProtocolVersion {
-        self.decode_context.protocol_version
-    }
-
-    pub async fn connect(
-        admitted: AdmittedTarget<TargetPostgresOptions>,
-        options: ConnectionOptions,
-        secrets: &dyn SecretResolver,
-    ) -> Result<Self, PostgresError> {
-        let target = admitted.specific_target().options().clone();
+    /// Opens a TCP connection to the target and negotiates TLS according to
+    /// the target's TLS mode, without sending a startup message.
+    async fn open_stream(
+        target: &TargetPostgresOptions,
+        ctx: &DecodeContext,
+    ) -> Result<PostgresStream<TcpStream, ClientTlsStream<TcpStream>>, PostgresError> {
         let stream = TcpStream::connect((target.host.clone(), target.port)).await?;
         stream.set_nodelay(true)?;
 
         let mut stream = PostgresStream::new(stream);
-        let mut ctx = DecodeContext::new(options.protocol_version);
 
         if target.tls.mode != TlsMode::Disabled {
             stream.push(pgwire::messages::startup::SslRequest::new())?;
             stream.flush().await?;
 
             let Some(response) = stream
-                .recv::<pgwire::messages::response::SslResponse>(&ctx)
+                .recv::<pgwire::messages::response::SslResponse>(ctx)
                 .await?
             else {
                 return Err(PostgresError::Eof);
@@ -114,6 +111,18 @@ impl PostgresClient {
                 info!("Target connection upgraded to TLS");
             }
         }
+
+        Ok(stream)
+    }
+
+    pub async fn connect(
+        admitted: AdmittedTarget<TargetPostgresOptions>,
+        options: ConnectionOptions,
+        secrets: &dyn SecretResolver,
+    ) -> Result<Self, PostgresError> {
+        let target = admitted.specific_target().options().clone();
+        let mut ctx = DecodeContext::new(options.protocol_version);
+        let mut stream = Self::open_stream(&target, &ctx).await?;
 
         let mut startup = pgwire::messages::startup::Startup::new();
         startup.parameters = options.parameters.clone();
@@ -288,6 +297,20 @@ impl PostgresClient {
             }
         }
 
+        Ok(())
+    }
+
+    /// Sends a CancelRequest for a backend of the target on a new connection.
+    /// The server answers by closing the connection, so nothing is read back.
+    pub async fn send_cancel_request(
+        target: &TargetPostgresOptions,
+        pid: i32,
+        secret_key: SecretKey,
+    ) -> Result<(), PostgresError> {
+        let ctx = DecodeContext::new(ProtocolVersion::PROTOCOL3_2);
+        let mut stream = Self::open_stream(target, &ctx).await?;
+        stream.push(CancelRequest::new(pid, secret_key))?;
+        stream.flush().await?;
         Ok(())
     }
 

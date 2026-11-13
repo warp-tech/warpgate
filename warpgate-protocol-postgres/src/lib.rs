@@ -1,3 +1,4 @@
+mod cancel;
 mod client;
 mod common;
 mod error;
@@ -10,6 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use cancel::CancelRegistry;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use rustls::ServerConfig;
@@ -61,6 +63,7 @@ impl ProtocolServer for PostgresProtocolServer {
             .await
             .context("accepting connection")?;
         let services = self.services;
+        let cancel_registry = CancelRegistry::default();
         Ok(async move {
             accept_loop(
                 "PostgreSQL connection",
@@ -69,6 +72,7 @@ impl ProtocolServer for PostgresProtocolServer {
                 move |stream, remote_address| {
                     let tls_config = tls_config.clone();
                     let services = services.clone();
+                    let cancel_registry = cancel_registry.clone();
                     async move {
                         // Enable TCP keepalive to prevent idle connections from timing out
                         // This is especially important during web auth approval wait
@@ -112,6 +116,7 @@ impl ProtocolServer for PostgresProtocolServer {
                             wrapped_stream,
                             tls_config,
                             remote_address,
+                            cancel_registry,
                         )
                         .await;
 
