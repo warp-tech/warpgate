@@ -6,9 +6,10 @@ use serde::{Deserialize, Serialize};
 use warpgate_tls::TlsMode;
 
 use super::defaults::{
-    _default_empty_string, _default_empty_vec, _default_mysql_port,
-    _default_postgres_idle_timeout_str, _default_postgres_port, _default_rdp_port,
-    _default_ssh_ca_mount, _default_ssh_port, _default_username, _default_vnc_port,
+    _default_empty_string, _default_empty_vec, _default_mysql_port, _default_port_knock_delay_ms,
+    _default_port_knock_wait_after_ms, _default_postgres_idle_timeout_str, _default_postgres_port,
+    _default_rdp_port, _default_ssh_ca_mount, _default_ssh_port, _default_username,
+    _default_vnc_port,
 };
 use crate::secrets::{MaybeSecretRef, SecretRef, StoredSecrets};
 use crate::{Protocol, ProviderId, Secret, SshClientKeyId, StoredSecret, TargetGroupId, TargetId};
@@ -29,6 +30,51 @@ impl Default for KubernetesTargetCertificateAuth {
     }
 }
 
+/// Transport of a single port knock
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Enum, Default, JsonSchema)]
+pub enum PortKnockProtocol {
+    #[default]
+    #[serde(rename = "tcp")]
+    #[oai(rename = "tcp")]
+    Tcp,
+    #[serde(rename = "udp")]
+    #[oai(rename = "udp")]
+    Udp,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
+pub struct PortKnock {
+    #[oai(validator(minimum(value = "1")))]
+    pub port: u16,
+
+    // Kept as a plain comment so OpenAPI emits a direct enum reference.
+    #[serde(default)]
+    pub protocol: PortKnockProtocol,
+}
+
+/// Packets sent to the target host, in order, before each connection to it
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
+pub struct PortKnocking {
+    #[oai(validator(min_items = 1, max_items = 32))]
+    pub sequence: Vec<PortKnock>,
+
+    /// Pause between two knocks, in milliseconds
+    #[serde(default = "_default_port_knock_delay_ms")]
+    #[oai(
+        default = "_default_port_knock_delay_ms",
+        validator(maximum(value = "10000"))
+    )]
+    pub delay_ms: u32,
+
+    /// Pause between the last knock and the connection, in milliseconds
+    #[serde(default = "_default_port_knock_wait_after_ms")]
+    #[oai(
+        default = "_default_port_knock_wait_after_ms",
+        validator(maximum(value = "30000"))
+    )]
+    pub wait_after_ms: u32,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
 pub struct TargetSSHOptions {
     pub host: String,
@@ -45,6 +91,9 @@ pub struct TargetSSHOptions {
     #[serde(default)]
     #[schemars(with = "Option<String>")]
     pub jump_host: Option<TargetId>,
+
+    #[serde(default)]
+    pub port_knocking: Option<PortKnocking>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union, JsonSchema)]
@@ -199,6 +248,9 @@ pub struct TargetMySqlOptions {
 
     #[serde(default)]
     pub default_database_name: Option<String>,
+
+    #[serde(default)]
+    pub port_knocking: Option<PortKnocking>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default, Enum, JsonSchema)]
@@ -239,6 +291,9 @@ pub struct TargetPostgresOptions {
 
     #[serde(default)]
     pub protocol_version: PostgresProtocolVersion,
+
+    #[serde(default)]
+    pub port_knocking: Option<PortKnocking>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
@@ -253,6 +308,9 @@ pub struct TargetVncOptions {
 
     #[serde(default)]
     pub auth: VncTargetAuth,
+
+    #[serde(default)]
+    pub port_knocking: Option<PortKnocking>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union, JsonSchema)]
@@ -340,6 +398,9 @@ pub struct TargetRdpOptions {
     // description wraps the enum in allOf, which typescript-fetch misgenerates.
     #[serde(default)]
     pub tls_security: RdpTlsSecurity,
+
+    #[serde(default)]
+    pub port_knocking: Option<PortKnocking>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Default, Enum, JsonSchema)]
@@ -639,6 +700,23 @@ impl StoredSecrets for TargetOptions {
         if let Self::Http(options) = self {
             options.redact_credentials();
         }
+        // The knock sequence acts as a shared secret
+        if let Some(port_knocking) = self.port_knocking_mut() {
+            *port_knocking = None;
+        }
+    }
+}
+
+impl TargetOptions {
+    pub const fn port_knocking_mut(&mut self) -> Option<&mut Option<PortKnocking>> {
+        match self {
+            Self::Ssh(o) => Some(&mut o.port_knocking),
+            Self::MySql(o) => Some(&mut o.port_knocking),
+            Self::Postgres(o) => Some(&mut o.port_knocking),
+            Self::Vnc(o) => Some(&mut o.port_knocking),
+            Self::Rdp(o) => Some(&mut o.port_knocking),
+            Self::Http(_) | Self::Kubernetes(_) => None,
+        }
     }
 }
 
@@ -878,6 +956,59 @@ mod tests {
         assert_eq!(snapshot["mysql"]["auth"]["password"], "");
         assert_eq!(snapshot["mysql"]["host"], "db");
         assert_eq!(snapshot["mysql"]["username"], "root");
+    }
+
+    /// Knowing the sequence is enough to open the target's firewall, so it
+    /// must not reach session snapshots or admins who cannot edit targets.
+    #[test]
+    fn redaction_drops_port_knocking() {
+        let knocking = serde_json::json!({"sequence": [{"port": 7000}]});
+        for options in [
+            serde_json::json!({"ssh": {"host": "h", "port_knocking": knocking}}),
+            serde_json::json!({"mysql": {"host": "h", "port_knocking": knocking}}),
+            serde_json::json!({"postgres": {"host": "h", "port_knocking": knocking}}),
+            serde_json::json!({"vnc": {"host": "h", "port_knocking": knocking}}),
+            serde_json::json!({"rdp": {"host": "h", "port_knocking": knocking}}),
+        ] {
+            let mut options: TargetOptions = serde_json::from_value(options).unwrap();
+            assert!(options.port_knocking_mut().unwrap().is_some());
+
+            let mut redacted = options.redacted();
+            assert_eq!(redacted.port_knocking_mut(), Some(&mut None));
+            let snapshot = serde_json::to_value(&redacted).unwrap();
+            let (_, inner) = snapshot.as_object().unwrap().iter().next().unwrap();
+            assert_eq!(inner["host"], "h", "{snapshot}");
+        }
+    }
+
+    #[test]
+    fn port_knocking_is_optional_and_has_defaults() {
+        use super::{PortKnock, PortKnockProtocol, PortKnocking};
+
+        let ssh: TargetSSHOptions = serde_json::from_str(r#"{"host":"h"}"#).unwrap();
+        assert_eq!(ssh.port_knocking, None);
+
+        let ssh: TargetSSHOptions = serde_json::from_str(
+            r#"{"host":"h","port_knocking":{"sequence":[{"port":7000},{"port":8000,"protocol":"udp"}]}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            ssh.port_knocking,
+            Some(PortKnocking {
+                sequence: vec![
+                    PortKnock {
+                        port: 7000,
+                        protocol: PortKnockProtocol::Tcp,
+                    },
+                    PortKnock {
+                        port: 8000,
+                        protocol: PortKnockProtocol::Udp,
+                    },
+                ],
+                delay_ms: 100,
+                wait_after_ms: 500,
+            })
+        );
     }
 
     const MALFORMED: &str = "secret://not a valid ref";
