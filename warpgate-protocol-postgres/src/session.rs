@@ -394,11 +394,14 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
 
         let mut last_activity = std::time::Instant::now();
         let check_interval = Duration::from_secs(5); // Check idle timeout every 5 seconds
+        // A running query sends nothing until it completes, so a session is
+        // not idle between the client starting a query and ReadyForQuery.
+        let mut query_in_progress = false;
 
         loop {
             // With the idle timeout disabled we still wake up on check_interval
             // to re-poll the sockets, but never close the connection ourselves.
-            let select_timeout = match idle_timeout {
+            let select_timeout = match idle_timeout.filter(|_| !query_in_progress) {
                 Some(timeout) => {
                     let elapsed = last_activity.elapsed();
                     if elapsed > timeout {
@@ -428,6 +431,9 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                     match c_to_s {
                         Ok(Ok(Some(mut msg))) => {
                             last_activity = std::time::Instant::now(); // Update activity on client message
+                            if starts_query(&msg.0) {
+                                query_in_progress = true;
+                            }
                             Self::maybe_log_client_msg(&msg.0);
                             msg = self.maybe_transform_client_msg(msg, &client);
                             client.send(msg).await?;
@@ -448,6 +454,9 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                     match s_to_c {
                         Ok(Some(mut msg)) => {
                             last_activity = std::time::Instant::now(); // Update activity on server message
+                            if matches!(msg.0, PgWireBackendMessage::ReadyForQuery(_)) {
+                                query_in_progress = false;
+                            }
                             Self::maybe_log_server_msg(&msg.0);
                             msg = self.maybe_transform_server_msg(msg);
                             self.stream.push(msg)?;
@@ -550,6 +559,15 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
     }
 }
 
+/// Messages after which the server is busy until it sends ReadyForQuery:
+/// a simple Query, or Sync, which ends an extended-protocol batch.
+const fn starts_query(msg: &PgWireFrontendMessage) -> bool {
+    matches!(
+        msg,
+        PgWireFrontendMessage::Query(_) | PgWireFrontendMessage::Sync(_)
+    )
+}
+
 const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_mins(10);
 
 enum IdlePolicy {
@@ -583,7 +601,23 @@ fn parse_idle_timeout(value: Option<&str>) -> IdlePolicy {
 mod tests {
     use std::time::Duration;
 
-    use super::{DEFAULT_IDLE_TIMEOUT, IdlePolicy, parse_idle_timeout};
+    use pgwire::messages::PgWireFrontendMessage;
+    use pgwire::messages::extendedquery::{Execute, Sync};
+    use pgwire::messages::simplequery::Query;
+
+    use super::{DEFAULT_IDLE_TIMEOUT, IdlePolicy, parse_idle_timeout, starts_query};
+
+    #[test]
+    fn query_and_sync_start_a_query() {
+        assert!(starts_query(&PgWireFrontendMessage::Query(Query::new(
+            "select 1".into()
+        ))));
+        assert!(starts_query(&PgWireFrontendMessage::Sync(Sync::new())));
+        // The server answers Execute without ReadyForQuery, only Sync gets one
+        assert!(!starts_query(&PgWireFrontendMessage::Execute(
+            Execute::new(None, 0)
+        )));
+    }
 
     #[test]
     fn explicit_zero_disables() {
