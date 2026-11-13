@@ -5,6 +5,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc::{Receiver, UnboundedReceiver, channel, unbounded_channel};
 use tracing::{Instrument, debug, error, info_span, warn};
 use vnc::{ClientKeyEvent, PixelFormat, VncConnector, VncEncoding, VncError, VncEvent, X11Event};
+use warpgate_common::helpers::port_knock;
 use warpgate_common::{SecretResolver, TargetVncOptions, VncTargetAuth, WarpgateError};
 use warpgate_core::{
     AdmittedTarget, DESKTOP_CONNECT_TIMEOUT, DESKTOP_HANDSHAKE_TIMEOUT,
@@ -173,6 +174,13 @@ async fn run(
         .send(DesktopEvent::State(DesktopState::Connecting))
         .await
         .ok();
+
+    // Outside the connect deadline: the sequence's own pauses can exceed it.
+    if let Some(port_knocking) = &options.port_knocking {
+        port_knock::knock(&options.host, port_knocking)
+            .await
+            .map_err(DesktopConnectionError::Io)?;
+    }
 
     let stream = within_deadline(DESKTOP_CONNECT_TIMEOUT, async {
         TcpStream::connect((options.host.clone(), options.port))

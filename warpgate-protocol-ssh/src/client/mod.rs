@@ -28,6 +28,7 @@ use tokio::task::JoinHandle;
 use tracing::*;
 use uuid::Uuid;
 use warpgate_aws::AwsError;
+use warpgate_common::helpers::port_knock;
 use warpgate_common::{
     SSHTargetAuth, TargetOptionsVariant, TargetSSHOptions, UserFacingReason, UserSessionId,
     WarpgateError, io_connect_reason,
@@ -848,6 +849,11 @@ impl Connector {
         let config = self.build_ssh_config(&first).await;
         let address = (first.host.as_str(), first.port);
         info!(?address, username = %first.username, "Connecting");
+        // Only the first hop is reachable from Warpgate; later hops sit behind
+        // the jump host, so knocking them from here would not reach them.
+        if let Some(port_knocking) = &first.port_knocking {
+            port_knock::knock(&first.host, port_knocking).await?;
+        }
         let (event_tx, event_rx) = unbounded_channel();
         let handler = ClientHandler {
             ssh_options: first.clone(),

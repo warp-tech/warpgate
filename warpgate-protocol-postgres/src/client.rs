@@ -8,6 +8,7 @@ use rsasl::config::SASLConfig;
 use rsasl::prelude::{Mechname, SASLClient};
 use tokio::net::TcpStream;
 use tracing::{debug, info, warn};
+use warpgate_common::helpers::port_knock;
 use warpgate_common::{SecretResolver, TargetPostgresOptions, WarpgateError};
 use warpgate_core::AdmittedTarget;
 use warpgate_tls::{ClientTlsStream, TlsMode, configure_tls_connector};
@@ -62,6 +63,9 @@ impl PostgresClient {
         secrets: &dyn SecretResolver,
     ) -> Result<Self, PostgresError> {
         let target = admitted.specific_target().options().clone();
+        if let Some(port_knocking) = &target.port_knocking {
+            port_knock::knock(&target.host, port_knocking).await?;
+        }
         let stream = TcpStream::connect((target.host.clone(), target.port)).await?;
         stream.set_nodelay(true)?;
 
