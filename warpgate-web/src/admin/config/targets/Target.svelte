@@ -36,6 +36,7 @@
     import { replace } from 'svelte-spa-router'
     import TlsConfiguration from '../../TlsConfiguration.svelte'
     import HttpHeadersEditor from './http/HeadersEditor.svelte'
+    import PortKnockingEditor from './PortKnockingEditor.svelte'
     import ProtocolDocs from './ProtocolDocs.svelte'
     import TargetRdpOptions from './rdp/Options.svelte'
     import TargetSshOptions from './ssh/Options.svelte'
@@ -493,6 +494,18 @@
                                 bind:value={target.rateLimitBytesPerSecond}
                             />
                         </FormGroup>
+
+                        {#if target.options.kind === 'Ssh' ||
+                            target.options.kind === 'MySql' ||
+                            target.options.kind === 'Postgres' ||
+                            target.options.kind === 'Vnc' ||
+                            target.options.kind === 'Rdp'}
+                            <h4 class="mt-4">Port knocking</h4>
+                            <PortKnockingEditor
+                                bind:value={target.options.portKnocking}
+                                disabled={!$adminPermissions.targetsEdit}
+                            />
+                        {/if}
                     </Section>
 
                     {#if target.options.kind === 'MySql' ||
