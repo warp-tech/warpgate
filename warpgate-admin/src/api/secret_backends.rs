@@ -237,6 +237,7 @@ fn update_active_model(
 
     // existing entry that can be used to restore the full auth field
     let stored = existing
+        .filter(|m| m.address == body.address && m.namespace == body.namespace)
         .map(|m| &m.auth)
         // only if the auth type hasn't changed
         .filter(|auth| mem::discriminant(*auth) == mem::discriminant(&body.auth))
@@ -397,6 +398,8 @@ impl Api {
         admin: AdminContext,
         Path(id): Path<Uuid>,
     ) -> Result<GetSecretBackendResponse, WarpgateError> {
+        admin.require(AdminPermission::ConfigEdit)?;
+
         let Some(backend) = SecretBackend::Entity::find_by_id(id)
             .one(&admin.services().db)
             .await?
