@@ -532,7 +532,7 @@ def test_admin_close_session_ends_a_web_approval_wait(shared_wg, ticket_setup):
     api.update_user(user.id, sdk.UserDataRequest(
         username=user.username,
         credential_policy=sdk.UserRequireCredentialsPolicy(
-            kubernetes=[sdk.CredentialKind.WEBUSERAPPROVAL],
+            kubernetes=[[sdk.CredentialKind.WEBUSERAPPROVAL]],
         ),
     ))
     role = api.create_role(sdk.RoleDataRequest(name=f"k8s-role-{uuid4()}"))

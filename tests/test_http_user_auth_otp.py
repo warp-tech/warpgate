@@ -32,7 +32,7 @@ class TestHTTPUserAuthOTP:
                 sdk.UserDataRequest(
                     username=user.username,
                     credential_policy=sdk.UserRequireCredentialsPolicy(
-                        http=["Password", "Totp"]
+                        http=[["Password", "Totp"]]
                     ),
                 ),
             )
@@ -115,7 +115,7 @@ class TestHTTPUserAuthOTP:
                 sdk.UserDataRequest(
                     username=user.username,
                     credential_policy=sdk.UserRequireCredentialsPolicy(
-                        http=["Password", "Totp"]
+                        http=[["Password", "Totp"]]
                     ),
                 ),
             )
