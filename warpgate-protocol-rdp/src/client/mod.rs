@@ -40,6 +40,7 @@ use ironrdp_tokio::{FramedWrite as _, TokioFramed};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tracing::{debug, warn};
+use warpgate_common::helpers::port_knock;
 use warpgate_common::{RdpTargetAuth, RdpTargetCompression, SecretResolver, TargetRdpOptions};
 use warpgate_core::{
     DESKTOP_CONNECT_TIMEOUT, DESKTOP_HANDSHAKE_TIMEOUT, DesktopConnectionError, DesktopEvent,
@@ -106,6 +107,13 @@ pub async fn run(
 
     let (clipboard_tx, clipboard_rx) = unbounded_channel();
     let clipboard = Clipboard::deferred(ClientClipboardSink(clipboard_tx));
+
+    // Outside the handshake deadline: the sequence's own pauses can exceed it.
+    if let Some(port_knocking) = &options.port_knocking {
+        port_knock::knock(&options.host, port_knocking)
+            .await
+            .map_err(DesktopConnectionError::Io)?;
+    }
 
     let (connection_result, framed) = within_deadline(
         DESKTOP_HANDSHAKE_TIMEOUT,

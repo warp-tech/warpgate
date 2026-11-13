@@ -31,6 +31,14 @@ pub const fn _default_rdp_port() -> u16 {
     3389
 }
 
+pub const fn _default_port_knock_delay_ms() -> u32 {
+    100
+}
+
+pub const fn _default_port_knock_wait_after_ms() -> u32 {
+    500
+}
+
 #[inline]
 pub fn _default_username() -> String {
     "root".to_owned()

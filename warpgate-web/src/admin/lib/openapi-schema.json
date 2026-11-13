@@ -6750,6 +6750,64 @@
           "MissingSpecial"
         ]
       },
+      "PortKnock": {
+        "type": "object",
+        "title": "PortKnock",
+        "required": [
+          "port",
+          "protocol"
+        ],
+        "properties": {
+          "port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 1.0
+          },
+          "protocol": {
+            "$ref": "#/components/schemas/PortKnockProtocol"
+          }
+        }
+      },
+      "PortKnockProtocol": {
+        "type": "string",
+        "description": "Transport of a single port knock",
+        "enum": [
+          "tcp",
+          "udp"
+        ]
+      },
+      "PortKnocking": {
+        "type": "object",
+        "title": "PortKnocking",
+        "description": "Packets sent to the target host, in order, before each connection to it",
+        "required": [
+          "sequence"
+        ],
+        "properties": {
+          "sequence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PortKnock"
+            },
+            "maxItems": 32,
+            "minItems": 1
+          },
+          "delay_ms": {
+            "type": "integer",
+            "format": "uint32",
+            "description": "Pause between two knocks, in milliseconds",
+            "default": 100,
+            "maximum": 10000.0
+          },
+          "wait_after_ms": {
+            "type": "integer",
+            "format": "uint32",
+            "description": "Pause between the last knock and the connection, in milliseconds",
+            "default": 500,
+            "maximum": 30000.0
+          }
+        }
+      },
       "PostgresProtocolVersion": {
         "type": "string",
         "enum": [
@@ -8023,6 +8081,9 @@
           },
           "default_database_name": {
             "type": "string"
+          },
+          "port_knocking": {
+            "$ref": "#/components/schemas/PortKnocking"
           }
         }
       },
@@ -8255,6 +8316,9 @@
           },
           "protocol_version": {
             "$ref": "#/components/schemas/PostgresProtocolVersion"
+          },
+          "port_knocking": {
+            "$ref": "#/components/schemas/PortKnocking"
           }
         }
       },
@@ -8308,6 +8372,9 @@
           },
           "tls_security": {
             "$ref": "#/components/schemas/RdpTlsSecurity"
+          },
+          "port_knocking": {
+            "$ref": "#/components/schemas/PortKnocking"
           }
         }
       },
@@ -8342,6 +8409,9 @@
           "jump_host": {
             "type": "string",
             "format": "uuid"
+          },
+          "port_knocking": {
+            "$ref": "#/components/schemas/PortKnocking"
           }
         }
       },
@@ -8415,6 +8485,9 @@
           },
           "auth": {
             "$ref": "#/components/schemas/VncTargetAuth"
+          },
+          "port_knocking": {
+            "$ref": "#/components/schemas/PortKnocking"
           }
         }
       },
