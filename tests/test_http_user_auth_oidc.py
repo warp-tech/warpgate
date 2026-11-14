@@ -842,8 +842,8 @@ class TestHTTPUserAuthOIDC:
         echo_server_port,
         processes: ProcessManager,
     ):
-        """On subsequent logins, roles that are no longer present in the OIDC
-        warpgate_roles claim should be removed."""
+        """Roles issued by SSO are revoked when no longer present in the
+        warpgate_roles claim; manually issued roles survive SSO sync."""
         wg_http_port = alloc_port()
 
         # First login: user has both roles
@@ -912,9 +912,11 @@ class TestHTTPUserAuthOIDC:
             assert "role-keep" in role_names
             assert "role-remove" in role_names
 
-        # Second login: start a new OIDC mock where the user only has
-        # "role-keep".  We need a fresh mock because the mock server's user
-        # config is fixed at startup.
+        # Second login: two mock users share the same email (map to one Warpgate
+        # user).  User1 only has "role-keep"; User2 has "role-keep" and
+        # "role-remove".  We log in as User2 to grant both roles via SSO, then
+        # as User1 to revoke "role-remove".  Roles issued by SSO are revoked
+        # when no longer present in the claim; manually issued roles survive.
         wg_http_port2 = alloc_port()
         oidc_users_reduced = [
             {
@@ -939,7 +941,35 @@ class TestHTTPUserAuthOIDC:
                         "ValueType": "string",
                     },
                 ],
-            }
+            },
+            {
+                "SubjectId": "2",
+                "Username": "User2",
+                "Password": "pwd",
+                "Claims": [
+                    {"Type": "name", "Value": "Sam Tailor", "ValueType": "string"},
+                    {
+                        "Type": "email",
+                        "Value": "sam.tailor@gmail.com",
+                        "ValueType": "string",
+                    },
+                    {
+                        "Type": "preferred_username",
+                        "Value": "sam_tailor",
+                        "ValueType": "string",
+                    },
+                    {
+                        "Type": "warpgate_roles",
+                        "Value": "role-keep",
+                        "ValueType": "string",
+                    },
+                    {
+                        "Type": "warpgate_roles",
+                        "Value": "role-remove",
+                        "ValueType": "string",
+                    },
+                ],
+            },
         ]
 
         oidc_port2 = processes.start_oidc_server(
@@ -960,12 +990,12 @@ class TestHTTPUserAuthOIDC:
         )
         wg_url2 = f"https://127.0.0.1:{wg2.http_port}"
 
-        # The user already exists from the first wg instance's DB, but this is
-        # a fresh warpgate with its own DB.  Re-create the user so we can test
-        # the role-removal path.
+        # Set up the user and roles.  Manually assign "role-manual" to verify
+        # that manually-issued roles survive SSO sync (warpgate #2785).
         with admin_client(wg_url2) as api:
             api.create_role(sdk.RoleDataRequest(name="role-keep"))
             api.create_role(sdk.RoleDataRequest(name="role-remove"))
+            role_manual = api.create_role(sdk.RoleDataRequest(name="role-manual"))
             user = api.create_user(sdk.CreateUserRequest(username="sam_tailor"))
             api.create_sso_credential(
                 user.id,
@@ -974,12 +1004,21 @@ class TestHTTPUserAuthOIDC:
                     provider="test-oidc",
                 ),
             )
-            # Pre-assign both roles
-            roles = api.get_roles()
-            for r in roles:
-                if r.name in ("role-keep", "role-remove"):
-                    api.add_user_role(user.id, r.id)
+            # Manually assign only role-manual (not role-keep or role-remove)
+            api.add_user_role(user.id, role_manual.id)
 
+        # Login as User2 — SSO issues both roles (role-keep + role-remove).
+        _, resp = _do_oidc_login(wg_url2, oidc_port2, username="User2")
+        assert resp.status_code in (302, 307)
+
+        with admin_client(wg_url2) as api:
+            user_roles = api.get_user_roles(user.id)
+            active = {r.name for r in user_roles if r.is_active}
+            assert "role-keep" in active
+            assert "role-remove" in active
+            assert "role-manual" in active
+
+        # Login as User1 — SSO only issues role-keep, so role-remove is revoked.
         _, resp = _do_oidc_login(wg_url2, oidc_port2)
         assert resp.status_code in (302, 307)
 
@@ -988,6 +1027,7 @@ class TestHTTPUserAuthOIDC:
             active_role_names = {r.name for r in user_roles if r.is_active}
             assert "role-keep" in active_role_names
             assert "role-remove" not in active_role_names
+            assert "role-manual" in active_role_names
 
 
 # ---------------------------------------------------------------------------
