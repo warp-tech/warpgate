@@ -149,7 +149,7 @@ jobs:
           fi
 
       - name: Upload release
-        uses: softprops/action-gh-release@v3.0.3
+        uses: softprops/action-gh-release@v3.0.4
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           draft: true
