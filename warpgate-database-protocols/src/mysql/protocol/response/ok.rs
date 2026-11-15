@@ -17,7 +17,7 @@ pub struct OkPacket {
 
 impl Decode<'_> for OkPacket {
     fn decode_with(mut buf: Bytes, _: ()) -> Result<Self, Error> {
-        let header = buf.get_u8();
+        let header = buf.try_get_u8()?;
         if header != 0 && header != 0xfe {
             return Err(err_protocol!(
                 "expected 0x00 or 0xfe (OK_Packet) but found 0x{:02x}",
@@ -25,10 +25,10 @@ impl Decode<'_> for OkPacket {
             ));
         }
 
-        let affected_rows = buf.get_uint_lenenc();
-        let last_insert_id = buf.get_uint_lenenc();
-        let status = Status::from_bits_truncate(buf.get_u16_le());
-        let warnings = buf.get_u16_le();
+        let affected_rows = buf.get_uint_lenenc()?;
+        let last_insert_id = buf.get_uint_lenenc()?;
+        let status = Status::from_bits_truncate(buf.try_get_u16_le()?);
+        let warnings = buf.try_get_u16_le()?;
 
         Ok(Self {
             affected_rows,

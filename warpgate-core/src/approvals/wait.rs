@@ -124,6 +124,55 @@ pub(super) fn row_state(row: &SessionApprovalRequest::Model) -> Result<RowState,
     Ok(RowState::Decided(decision))
 }
 
+pub(super) async fn find_row(
+    db: &DatabaseConnection,
+    session_id: UserSessionId,
+    kind: ApprovalKind,
+    target: &str,
+) -> Result<Option<SessionApprovalRequest::Model>, WarpgateError> {
+    Ok(SessionApprovalRequest::Entity::find()
+        .filter(SessionApprovalRequest::Key::new(session_id, kind, target).into_condition())
+        .one(db)
+        .await?)
+}
+
+/// The decision recorded on the row, if there is one
+pub(super) async fn row_decision(
+    db: &DatabaseConnection,
+    session_id: UserSessionId,
+    kind: ApprovalKind,
+    target: &str,
+) -> Result<Option<ApprovalDecision>, WarpgateError> {
+    let Some(row) = find_row(db, session_id, kind, target).await? else {
+        return Ok(None);
+    };
+    Ok(match row_state(&row)? {
+        RowState::Decided(decision) => Some(decision),
+        RowState::Pending | RowState::Ended => None,
+    })
+}
+
+/// Close the request as timed out. Returns whether this close is what ended
+/// it, in which case the timeout is also audited; `false` means a decision or
+/// another close got there first.
+pub(super) async fn close_timed_out(
+    db: &DatabaseConnection,
+    subject: &ApprovalSubject,
+) -> Result<bool, WarpgateError> {
+    let closed = close_request(
+        db,
+        subject.session_id,
+        ApprovalKind::Admin,
+        &subject.target_name,
+        SessionApprovalRequest::UndecidedApprovalRequestStatus::TimedOut,
+    )
+    .await?;
+    if closed {
+        subject.emit_timed_out_event();
+    }
+    Ok(closed)
+}
+
 pub(super) async fn await_row_decision(
     db: &DatabaseConnection,
     session_id: UserSessionId,
@@ -139,9 +188,7 @@ pub(super) async fn await_row_decision(
             () = tokio::time::sleep_until(deadline) => return Ok(DecisionWaitOutcome::TimedOut),
             // The first tick is immediate
             _ = ticker.tick() => {
-                match SessionApprovalRequest::Entity::find().filter(
-                    SessionApprovalRequest::Key::new(session_id, kind, target).into_condition()
-                ).one(db).await {
+                match find_row(db, session_id, kind, target).await {
                     Ok(Some(row)) => match row_state(&row)? {
                         RowState::Pending => {}
                         RowState::Decided(decision) => {
@@ -177,9 +224,7 @@ pub async fn record_decision(
         ApprovalDecision::Rejected => (ApprovalRequestStatus::Rejected, None),
     };
 
-    let Some(row) = SessionApprovalRequest::Entity::find()
-        .filter(SessionApprovalRequest::Key::new(session_id, kind, target).into_condition())
-        .one(db)
+    let Some(row) = find_row(db, session_id, kind, target)
         .await?
         .filter(|row| row.status == ApprovalRequestStatus::Pending)
     else {

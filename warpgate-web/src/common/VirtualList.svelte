@@ -5,9 +5,19 @@
     interface Props {
         items: T[]
         row: Snippet<[T]>
+        class?: string
+        gridTemplateColumns?: string
+        // Rendered outside virtual list
+        before?: Snippet
     }
 
-    const { items, row }: Props = $props()
+    const {
+        items,
+        row,
+        class: className = '',
+        gridTemplateColumns,
+        before,
+    }: Props = $props()
 
     const virtualizer = createWindowVirtualizer<HTMLDivElement>({
         count: 0,
@@ -40,7 +50,12 @@
     style:height="{(rows[0]?.start ?? margin) - margin}px"
     bind:this={listStart}
 ></div>
-<div class="list-group list-group-flush mb-3" hidden={!items.length}>
+<div
+    class="list-group list-group-flush mb-3 {className}"
+    style:grid-template-columns={gridTemplateColumns}
+    hidden={!items.length}
+>
+    {@render before?.()}
     {#each rows as _row (_row.key)}
         {@const _item = items[_row.index]}
         <!-- The row count trails the items by one render, so the tail can

@@ -15,5 +15,6 @@ tokio-util.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 warpgate-common = { path = "../warpgate-common" }
+warpgate-common-http = { path = "../warpgate-common-http" }
 warpgate-core = { path = "../warpgate-core" }
 warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }

@@ -106,6 +106,10 @@ where
     pub const fn new(stream: S) -> Self {
         Self::Raw(stream)
     }
+
+    pub const fn is_tls(&self) -> bool {
+        matches!(self, Self::Tls(_))
+    }
 }
 
 impl<S, TS> MaybeTlsStream<S, TS>

@@ -1,4 +1,6 @@
-use sea_orm::{ConnectionTrait, DatabaseTransaction, DbBackend, StatementBuilder, TransactionTrait};
+use sea_orm::{
+    ConnectionTrait, DatabaseTransaction, DbBackend, StatementBuilder, TransactionTrait,
+};
 use sea_orm_migration::prelude::*;
 
 /// Audit events raised outside a user session (API-token requests) carry no
@@ -12,7 +14,10 @@ const LOG_TMP: &str = "log_new";
 /// `(index name, columns)` for every index on `log`. SQLite drops them along
 /// with the table it rebuilds, so they are recreated on the replacement.
 const INDEXES: &[(&str, &[&str])] = &[
-    ("log_entry__timestamp_session_id", &["timestamp", "session_id"]),
+    (
+        "log_entry__timestamp_session_id",
+        &["timestamp", "session_id"],
+    ),
     ("log_entry__session_id", &["session_id"]),
     ("log_entry__username", &["username"]),
     ("log_target_timestamp", &["target", "timestamp"]),
@@ -45,7 +50,12 @@ impl MigrationTrait for Migration {
             &db,
             &Table::create()
                 .table(Alias::new(LOG_TMP))
-                .col(ColumnDef::new(Alias::new("id")).uuid().not_null().primary_key())
+                .col(
+                    ColumnDef::new(Alias::new("id"))
+                        .uuid()
+                        .not_null()
+                        .primary_key(),
+                )
                 .col(ColumnDef::new(Alias::new("text")).text().not_null())
                 .col(ColumnDef::new(Alias::new("values")).json().not_null())
                 .col(
@@ -62,8 +72,16 @@ impl MigrationTrait for Migration {
                         .default("warpgate"),
                 )
                 .col(ColumnDef::new(Alias::new("related_users")).string().null())
-                .col(ColumnDef::new(Alias::new("related_access_roles")).string().null())
-                .col(ColumnDef::new(Alias::new("related_admin_roles")).string().null())
+                .col(
+                    ColumnDef::new(Alias::new("related_access_roles"))
+                        .string()
+                        .null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("related_admin_roles"))
+                        .string()
+                        .null(),
+                )
                 .to_owned(),
         )
         .await?;

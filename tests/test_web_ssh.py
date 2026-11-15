@@ -6,7 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import requests
-from websocket import create_connection
+from websocket import WebSocketTimeoutException, create_connection
 
 from .api_client import admin_client, sdk
 from .approval_util import wait_for_pending_approval
@@ -102,6 +102,21 @@ def _wait_for_close(ws, deadline):
     raise TimeoutError("session was not closed in time")
 
 
+def _phases_until_quiet(ws, quiet=1.0):
+    """Every `state` phase received until the stream goes quiet for `quiet` seconds."""
+    phases = []
+    ws.settimeout(quiet)
+    try:
+        while True:
+            msg = json.loads(ws.recv())
+            if msg["type"] == "state":
+                phases.append(msg["phase"])
+    except WebSocketTimeoutException:
+        return phases
+    finally:
+        ws.settimeout(None)
+
+
 def _run_shell_roundtrip(ws, deadline):
     ws.send(json.dumps({"type": "open_channel", "cols": 80, "rows": 24}))
 
@@ -176,6 +191,37 @@ class TestWebSsh:
 
         resp = http.get(f"{url}/@warpgate/api/web-ssh/sessions/{session_id}")
         assert resp.status_code == 404
+
+    def test_phase_delivered_once_per_attach(
+        self,
+        processes: ProcessManager,
+        wg_c_ed25519_pubkey: Path,
+        timeout,
+        shared_wg: WarpgateProcess,
+    ):
+        url, http, _, ssh_target = _web_ssh_login(
+            processes, wg_c_ed25519_pubkey, shared_wg
+        )
+        session_id = _create_session(url, http, ssh_target)
+        # Let the session reach `connected` before anything attaches, so the phase
+        # is still queued when the first stream opens.
+        time.sleep(3)
+
+        ws = _open_stream(shared_wg, http, session_id)
+        try:
+            assert _phases_until_quiet(ws).count("connected") == 1
+        finally:
+            ws.close()
+
+        # A reattaching client is told the current phase again, once.
+        ws = _open_stream(shared_wg, http, session_id)
+        try:
+            assert _phases_until_quiet(ws) == ["connected"]
+        finally:
+            ws.close()
+
+        resp = http.delete(f"{url}/@warpgate/api/web-ssh/sessions/{session_id}")
+        assert resp.status_code == 204
 
     def test_admin_approval_approved(
         self,

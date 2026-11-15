@@ -4,12 +4,12 @@ use std::any::Any;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use ironrdp::cliprdr::backend::{ClipboardMessage, CliprdrBackend};
-use ironrdp::cliprdr::pdu::{
+use ironrdp_cliprdr::backend::{ClipboardMessage, CliprdrBackend};
+use ironrdp_cliprdr::pdu::{
     ClipboardFormat, ClipboardFormatId, ClipboardGeneralCapabilityFlags, FileContentsRequest,
     FileContentsResponse, FormatDataRequest, FormatDataResponse, LockDataId,
 };
-use ironrdp::core::{AsAny, IntoOwned as _};
+use ironrdp_core::{AsAny, IntoOwned as _};
 use tracing::debug;
 use warpgate_core::MAX_CLIPBOARD_BYTES;
 

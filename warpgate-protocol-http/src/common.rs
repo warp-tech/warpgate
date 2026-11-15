@@ -20,6 +20,7 @@ use warpgate_common::auth::{AuthResult, AuthState, AuthStateUserInfo, Credential
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Protocol, UserSessionId, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
+pub use warpgate_common_http::auth::is_localhost_host;
 use warpgate_common_http::ext::{construct_external_url, is_navigation_request};
 use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_common_http::{
@@ -88,11 +89,6 @@ impl SessionRotation {
     }
 }
 
-/// Check if a host is localhost or 127.x.x.x (for development/testing scenarios)
-pub fn is_localhost_host(host: &str) -> bool {
-    host == "localhost" || host == "127.0.0.1" || host.starts_with("127.")
-}
-
 pub fn host_is_subdomain_of_or_equal(host: &str, base_domain: &str) -> bool {
     let base = base_domain.trim_start_matches('.');
     host == base || host.ends_with(&format!(".{base}"))
@@ -107,7 +103,7 @@ fn session_host_is_authorized(request_host: Option<&str>, base_host: &str) -> bo
         return false;
     };
     host_is_subdomain_of_or_equal(host, base_host)
-        || (is_localhost_host(host) && base_host != "localhost" && base_host != "127.0.0.1")
+        || (is_localhost_host(host) && !is_localhost_host(base_host))
 }
 
 /// Whether a state-changing (or WebSocket) request to Warpgate's own endpoints
@@ -511,9 +507,10 @@ async fn user_for_api_token(
         return Ok(None);
     }
 
-    let Some(user) = services.config_provider.validate_api_token(token).await? else {
+    let Some(token) = services.config_provider.validate_api_token(token).await? else {
         return Ok(None);
     };
+    let user = token.user;
 
     if !vet_credential_bearer(&services.login_protection, &user, remote_ip).await? {
         return Ok(None);
@@ -604,6 +601,24 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
         {
             Some(RequestAuthorization::AdminToken)
         } else if let Some(user) = user_for_api_token(&req, &ctx, token_from_header).await? {
+            let endpoint = format!("{} {}", req.method(), req.uri().path());
+            let allowed = ctx
+                .services()
+                .config
+                .lock()
+                .await
+                .store
+                .http
+                .user_api_token_allowed_endpoints
+                .as_ref()
+                .is_none_or(|list| list.iter().any(|e| e.eq_ignore_ascii_case(&endpoint)));
+            if !allowed {
+                tracing::warn!(
+                    session_username = %user.username,
+                    "API token denied for {endpoint}: not in http.user_api_token_allowed_endpoints"
+                );
+                return Err(poem::Error::from_status(StatusCode::FORBIDDEN));
+            }
             Some(RequestAuthorization::UserToken {
                 user_id: user.id,
                 username: user.username,

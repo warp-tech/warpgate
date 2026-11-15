@@ -13,6 +13,7 @@ use ratatui::widgets::{
 use ratatui::{Terminal, TerminalOptions, Viewport};
 use termwiz::input::{InputEvent, InputParser, KeyCode, Modifiers};
 use tui_input::{Input, InputRequest};
+use uuid::Uuid;
 use warpgate_common::eventhub::{EventSender, EventSubscription};
 use warpgate_common::fuzzy::fuzzy_rank;
 use warpgate_common::{Target, TargetSSHOptions, UserSessionId, WarpgateError};
@@ -125,10 +126,9 @@ struct DrawState {
 }
 
 #[derive(Debug)]
-#[allow(clippy::large_enum_variant)]
 pub enum MenuEvent {
     Render(Bytes),
-    Selected(Target),
+    Selected(Uuid),
     Abort,
 }
 
@@ -544,7 +544,7 @@ async fn run_target_menu_loop(
                     }
                     Some(MenuInputResult::Abort) => Some(MenuEvent::Abort),
                     Some(MenuInputResult::Selected((target, _options))) => {
-                        Some(MenuEvent::Selected(target))
+                        Some(MenuEvent::Selected(target.id))
                     }
                 };
 

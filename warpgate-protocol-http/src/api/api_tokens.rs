@@ -6,6 +6,7 @@ use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 use warpgate_common::WarpgateError;
 use warpgate_common::helpers::hash::{generate_ticket_secret, hash_secret};
+use warpgate_common_http::RequestAuthorization;
 use warpgate_common_http::errors::bad_request;
 use warpgate_db_entities::ApiToken;
 
@@ -61,6 +62,10 @@ enum CreateApiTokenResponse {
     BadRequest(Json<String>),
     #[oai(status = 401)]
     Unauthorized,
+    /// Issuing a token from a token would let a leaked token renew itself
+    /// indefinitely, so a fresh token requires a web session.
+    #[oai(status = 403)]
+    Forbidden,
 }
 
 #[derive(ApiResponse)]
@@ -114,6 +119,9 @@ impl Api {
         let auth = &ctx.auth;
         let db = &ctx.services().db;
 
+        if matches!(auth, RequestAuthorization::UserToken { .. }) {
+            return Ok(CreateApiTokenResponse::Forbidden);
+        }
         let Some(full) = auth.as_full_user() else {
             return Ok(CreateApiTokenResponse::Unauthorized);
         };

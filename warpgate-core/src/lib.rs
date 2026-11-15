@@ -18,6 +18,7 @@ pub mod login_protection;
 mod protocols;
 pub mod rate_limiting;
 pub mod recordings;
+pub mod resources;
 mod secret_backend_registry;
 mod services;
 mod state;

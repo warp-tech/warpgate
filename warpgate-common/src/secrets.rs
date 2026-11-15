@@ -179,6 +179,15 @@ impl fmt::Display for SecretRef {
     }
 }
 
+fn is_valid_kv_segment(seg: &str) -> bool {
+    !seg.is_empty()
+        && seg != "."
+        && seg != ".."
+        && !seg
+            .chars()
+            .any(|c| c.is_control() || matches!(c, '\\' | '?' | '%' | '#'))
+}
+
 impl FromStr for SecretRef {
     type Err = SecretError;
 
@@ -190,7 +199,10 @@ impl FromStr for SecretRef {
 
         let (kv_path, field) = rest.split_once('#').ok_or_else(invalid)?;
         let (mount, path) = kv_path.split_once('/').ok_or_else(invalid)?;
-        if mount.is_empty() || path.is_empty() || field.is_empty() {
+        if !is_valid_kv_segment(mount)
+            || !path.split('/').all(is_valid_kv_segment)
+            || field.is_empty()
+        {
             return Err(invalid());
         }
 
@@ -513,6 +525,15 @@ mod tests {
             "secret://vault-prod/secret",
             "secret://vault-prod/secret/",
             "secret://vault-prod//myapp#password",
+            "secret://vault-prod/secret//myapp#password",
+            "secret://vault-prod/secret/myapp/#password",
+            "secret://vault-prod/secret/./myapp#password",
+            "secret://vault-prod/secret/../myapp#password",
+            "secret://vault-prod/secret/warpgate/../../other#password",
+            "secret://vault-prod/../secret/myapp#password",
+            "secret://vault-prod/secret/my%2fapp#password",
+            "secret://vault-prod/secret/myapp?version=1#password",
+            "secret://vault-prod/secret/my\\app#password",
             "secret://vault-prod/secret/myapp",
             "secret://vault-prod/secret/myapp#",
             "vault://vault-prod/secret/myapp",

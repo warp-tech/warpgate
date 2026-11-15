@@ -321,9 +321,9 @@
                 {#each sharedWith as usage, i}
                     {i ? ', ' : ''}
                     {#if usage.kind === 'Target'}
-                        <a href="#/config/targets/{usage.id}">{usage.name}</a>
+                        <a href="#/manage/targets/{usage.id}">{usage.name}</a>
                     {:else}
-                        <a href="#/config/ssh">SSH client key {usage.label}</a>
+                        <a href="#/manage/ssh">SSH client key {usage.label}</a>
                     {/if}
                 {/each}
             </div>

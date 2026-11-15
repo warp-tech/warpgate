@@ -168,8 +168,8 @@ pub async fn is_open(
         .is_some())
 }
 
-pub async fn open_user_sessions_admitted_by_tickets(
-    db: &DatabaseConnection,
+pub async fn open_user_sessions_admitted_by_tickets<C: ConnectionTrait>(
+    db: &C,
     tickets: impl IntoCondition,
 ) -> Result<Vec<UserSessionId>, WarpgateError> {
     Ok(Entity::find()

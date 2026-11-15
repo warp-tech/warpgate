@@ -1,3 +1,5 @@
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -5,7 +7,8 @@ use std::time::Duration;
 use anyhow::Result;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait,
+    ColumnTrait, DatabaseConnection, EntityTrait, JoinType, PaginatorTrait, QueryFilter,
+    QuerySelect, RelationTrait, TransactionTrait,
 };
 use time::OffsetDateTime;
 use tokio::sync::{Mutex, broadcast};
@@ -21,15 +24,16 @@ use warpgate_db_entities::{
 };
 
 use crate::auth_state_store::ApprovalRequestSink;
-use crate::cluster::{Cluster, ClusterNotification};
+use crate::cluster::{Cluster, ClusterNotification, REAP_INTERVAL};
 use crate::db::connect_to_db_and_migrate;
 use crate::helpers::i64_seconds_to_duration;
 use crate::login_protection::LoginProtectionService;
 use crate::rate_limiting::RateLimiterRegistry;
 use crate::recordings::SessionRecordings;
+use crate::resources::AdmittedSessions;
 use crate::{
-    AuthStateStore, ConfigProviderEnum, DatabaseConfigProvider, ListenerStatusRegistry,
-    SecretBackendRegistry, SessionsFilter, State,
+    AuthStateStore, ConfigProvider, ConfigProviderEnum, DatabaseConfigProvider,
+    ListenerStatusRegistry, SecretBackendRegistry, SessionsFilter, State,
 };
 
 #[derive(Clone)]
@@ -62,9 +66,47 @@ const TICKET_EXPIRY_SWEEP_INTERVAL: Duration = Duration::from_secs(5);
 impl Services {
     pub async fn close_sessions(&self, scope: SessionsFilter) -> Result<(), WarpgateError> {
         scope.revoke(&self.db).await?;
-        State::close_local_sessions(&self.state, &scope).await;
-        self.cluster.close_sessions_on_peers(&scope).await;
+        self.close_everywhere(&scope).await;
         Ok(())
+    }
+
+    /// Closes the live handles of already-ended sessions on every node.
+    async fn close_everywhere(&self, scope: &SessionsFilter) {
+        State::close_local_sessions(&self.state, scope).await;
+        self.cluster.close_sessions_on_peers(scope).await;
+    }
+
+    /// Joins the cluster and starts the reaper.
+    pub async fn start_cluster(&self) -> Result<(), WarpgateError> {
+        self.cluster.start().await?;
+        let services = self.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(REAP_INTERVAL);
+            loop {
+                interval.tick().await;
+                match crate::cluster::reap(&services.db).await {
+                    Ok(ids) if !ids.is_empty() => {
+                        services
+                            .close_everywhere(&SessionsFilter::Sessions { ids })
+                            .await;
+                    }
+                    Ok(_) => {}
+                    Err(error) => warn!(%error, "Node reaper failed"),
+                }
+            }
+        });
+        Ok(())
+    }
+
+    pub async fn close_admitted_sessions(
+        &self,
+        sessions: AdmittedSessions,
+    ) -> Result<(), WarpgateError> {
+        if sessions.0.is_empty() {
+            return Ok(());
+        }
+        self.close_sessions(SessionsFilter::Sessions { ids: sessions.0 })
+            .await
     }
 
     pub async fn delete_ticket_closing_sessions(
@@ -85,11 +127,8 @@ impl Services {
         Ticket::Entity::delete_by_id(ticket_id).exec(&txn).await?;
         txn.commit().await?;
 
-        if !admitted.is_empty() {
-            self.close_sessions(SessionsFilter::Sessions { ids: admitted })
-                .await?;
-        }
-        Ok(())
+        self.close_admitted_sessions(AdmittedSessions(admitted))
+            .await
     }
 
     pub async fn close_sessions_of_expired_tickets(&self) -> Result<(), WarpgateError> {
@@ -98,10 +137,47 @@ impl Services {
             Ticket::Column::Expiry.lt(OffsetDateTime::now_utc()),
         )
         .await?;
-        if ids.is_empty() {
-            return Ok(());
+        self.close_admitted_sessions(AdmittedSessions(ids)).await
+    }
+
+    /// Close sessions whose role-based access has ended: their user no longer
+    /// holds an active role assignment (not expired, not revoked) that grants
+    /// the target. Ticket-admitted sessions are left to the ticket sweep.
+    pub async fn close_sessions_without_role_access(&self) -> Result<(), WarpgateError> {
+        let open: Vec<(UserSessionId, Uuid, Option<Uuid>)> = TargetSession::Entity::find()
+            .join(
+                JoinType::InnerJoin,
+                TargetSession::Relation::UserSession.def(),
+            )
+            .filter(TargetSession::Column::Ended.is_null())
+            .filter(TargetSession::Column::TicketId.is_null())
+            .select_only()
+            .column(TargetSession::Column::UserSessionId)
+            .column(TargetSession::Column::TargetId)
+            .column(UserSession::Column::UserId)
+            .into_tuple()
+            .all(&self.db)
+            .await?;
+        let mut allowed: HashMap<Uuid, HashSet<Uuid>> = HashMap::new();
+        let mut lost: HashSet<UserSessionId> = HashSet::new();
+        for (session, target, user) in open {
+            // Sessions without a user (e.g. the admin token) are not role-admitted.
+            let Some(user) = user else { continue };
+            if lost.contains(&session) {
+                continue;
+            }
+            let targets = match allowed.entry(user) {
+                Entry::Occupied(entry) => entry.into_mut(),
+                Entry::Vacant(entry) => {
+                    entry.insert(self.config_provider.authorized_target_ids(user).await?)
+                }
+            };
+            if !targets.contains(&target) {
+                lost.insert(session);
+            }
         }
-        self.close_sessions(SessionsFilter::Sessions { ids }).await
+        self.close_admitted_sessions(AdmittedSessions(lost.into_iter().collect()))
+            .await
     }
 
     pub async fn new(
@@ -209,6 +285,9 @@ impl Services {
                     interval.tick().await;
                     if let Err(error) = services.close_sessions_of_expired_tickets().await {
                         warn!("Failed to close sessions of expired tickets: {error}");
+                    }
+                    if let Err(error) = services.close_sessions_without_role_access().await {
+                        warn!("Failed to close sessions without role access: {error}");
                     }
                 }
             });

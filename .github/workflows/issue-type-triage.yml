@@ -1,0 +1,122 @@
+name: Issue type triage
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+  models: read
+
+jobs:
+  classify:
+    if: github.event.issue.pull_request == null
+    runs-on: ubuntu-latest
+
+    env:
+      ISSUE_TYPE_FIELD_ID: ${{ vars.ISSUE_TYPE_FIELD_ID }}
+      ISSUE_TYPE_BUG_ID: ${{ vars.ISSUE_TYPE_BUG_ID }}
+      ISSUE_TYPE_FEATURE_ID: ${{ vars.ISSUE_TYPE_FEATURE_ID }}
+
+    steps:
+      - name: Prepare issue text
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body || 'No description provided.' }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+
+          title = os.environ.get("ISSUE_TITLE", "")
+          body = os.environ.get("ISSUE_BODY", "")
+
+          with open("issue.txt", "w", encoding="utf-8") as f:
+              f.write("<issue_title>\n")
+              f.write(title)
+              f.write("\n</issue_title>\n")
+              f.write("<issue_body>\n")
+              f.write(body)
+              f.write("\n</issue_body>\n")
+          PY
+
+      - name: Guess issue type
+        id: guess
+        uses: actions/ai-inference@v1.2.8
+        with:
+          model: openai/gpt-4.1
+          max-tokens: 8
+          prompt-file: issue.txt
+          system-prompt: >-
+            You are a GitHub triage assistant.
+            Decide whether the issue is primarily a bug report or a feature request.
+            A bug is something broken, failing, unexpected, crashing, incorrect, or a regression.
+            A feature request is a capability request, enhancement, or planned addition.
+            Reply with exactly one word: bug or feature.
+            Do not include punctuation or explanation.
+
+      - name: Normalize guess
+        id: normalized
+        env:
+          RESPONSE: ${{ steps.guess.outputs.response }}
+        run: |
+          set -euo pipefail
+          type="$(printf '%s' "$RESPONSE" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alpha:]' | head -c 16)"
+          if [ "$type" = "bug" ] || [ "$type" = "feature" ]; then
+            echo "value=$type" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update GitHub issue type field
+        if: steps.normalized.outputs.value != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          case "${{ steps.normalized.outputs.value }}" in
+            bug) OPTION_ID="$ISSUE_TYPE_BUG_ID" ;;
+            feature) OPTION_ID="$ISSUE_TYPE_FEATURE_ID" ;;
+            *) echo "No valid type option" ; exit 0 ;;
+          esac
+
+          if [ -z "$ISSUE_TYPE_FIELD_ID" ] || [ -z "$OPTION_ID" ]; then
+            echo "Missing ISSUE_TYPE_FIELD_ID or issue option ID. Add them as repository variables."
+            exit 0
+          fi
+
+          gh api graphql \
+            -H 'GraphQL-Features: issue_fields' \
+            -f query='
+              mutation($issueId: ID!, $fieldId: ID!, $optionId: ID!) {
+                createIssueFieldValue(input: {
+                  issueId: $issueId
+                  issueField: {
+                    fieldId: $fieldId
+                    singleSelectOptionId: $optionId
+                  }
+                }) {
+                  issue {
+                    id
+                  }
+                }
+              }
+            ' \
+            -F issueId="${{ github.event.issue.node_id }}" \
+            -F fieldId="$ISSUE_TYPE_FIELD_ID" \
+            -F optionId="$OPTION_ID"
+
+      - name: Add AI label when the type changed
+        if: steps.normalized.outputs.value != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/labels" \
+            --input - <<'JSON'
+          ["issue-labelled-by-ai"]
+          JSON

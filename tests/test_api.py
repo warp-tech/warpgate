@@ -1225,6 +1225,42 @@ def test_admin_api_permission_enforcement(
         }, f"{case.id} should be forbidden without {case.permission}, got {status}: {body}"
 
 
+def test_admin_cannot_edit_user_with_broader_admin_permissions(
+    pg_wg: WarpgateProcess,
+    admin_client: sdk.DefaultApi,
+):
+    url = f"https://localhost:{pg_wg.http_port}"
+
+    narrow_role = _create_admin_role(
+        admin_client, make_limited_admin_role_payload(users_edit=True)
+    )
+    broad_role = _create_admin_role(
+        admin_client,
+        make_limited_admin_role_payload(users_edit=True, config_edit=True),
+    )
+    actor = _create_user_with_role(admin_client, narrow_role.id)
+    peer = _create_user_with_role(admin_client, narrow_role.id)
+    superior = _create_user_with_role(admin_client, broad_role.id)
+
+    token = _create_user_api_token(url, actor.username, "123")
+    with new_admin_client(url, token) as api:
+        api.create_password_credential(
+            peer.id, sdk.NewPasswordCredential(password="456")
+        )
+
+        with pytest.raises(sdk.ApiException) as e:
+            api.create_password_credential(
+                superior.id, sdk.NewPasswordCredential(password="456")
+            )
+        assert e.value.status == 403
+
+        with pytest.raises(sdk.ApiException) as e:
+            api.update_user(
+                superior.id, sdk.UserDataRequest(username=superior.username)
+            )
+        assert e.value.status == 403
+
+
 def test_update_target_must_state_the_approval_gate(
     pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
 ):

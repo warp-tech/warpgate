@@ -1,26 +1,16 @@
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
-use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::prelude::Expr;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
-};
+use poem_openapi::{ApiResponse, OpenApi};
+use sea_orm::{EntityTrait, QueryOrder};
 use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::errors::invalid_field;
+use warpgate_core::resources::ResourceError;
+use warpgate_core::resources::target_groups::{self as store, TargetGroupDataRequest};
 use warpgate_db_entities::TargetGroup;
-use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
 
 use super::AdminContext;
-use crate::api::common::is_unique_violation;
-
-#[derive(Object)]
-struct TargetGroupDataRequest {
-    name: String,
-    description: Option<String>,
-    color: Option<BootstrapThemeColor>,
-}
 
 #[derive(ApiResponse)]
 enum GetTargetGroupsResponse {
@@ -74,32 +64,16 @@ impl ListApi {
     ) -> Result<CreateTargetGroupResponse, WarpgateError> {
         admin.require(AdminPermission::TargetsCreate)?;
 
-        if body.name.is_empty() {
-            return Ok(CreateTargetGroupResponse::BadRequest(invalid_field(
-                "name",
-                "target group name is empty",
-            )));
+        match store::create(&admin.services().db, &body).await {
+            Ok(group) => Ok(CreateTargetGroupResponse::Created(Json(group))),
+            Err(ResourceError::EmptyName) => Ok(CreateTargetGroupResponse::BadRequest(
+                invalid_field("name", "target group name is empty"),
+            )),
+            Err(ResourceError::NameTaken) => Ok(CreateTargetGroupResponse::Conflict(Json(
+                "Name already exists".into(),
+            ))),
+            Err(err) => Err(err.into()),
         }
-
-        let db = &admin.services().db;
-        let values = TargetGroup::ActiveModel {
-            id: Set(Uuid::new_v4()),
-            name: Set(body.name.clone()),
-            description: Set(body.description.clone().unwrap_or_default()),
-            color: Set(body.color.clone()),
-        };
-
-        let group = match values.insert(db).await {
-            Ok(group) => group,
-            Err(err) if is_unique_violation(&err) => {
-                return Ok(CreateTargetGroupResponse::Conflict(Json(
-                    "Name already exists".into(),
-                )));
-            }
-            Err(err) => return Err(WarpgateError::from(err)),
-        };
-
-        Ok(CreateTargetGroupResponse::Created(Json(group)))
     }
 }
 
@@ -168,33 +142,18 @@ impl DetailApi {
     ) -> Result<UpdateTargetGroupResponse, WarpgateError> {
         admin.require(AdminPermission::TargetsEdit)?;
 
-        if body.name.is_empty() {
-            warn!("Rejecting request: target group name is empty");
-            return Ok(UpdateTargetGroupResponse::BadRequest);
-        }
-
-        let db = &admin.services().db;
-        let group = TargetGroup::Entity::find_by_id(id.0).one(db).await?;
-
-        let Some(group) = group else {
-            return Ok(UpdateTargetGroupResponse::NotFound);
-        };
-
-        let mut group: TargetGroup::ActiveModel = group.into();
-        group.name = Set(body.name.clone());
-        group.description = Set(body.description.clone().unwrap_or_default());
-        group.color = Set(body.color.clone());
-
-        let group = match group.update(db).await {
-            Ok(group) => group,
-            Err(err) if is_unique_violation(&err) => {
-                return Ok(UpdateTargetGroupResponse::Conflict(Json(
-                    "Name already exists".into(),
-                )));
+        match store::update(&admin.services().db, id.0, &body).await {
+            Ok(group) => Ok(UpdateTargetGroupResponse::Ok(Json(group))),
+            Err(ResourceError::EmptyName) => {
+                warn!("Rejecting request: target group name is empty");
+                Ok(UpdateTargetGroupResponse::BadRequest)
             }
-            Err(err) => return Err(WarpgateError::from(err)),
-        };
-        Ok(UpdateTargetGroupResponse::Ok(Json(group)))
+            Err(ResourceError::NameTaken) => Ok(UpdateTargetGroupResponse::Conflict(Json(
+                "Name already exists".into(),
+            ))),
+            Err(ResourceError::NotFound) => Ok(UpdateTargetGroupResponse::NotFound),
+            Err(err) => Err(err.into()),
+        }
     }
 
     #[oai(
@@ -207,26 +166,12 @@ impl DetailApi {
         admin: AdminContext,
         id: Path<Uuid>,
     ) -> Result<DeleteTargetGroupResponse, WarpgateError> {
-        use warpgate_db_entities::Target;
-
         admin.require(AdminPermission::TargetsDelete)?;
 
-        let db = &admin.services().db;
-        let group = TargetGroup::Entity::find_by_id(id.0).one(db).await?;
-
-        let Some(group) = group else {
-            return Ok(DeleteTargetGroupResponse::NotFound);
-        };
-
-        // First, unassign all targets from this group by setting their group_id to NULL
-        Target::Entity::update_many()
-            .col_expr(Target::Column::GroupId, Expr::value(Option::<Uuid>::None))
-            .filter(Target::Column::GroupId.eq(id.0))
-            .exec(db)
-            .await?;
-
-        // Then delete the group
-        group.delete(db).await?;
-        Ok(DeleteTargetGroupResponse::Deleted)
+        match store::delete(&admin.services().db, id.0).await {
+            Ok(()) => Ok(DeleteTargetGroupResponse::Deleted),
+            Err(ResourceError::NotFound) => Ok(DeleteTargetGroupResponse::NotFound),
+            Err(err) => Err(err.into()),
+        }
     }
 }

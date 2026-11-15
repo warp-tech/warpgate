@@ -95,7 +95,15 @@ pub trait ConfigProvider {
         credential: Option<AuthCredential>,
     ) -> Result<(), WarpgateError>;
 
-    async fn validate_api_token(&self, token: &str) -> Result<Option<User>, WarpgateError>;
+    async fn validate_api_token(
+        &self,
+        token: &str,
+    ) -> Result<Option<ValidatedApiToken>, WarpgateError>;
+}
+
+pub struct ValidatedApiToken {
+    pub id: Uuid,
+    pub user: User,
 }
 
 /// Proof that a user authenticated for a given protocol, and so may be handed to
@@ -339,6 +347,12 @@ impl ValidatedTicket {
 
     pub fn target(&self) -> &Target {
         self.authorization.target()
+    }
+
+    /// For joining a session this ticket already opened, so no use is spent.
+    /// `validate_ticket` has already re-checked expiry and revocation.
+    pub fn join(self) -> TargetAuthorization {
+        self.authorization
     }
 
     pub async fn spend(

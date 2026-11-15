@@ -28,42 +28,42 @@ pub struct Handshake {
 
 impl Decode<'_> for Handshake {
     fn decode_with(mut buf: Bytes, _: ()) -> Result<Self, Error> {
-        let protocol_version = buf.get_u8(); // int<1>
+        let protocol_version = buf.try_get_u8()?; // int<1>
         let server_version = buf.get_str_nul()?; // string<NUL>
-        let connection_id = buf.get_u32_le(); // int<4>
-        let auth_plugin_data_1 = buf.get_bytes(8); // string<8>
+        let connection_id = buf.try_get_u32_le()?; // int<4>
+        let auth_plugin_data_1 = buf.get_bytes(8)?; // string<8>
 
-        buf.advance(1); // reserved: string<1>
+        buf.skip(1)?; // reserved: string<1>
 
-        let capabilities_1 = buf.get_u16_le(); // int<2>
+        let capabilities_1 = buf.try_get_u16_le()?; // int<2>
         let mut capabilities = Capabilities::from_bits_truncate(capabilities_1.into());
 
-        let collation = buf.get_u8(); // int<1>
-        let status = Status::from_bits_truncate(buf.get_u16_le());
+        let collation = buf.try_get_u8()?; // int<1>
+        let status = Status::from_bits_truncate(buf.try_get_u16_le()?);
 
-        let capabilities_2 = buf.get_u16_le(); // int<2>
+        let capabilities_2 = buf.try_get_u16_le()?; // int<2>
         capabilities |= Capabilities::from_bits_truncate(((capabilities_2 as u32) << 16).into());
 
         let auth_plugin_data_len = if capabilities.contains(Capabilities::PLUGIN_AUTH) {
-            buf.get_u8()
+            buf.try_get_u8()?
         } else {
-            buf.advance(1); // int<1>
+            buf.skip(1)?; // int<1>
             0
         };
 
-        buf.advance(6); // reserved: string<6>
+        buf.skip(6)?; // reserved: string<6>
 
         if capabilities.contains(Capabilities::MYSQL) {
-            buf.advance(4); // reserved: string<4>
+            buf.skip(4)?; // reserved: string<4>
         } else {
-            let capabilities_3 = buf.get_u32_le(); // int<4>
+            let capabilities_3 = buf.try_get_u32_le()?; // int<4>
             capabilities |= Capabilities::from_bits_truncate((capabilities_3 as u64) << 32);
         }
 
         let auth_plugin_data_2 = if capabilities.contains(Capabilities::SECURE_CONNECTION) {
             let len = ((auth_plugin_data_len as isize) - 9).max(12) as usize;
-            let v = buf.get_bytes(len);
-            buf.advance(1); // NUL-terminator
+            let v = buf.get_bytes(len)?;
+            buf.skip(1)?; // NUL-terminator
 
             v
         } else {

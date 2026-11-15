@@ -10,30 +10,31 @@ mod tls;
 
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use bytes::Bytes;
-use ironrdp::cliprdr::CliprdrClient;
-use ironrdp::cliprdr::backend::ClipboardMessage;
-use ironrdp::connector::connection_activation::{
+use ironrdp_cliprdr::CliprdrClient;
+use ironrdp_cliprdr::backend::ClipboardMessage;
+use ironrdp_connector::connection_activation::{
     ConnectionActivationFactory, ConnectionActivationState,
 };
-use ironrdp::connector::credssp::KerberosConfig;
-use ironrdp::connector::{self, ConnectionResult, Credentials};
-use ironrdp::core::WriteBuf;
-use ironrdp::displaycontrol::client::DisplayControlClient;
-use ironrdp::displaycontrol::pdu::MonitorLayoutEntry;
-use ironrdp::dvc::DrdynvcClient;
-use ironrdp::graphics::image_processing::PixelFormat;
-use ironrdp::pdu::gcc::KeyboardType;
-use ironrdp::pdu::geometry::InclusiveRectangle;
-use ironrdp::pdu::rdp::capability_sets::{MajorPlatformType, client_codecs_capabilities};
-use ironrdp::pdu::rdp::client_info::{PerformanceFlags, TimezoneInfo};
-use ironrdp::pdu::rdp::headers::ShareDataPdu;
-use ironrdp::pdu::rdp::refresh_rectangle::RefreshRectanglePdu;
-use ironrdp::session::image::DecodedImage;
-use ironrdp::session::{ActiveStage, ActiveStageBuilder, ActiveStageOutput};
+use ironrdp_connector::credssp::KerberosConfig;
+use ironrdp_connector::{self as connector, ConnectionResult, Credentials};
+use ironrdp_core::WriteBuf;
+use ironrdp_displaycontrol::client::DisplayControlClient;
+use ironrdp_displaycontrol::pdu::MonitorLayoutEntry;
+use ironrdp_dvc::DrdynvcClient;
 use ironrdp_egfx::client::{GraphicsPipelineClient, GraphicsPipelineHandler};
 use ironrdp_egfx::pdu::{Codec1Type, GfxPdu};
+use ironrdp_graphics::image_processing::PixelFormat;
+use ironrdp_graphics::pointer::DecodedPointer;
+use ironrdp_pdu::gcc::{ConnectionType, KeyboardType};
+use ironrdp_pdu::geometry::InclusiveRectangle;
+use ironrdp_pdu::rdp::capability_sets::{
+    MajorPlatformType, RailSupportLevel, client_codecs_capabilities,
+};
+use ironrdp_pdu::rdp::client_info::{PerformanceFlags, TimezoneInfo};
+use ironrdp_session::image::DecodedImage;
+use ironrdp_session::{ActiveStage, ActiveStageBuilder, ActiveStageOutput};
 use ironrdp_tokio::reqwest::ReqwestNetworkClient;
 use ironrdp_tokio::{FramedWrite as _, TokioFramed};
 use tokio::net::TcpStream;
@@ -161,6 +162,14 @@ async fn active_loop(
     logon: &LogonWatcher,
 ) -> Result<()> {
     let activation_factory = connection_result.activation_factory;
+    let channel_ids = ChannelIds {
+        io: connection_result.io_channel_id,
+        user: connection_result.user_channel_id,
+    };
+    let mut redraw = RedrawSupport {
+        refresh_rect: connection_result.refresh_rect_support,
+        suppress_output: connection_result.suppress_output_support,
+    };
     let mut active_stage = ActiveStageBuilder {
         static_channels: connection_result.static_channels,
         user_channel_id: connection_result.user_channel_id,
@@ -172,7 +181,7 @@ async fn active_loop(
         pointer_software_rendering: connection_result.pointer_software_rendering,
     }
     .build();
-    let mut input_db = ironrdp::input::Database::new();
+    let mut input_db = ironrdp_input::Database::new();
     // The Display Control channel only becomes usable once the target has created it and
     // sent its capabilities, which happens after the connection is already active. A
     // resize requested before then (notably the viewer's initial size) is held here and
@@ -264,8 +273,9 @@ async fn active_loop(
             }
             pdu = framed.read_pdu() => {
                 let (action, payload) = pdu.context("reading PDU")?;
+                let received_at = framed.last_read_at();
                 active_stage
-                    .process(image, action, &payload)
+                    .process(image, action, &payload, received_at)
                     .context("processing PDU")?
             }
         };
@@ -274,9 +284,15 @@ async fn active_loop(
             .iter()
             .any(|output| matches!(output, ActiveStageOutput::DeactivateAll));
 
+        // `SessionId` precedes the `SaveSessionInfo` of the same notification.
+        let mut session_id = None;
         for output in &outputs {
-            if let ActiveStageOutput::SaveSessionInfo(pdu) = output {
-                logon.notify_logon_pdu(pdu);
+            match output {
+                ActiveStageOutput::SessionId(id) => session_id = Some(*id),
+                ActiveStageOutput::SaveSessionInfo { logon_complete } => {
+                    logon.notify_logon(*logon_complete, session_id.take());
+                }
+                _ => {}
             }
         }
 
@@ -294,11 +310,26 @@ async fn active_loop(
             Ok(false) => {}
         }
 
+        // A malformed fast-path bitmap was dropped; only the target can repaint that region.
+        if active_stage.take_bitmap_recovery_request() {
+            let size = connector::DesktopSize {
+                width: image.width(),
+                height: image.height(),
+            };
+            request_full_redraw(&mut framed, &mut active_stage, size, redraw).await?;
+        }
+
         if should_reactivate
-            && let Some(size) =
-                reactivate(&mut framed, &mut active_stage, &activation_factory, image)
-                    .await
-                    .context("RDP deactivation-reactivation sequence")?
+            && let Some(size) = reactivate(
+                &mut framed,
+                &mut active_stage,
+                &activation_factory,
+                channel_ids,
+                &mut redraw,
+                image,
+            )
+            .await
+            .context("RDP deactivation-reactivation sequence")?
         {
             // Reactivation resets the viewer's surface; re-seed it with the pre-resize content
             // (overlap kept, new margin black) so it isn't blank until the full refresh lands.
@@ -310,7 +341,7 @@ async fn active_loop(
             {
                 return Ok(());
             }
-            send_refresh_request(&mut framed, &mut active_stage, size).await?;
+            request_full_redraw(&mut framed, &mut active_stage, size, redraw).await?;
         }
     }
 }
@@ -402,12 +433,30 @@ async fn send_clipboard(
         .context("sending clipboard message")
 }
 
+/// MCS channel ids fixed for the life of the connection; a reactivation rebuilds the
+/// fast-path processor with them.
+#[derive(Clone, Copy)]
+struct ChannelIds {
+    io: u16,
+    user: u16,
+}
+
+/// Which full-redraw PDUs the target accepts, from its capability sets; renegotiated on
+/// every reactivation.
+#[derive(Clone, Copy)]
+struct RedrawSupport {
+    refresh_rect: bool,
+    suppress_output: bool,
+}
+
 /// Drive the deactivation-reactivation sequence. Returns the new desktop size if the target
 /// came back at a different one than `image`.
 async fn reactivate(
     framed: &mut Framed,
     active_stage: &mut ActiveStage,
     activation_factory: &ConnectionActivationFactory,
+    channel_ids: ChannelIds,
+    redraw: &mut RedrawSupport,
     image: &DecodedImage,
 ) -> Result<Option<connector::DesktopSize>> {
     let mut activation = activation_factory.create();
@@ -422,14 +471,31 @@ async fn reactivate(
             desktop_size,
             share_id,
             enable_server_pointer,
+            pointer_software_rendering,
+            static_channel_chunk_size,
+            refresh_rect_support,
+            suppress_output_support,
             ..
         } = activation.connection_activation_state()
         else {
             continue;
         };
 
-        active_stage.set_share_id(share_id);
-        active_stage.set_enable_server_pointer(enable_server_pointer);
+        *redraw = RedrawSupport {
+            refresh_rect: refresh_rect_support,
+            suppress_output: suppress_output_support,
+        };
+
+        if !active_stage.reactivate(
+            channel_ids.io,
+            channel_ids.user,
+            share_id,
+            enable_server_pointer,
+            pointer_software_rendering,
+            static_channel_chunk_size,
+        ) {
+            bail!("target negotiated an invalid static channel chunk size");
+        }
         check_desktop_size(desktop_size.width, desktop_size.height)?;
 
         if image.width() != desktop_size.width || image.height() != desktop_size.height {
@@ -447,38 +513,36 @@ async fn reactivate(
 
 /// Ask the target to repaint the whole desktop. After a resize the target only sends the
 /// regions it considers changed, so the freshly-exposed margin of a grow would stay blank;
-/// a full refresh forces it to resend everything for the new size.
+/// a full redraw forces it to resend everything for the new size. Silently a no-op for a
+/// target that advertises neither Refresh Rect nor Suppress Output.
 ///
-/// `&mut` even though only `encode_static(&self)` is needed: `ActiveStage` is `Send` but not
-/// `Sync`, so a shared borrow held across the write would make the session future non-`Send`.
-async fn send_refresh_request(
+/// `&mut` even though only `request_full_redraw(&self)` is needed: `ActiveStage` is `Send`
+/// but not `Sync`, so a shared borrow held across the write would make the session future
+/// non-`Send`.
+async fn request_full_redraw(
     framed: &mut Framed,
     active_stage: &mut ActiveStage,
     size: connector::DesktopSize,
+    redraw: RedrawSupport,
 ) -> Result<()> {
-    let (Some(right), Some(bottom)) = (size.width.checked_sub(1), size.height.checked_sub(1))
-    else {
+    if size.width == 0 || size.height == 0 {
         return Ok(());
-    };
-
-    let mut output = WriteBuf::new();
-    active_stage
-        .encode_static(
-            &mut output,
-            ShareDataPdu::RefreshRectangle(RefreshRectanglePdu {
-                areas_to_refresh: vec![InclusiveRectangle {
-                    left: 0,
-                    top: 0,
-                    right,
-                    bottom,
-                }],
-            }),
+    }
+    let frames = active_stage
+        .request_full_redraw(
+            size.width,
+            size.height,
+            redraw.refresh_rect,
+            redraw.suppress_output,
         )
-        .context("encoding refresh rectangle request")?;
-    framed
-        .write_all(output.filled())
-        .await
-        .context("requesting refreshed desktop after resize")
+        .context("encoding full redraw request")?;
+    for frame in frames {
+        framed
+            .write_all(&frame)
+            .await
+            .context("requesting full redraw")?;
+    }
+    Ok(())
 }
 
 /// Handle a batch of active-stage outputs. Returns `true` if the session should terminate.
@@ -514,9 +578,16 @@ async fn process_outputs(
     report_size(image, reported_size, None, event_tx, abort_rx).await?;
 
     for out in outputs {
-        if let ActiveStageOutput::GraphicsUpdate(region) = out
-            && let Some(event) = encode_region(image, &region)
-        {
+        let event = match out {
+            ActiveStageOutput::GraphicsUpdate(region) => encode_region(image, &region),
+            ActiveStageOutput::PointerBitmap(pointer) => encode_pointer(&pointer),
+            ActiveStageOutput::PointerDefault => Some(DesktopEvent::CursorDefault),
+            ActiveStageOutput::PointerHidden => Some(DesktopEvent::CursorHidden),
+            // The viewer owns the pointer position; warping it to wherever the target last
+            // put its own would fight the user's mouse.
+            _ => None,
+        };
+        if let Some(event) = event {
             send_event(event_tx, abort_rx, event).await?;
         }
     }
@@ -614,6 +685,34 @@ fn encode_region(image: &DecodedImage, region: &InclusiveRectangle) -> Option<De
             y: top as u16,
             width: w as u16,
             height: h as u16,
+        },
+        data: Bytes::from(data),
+    })
+}
+
+/// Build the cursor shape update for a pointer bitmap. `None` for a degenerate or short
+/// bitmap rather than panicking downstream; a zero-sized pointer is how RDP hides one.
+fn encode_pointer(pointer: &DecodedPointer) -> Option<DesktopEvent> {
+    if pointer.width == 0 || pointer.height == 0 {
+        return Some(DesktopEvent::CursorHidden);
+    }
+    let len = usize::from(pointer.width) * usize::from(pointer.height) * 4;
+    if pointer.bitmap_data.len() != len {
+        return None;
+    }
+
+    // The decoder yields non-premultiplied RGBA for an accelerated target.
+    let mut data = Vec::with_capacity(len);
+    for px in pointer.bitmap_data.as_chunks::<4>().0 {
+        data.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
+    }
+
+    Some(DesktopEvent::Cursor {
+        rect: DesktopRect {
+            x: pointer.hotspot_x.min(pointer.width - 1),
+            y: pointer.hotspot_y.min(pointer.height - 1),
+            width: pointer.width,
+            height: pointer.height,
         },
         data: Bytes::from(data),
     })
@@ -725,9 +824,23 @@ fn build_config(
         license_cache: None,
         timezone_info: TimezoneInfo::default(),
         compression_type: None,
-        enable_server_pointer: false,
-        pointer_software_rendering: true,
+        // The target's pointer is relayed to the viewer as shape updates and never drawn into
+        // the framebuffer: software rendering would paint a second cursor under the viewer's
+        // own, and into recordings.
+        enable_server_pointer: true,
+        pointer_software_rendering: false,
         desktop_scale_factor: 0,
+        desktop_physical_size: None,
+        desktop_orientation: None,
+        device_scale_factor: None,
+        monitor_layout: None,
+        monitor_extended_layout: None,
+        relative_mouse_input: false,
+        enable_standard_rdp_security: false,
+        connection_type: ConnectionType::Lan,
+        remote_application_mode: false,
+        rail_support_level: RailSupportLevel::empty(),
+        enable_audio_capture: false,
         multitransport_flags: None,
         // `connect` registers the Graphics Pipeline channel from this flag: advertising
         // it without a processor leaves the desktop blank.
@@ -838,6 +951,7 @@ async fn connect(
         kerberos_config,
     )
     .await
+    .and_then(connector::ConnectionOutcome::into_connected)
     .map_err(|error| connector_error("connect_finalize", error))?;
 
     if connection_result.desktop_size.width == 0 || connection_result.desktop_size.height == 0 {
@@ -866,17 +980,18 @@ fn connector_error(step: &'static str, error: connector::ConnectorError) -> Desk
 
 #[cfg(test)]
 mod tests {
-    use ironrdp::graphics::image_processing::PixelFormat;
-    use ironrdp::session::image::DecodedImage;
+    use ironrdp_graphics::image_processing::PixelFormat;
+    use ironrdp_graphics::pointer::DecodedPointer;
+    use ironrdp_session::image::DecodedImage;
     use warpgate_core::{DesktopEvent, DesktopRect};
 
-    use super::{GraphicsPipelineOutput, connector, encode_resized_keyframe};
+    use super::{GraphicsPipelineOutput, connector, encode_pointer, encode_resized_keyframe};
 
     #[test]
     fn unhandled_graphics_are_reported_once_per_codec() {
-        use ironrdp::pdu::geometry::ExclusiveRectangle;
         use ironrdp_egfx::client::GraphicsPipelineHandler as _;
         use ironrdp_egfx::pdu::{Codec1Type, GfxPdu, PixelFormat, WireToSurface1Pdu};
+        use ironrdp_pdu::geometry::ExclusiveRectangle;
 
         let update = |codec_id| {
             GfxPdu::WireToSurface1(WireToSurface1Pdu {
@@ -922,5 +1037,57 @@ mod tests {
                 data,
             }) if data.len() == 4 * 3 * 4 && data.iter().skip(3).step_by(4).all(|alpha| *alpha == 255)
         ));
+    }
+
+    fn pointer(width: u16, height: u16, bitmap_data: Vec<u8>) -> DecodedPointer {
+        DecodedPointer {
+            width,
+            height,
+            hotspot_x: 1,
+            hotspot_y: 0,
+            bitmap_data,
+        }
+    }
+
+    #[test]
+    fn pointer_bitmap_becomes_a_bgra_cursor_with_its_hotspot() {
+        let event = encode_pointer(&pointer(2, 1, vec![1, 2, 3, 4, 5, 6, 7, 8]));
+
+        assert!(matches!(
+            event,
+            Some(DesktopEvent::Cursor {
+                rect: DesktopRect {
+                    x: 1,
+                    y: 0,
+                    width: 2,
+                    height: 1,
+                },
+                data,
+            }) if data[..] == [3, 2, 1, 4, 7, 6, 5, 8]
+        ));
+    }
+
+    #[test]
+    fn hotspot_outside_the_pointer_is_clamped() {
+        let mut decoded = pointer(1, 1, vec![0; 4]);
+        decoded.hotspot_x = 40;
+        decoded.hotspot_y = 40;
+
+        assert!(matches!(
+            encode_pointer(&decoded),
+            Some(DesktopEvent::Cursor {
+                rect: DesktopRect { x: 0, y: 0, .. },
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn empty_pointer_hides_the_cursor_and_short_one_is_dropped() {
+        assert!(matches!(
+            encode_pointer(&DecodedPointer::new_invisible()),
+            Some(DesktopEvent::CursorHidden)
+        ));
+        assert!(encode_pointer(&pointer(2, 2, vec![0; 4])).is_none());
     }
 }

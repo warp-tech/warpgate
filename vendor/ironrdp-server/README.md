@@ -31,9 +31,9 @@ This crate is part of the [IronRDP] project.
 Enable the `echo` feature to use the ECHO dynamic virtual channel (`MS-RDPEECO`) and measure round-trip time.
 
 ```rust
-use ironrdp_server::RdpServer;
+use ironrdp_server::{RdpServer, ServerError, ServerErrorExt as _, ServerResult};
 
-# async fn demo(mut server: RdpServer) -> anyhow::Result<()> {
+# async fn demo(mut server: RdpServer) -> ServerResult<()> {
 // Grab and clone the shared handle before moving the server into a task.
 let echo = server.echo_handle().clone();
 
@@ -54,8 +54,10 @@ local
 			}
 		}
 
-		server_task.await??;
-		Ok::<(), anyhow::Error>(())
+		server_task
+			.await
+			.map_err(|e| ServerError::custom("server task", e))??;
+		Ok::<(), ServerError>(())
 	})
 	.await?;
 # Ok(()) }
