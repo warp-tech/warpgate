@@ -12,11 +12,16 @@
 //! The input stream is used only to locate the prompt boundary and to spot
 //! Enter and Ctrl-C — never for text content.
 //!
+//! A paste submits several commands in one input burst. Every Enter beyond the
+//! first is counted, and each is resolved in turn: when one line's terminator
+//! arrives, the next line is read off the screen row the terminator moved to,
+//! after stripping the prompt that was snapshotted at the last
+//! `Output → Editing` transition (the shell may or may not re-print it there).
+//!
 //! This is an audit aid, not a security boundary: a determined user can defeat
 //! any stream-derived logging. Known heuristic limitations, all exercised by
 //! the tests below:
 //! - Input into a main-screen REPL (python, psql, …) is logged as a command.
-//! - Multi-command paste in a single burst captures only the first command.
 //! - A command that wraps past the bottom of the screen may be skipped.
 //! - Text right of the cursor containing a wide run of spaces is cut there.
 
@@ -48,8 +53,15 @@ enum State {
     /// prompt ends and typed input begins.
     Editing { row: u16, col: u16 },
     /// Enter was pressed; waiting for the shell to echo the line terminator
-    /// that guarantees the whole command has finished rendering.
-    Submitted { row: u16, col: u16, scanned: usize },
+    /// that guarantees the whole command has finished rendering. `queued`
+    /// counts further Enters the user already sent (a paste), each of which
+    /// submits the next line once this one lands.
+    Submitted {
+        row: u16,
+        col: u16,
+        scanned: usize,
+        queued: usize,
+    },
     /// A resize invalidated the saved prompt boundary while the user was
     /// editing. Ignore the rest of this line rather than logging a suffix.
     Discarding,
@@ -61,6 +73,12 @@ enum State {
 pub struct CommandDetector {
     parser: vt100::Parser,
     state: State,
+    /// The prompt as rendered, snapshotted at the `Output → Editing`
+    /// transition: the cells on the cursor's row to the left of the cursor.
+    /// Escape sequences are already gone (vt100 processed them), so this is
+    /// plain text. A continuation row of a multi-line paste may carry the same
+    /// prompt again, and `extract` strips it from what it reads there.
+    prompt_text: String,
 }
 
 impl CommandDetector {
@@ -69,12 +87,16 @@ impl CommandDetector {
         Self {
             parser: vt100::Parser::new(rows, cols, 0),
             state: State::Idle,
+            prompt_text: String::new(),
         }
     }
 
     pub fn on_resize(&mut self, cols: u16, rows: u16) {
         let (cols, rows) = sane_size(cols, rows);
         self.parser.screen_mut().set_size(rows, cols);
+        // The saved boundary is meaningless at the new width, and the rows a
+        // queued paste would land on have moved: both transitions below drop
+        // any commands still queued behind the current line.
         self.state = match self.state {
             State::Editing { .. } => State::Discarding,
             State::Submitted { scanned, .. } => State::Discarded { scanned },
@@ -87,10 +109,13 @@ impl CommandDetector {
     pub fn on_input(&mut self, data: &[u8]) {
         for &b in data {
             match self.state {
-                State::Idle | State::Submitted { .. } | State::Discarded { .. } => {}
+                State::Idle | State::Discarded { .. } => {}
+                State::Submitted { .. } => self.step_input(b),
                 State::Output => {
                     if !self.parser.screen().alternate_screen() {
                         let (row, col) = self.parser.screen().cursor_position();
+                        let prompt_text = self.parser.screen().contents_between(row, 0, row, col);
+                        self.prompt_text = prompt_text;
                         self.state = State::Editing { row, col };
                         self.step_input(b);
                     }
@@ -100,66 +125,108 @@ impl CommandDetector {
         }
     }
 
-    /// Feed target output. Returns a command when one has just been submitted
-    /// and fully rendered.
+    /// Feed target output. Returns every command submitted and fully rendered
+    /// by this chunk, in order: a paste submits several lines in one burst, so
+    /// a single chunk can complete more than one command and none may be
+    /// dropped for sharing a chunk with an earlier one.
     #[must_use]
-    pub fn on_output(&mut self, data: &[u8]) -> Option<String> {
+    pub fn on_output(&mut self, data: &[u8]) -> Vec<String> {
+        let mut commands = Vec::new();
+
         if matches!(self.state, State::Idle) {
             self.state = State::Output;
         }
 
-        if let State::Discarded { scanned } = self.state {
-            self.parser.process(data);
-            let scanned = scanned.saturating_add(data.len());
-            if data.iter().any(|&b| b == LF || b == CR)
-                || self.parser.screen().alternate_screen()
-                || scanned >= MAX_PENDING_OUTPUT
-            {
-                self.state = State::Output;
-            } else {
-                self.state = State::Discarded { scanned };
+        let mut rest = data;
+        loop {
+            match self.state {
+                State::Idle | State::Output | State::Editing { .. } | State::Discarding => {
+                    // Not waiting on a terminator: nothing here can complete.
+                    self.parser.process(rest);
+                    break;
+                }
+                State::Discarded { scanned } => {
+                    self.parser.process(rest);
+                    let scanned = scanned.saturating_add(rest.len());
+                    self.state = if rest.iter().any(|&b| b == LF || b == CR)
+                        || self.parser.screen().alternate_screen()
+                        || scanned >= MAX_PENDING_OUTPUT
+                    {
+                        State::Output
+                    } else {
+                        State::Discarded { scanned }
+                    };
+                    break;
+                }
+                State::Submitted {
+                    row,
+                    col,
+                    scanned: bytes_scanned,
+                    queued,
+                } => {
+                    let Some(p) = rest.iter().position(|&b| b == LF || b == CR) else {
+                        // No terminator yet: this line is still rendering.
+                        self.parser.process(rest);
+                        let scanned = bytes_scanned.saturating_add(rest.len());
+
+                        // A full-screen app (vim/less/…) launched by the
+                        // command switches to the alternate screen before any
+                        // newline; give up rather than read the alternate
+                        // buffer, and drop the commands queued behind it —
+                        // their rows are no longer on the main screen.
+                        if self.parser.screen().alternate_screen() {
+                            self.state = State::Output;
+                        } else if scanned >= MAX_PENDING_OUTPUT {
+                            // Best effort on a line that never terminates;
+                            // whatever was queued behind it is unrecoverable.
+                            commands.extend(self.extract(row, col));
+                            self.state = State::Output;
+                        } else {
+                            self.state = State::Submitted {
+                                row,
+                                col,
+                                scanned,
+                                queued,
+                            };
+                        }
+                        break;
+                    };
+
+                    // The shell echoes the Enter as CR/LF only after echoing
+                    // everything before it, so this is the point at which the
+                    // whole command is guaranteed rendered.
+                    let (before, after) = rest.split_at(p);
+                    self.parser.process(before);
+                    commands.extend(self.extract(row, col));
+
+                    let term_len = if rest[p] == CR && after.get(1) == Some(&LF) {
+                        2
+                    } else {
+                        1
+                    };
+                    self.parser.process(&after[..term_len]);
+                    rest = &after[term_len..];
+
+                    self.state = if queued > 0 {
+                        // Another Enter is already waiting. The terminator
+                        // moved the cursor to the row the next pasted line
+                        // renders on; its prompt is unknown, so read that row
+                        // from column 0 and let `extract` strip the prompt.
+                        let (next_row, _) = self.parser.screen().cursor_position();
+                        State::Submitted {
+                            row: next_row,
+                            col: 0,
+                            scanned: 0,
+                            queued: queued - 1,
+                        }
+                    } else {
+                        State::Output
+                    };
+                }
             }
-            return None;
         }
 
-        let State::Submitted { row, col, scanned } = self.state else {
-            self.parser.process(data);
-            return None;
-        };
-
-        // The client's Enter can arrive before the target has echoed the tail
-        // of the line, so we don't snapshot at Enter. The shell echoes the
-        // Enter as CR/LF only after echoing everything before it, so the first
-        // CR or LF in the output stream is the point at which the whole command
-        // is guaranteed rendered.
-        if let Some(p) = data.iter().position(|&b| b == LF || b == CR) {
-            let (before, after) = data.split_at(p);
-            self.parser.process(before);
-            let command = self.extract(row, col);
-            self.parser.process(after);
-            self.state = State::Output;
-            return command;
-        }
-
-        self.parser.process(data);
-        let scanned = scanned.saturating_add(data.len());
-
-        // A full-screen app (vim/less/…) launched by the command switches to
-        // the alternate screen before any newline; give up rather than read the
-        // alternate buffer.
-        if self.parser.screen().alternate_screen() {
-            self.state = State::Output;
-            return None;
-        }
-
-        if scanned >= MAX_PENDING_OUTPUT {
-            let command = self.extract(row, col);
-            self.state = State::Output;
-            return command;
-        }
-
-        self.state = State::Submitted { row, col, scanned };
-        None
+        commands
     }
 
     const fn step_input(&mut self, b: u8) {
@@ -172,6 +239,22 @@ impl CommandDetector {
                     row,
                     col,
                     scanned: 0,
+                    queued: 0,
+                };
+            }
+            // Enters past the first one belong to lines the target has not
+            // echoed yet; each is resolved as the line before it completes.
+            State::Submitted {
+                row,
+                col,
+                scanned,
+                queued,
+            } if b == CR || b == LF => {
+                self.state = State::Submitted {
+                    row,
+                    col,
+                    scanned,
+                    queued: queued.saturating_add(1),
                 };
             }
             State::Discarding if b == ETX || b == CR || b == LF => {
@@ -221,6 +304,17 @@ impl CommandDetector {
         }
         let text = screen.contents_between(row, col, last_row, end);
         let trimmed = text.trim();
+        // A continuation row is read from column 0 because its prompt boundary
+        // is unknown; when the shell re-printed the prompt there, it comes
+        // back verbatim as the leading cells, so drop it.
+        let trimmed = if col == 0 {
+            match trimmed.strip_prefix(self.prompt_text.as_str()) {
+                Some(rest) => rest.trim_start(),
+                None => trimmed,
+            }
+        } else {
+            trimmed
+        };
         if trimmed.is_empty() {
             None
         } else {
@@ -235,19 +329,33 @@ mod tests {
 
     /// Drive a prompt appearing on screen (positions the cursor).
     fn prompt(d: &mut CommandDetector, s: &str) {
-        assert!(d.on_output(s.as_bytes()).is_none());
+        assert!(d.on_output(s.as_bytes()).is_empty());
     }
 
     /// Simulate the user typing `s`, with the shell echoing it verbatim.
     fn typed(d: &mut CommandDetector, s: &str) {
         d.on_input(s.as_bytes());
-        assert!(d.on_output(s.as_bytes()).is_none());
+        assert!(d.on_output(s.as_bytes()).is_empty());
+    }
+
+    /// A chunk that must not complete more than one command.
+    fn single(commands: Vec<String>) -> Option<String> {
+        assert!(
+            commands.len() <= 1,
+            "expected at most one command, got {commands:?}"
+        );
+        commands.into_iter().next()
     }
 
     /// Simulate pressing Enter: the shell echoes CR/LF, finalizing the line.
     fn enter(d: &mut CommandDetector) -> Option<String> {
         d.on_input(b"\r");
-        d.on_output(b"\r\n")
+        let mut commands = d.on_output(b"\r\n");
+        assert!(
+            commands.len() <= 1,
+            "expected at most one command, got {commands:?}"
+        );
+        commands.pop()
     }
 
     #[test]
@@ -298,7 +406,7 @@ mod tests {
         // Up-arrow: input carries only an escape sequence; the recalled command
         // appears purely as echoed output.
         d.on_input(b"\x1b[A");
-        assert!(d.on_output(b"git status").is_none());
+        assert!(d.on_output(b"git status").is_empty());
         assert_eq!(enter(&mut d).as_deref(), Some("git status"));
     }
 
@@ -308,7 +416,7 @@ mod tests {
         prompt(&mut d, "$ ");
         // User types "gi\t"; the shell echoes the expansion.
         d.on_input(b"gi\t");
-        assert!(d.on_output(b"git ").is_none());
+        assert!(d.on_output(b"git ").is_empty());
         typed(&mut d, "log");
         assert_eq!(enter(&mut d).as_deref(), Some("git log"));
     }
@@ -320,7 +428,7 @@ mod tests {
         typed(&mut d, "sl");
         // Two backspaces: shell moves left and clears to end of line.
         d.on_input(b"\x7f\x7f");
-        assert!(d.on_output(b"\x08\x08\x1b[K").is_none());
+        assert!(d.on_output(b"\x08\x08\x1b[K").is_empty());
         typed(&mut d, "ls");
         assert_eq!(enter(&mut d).as_deref(), Some("ls"));
     }
@@ -331,7 +439,7 @@ mod tests {
         prompt(&mut d, "$ ");
         typed(&mut d, "date");
         // zsh RPROMPT is painted to the right of the cursor before Enter.
-        assert!(d.on_output(b"\x1b7\x1b[75G12:00\x1b8").is_none());
+        assert!(d.on_output(b"\x1b7\x1b[75G12:00\x1b8").is_empty());
         assert_eq!(enter(&mut d).as_deref(), Some("date"));
     }
 
@@ -342,7 +450,7 @@ mod tests {
         typed(&mut d, "ls /tmp");
         // Four ← presses: readline echoes a cursor move, nothing else.
         d.on_input(b"\x1b[D\x1b[D\x1b[D\x1b[D");
-        assert!(d.on_output(b"\x1b[4D").is_none());
+        assert!(d.on_output(b"\x1b[4D").is_empty());
         assert_eq!(enter(&mut d).as_deref(), Some("ls /tmp"));
     }
 
@@ -352,7 +460,7 @@ mod tests {
         prompt(&mut d, "$ ");
         typed(&mut d, "ls /tmp");
         d.on_input(b"\x01");
-        assert!(d.on_output(b"\x1b[3G").is_none());
+        assert!(d.on_output(b"\x1b[3G").is_empty());
         assert_eq!(enter(&mut d).as_deref(), Some("ls /tmp"));
     }
 
@@ -361,9 +469,9 @@ mod tests {
         let mut d = CommandDetector::new(80, 24);
         prompt(&mut d, "$ ");
         typed(&mut d, "date");
-        assert!(d.on_output(b"\x1b7\x1b[75G12:00\x1b8").is_none());
+        assert!(d.on_output(b"\x1b7\x1b[75G12:00\x1b8").is_empty());
         d.on_input(b"\x1b[D\x1b[D");
-        assert!(d.on_output(b"\x1b[2D").is_none());
+        assert!(d.on_output(b"\x1b[2D").is_empty());
         assert_eq!(enter(&mut d).as_deref(), Some("date"));
     }
 
@@ -376,9 +484,12 @@ mod tests {
         // Cursor back up onto the first row; readline's accept-line then only
         // prints newlines to get below the input.
         d.on_input(b"\x1b[A");
-        assert!(d.on_output(b"\x1b[A").is_none());
+        assert!(d.on_output(b"\x1b[A").is_empty());
         d.on_input(b"\r");
-        assert_eq!(d.on_output(b"\n\r\n").as_deref(), Some("echo abcdefghij"));
+        assert_eq!(
+            single(d.on_output(b"\n\r\n")).as_deref(),
+            Some("echo abcdefghij")
+        );
     }
 
     #[test]
@@ -388,9 +499,9 @@ mod tests {
         // Whole burst (command + Enter) arrives on input before any echo.
         d.on_input(b"ls\r");
         // Echo of the command arrives first, without a terminator yet.
-        assert!(d.on_output(b"ls").is_none());
+        assert!(d.on_output(b"ls").is_empty());
         // The terminating newline arrives in a later chunk.
-        assert_eq!(d.on_output(b"\r\n").as_deref(), Some("ls"));
+        assert_eq!(single(d.on_output(b"\r\n")).as_deref(), Some("ls"));
     }
 
     #[test]
@@ -410,9 +521,9 @@ mod tests {
         typed(&mut d, "sudo id");
         assert_eq!(enter(&mut d).as_deref(), Some("sudo id"));
         // sudo prints a prompt, then reads the password without echoing it.
-        assert!(d.on_output(b"[sudo] password for user: ").is_none());
+        assert!(d.on_output(b"[sudo] password for user: ").is_empty());
         d.on_input(b"hunter2\r");
-        assert_eq!(d.on_output(b"\r\n"), None);
+        assert!(d.on_output(b"\r\n").is_empty());
     }
 
     #[test]
@@ -421,7 +532,7 @@ mod tests {
         prompt(&mut d, "$ ");
         typed(&mut d, "rm -rf /");
         d.on_input(b"\x03");
-        assert!(d.on_output(b"^C\r\n").is_none());
+        assert!(d.on_output(b"^C\r\n").is_empty());
         prompt(&mut d, "$ ");
         typed(&mut d, "ls");
         assert_eq!(enter(&mut d).as_deref(), Some("ls"));
@@ -434,12 +545,12 @@ mod tests {
         typed(&mut d, "vim");
         assert_eq!(enter(&mut d).as_deref(), Some("vim"));
         // vim switches to the alternate screen.
-        assert!(d.on_output(b"\x1b[?1049h").is_none());
+        assert!(d.on_output(b"\x1b[?1049h").is_empty());
         // Keystrokes inside vim, including Enter, must not be captured.
         d.on_input(b"iHello, world\x1b:wq\r");
-        assert!(d.on_output(b"redrawing").is_none());
+        assert!(d.on_output(b"redrawing").is_empty());
         // Back to the main screen.
-        assert!(d.on_output(b"\x1b[?1049l").is_none());
+        assert!(d.on_output(b"\x1b[?1049l").is_empty());
         prompt(&mut d, "$ ");
         typed(&mut d, "pwd");
         assert_eq!(enter(&mut d).as_deref(), Some("pwd"));
@@ -455,7 +566,7 @@ mod tests {
         // wedge the detector: a best-effort capture fires and returns to Output.
         let mut emitted = None;
         for _ in 0..40 {
-            if let Some(c) = d.on_output(&[b'y'; 100]) {
+            if let Some(c) = single(d.on_output(&[b'y'; 100])) {
                 emitted = Some(c);
                 break;
             }
@@ -498,6 +609,89 @@ mod tests {
         assert_eq!(enter(&mut d), None);
 
         prompt(&mut d, "$ ");
+        typed(&mut d, "pwd");
+        assert_eq!(enter(&mut d).as_deref(), Some("pwd"));
+    }
+
+    #[test]
+    fn paste_of_two_commands_emits_both() {
+        let mut d = CommandDetector::new(80, 24);
+        prompt(&mut d, "user@host:~$ ");
+        // One input burst carrying two Enters.
+        d.on_input(b"echo one\recho two\r");
+        // The shell echoes the first line, re-prints the prompt and echoes the
+        // second line, all before the detector sees any of it.
+        let commands = d.on_output(b"echo one\r\nuser@host:~$ echo two\r\n");
+        assert_eq!(commands, ["echo one", "echo two"]);
+    }
+
+    #[test]
+    fn paste_of_three_commands_with_reprinted_prompts() {
+        let mut d = CommandDetector::new(80, 24);
+        prompt(&mut d, "user@host:~$ ");
+        d.on_input(b"echo one\recho two\recho three\r");
+        let commands =
+            d.on_output(b"echo one\r\nuser@host:~$ echo two\r\nuser@host:~$ echo three\r\n");
+        assert_eq!(commands, ["echo one", "echo two", "echo three"]);
+    }
+
+    #[test]
+    fn paste_of_three_commands_without_reprinted_prompts() {
+        let mut d = CommandDetector::new(80, 24);
+        prompt(&mut d, "user@host:~$ ");
+        d.on_input(b"echo one\recho two\recho three\r");
+        // Some shells echo the pasted newlines without re-printing the prompt
+        // for each line. Reading a continuation row from column 0 is what keeps
+        // the old prompt column from cutting these down to a suffix.
+        let commands = d.on_output(b"echo one\r\necho two\r\necho three\r\n");
+        assert_eq!(commands, ["echo one", "echo two", "echo three"]);
+    }
+
+    #[test]
+    fn paste_then_typed_command_emits_all_three_without_duplicates() {
+        let mut d = CommandDetector::new(80, 24);
+        prompt(&mut d, "user@host:~$ ");
+        d.on_input(b"echo one\recho two\r");
+        assert_eq!(
+            d.on_output(b"echo one\r\nuser@host:~$ echo two\r\n"),
+            ["echo one", "echo two"]
+        );
+        // Back to ordinary editing, with a freshly snapshotted prompt.
+        prompt(&mut d, "user@host:~$ ");
+        typed(&mut d, "pwd");
+        assert_eq!(enter(&mut d).as_deref(), Some("pwd"));
+    }
+
+    #[test]
+    fn paste_into_a_screen_app_drops_queued_commands() {
+        let mut d = CommandDetector::new(80, 24);
+        prompt(&mut d, "user@host:~$ ");
+        // A two-line paste whose first command is a full-screen app: the
+        // second Enter is queued, then the app takes over before the line
+        // holding it ever terminates.
+        d.on_input(b"vim\r:wq\r");
+        assert_eq!(d.on_output(b"vim\r\n\x1b[?1049h"), ["vim"]);
+        // The queued line must not be recovered from the alternate screen.
+        assert!(d.on_output(b"hello\x1b[?1049l\r\n").is_empty());
+        // Detection resumes on the main screen.
+        prompt(&mut d, "user@host:~$ ");
+        typed(&mut d, "ls");
+        assert_eq!(enter(&mut d).as_deref(), Some("ls"));
+    }
+
+    #[test]
+    fn resize_mid_paste_drops_queued_commands() {
+        let mut d = CommandDetector::new(80, 24);
+        prompt(&mut d, "user@host:~$ ");
+        d.on_input(b"echo one\recho two\r");
+        // The first line completes, leaving the second one queued ...
+        assert_eq!(d.on_output(b"echo one\r\n"), ["echo one"]);
+        // ... then a resize invalidates the row it would have landed on.
+        d.on_resize(40, 24);
+        // The rest of the paste must not surface as a suffix of the new layout.
+        assert!(d.on_output(b"user@host:~$ echo two\r\n").is_empty());
+        // Detection recovers at the new width.
+        prompt(&mut d, "user@host:~$ ");
         typed(&mut d, "pwd");
         assert_eq!(enter(&mut d).as_deref(), Some("pwd"));
     }

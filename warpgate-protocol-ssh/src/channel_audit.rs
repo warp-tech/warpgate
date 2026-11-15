@@ -57,12 +57,14 @@ impl ChannelAudit {
 
     pub async fn on_output(&mut self, data: &[u8]) {
         self.record(TerminalRecordingStreamId::Output, data).await;
-        if let Some(detector) = self.detector.as_mut()
-            && let Some(command) = detector.on_output(data)
-        {
-            info!(channel_id=%self.channel_id, %command, "Shell command");
-            if let Some(context) = self.command_context.clone() {
-                record_command(context, command);
+        if let Some(detector) = self.detector.as_mut() {
+            // A paste can complete several commands in one chunk; each is
+            // recorded and logged on its own.
+            for command in detector.on_output(data) {
+                info!(channel_id=%self.channel_id, %command, "Shell command");
+                if let Some(context) = self.command_context.clone() {
+                    record_command(context, command);
+                }
             }
         }
     }
