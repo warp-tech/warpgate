@@ -5792,10 +5792,9 @@
           "search": {
             "type": "string"
           },
-          "before": {
-            "type": "string",
-            "format": "date-time",
-            "description": "Keyset cursor: only rows with `timestamp` strictly before this are returned."
+          "offset": {
+            "type": "integer",
+            "format": "uint64"
           },
           "limit": {
             "type": "integer",

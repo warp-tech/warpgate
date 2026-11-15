@@ -1,7 +1,7 @@
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::prelude::Expr;
-use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect};
+use sea_orm::{EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect};
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
@@ -22,8 +22,7 @@ enum GetCommandsResponse {
 #[derive(Object)]
 struct GetCommandsRequest {
     search: Option<String>,
-    /// Keyset cursor: only rows with `timestamp` strictly before this are returned.
-    before: Option<OffsetDateTime>,
+    offset: Option<u64>,
     limit: Option<u64>,
 }
 
@@ -63,9 +62,6 @@ impl Api {
         let db = &admin.services().db;
         let mut q = Command::Entity::find().order_by_desc(Command::Column::Timestamp);
 
-        if let Some(before) = body.before {
-            q = q.filter(Command::Column::Timestamp.lt(before));
-        }
         if let Some(ref search) = body.search
             && !search.is_empty()
         {
@@ -78,9 +74,12 @@ impl Api {
             ));
         }
 
+        let offset = body.offset.unwrap_or(0);
+        let limit = body.limit.unwrap_or(100).clamp(1, 500);
         let total = q.clone().count(db).await.map_err(WarpgateError::from)?;
         let commands = q
-            .limit(body.limit.unwrap_or(100).clamp(1, 500))
+            .offset(offset)
+            .limit(limit)
             .all(db)
             .await
             .map_err(WarpgateError::from)?;
@@ -88,7 +87,7 @@ impl Api {
         Ok(GetCommandsResponse::Ok(Json(
             PaginatedResponse::from_parts(
                 commands.into_iter().map(CommandEntry::from).collect(),
-                0,
+                offset,
                 total,
             ),
         )))

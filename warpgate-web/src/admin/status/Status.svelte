@@ -10,6 +10,9 @@
         '/sessions/:id': wrap({
             asyncComponent: () => import('./Session.svelte'),
         }),
+        '/commands': wrap({
+            asyncComponent: () => import('./Commands.svelte'),
+        }),
         '/requests': wrap({
             asyncComponent: () => import('./Requests.svelte'),
         }),
@@ -25,6 +28,10 @@
         {
             title: 'Sessions',
             href: '/status/sessions',
+        },
+        {
+            title: 'Commands',
+            href: '/status/commands',
         },
         {
             title: 'Requests',
