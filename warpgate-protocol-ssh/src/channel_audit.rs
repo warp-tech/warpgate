@@ -13,7 +13,6 @@ use crate::common::PtyRequest;
 pub struct CommandRecordContext {
     pub db: DatabaseConnection,
     pub user_session_id: Uuid,
-    pub target_session_id: Option<Uuid>,
     pub username: Option<String>,
 }
 
@@ -107,7 +106,6 @@ fn record_command(context: CommandRecordContext, command: String) {
             id: Set(Uuid::new_v4()),
             timestamp: Set(OffsetDateTime::now_utc()),
             user_session_id: Set(context.user_session_id),
-            target_session_id: Set(context.target_session_id),
             username: Set(context.username),
             command: Set(command),
         };

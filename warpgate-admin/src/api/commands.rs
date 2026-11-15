@@ -33,7 +33,6 @@ pub struct CommandEntry {
     username: Option<String>,
     command: String,
     user_session_id: Uuid,
-    target_session_id: Option<Uuid>,
 }
 
 impl From<Command::Model> for CommandEntry {
@@ -44,7 +43,6 @@ impl From<Command::Model> for CommandEntry {
             username: model.username,
             command: model.command,
             user_session_id: model.user_session_id,
-            target_session_id: model.target_session_id,
         }
     }
 }

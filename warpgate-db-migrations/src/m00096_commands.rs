@@ -13,7 +13,6 @@ pub mod command {
         pub id: Uuid,
         pub timestamp: OffsetDateTime,
         pub user_session_id: Uuid,
-        pub target_session_id: Option<Uuid>,
         pub username: Option<String>,
         #[sea_orm(column_type = "Text")]
         pub command: String,

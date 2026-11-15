@@ -5,7 +5,7 @@
         type LoadOptions,
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
-    import { from, map, type Observable } from 'rxjs'
+    import { from, type Observable } from 'rxjs'
     import PermissionGate from '../lib/PermissionGate.svelte'
 
     function getCommands(
@@ -19,12 +19,6 @@
                     limit: options.limit,
                 },
             }),
-        ).pipe(
-            map(res => ({
-                items: res.items,
-                offset: res.offset,
-                total: res.total,
-            })),
         )
     }
 

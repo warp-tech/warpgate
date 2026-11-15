@@ -5436,10 +5436,6 @@
           "user_session_id": {
             "type": "string",
             "format": "uuid"
-          },
-          "target_session_id": {
-            "type": "string",
-            "format": "uuid"
           }
         }
       },

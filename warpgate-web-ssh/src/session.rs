@@ -156,7 +156,6 @@ impl WebSshSession {
         let command_context = CommandRecordContext {
             db: self.db.clone(),
             user_session_id: self.id().0,
-            target_session_id: Some(target_session_id.0),
             username: self.username.clone(),
         };
         audit.start_command_detection(cols, rows, Some(command_context));

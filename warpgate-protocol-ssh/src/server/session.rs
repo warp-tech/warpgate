@@ -1841,7 +1841,6 @@ impl ServerSession {
         let command_context = CommandRecordContext {
             db: self.services.db.clone(),
             user_session_id: self.id.0,
-            target_session_id: self.target_session_id.map(|id| id.0),
             username: self.user_info.as_ref().map(|u| u.username.clone()),
         };
         channel_state

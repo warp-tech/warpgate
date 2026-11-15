@@ -146,6 +146,16 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         expected_statuses={200, 404},
     ),
     AdminApiTestCase(
+        id="get_commands",
+        permission="sessions_view",
+        # A non-empty search is what actually exercises the filter - an empty one
+        # is skipped, so the case would pass without ever running the LIKE query
+        call=lambda api, r: api.get_commands_with_http_info(
+            sdk.GetCommandsRequest(search="test")
+        ),
+        expected_statuses={200},
+    ),
+    AdminApiTestCase(
         id="get_roles",
         permission=None,
         call=lambda api, r: api.get_roles_with_http_info(),

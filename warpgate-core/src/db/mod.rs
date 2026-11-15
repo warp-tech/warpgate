@@ -137,7 +137,7 @@ pub async fn cleanup_db(
     audit_retention: &Duration,
 ) -> Result<()> {
     use warpgate_db_entities::{
-        LogEntry, Recording, SessionApprovalRequest, Ticket, TicketRequest,
+        Command, LogEntry, Recording, SessionApprovalRequest, Ticket, TicketRequest,
     };
     let audit_cutoff = OffsetDateTime::now_utc() - time::Duration::try_from(*audit_retention)?;
     let recording_cutoff = OffsetDateTime::now_utc() - time::Duration::try_from(*retention)?;
@@ -153,6 +153,13 @@ pub async fn cleanup_db(
     LogEntry::Entity::delete_many()
         .filter(Expr::col(LogEntry::Column::Target).ne("audit"))
         .filter(Expr::col(LogEntry::Column::Timestamp).lt(recording_cutoff))
+        .exec(db)
+        .await?;
+
+    // Detected shell commands are audit data, so they follow the audit cutoff
+    // rather than the recording one.
+    Command::Entity::delete_many()
+        .filter(Expr::col(Command::Column::Timestamp).lt(audit_cutoff))
         .exec(db)
         .await?;
 
