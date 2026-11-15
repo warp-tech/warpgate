@@ -4,6 +4,7 @@ mod admin_roles;
 mod certificate_credentials;
 pub mod cluster_notifications;
 pub mod cluster_proxy;
+mod commands;
 mod secret_backends;
 // The per-permission `require` gate, `PermissionGranted`, and the cluster variant are consumed
 // by the Stage 3 endpoint migration; until every handler is moved onto these, parts of the
@@ -86,6 +87,7 @@ pub fn get() -> impl OpenApi {
                 network_status::Api,
             ),
             session_approvals::Api,
+            commands::Api,
         ),
         (
             certificate_credentials::ListApi,

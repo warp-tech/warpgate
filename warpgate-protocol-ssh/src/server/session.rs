@@ -53,9 +53,9 @@ use crate::server::get_allowed_auth_methods;
 use crate::server::service_output::{VisualConnectionChainItem, paint_fg};
 use crate::server::target_menu::{MenuEvent, spawn_target_menu_loop};
 use crate::{
-    ChannelOperation, ConnectionError, DirectTCPIPParams, PtyRequest, RCCommand, RCCommandReply,
-    RCEvent, RCState, RemoteClient, ResolvedSshChainHost, ServerChannelId, SshClientError,
-    SshRecordingMetadata, X11Request, resolve_approved_ssh_chain,
+    ChannelOperation, CommandRecordContext, ConnectionError, DirectTCPIPParams, PtyRequest,
+    RCCommand, RCCommandReply, RCEvent, RCState, RemoteClient, ResolvedSshChainHost,
+    ServerChannelId, SshClientError, SshRecordingMetadata, X11Request, resolve_approved_ssh_chain,
 };
 
 const EVENT_QUEUE_CAPACITY: usize = 128;
@@ -1838,7 +1838,15 @@ impl ServerSession {
             .pty_size
             .as_ref()
             .map_or((80, 24), PtyRequest::screen_size);
-        channel_state.audit.start_command_detection(cols, rows);
+        let command_context = CommandRecordContext {
+            db: self.services.db.clone(),
+            user_session_id: self.id.0,
+            target_session_id: self.target_session_id.map(|id| id.0),
+            username: self.user_info.as_ref().map(|u| u.username.clone()),
+        };
+        channel_state
+            .audit
+            .start_command_detection(cols, rows, Some(command_context));
     }
 
     async fn _channel_x11_request(

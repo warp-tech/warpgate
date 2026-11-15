@@ -1,15 +1,28 @@
-use tracing::{error, info};
+use sea_orm::{ActiveModelTrait, DatabaseConnection, Set};
+use time::OffsetDateTime;
+use tracing::{error, info, warn};
 use uuid::Uuid;
 use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
+use warpgate_db_entities::Command;
 
 use crate::command_detector::CommandDetector;
 use crate::common::PtyRequest;
+
+/// Context needed to persist a detected command.
+#[derive(Clone)]
+pub struct CommandRecordContext {
+    pub db: DatabaseConnection,
+    pub user_session_id: Uuid,
+    pub target_session_id: Option<Uuid>,
+    pub username: Option<String>,
+}
 
 /// Encapsulates channel recording and command detection
 pub struct ChannelAudit {
     channel_id: Uuid,
     recorder: Option<TerminalRecorder>,
     detector: Option<CommandDetector>,
+    command_context: Option<CommandRecordContext>,
 }
 
 impl ChannelAudit {
@@ -18,6 +31,7 @@ impl ChannelAudit {
             channel_id,
             recorder: None,
             detector: None,
+            command_context: None,
         }
     }
 
@@ -25,8 +39,14 @@ impl ChannelAudit {
         self.recorder = Some(recorder);
     }
 
-    pub fn start_command_detection(&mut self, cols: u16, rows: u16) {
+    pub fn start_command_detection(
+        &mut self,
+        cols: u16,
+        rows: u16,
+        command_context: Option<CommandRecordContext>,
+    ) {
         self.detector = Some(CommandDetector::new(cols, rows));
+        self.command_context = command_context;
     }
 
     pub async fn on_input(&mut self, data: &[u8]) {
@@ -42,6 +62,9 @@ impl ChannelAudit {
             && let Some(command) = detector.on_output(data)
         {
             info!(channel_id=%self.channel_id, %command, "Shell command");
+            if let Some(context) = self.command_context.clone() {
+                record_command(context, command);
+            }
         }
     }
 
@@ -74,4 +97,22 @@ impl ChannelAudit {
             self.recorder = None;
         }
     }
+}
+
+/// Persists a detected command off the session's critical path. A failure is
+/// logged and dropped: command auditing must never disturb the terminal stream.
+fn record_command(context: CommandRecordContext, command: String) {
+    tokio::spawn(async move {
+        let row = Command::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            timestamp: Set(OffsetDateTime::now_utc()),
+            user_session_id: Set(context.user_session_id),
+            target_session_id: Set(context.target_session_id),
+            username: Set(context.username),
+            command: Set(command),
+        };
+        if let Err(error) = row.insert(&context.db).await {
+            warn!(?error, "failed to record shell command");
+        }
+    });
 }

@@ -4400,6 +4400,41 @@
         "operationId": "reject_session"
       }
     },
+    "/commands": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/GetCommandsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_CommandEntry"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_commands"
+      }
+    },
     "/users/{user_id}/credentials/certificates": {
       "get": {
         "parameters": [
@@ -5374,6 +5409,40 @@
           }
         }
       },
+      "CommandEntry": {
+        "type": "object",
+        "title": "CommandEntry",
+        "required": [
+          "id",
+          "timestamp",
+          "command",
+          "user_session_id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "username": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "user_session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target_session_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "CreateLdapServerRequest": {
         "type": "object",
         "title": "CreateLdapServerRequest",
@@ -5713,6 +5782,24 @@
           },
           "kind": {
             "$ref": "#/components/schemas/SSHClientKeyKind"
+          }
+        }
+      },
+      "GetCommandsRequest": {
+        "type": "object",
+        "title": "GetCommandsRequest",
+        "properties": {
+          "search": {
+            "type": "string"
+          },
+          "before": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Keyset cursor: only rows with `timestamp` strictly before this are returned."
+          },
+          "limit": {
+            "type": "integer",
+            "format": "uint64"
           }
         }
       },
@@ -6282,6 +6369,31 @@
           "ForcedOn",
           "ForcedOff"
         ]
+      },
+      "PaginatedResponse_CommandEntry": {
+        "type": "object",
+        "title": "PaginatedResponse_CommandEntry",
+        "required": [
+          "items",
+          "offset",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CommandEntry"
+            }
+          },
+          "offset": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "total": {
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
       },
       "PaginatedResponse_UserSessionSnapshot": {
         "type": "object",
