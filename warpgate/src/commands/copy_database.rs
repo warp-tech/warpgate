@@ -31,6 +31,8 @@ macro_rules! with_every_table_in_order {
             HttpSession,
             LogEntry,
             CertificateRevocation,
+            // No foreign keys, so it need not wait for any of the tables above
+            Command,
             // Referencing the tables above
             Ticket,
             UserSession,
@@ -48,7 +50,6 @@ macro_rules! with_every_table_in_order {
             SsoCredential,
             CertificateCredential,
             SessionApprovalRequest,
-            Command,
         ];
     };
 }
