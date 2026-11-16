@@ -132,6 +132,14 @@ impl ListApi {
     ) -> Result<CreateAdminRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AdminRolesManage)?;
 
+        // The built-in role is provisioned by setup; a second row with its name
+        // would make anything keyed on that name ambiguous.
+        if body.name == BUILTIN_ADMIN_ROLE_NAME {
+            return Err(WarpgateError::InvalidRequest(
+                "reserved admin role name".into(),
+            ));
+        }
+
         let db = &admin.services().db;
         let values = AdminRole::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -204,6 +212,17 @@ impl DetailApi {
         let Some(role) = AdminRole::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(UpdateAdminRoleResponse::NotFound);
         };
+
+        // No renaming the built-in role, and no renaming another role onto its
+        // name: both would break anything keyed on that name.
+        if body.name != role.name
+            && (role.name == BUILTIN_ADMIN_ROLE_NAME
+                || body.name == BUILTIN_ADMIN_ROLE_NAME)
+        {
+            return Err(WarpgateError::InvalidRequest(
+                "cannot rename the built-in admin role or rename a role to it".into(),
+            ));
+        }
 
         let mut model: AdminRole::ActiveModel = role.into();
         model.name = Set(body.name.clone());

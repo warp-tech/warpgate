@@ -1,8 +1,10 @@
 <script lang="ts">
     import { faTerminal } from '@fortawesome/free-solid-svg-icons'
     import { api, type CommandEntry } from 'admin/lib/api'
+    import { adminPermissions } from 'admin/lib/store'
     import ItemList, {
         type Column,
+        type ColumnControls,
         type LoadOptions,
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
@@ -45,6 +47,28 @@
         // toggleable columns.
         { id: 'open', cell: openCell, class: 'commands-open' },
     ]
+
+    // The body's grid template comes from the enabled columns, so the header
+    // has to follow the same rule or a column toggle desynchronises the two:
+    // hidden toggleable columns drop out, and if no remaining column grows the
+    // first one does (ItemList's fallback).
+    function headerColumns(controls: ColumnControls) {
+        const shown = columns.filter(column => {
+            const toggle = controls.toggleable.find(c => c.id === column.id)
+            return toggle ? toggle.shown : true
+        })
+        const fallbackGrow = !shown.some(column => column.grow)
+        return shown.map((column, i) => ({
+            ...column,
+            grow: column.grow || (fallbackGrow && i === 0),
+        }))
+    }
+
+    function headerTemplate(controls: ColumnControls) {
+        return headerColumns(controls)
+            .map(column => (column.grow ? 'minmax(0, 1fr)' : 'auto'))
+            .join(' ')
+    }
 </script>
 
 {#snippet timeCell(entry: CommandEntry)}
@@ -70,7 +94,9 @@
     <code>{entry.command}</code>
 {/snippet}
 {#snippet openCell(entry: CommandEntry)}
-    {#if entry.userSessionId}
+    <!-- The session page itself requires sessionsView; without it the button
+         would only lead to a permission error page. -->
+    {#if entry.userSessionId && $adminPermissions.sessionsView}
         <a
             class="btn btn-sm btn-outline-secondary"
             href="#/status/sessions/{entry.userSessionId}"
@@ -98,14 +124,17 @@
         storageKey="admin-commands"
         showSearch={true}
     >
-        {#snippet header(items)}
+        {#snippet header(items, _groupControls, columnControls)}
             {#if items?.length}
-                <div class="commands-header">
-                    <div class="commands-time">Time</div>
-                    <div class="commands-name">Name</div>
-                    <div class="commands-target">Target</div>
-                    <div>Command</div>
-                    <div class="commands-open"></div>
+                <div
+                    class="commands-header"
+                    style:grid-template-columns={headerTemplate(columnControls)}
+                >
+                    {#each headerColumns(columnControls) as column (column.id)}
+                        <div class={column.class ?? ''}>
+                            {column.label ?? ''}
+                        </div>
+                    {/each}
                 </div>
             {/if}
         {/snippet}
@@ -149,10 +178,17 @@
     }
 
     // Trailing action column: as narrow as its button, flush with the list's
-    // right edge.
+    // right edge. The min width pins the track to the button's box
+    // (2 * .5rem padding + 1.125em terminal icon at .875rem + 2px border)
+    // so the header's empty cell and the body's button occupy the same width.
     :global(.commands-open) {
+        min-inline-size: 2.125rem;
         text-align: right;
         white-space: nowrap;
+    }
+
+    :global(.commands-open .btn) {
+        min-inline-size: 2.125rem;
     }
 
     // The list drops the header snippet into the flex row that also holds the
@@ -165,7 +201,6 @@
         flex: 1 1 auto;
         width: 100%;
         display: grid;
-        grid-template-columns: auto auto auto minmax(0, 1fr) auto;
         align-items: center;
         padding-inline: var(--bs-list-group-item-padding-x);
         padding-block-end: .25rem;
