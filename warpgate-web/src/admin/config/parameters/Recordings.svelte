@@ -242,6 +242,32 @@
                     Disable if recording passwords typed in by users in various
                     applications is a security concern.
                 </HelpText>
+                <FormGroup
+                    floating
+                    label="Remote desktop recording frame rate (1-30 fps)"
+                    class="mt-2"
+                >
+                    <input
+                        type="number"
+                        min="1"
+                        max="30"
+                        step="1"
+                        required
+                        class="form-control"
+                        value={parameters.desktopRecordingFrameRate}
+                        onchange={e => {
+                            const v = e.currentTarget.valueAsNumber
+                            if (Number.isInteger(v)) {
+                                parameters.desktopRecordingFrameRate = v
+                            }
+                        }}
+                    >
+                </FormGroup>
+                <HelpText>
+                    Lower values make recordings of busy screens much smaller,
+                    at the cost of smoothness on playback. Applies to sessions
+                    started after the change.
+                </HelpText>
                 <label for="recordScp" class="d-flex align-items-center mt-2">
                     <Input
                         id="recordScp"
