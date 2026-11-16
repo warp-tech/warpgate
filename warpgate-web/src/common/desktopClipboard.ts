@@ -103,10 +103,9 @@ export class DesktopClipboard {
         )
     }
 
-    // Local -> remote clipboard sync. The text goes first and its order against the
-    // keystroke is preserved all the way to the target, so the remote has it before the
-    // paste arrives — forwarding the keystroke as it happened would paste whatever the
-    // remote held previously.
+    // Local -> remote clipboard sync. The text goes first, and the server delivers the
+    // keystroke behind it only once the target has taken the text — forwarding the
+    // keystroke as it happened would paste whatever the remote held previously.
     onPaste(e: ClipboardEvent): void {
         e.preventDefault()
         const text = e.clipboardData?.getData('text/plain')
