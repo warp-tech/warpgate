@@ -180,9 +180,10 @@
     // Trailing action column: as narrow as its button, flush with the list's
     // right edge. The min width pins the track to the button's box
     // (2 * .5rem padding + 1.125em terminal icon at .875rem + 2px border)
-    // so the header's empty cell and the body's button occupy the same width.
+    // plus this cell's 1rem gap, so the header's empty cell and the body's
+    // button occupy the same track.
     :global(.commands-open) {
-        min-inline-size: 2.125rem;
+        min-inline-size: calc(1rem + 2.125rem);
         text-align: right;
         white-space: nowrap;
     }
