@@ -93,6 +93,11 @@ export const ADMIN_PERMISSIONS = [
         deps: ['sessionsView'] as AdminRolePermissionKey[],
     },
     {
+        key: 'shellCommandsView' as const,
+        label: 'View',
+        category: 'Commands' as const,
+    },
+    {
         key: 'recordingsView' as const,
         label: 'View',
         category: 'Recordings' as const,

@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.30.3-40-g483baa80-modified"
+    "version": "v0.30.3-commands-modified"
   },
   "servers": [
     {
@@ -5091,7 +5091,8 @@
           "tickets_delete",
           "config_edit",
           "admin_roles_manage",
-          "ticket_requests_manage"
+          "ticket_requests_manage",
+          "shell_commands_view"
         ],
         "properties": {
           "id": {
@@ -5160,6 +5161,9 @@
           },
           "ticket_requests_manage": {
             "type": "boolean"
+          },
+          "shell_commands_view": {
+            "type": "boolean"
           }
         }
       },
@@ -5186,7 +5190,8 @@
           "tickets_delete",
           "config_edit",
           "admin_roles_manage",
-          "ticket_requests_manage"
+          "ticket_requests_manage",
+          "shell_commands_view"
         ],
         "properties": {
           "name": {
@@ -5250,6 +5255,9 @@
             "type": "boolean"
           },
           "ticket_requests_manage": {
+            "type": "boolean"
+          },
+          "shell_commands_view": {
             "type": "boolean"
           }
         }
@@ -5428,6 +5436,9 @@
             "format": "date-time"
           },
           "username": {
+            "type": "string"
+          },
+          "target_name": {
             "type": "string"
           },
           "command": {
