@@ -1,6 +1,6 @@
 //! Translation of normalised desktop input into IronRDP input operations.
 
-use ironrdp::input::{MouseButton, MousePosition, Operation, Scancode, WheelRotations};
+use ironrdp_input::{MouseButton, MousePosition, Operation, Scancode, WheelRotations};
 use warpgate_core::DesktopInput;
 
 /// RDP expresses wheel movement in rotation units; one notch is 120 of them.
