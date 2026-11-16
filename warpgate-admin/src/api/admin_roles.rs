@@ -216,8 +216,7 @@ impl DetailApi {
         // No renaming the built-in role, and no renaming another role onto its
         // name: both would break anything keyed on that name.
         if body.name != role.name
-            && (role.name == BUILTIN_ADMIN_ROLE_NAME
-                || body.name == BUILTIN_ADMIN_ROLE_NAME)
+            && (role.name == BUILTIN_ADMIN_ROLE_NAME || body.name == BUILTIN_ADMIN_ROLE_NAME)
         {
             return Err(WarpgateError::InvalidRequest(
                 "cannot rename the built-in admin role or rename a role to it".into(),
