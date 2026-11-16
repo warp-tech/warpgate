@@ -569,6 +569,7 @@ pub struct HttpConfig {
     pub sni_certificates: Vec<SniCertificateConfig>,
 
     /// API endpoints allowed when using token auth. Each item is a "<METHOD> <path>".
+    /// `<METHOD>` may be `*`. In `<path>`, `*` matches one segment and `**` any number.
     #[serde(default)]
     pub user_api_token_allowed_endpoints: Option<Vec<String>>,
 }

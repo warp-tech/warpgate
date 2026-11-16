@@ -104,6 +104,12 @@ pub trait UserFacingReason {
     fn user_facing_reason(&self) -> String;
 }
 
+impl<T: UserFacingReason + ?Sized> UserFacingReason for std::sync::Arc<T> {
+    fn user_facing_reason(&self) -> String {
+        (**self).user_facing_reason()
+    }
+}
+
 pub fn io_connect_reason(error: &std::io::Error) -> &'static str {
     match error.kind() {
         std::io::ErrorKind::ConnectionRefused => "Target refused the connection",

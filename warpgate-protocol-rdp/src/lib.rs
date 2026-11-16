@@ -119,7 +119,8 @@ pub fn connect(
             )
             .await
             {
-                let _ = event_tx.send(DesktopEvent::backend_error(&error)).await;
+                let error = Arc::new(error);
+                let _ = event_tx.send(DesktopEvent::Error(error.clone())).await;
                 error!("RDP client failed: {:#}", anyhow::Error::from(error));
             }
             let _ = event_tx
