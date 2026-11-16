@@ -199,13 +199,12 @@ impl CommandDetector {
                     self.parser.process(before);
                     commands.extend(self.extract(row, col));
 
-                    let term_len = if rest[p] == CR && after.get(1) == Some(&LF) {
-                        2
-                    } else {
-                        1
-                    };
-                    self.parser.process(&after[..term_len]);
-                    rest = &after[term_len..];
+                    // `p` is the position of a terminator, so `after` is
+                    // never empty and always starts with CR or LF.
+                    let term_len = if after.starts_with(&[CR, LF]) { 2 } else { 1 };
+                    let (terminator, tail) = after.split_at(term_len);
+                    self.parser.process(terminator);
+                    rest = tail;
 
                     self.state = if queued > 0 {
                         // Another Enter is already waiting. The terminator
