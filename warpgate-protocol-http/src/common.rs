@@ -25,7 +25,8 @@ use warpgate_common_http::ext::{construct_external_url, is_navigation_request};
 use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
-    X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_TOKEN, is_cluster_peer_request,
+    X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_IDENTITY_TOKEN, X_WARPGATE_TOKEN,
+    is_cluster_peer_request,
 };
 use warpgate_core::{ConfigProvider, vet_credential_bearer};
 use warpgate_db_entities::User;
@@ -458,8 +459,9 @@ pub async fn authorize_session(
 
 /// Authorization for a request from an authenticated cluster peer. The proxying
 /// node forwards the acting user's id in `x-warpgate-cluster-identity` (see
-/// `cluster_proxy::proxy_or_serve`), so the request runs here as that user;
-/// without the header the peer acts as a bare cluster peer. An id that no
+/// `cluster_proxy::proxy_or_serve`), so the request runs here as that user.
+/// `x-warpgate-cluster-identity-token` marks that user as token-authenticated.
+/// Without the identity header the peer acts as a bare cluster peer. An id that no
 /// longer resolves to a user fails closed (unauthenticated).
 async fn cluster_request_authorization(
     ctx: &UnauthenticatedRequestContext,
@@ -476,10 +478,20 @@ async fn cluster_request_authorization(
         .await
         .map_err(poem::error::InternalServerError)?
         .map(|user| {
-            RequestAuthorization::Session(SessionAuthorization::User {
-                user_id: user.id,
-                username: user.username,
-            })
+            if req
+                .headers()
+                .contains_key(&X_WARPGATE_CLUSTER_IDENTITY_TOKEN)
+            {
+                RequestAuthorization::UserToken {
+                    user_id: user.id,
+                    username: user.username,
+                }
+            } else {
+                RequestAuthorization::Session(SessionAuthorization::User {
+                    user_id: user.id,
+                    username: user.username,
+                })
+            }
         }))
 }
 

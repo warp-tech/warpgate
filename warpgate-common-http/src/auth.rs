@@ -35,22 +35,34 @@ pub async fn web_reauth_required(
     ctx: &AuthenticatedRequestContext,
     session: &Session,
 ) -> Result<bool, WarpgateError> {
-    if !matches!(
-        ctx.auth,
-        RequestAuthorization::Session(SessionAuthorization::User { .. })
-    ) {
-        return Ok(false);
-    }
-
     let Some(max_age) = ctx.parameters().await?.web_auth_max_age_seconds else {
         return Ok(false);
     };
 
-    let Some(auth_time) = session.get::<u64>(AUTH_TIME_SESSION_KEY) else {
-        return Ok(true);
-    };
+    Ok(login_too_old(
+        &ctx.auth,
+        session.get::<u64>(AUTH_TIME_SESSION_KEY),
+        now_unix(),
+        max_age.cast_unsigned(),
+    ))
+}
 
-    Ok(now_unix() - auth_time >= max_age.cast_unsigned())
+fn login_too_old(
+    auth: &RequestAuthorization,
+    auth_time: Option<u64>,
+    now: u64,
+    max_age: u64,
+) -> bool {
+    match auth {
+        RequestAuthorization::Session(SessionAuthorization::User { .. }) => {
+            auth_time.is_none_or(|auth_time| now.saturating_sub(auth_time) >= max_age)
+        }
+        /// token has no session age and always fails
+        RequestAuthorization::UserToken { .. } => true,
+        RequestAuthorization::Session(SessionAuthorization::Ticket { .. })
+        | RequestAuthorization::AdminToken
+        | RequestAuthorization::ClusterPeer => false,
+    }
 }
 
 /// Represents the source of authentication of a session
@@ -235,6 +247,10 @@ impl RequestAuthorization {
         matches!(self, Self::ClusterPeer)
     }
 
+    pub const fn is_session(&self) -> bool {
+        matches!(self, Self::Session(_))
+    }
+
     /// Returns a username if one is present (admin token has none)
     pub const fn username(&self) -> Option<&String> {
         match self {
@@ -338,6 +354,20 @@ mod tests {
             username: "alice".into(),
         };
         assert!(token.as_full_user().is_some());
+        assert!(super::login_too_old(&token, Some(100), 100, 3600));
+        assert!(!super::login_too_old(&user, Some(100), 200, 3600));
+        assert!(super::login_too_old(&user, Some(100), 3700, 3600));
+        assert!(super::login_too_old(&user, None, 100, 3600));
+        assert!(!super::login_too_old(&ticket, None, 100, 3600));
+        assert!(!super::login_too_old(
+            &RequestAuthorization::AdminToken,
+            None,
+            100,
+            3600
+        ));
+        assert!(!token.is_session());
+        assert!(user.is_session());
+        assert!(!RequestAuthorization::AdminToken.is_session());
 
         // Machine tokens carry no user identity.
         assert!(RequestAuthorization::AdminToken.as_full_user().is_none());

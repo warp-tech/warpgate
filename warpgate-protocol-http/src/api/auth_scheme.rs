@@ -2,6 +2,9 @@ use poem::Request;
 use poem_openapi::SecurityScheme;
 use poem_openapi::auth::ApiKey;
 use warpgate_common_http::AuthenticatedRequestContext;
+use warpgate_db_entities as entities;
+
+use super::common::get_user;
 
 #[allow(clippy::unused_async)]
 async fn authenticated_context(req: &Request, _key: ApiKey) -> Option<AuthenticatedRequestContext> {
@@ -67,6 +70,126 @@ impl std::ops::Deref for AuthedSession {
 
     fn deref(&self) -> &Self::Target {
         self.ctx()
+    }
+}
+
+/// AuthenticatedRequestContext with user already loaded
+#[derive(Clone)]
+pub struct UserAccess {
+    ctx: AuthenticatedRequestContext,
+    pub user: entities::User::Model,
+}
+
+impl std::ops::Deref for UserAccess {
+    type Target = AuthenticatedRequestContext;
+
+    fn deref(&self) -> &Self::Target {
+        &self.ctx
+    }
+}
+
+mod sec_scheme_checkers {
+    use super::*;
+
+    pub async fn full_user(req: &Request, _key: ApiKey) -> Option<UserAccess> {
+        let ctx = req.data::<AuthenticatedRequestContext>().cloned()?;
+        let full = ctx.auth.as_full_user()?;
+        let user = get_user(&full, &ctx.services().db).await.ok()??;
+        Some(UserAccess { ctx, user })
+    }
+
+    pub async fn web_session_user(req: &Request, key: ApiKey) -> Option<UserAccess> {
+        // checks the auth kind because a token caller can send a junk session cookie to trigger the cookie scheme
+        full_user(req, key)
+            .await
+            .filter(|access| access.auth.is_session())
+    }
+}
+
+#[derive(SecurityScheme)]
+#[oai(
+    rename = "TokenSecurityScheme",
+    ty = "api_key",
+    key_name = "X-Warpgate-Token",
+    key_in = "header",
+    checker = "sec_scheme_checkers::full_user"
+)]
+pub struct FullUserTokenAuth(UserAccess);
+
+#[derive(SecurityScheme)]
+#[oai(
+    rename = "CookieSecurityScheme",
+    ty = "api_key",
+    key_name = "warpgate-http-session",
+    key_in = "cookie",
+    checker = "sec_scheme_checkers::full_user"
+)]
+pub struct FullUserCookieAuth(UserAccess);
+
+#[derive(SecurityScheme)]
+#[oai(
+    rename = "ClusterSecurityScheme",
+    ty = "api_key",
+    key_name = "x-warpgate-cluster-node",
+    key_in = "header",
+    checker = "sec_scheme_checkers::full_user"
+)]
+pub struct FullUserClusterAuth(UserAccess);
+
+#[derive(SecurityScheme)]
+pub enum FullUser {
+    Token(FullUserTokenAuth),
+    Cookie(FullUserCookieAuth),
+    Cluster(FullUserClusterAuth),
+}
+
+impl std::ops::Deref for FullUser {
+    type Target = UserAccess;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Token(t) => &t.0,
+            Self::Cookie(c) => &c.0,
+            Self::Cluster(c) => &c.0,
+        }
+    }
+}
+
+#[derive(SecurityScheme)]
+#[oai(
+    rename = "CookieSecurityScheme",
+    ty = "api_key",
+    key_name = "warpgate-http-session",
+    key_in = "cookie",
+    checker = "sec_scheme_checkers::web_session_user"
+)]
+pub struct WebSessionCookieAuth(UserAccess);
+
+#[derive(SecurityScheme)]
+#[oai(
+    rename = "ClusterSecurityScheme",
+    ty = "api_key",
+    key_name = "x-warpgate-cluster-node",
+    key_in = "header",
+    checker = "sec_scheme_checkers::web_session_user"
+)]
+pub struct WebSessionClusterAuth(UserAccess);
+
+/// FullUser except no token auth for sensitive endpoints
+#[derive(SecurityScheme)]
+pub enum WebSessionUser {
+    Cookie(WebSessionCookieAuth),
+    Cluster(WebSessionClusterAuth),
+}
+
+impl std::ops::Deref for WebSessionUser {
+    type Target = UserAccess;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Cookie(c) => &c.0,
+            Self::Cluster(c) => &c.0,
+        }
     }
 }
 

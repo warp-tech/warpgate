@@ -627,7 +627,7 @@ mod tests {
         TargetMySqlOptions, TargetOptions, TargetPostgresOptions, TargetRdpOptions,
         TargetSSHOptions, Tls,
     };
-    use crate::{StoredSecrets, TargetSecrets};
+    use crate::StoredSecrets;
 
     const REFERENCE: &str = "secret://vault-prod/secret/db#password";
 
