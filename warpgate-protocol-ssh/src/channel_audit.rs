@@ -1,3 +1,5 @@
+use std::sync::{Arc, PoisonError, RwLock};
+
 use sea_orm::{ActiveModelTrait, DatabaseConnection, Set};
 use time::OffsetDateTime;
 use tracing::{error, info, warn};
@@ -8,12 +10,31 @@ use warpgate_db_entities::Command;
 use crate::command_detector::CommandDetector;
 use crate::common::PtyRequest;
 
+/// The target a session is currently bound to, shared with the command
+/// detector. Detection can start before the target is admitted (a channel held
+/// at the approval gate), so the session re-stamps this whenever it resolves a
+/// target and the insert reads it when a command is detected — a command
+/// emitted after the target became known still carries its name.
+pub type TargetNameHandle = Arc<RwLock<Option<String>>>;
+
+pub fn new_target_name_handle() -> TargetNameHandle {
+    Arc::new(RwLock::new(None))
+}
+
+/// Records the resolved target name. The lock is only ever held for the
+/// assignment: no `.await` happens between acquiring it and releasing it, and
+/// nothing else runs under [`std::sync::RwLock`] here.
+pub fn stamp_target_name(handle: &TargetNameHandle, name: String) {
+    *handle.write().unwrap_or_else(PoisonError::into_inner) = Some(name);
+}
+
 /// Context needed to persist a detected command.
 #[derive(Clone)]
 pub struct CommandRecordContext {
     pub db: DatabaseConnection,
     pub user_session_id: Uuid,
     pub username: Option<String>,
+    pub target_name: TargetNameHandle,
 }
 
 /// Encapsulates channel recording and command detection
@@ -104,15 +125,40 @@ impl ChannelAudit {
 /// logged and dropped: command auditing must never disturb the terminal stream.
 fn record_command(context: CommandRecordContext, command: String) {
     tokio::spawn(async move {
+        let target_name = context
+            .target_name
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
         let row = Command::ActiveModel {
             id: Set(Uuid::new_v4()),
             timestamp: Set(OffsetDateTime::now_utc()),
             user_session_id: Set(context.user_session_id),
             username: Set(context.username),
+            target_name: Set(target_name),
             command: Set(command),
         };
         if let Err(error) = row.insert(&context.db).await {
             warn!(?error, "failed to record shell command");
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The context carries a handle, not a snapshot: a target resolved after
+    /// the detector started is what the insert reads.
+    #[test]
+    fn target_name_handle_sees_a_later_stamp() {
+        let handle = new_target_name_handle();
+        let in_context = handle.clone();
+
+        assert_eq!(*in_context.read().unwrap(), None);
+        stamp_target_name(&handle, "prod-db".into());
+        assert_eq!(in_context.read().unwrap().as_deref(), Some("prod-db"));
+        stamp_target_name(&handle, "prod-web".into());
+        assert_eq!(in_context.read().unwrap().as_deref(), Some("prod-web"));
+    }
 }

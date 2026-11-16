@@ -100,6 +100,8 @@ mod m00093_log_session_id_nullable;
 mod m00094_unique_role_names;
 mod m00095_kubernetes_sessions;
 mod m00096_commands;
+mod m00097_commands_target_name;
+mod m00098_admin_role_shell_commands_view;
 
 pub(crate) mod helpers;
 
@@ -205,6 +207,8 @@ impl MigratorTrait for Migrator {
             Box::new(m00094_unique_role_names::Migration),
             Box::new(m00095_kubernetes_sessions::Migration),
             Box::new(m00096_commands::Migration),
+            Box::new(m00097_commands_target_name::Migration),
+            Box::new(m00098_admin_role_shell_commands_view::Migration),
         ]
     }
 }

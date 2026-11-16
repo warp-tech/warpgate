@@ -42,6 +42,8 @@ struct AdminRoleDataRequest {
     admin_roles_manage: bool,
 
     ticket_requests_manage: bool,
+
+    shell_commands_view: bool,
 }
 
 #[derive(ApiResponse)]
@@ -154,6 +156,7 @@ impl ListApi {
             config_edit: Set(body.config_edit),
             admin_roles_manage: Set(body.admin_roles_manage),
             ticket_requests_manage: Set(body.ticket_requests_manage),
+            shell_commands_view: Set(body.shell_commands_view),
         };
 
         let role = values.insert(db).await?;
@@ -224,6 +227,7 @@ impl DetailApi {
         model.config_edit = Set(body.config_edit);
         model.admin_roles_manage = Set(body.admin_roles_manage);
         model.ticket_requests_manage = Set(body.ticket_requests_manage);
+        model.shell_commands_view = Set(body.shell_commands_view);
         let role = model.update(db).await?;
         Ok(UpdateAdminRoleResponse::Ok(Json(role.into())))
     }

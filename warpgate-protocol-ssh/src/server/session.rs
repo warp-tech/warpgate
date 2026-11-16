@@ -55,7 +55,8 @@ use crate::server::target_menu::{MenuEvent, spawn_target_menu_loop};
 use crate::{
     ChannelOperation, CommandRecordContext, ConnectionError, DirectTCPIPParams, PtyRequest,
     RCCommand, RCCommandReply, RCEvent, RCState, RemoteClient, ResolvedSshChainHost,
-    ServerChannelId, SshClientError, SshRecordingMetadata, X11Request, resolve_approved_ssh_chain,
+    ServerChannelId, SshClientError, SshRecordingMetadata, TargetNameHandle, X11Request,
+    new_target_name_handle, resolve_approved_ssh_chain, stamp_target_name,
 };
 
 const EVENT_QUEUE_CAPACITY: usize = 128;
@@ -166,6 +167,12 @@ pub struct ServerSession {
     /// Recording requests made while [`Self::target_session_id`] was still
     /// `None`, in arrival order. Drained on stamp.
     pending_recordings: Vec<(Uuid, SshRecordingMetadata)>,
+    /// The target the session is bound to, shared with the command detector.
+    /// Command detection starts as soon as a shell/exec channel opens, and the
+    /// approval gate can hold that channel while the target is still only
+    /// pending, so this is re-stamped on every resolution rather than
+    /// snapshotted into the context.
+    target_name: TargetNameHandle,
     traffic_recorders: HashMap<TrafficRecorderKey, TrafficRecorder>,
     hub: EventHub<Event>,
     event_sender: EventSender<Event>,
@@ -294,6 +301,7 @@ impl ServerSession {
             server_handle,
             target: TargetSelection::None,
             target_session_id: None,
+            target_name: new_target_name_handle(),
             pending_recordings: vec![],
             traffic_recorders: HashMap::new(),
             hub,
@@ -816,6 +824,10 @@ impl ServerSession {
                         self.stamp_approved_target(admitted).await;
                     }
                     TargetSessionStart::NeedsApproval(authorization) => {
+                        // The target is known now, only the admission is
+                        // outstanding: a command detected while the gate holds
+                        // the session is still about this target.
+                        stamp_target_name(&self.target_name, authorization.target().name.clone());
                         self.target = TargetSelection::PendingApproval(authorization);
                     }
                 }
@@ -954,6 +966,9 @@ impl ServerSession {
     }
 
     async fn stamp_approved_target(&mut self, admitted: AdmittedTarget<TargetSSHOptions>) {
+        // The detector may already be running on a channel opened before the
+        // menu/approval gate resolved; commands from here on carry the name.
+        stamp_target_name(&self.target_name, admitted.target().name.clone());
         self.target_session_id = Some(admitted.id());
         self.target = TargetSelection::Found(admitted);
         self.start_pending_recordings().await;
@@ -1842,6 +1857,7 @@ impl ServerSession {
             db: self.services.db.clone(),
             user_session_id: self.id.0,
             username: self.user_info.as_ref().map(|u| u.username.clone()),
+            target_name: self.target_name.clone(),
         };
         channel_state
             .audit
@@ -2559,6 +2575,7 @@ impl ServerSession {
                 self.stamp_approved_target(admitted).await;
             }
             TargetSessionStart::NeedsApproval(authorization) => {
+                stamp_target_name(&self.target_name, authorization.target().name.clone());
                 self.target = TargetSelection::PendingApproval(authorization);
             }
         }

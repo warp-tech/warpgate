@@ -8,7 +8,9 @@ mod server;
 use std::fmt::Debug;
 
 use anyhow::Result;
-pub use channel_audit::{ChannelAudit, CommandRecordContext};
+pub use channel_audit::{
+    ChannelAudit, CommandRecordContext, TargetNameHandle, new_target_name_handle, stamp_target_name,
+};
 pub use client::*;
 pub use common::*;
 use futures::future::BoxFuture;

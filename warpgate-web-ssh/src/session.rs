@@ -15,7 +15,8 @@ use warpgate_core::recordings::{SessionRecordings, TerminalRecorder};
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_protocol_ssh::{
     ChannelAudit, ChannelOperation, CommandRecordContext, PtyRequest, RCCommand, RCCommandReply,
-    SshClientError, SshRecordingMetadata,
+    SshClientError, SshRecordingMetadata, TargetNameHandle, new_target_name_handle,
+    stamp_target_name,
 };
 use warpgate_web_clients_common::{ManagedSession, Sheddable, WebSession};
 
@@ -49,6 +50,11 @@ pub struct WebSshSession {
     db: DatabaseConnection,
     /// The authenticated username, recorded with detected shell commands.
     username: Option<String>,
+    /// The target the session is bound to, shared with the command detector.
+    /// A web-SSH session only exists for an already-authorized target, so the
+    /// name is stamped at construction; it is a handle (not a copied value)
+    /// for symmetry with the SSH protocol's re-stamping.
+    target_name: TargetNameHandle,
 }
 
 impl WebSshSession {
@@ -65,6 +71,8 @@ impl WebSshSession {
         db: DatabaseConnection,
         username: Option<String>,
     ) -> Self {
+        let target_name_handle = new_target_name_handle();
+        stamp_target_name(&target_name_handle, target_name.clone());
         Self {
             core: WebSession::new(
                 id,
@@ -84,6 +92,7 @@ impl WebSshSession {
             pending_host_key: Arc::new(Mutex::new(None)),
             db,
             username,
+            target_name: target_name_handle,
         }
     }
 
@@ -157,6 +166,7 @@ impl WebSshSession {
             db: self.db.clone(),
             user_session_id: self.id().0,
             username: self.username.clone(),
+            target_name: self.target_name.clone(),
         };
         audit.start_command_detection(cols, rows, Some(command_context));
         if let Some(recorder) = self.start_recording(target_session_id, channel_id).await {

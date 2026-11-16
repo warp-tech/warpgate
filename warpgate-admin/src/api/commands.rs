@@ -31,6 +31,7 @@ pub struct CommandEntry {
     id: Uuid,
     timestamp: OffsetDateTime,
     username: Option<String>,
+    target_name: Option<String>,
     command: String,
     user_session_id: Uuid,
 }
@@ -41,6 +42,7 @@ impl From<Command::Model> for CommandEntry {
             id: model.id,
             timestamp: model.timestamp,
             username: model.username,
+            target_name: model.target_name,
             command: model.command,
             user_session_id: model.user_session_id,
         }
@@ -55,7 +57,7 @@ impl Api {
         admin: AdminContext,
         body: Json<GetCommandsRequest>,
     ) -> Result<GetCommandsResponse, WarpgateError> {
-        admin.require(AdminPermission::SessionsView)?;
+        admin.require(AdminPermission::ShellCommandsView)?;
 
         let db = &admin.services().db;
         let mut q = Command::Entity::find().order_by_desc(Command::Column::Timestamp);
@@ -68,6 +70,7 @@ impl Api {
                 [
                     Expr::col(Command::Column::Command).into(),
                     Expr::col(Command::Column::Username).into(),
+                    Expr::col(Command::Column::TargetName).into(),
                 ],
             ));
         }

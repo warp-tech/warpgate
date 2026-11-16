@@ -16,6 +16,11 @@ pub struct Model {
     pub timestamp: OffsetDateTime,
     pub user_session_id: Uuid,
     pub username: Option<String>,
+    /// The target the command was run against. `None` for a command typed
+    /// before any target was resolved (the selection menu), or by an older
+    /// binary that predates the column.
+    #[sea_orm(column_type = "Text")]
+    pub target_name: Option<String>,
     #[sea_orm(column_type = "Text")]
     pub command: String,
 }
