@@ -10,6 +10,7 @@ export const DEFAULT_PORTS: { [K in PortKind]: number } = {
     Ssh: 22,
     MySql: 3306,
     Postgres: 5432,
+    Oracle: 1521,
     Rdp: 3389,
     Vnc: 5900,
 }
@@ -26,6 +27,7 @@ const ADDRESS: { [K in TargetKindName]: (_: OptionsOf<K>) => string } = {
     Http: o => o.url,
     MySql: hostPort,
     Postgres: hostPort,
+    Oracle: hostPort,
     Kubernetes: o => o.clusterUrl,
     Rdp: hostPort,
     Vnc: hostPort,

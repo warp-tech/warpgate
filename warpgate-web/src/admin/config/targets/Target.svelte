@@ -14,6 +14,7 @@
         type Role,
         type Target,
         type TargetGroup,
+        TlsMode,
     } from 'admin/lib/api'
     import Section from 'admin/lib/Section.svelte'
     import SectionedForm from 'admin/lib/SectionedForm.svelte'
@@ -36,6 +37,7 @@
     import { replace } from 'svelte-spa-router'
     import TlsConfiguration from '../../TlsConfiguration.svelte'
     import HttpHeadersEditor from './http/HeadersEditor.svelte'
+    import TargetOracleOptions from './oracle/Options.svelte'
     import ProtocolDocs from './ProtocolDocs.svelte'
     import TargetRdpOptions from './rdp/Options.svelte'
     import TargetSshOptions from './ssh/Options.svelte'
@@ -142,6 +144,7 @@
                         {#if target.options.kind === 'Ssh' ||
                             target.options.kind === 'MySql' ||
                             target.options.kind === 'Postgres' ||
+                            target.options.kind === 'Oracle' ||
                             target.options.kind === 'Kubernetes'}
                             <Loadable promise={api.getUsers()}>
                                 {#snippet children(users)}
@@ -175,6 +178,14 @@
                                 target.options.kind === TargetKind.Postgres
                                     ? target.options.defaultDatabaseName
                                     : undefined}
+                                targetServiceName={target.options.kind ===
+                                TargetKind.Oracle
+                                    ? target.options.serviceName
+                                    : undefined}
+                                targetTlsEnabled={target.options.kind ===
+                                    TargetKind.Oracle &&
+                                    target.options.tls.mode !==
+                                        TlsMode.Disabled}
                             />
                         {/key}
                     </ModalBody>
@@ -200,6 +211,9 @@
                             {/if}
                             {#if target.options.kind === 'Postgres'}
                                 PostgreSQL target
+                            {/if}
+                            {#if target.options.kind === 'Oracle'}
+                                Oracle target
                             {/if}
                             {#if target.options.kind === 'Ssh'}
                                 SSH target
@@ -274,6 +288,14 @@
 
                         {#if target.options.kind === 'Rdp'}
                             <TargetRdpOptions
+                                id={target.id}
+                                name={target.name}
+                                bind:options={target.options}
+                            />
+                        {/if}
+
+                        {#if target.options.kind === 'Oracle'}
+                            <TargetOracleOptions
                                 id={target.id}
                                 name={target.name}
                                 bind:options={target.options}

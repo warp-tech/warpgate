@@ -41,6 +41,18 @@ pub async fn command(params: &GlobalParams) -> Result<()> {
             .await
             .with_context(|| "Checking PostgreSQL key".to_string())?;
     }
+    if config.store.oracle.enable {
+        TlsCertificateBundle::from_file(
+            params
+                .paths_relative_to()
+                .join(&config.store.oracle.certificate),
+        )
+        .await
+        .with_context(|| "Checking Oracle certificate".to_string())?;
+        TlsPrivateKey::from_file(params.paths_relative_to().join(&config.store.oracle.key))
+            .await
+            .with_context(|| "Checking Oracle key".to_string())?;
+    }
     info!("No problems found");
     Ok(())
 }

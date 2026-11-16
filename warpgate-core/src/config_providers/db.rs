@@ -480,6 +480,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                 ssh,
                 mysql,
                 postgres,
+                oracle,
                 vnc,
                 rdp,
             } = req;
@@ -490,6 +491,7 @@ impl ConfigProvider for DatabaseConfigProvider {
                 (Protocol::Ssh, ssh),
                 (Protocol::MySql, mysql),
                 (Protocol::Postgres, postgres),
+                (Protocol::Oracle, oracle),
                 (Protocol::Vnc, vnc),
                 (Protocol::Rdp, rdp),
             ] {

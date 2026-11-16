@@ -6,6 +6,7 @@ use uuid::Uuid;
 use warpgate_common::auth::CredentialKind;
 use warpgate_common::{GlobalParams, Secret, User as UserConfig, UserPasswordCredential};
 use warpgate_core::Services;
+use warpgate_core::oracle_verifier::sync_oracle_verifier_from_password;
 use warpgate_db_entities::{PasswordCredential, User};
 
 use crate::commands::common::assert_interactive_terminal;
@@ -71,6 +72,9 @@ pub async fn command(params: &GlobalParams, username: Option<&String>) -> Result
     }
     .insert(db)
     .await?;
+
+    // Keep the Oracle O5LOGON verifier in step with the recovered password.
+    sync_oracle_verifier_from_password(db, user.id, &password, config.store.oracle.enable).await?;
 
     user.credential_policy
         .get_or_insert_with(Default::default)

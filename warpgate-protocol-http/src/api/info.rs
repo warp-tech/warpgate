@@ -30,6 +30,7 @@ pub struct PortsInfo {
     kubernetes: Option<u16>,
     vnc: Option<u16>,
     rdp: Option<u16>,
+    oracle: Option<u16>,
 }
 
 #[derive(Serialize, Object)]
@@ -41,6 +42,7 @@ pub struct ExternalHostsInfo {
     kubernetes: Option<String>,
     vnc: Option<String>,
     rdp: Option<String>,
+    oracle: Option<String>,
 }
 
 #[derive(Serialize, Object, Debug)]
@@ -281,6 +283,12 @@ impl Api {
                     .external_host
                     .clone()
                     .or_else(|| fallback_host.clone()),
+                oracle: config
+                    .store
+                    .oracle
+                    .external_host
+                    .clone()
+                    .or_else(|| fallback_host.clone()),
             })
         } else {
             None
@@ -357,6 +365,11 @@ impl Api {
                     } else {
                         None
                     },
+                    oracle: if config.store.oracle.enable {
+                        Some(config.store.oracle.external_port())
+                    } else {
+                        None
+                    },
                 }
             } else {
                 PortsInfo {
@@ -367,6 +380,7 @@ impl Api {
                     kubernetes: None,
                     vnc: None,
                     rdp: None,
+                    oracle: None,
                 }
             },
             control_plane_host: config

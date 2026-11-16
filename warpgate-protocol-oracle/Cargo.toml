@@ -1,0 +1,27 @@
+[package]
+name = "warpgate-protocol-oracle"
+version = "0.30.2"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+bytes.workspace = true
+futures.workspace = true
+hex = { workspace = true, features = ["alloc"] }
+humantime = { version = "2.1", default-features = false }
+rand.workspace = true
+rustls.workspace = true
+sea-orm.workspace = true
+socket2 = { version = "0.6", features = ["all"], default-features = false }
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+url.workspace = true
+uuid.workspace = true
+warpgate-common = { path = "../warpgate-common", default-features = false }
+warpgate-core = { path = "../warpgate-core", default-features = false }
+warpgate-db-entities = { path = "../warpgate-db-entities", default-features = false }
+warpgate-oracle-tns = { path = "../warpgate-oracle-tns" }
+warpgate-tls = { path = "../warpgate-tls", default-features = false }

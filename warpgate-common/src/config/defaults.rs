@@ -31,6 +31,10 @@ pub const fn _default_rdp_port() -> u16 {
     3389
 }
 
+pub const fn _default_oracle_port() -> u16 {
+    1521
+}
+
 #[inline]
 pub fn _default_username() -> String {
     "root".to_owned()
@@ -71,6 +75,11 @@ pub fn _default_mysql_advertised_version() -> String {
 #[inline]
 pub fn _default_postgres_listen() -> ListenEndpoint {
     ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 55432))
+}
+
+#[inline]
+pub fn _default_oracle_listen() -> ListenEndpoint {
+    ListenEndpoint::from(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 51521))
 }
 
 #[inline]
