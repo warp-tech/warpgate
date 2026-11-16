@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.30.0-modified"
+    "version": "v0.30.2-10-g8084f01b-modified"
   },
   "servers": [
     {
@@ -4988,6 +4988,111 @@
         ],
         "operationId": "get_secret_reference_usage"
       }
+    },
+    "/scim-tokens": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ScimTokenResponse"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_scim_tokens"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateScimTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScimTokenAndSecret"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "create_scim_token"
+      }
+    },
+    "/scim-tokens/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_scim_token"
+      }
     }
   },
   "components": {
@@ -5449,6 +5554,25 @@
           "uuid_attribute": {
             "type": "string",
             "default": ""
+          }
+        }
+      },
+      "CreateScimTokenRequest": {
+        "type": "object",
+        "title": "CreateScimTokenRequest",
+        "required": [
+          "label"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "sso_provider": {
+            "type": "string"
+          },
+          "expiry": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -6986,6 +7110,14 @@
           },
           "is_default": {
             "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -7290,6 +7422,57 @@
             "$ref": "#/components/schemas/SshTargetPublicKeyAuth"
           }
         ]
+      },
+      "ScimTokenAndSecret": {
+        "type": "object",
+        "title": "ScimTokenAndSecret",
+        "description": "The secret is shown exactly once, here.",
+        "required": [
+          "token",
+          "secret"
+        ],
+        "properties": {
+          "token": {
+            "$ref": "#/components/schemas/ScimTokenResponse"
+          },
+          "secret": {
+            "type": "string"
+          }
+        }
+      },
+      "ScimTokenResponse": {
+        "type": "object",
+        "title": "ScimTokenResponse",
+        "required": [
+          "id",
+          "label",
+          "created"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          },
+          "sso_provider": {
+            "type": "string",
+            "description": "The SSO provider whose credential follows each provisioned user's\nprimary email, if any."
+          },
+          "created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiry": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       },
       "SecretBackend": {
         "type": "object",
@@ -8812,7 +8995,8 @@
         "required": [
           "id",
           "username",
-          "description"
+          "description",
+          "enabled"
         ],
         "properties": {
           "id": {
@@ -8841,6 +9025,22 @@
             "items": {
               "type": "string"
             }
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "A disabled account can't log in anywhere."
+          },
+          "scim_external_id": {
+            "type": "string",
+            "description": "Set when an identity provider manages this user over SCIM."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -8869,6 +9069,10 @@
             "items": {
               "type": "string"
             }
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the account may log in. Left out, the flag is unchanged."
           }
         }
       },

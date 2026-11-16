@@ -83,6 +83,20 @@ def _wait_timeout(fn, msg, timeout=60):
         raise failure[0]
 
 
+def wait_until(condition, msg, timeout=60, interval=0.5):
+    """Polls `condition` until it returns a truthy value, which is returned, or
+    `timeout` seconds pass, which raises with `msg` (a string or a callable
+    describing what the wait kept seeing)."""
+    deadline = time.monotonic() + timeout
+    while True:
+        result = condition()
+        if result:
+            return result
+        if time.monotonic() >= deadline:
+            raise Exception(msg() if callable(msg) else msg)
+        time.sleep(interval)
+
+
 def wait_port(port, recv=True, timeout=60, for_process: subprocess.Popen = None, connect_timeout=5, read_timeout=5):
     logging.debug(f"Waiting for port {port}")
     for_process = for_process or port_owners.get(port)

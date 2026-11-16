@@ -72,8 +72,8 @@ pub fn check_ip_allowed(
 
 /// Vets a user resolved from a non-interactive credential — a ticket, an API
 /// token, a Kubernetes transport credential — against the account-status checks
-/// an interactive login goes through: account lockout and the user's IP
-/// allow-list. Callers check the source IP against login protection ahead of
+/// an interactive login goes through: a disabled account, account lockout and
+/// the user's IP allow-list. Callers check the source IP against login protection ahead of
 /// their credential lookup, so that a blocked caller can't use it as an
 /// existence oracle.
 ///
@@ -84,6 +84,13 @@ pub async fn vet_credential_bearer(
     user: &User,
     remote_ip: Option<IpAddr>,
 ) -> Result<bool, WarpgateError> {
+    if !user.enabled {
+        tracing::warn!(
+            "Credential presented for a disabled user: {}",
+            user.username
+        );
+        return Ok(false);
+    }
     if login_protection
         .check_user_locked(&user.username)
         .await?
@@ -240,6 +247,21 @@ impl AuthStateStore {
             .await;
             return Err(WarpgateError::UserNotFound(username.into()));
         };
+
+        // A disabled account answers exactly like an unknown one, so the
+        // response can't tell the two apart.
+        if !user.enabled {
+            tracing::warn!("Login attempt for a disabled user: {}", user.username);
+            record_unknown_user_attempt(
+                login_protection,
+                username,
+                protocol,
+                remote_ip,
+                rate_limit_credential_type,
+            )
+            .await;
+            return Err(WarpgateError::UserNotFound(username.into()));
+        }
 
         check_ip_allowed(user.allowed_ip_ranges.as_ref(), remote_ip, username)?;
 
@@ -429,6 +451,10 @@ mod tests {
             rate_limit_bytes_per_second: None,
             ldap_server_id: None,
             allowed_ip_ranges: None,
+            enabled: true,
+            scim_external_id: None,
+            created_at: None,
+            updated_at: None,
         }
     }
 
@@ -449,6 +475,34 @@ mod tests {
 
     // Cross-node web-approval routing keys on this: an auth state is identified
     // by its session id, so the owning node resolves from `user_sessions`.
+    /// A disabled account is refused on every non-interactive path, before
+    /// lockout or IP checks get a say.
+    #[tokio::test]
+    async fn a_disabled_user_is_not_vetted() {
+        use sea_orm::Database;
+        use warpgate_db_entities::Parameters::{
+            ConfigMigrationValues, set_config_migration_values,
+        };
+
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        warpgate_db_migrations::migrate_database(&db).await.unwrap();
+        let login_protection = LoginProtectionService::new(db.clone()).await.unwrap();
+
+        let mut user = test_user();
+        assert!(
+            vet_credential_bearer(&login_protection, &user, None)
+                .await
+                .unwrap()
+        );
+        user.enabled = false;
+        assert!(
+            !vet_credential_bearer(&login_protection, &user, None)
+                .await
+                .unwrap()
+        );
+    }
+
     #[tokio::test]
     async fn create_keys_auth_state_by_session_id() {
         let mut store = AuthStateStore::without_request_recording();

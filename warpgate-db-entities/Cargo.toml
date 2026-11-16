@@ -6,6 +6,7 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
+async-trait.workspace = true
 bytes = { version = "1.4", default-features = false }
 data-encoding.workspace = true
 data-url = "0.3.2"

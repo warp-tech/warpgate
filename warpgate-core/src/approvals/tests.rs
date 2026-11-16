@@ -971,6 +971,11 @@ pub(crate) async fn seed_ticket(
         ldap_server_id: Set(None),
         ldap_object_uuid: Set(None),
         allowed_ip_ranges: Set(serde_json::Value::Null),
+        enabled: Set(true),
+        scim_external_id: Set(None),
+        scim_attributes: Set(None),
+        created_at: Set(None),
+        updated_at: Set(None),
     })
     .exec(db)
     .await
@@ -1443,6 +1448,10 @@ mod delivery {
             rate_limit_bytes_per_second: None,
             ldap_server_id: None,
             allowed_ip_ranges: None,
+            enabled: true,
+            scim_external_id: None,
+            created_at: None,
+            updated_at: None,
         }
     }
 

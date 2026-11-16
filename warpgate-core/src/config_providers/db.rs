@@ -283,6 +283,11 @@ impl DatabaseConfigProvider {
             ldap_server_id: Set(ldap_server_id),
             ldap_object_uuid: Set(ldap_object_uuid),
             allowed_ip_ranges: Set(serde_json::Value::Null),
+            enabled: Set(true),
+            scim_external_id: Set(None),
+            scim_attributes: Set(None),
+            created_at: Set(None),
+            updated_at: Set(None),
         }
         .insert(db)
         .await?;
@@ -1374,6 +1379,74 @@ mod tests {
                 .await
                 .unwrap(),
             None,
+        );
+    }
+    /// Interactive logins resolve the user through `resolve_user_and_policy`;
+    /// a disabled account answers like an unknown one.
+    #[tokio::test]
+    async fn a_disabled_user_cannot_start_an_interactive_login() {
+        use std::sync::Arc;
+
+        use warpgate_common::Protocol;
+        use warpgate_common::auth::CredentialKind;
+
+        use crate::auth_state_store::AuthStateStore;
+        use crate::login_protection::LoginProtectionService;
+
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+        // The password is irrelevant to the test (the account is disabled before any
+        // login); a generated one keeps a literal secret out of the source.
+        let password = format!("pw-{}", Uuid::new_v4());
+        user_with_password(&db, "alice", &password).await;
+        let login_protection = LoginProtectionService::new(db.clone()).await.unwrap();
+        let provider: Arc<crate::ConfigProviderEnum> =
+            Arc::new(DatabaseConfigProvider::new(&db).into());
+
+        let resolve = |provider: Arc<crate::ConfigProviderEnum>,
+                       login_protection: LoginProtectionService| async move {
+            AuthStateStore::resolve_user_and_policy(
+                &provider,
+                &login_protection,
+                "alice",
+                Protocol::Ssh,
+                &[CredentialKind::Password],
+                None,
+                None,
+            )
+            .await
+            .map(|(user, _)| user.username)
+        };
+        assert_eq!(
+            resolve(
+                provider.clone(),
+                LoginProtectionService::new(db.clone()).await.unwrap()
+            )
+            .await
+            .unwrap(),
+            "alice"
+        );
+
+        let alice = entities::User::Entity::find()
+            .filter(entities::User::Entity::username_eq_ci("alice"))
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        entities::User::ActiveModel {
+            id: Set(alice.id),
+            enabled: Set(false),
+            ..Default::default()
+        }
+        .update(&db)
+        .await
+        .unwrap();
+
+        let result = resolve(provider, login_protection).await;
+        assert!(
+            matches!(result, Err(WarpgateError::UserNotFound(_))),
+            "{result:?}"
         );
     }
 }

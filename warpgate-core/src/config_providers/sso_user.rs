@@ -1,6 +1,7 @@
 use tracing::debug;
 use warpgate_common::WarpgateError;
 use warpgate_common::auth::AuthCredential;
+use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_sso::{RoleMapping, SsoLoginResponse, SsoProviderConfig};
 
 use crate::ConfigProvider;
@@ -36,6 +37,18 @@ pub async fn resolve_and_map_sso_user<C: ConfigProvider + Send + ?Sized>(
     else {
         return Ok(None);
     };
+
+    // A disabled account is refused here, before any role mapping is applied
+    // on its behalf (the auth state would refuse it again further down).
+    let enabled = cp
+        .list_users()
+        .await?
+        .iter()
+        .any(|user| username_eq_ci(&user.username, &username) && user.enabled);
+    if !enabled {
+        tracing::warn!("SSO login for a disabled user: {username}");
+        return Ok(None);
+    }
 
     let mappings = provider_config.provider.role_mappings();
     if let Some(remote_groups) = response.access_roles.clone() {

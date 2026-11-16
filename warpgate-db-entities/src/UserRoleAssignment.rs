@@ -109,6 +109,18 @@ impl RelationTrait for Relation {
     }
 }
 
+impl Related<super::User::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::User.def()
+    }
+}
+
+impl Related<super::Role::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Role.def()
+    }
+}
+
 impl ActiveModelBehavior for ActiveModel {}
 
 #[cfg(test)]

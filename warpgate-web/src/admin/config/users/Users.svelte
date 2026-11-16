@@ -97,8 +97,28 @@
                         >
                     {/if}
                 </div>
+                {#if !user.enabled}
+                    <span class="badge bg-danger ms-auto"> Disabled </span>
+                {/if}
+                {#if user.scimExternalId}
+                    <span
+                        class="badge bg-info {user.enabled
+                            ? 'ms-auto'
+                            : 'ms-2'}"
+                        title="Provisioned by an identity provider over SCIM"
+                    >
+                        SCIM
+                    </span>
+                {/if}
                 {#if user.ldapServerId}
-                    <span class="badge bg-info ms-auto"> LDAP </span>
+                    <span
+                        class="badge bg-info {user.enabled &&
+                        !user.scimExternalId
+                            ? 'ms-auto'
+                            : 'ms-2'}"
+                    >
+                        LDAP
+                    </span>
                 {/if}
             </a>
         {/snippet}

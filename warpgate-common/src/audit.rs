@@ -9,6 +9,8 @@ use crate::helpers::logging::format_related_ids;
 pub enum CredentialChangedVia {
     Admin,
     SelfService,
+    /// Written by an identity provider over SCIM.
+    Scim,
 }
 
 impl Display for CredentialChangedVia {
@@ -16,6 +18,7 @@ impl Display for CredentialChangedVia {
         match self {
             Self::Admin => write!(f, "admin"),
             Self::SelfService => write!(f, "self-service"),
+            Self::Scim => write!(f, "scim"),
         }
     }
 }
@@ -57,6 +60,27 @@ pub enum AuditEvent {
     UserDeleted {
         user_id: Uuid,
         username: String,
+        actor_user_id: Uuid,
+    },
+    /// The account was disabled: every login path refuses it until re-enabled.
+    UserDisabled {
+        user_id: Uuid,
+        username: String,
+        actor_user_id: Uuid,
+    },
+    UserEnabled {
+        user_id: Uuid,
+        username: String,
+        actor_user_id: Uuid,
+    },
+    ScimTokenCreated {
+        token_id: Uuid,
+        label: String,
+        actor_user_id: Uuid,
+    },
+    ScimTokenDeleted {
+        token_id: Uuid,
+        label: String,
         actor_user_id: Uuid,
     },
     TargetSessionStarted {
@@ -314,6 +338,62 @@ impl AuditEvent {
                     username = %username,
                         related_users = %format_related_ids(&[*user_id, *actor_user_id]),
                     "Deleted user"
+                );
+            }
+            Self::UserDisabled {
+                user_id,
+                username,
+                actor_user_id,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "UserDisabled1",
+                    user_id = %user_id,
+                    username = %username,
+                    related_users = %format_related_ids(&[*user_id, *actor_user_id]),
+                    "Disabled user"
+                );
+            }
+            Self::UserEnabled {
+                user_id,
+                username,
+                actor_user_id,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "UserEnabled1",
+                    user_id = %user_id,
+                    username = %username,
+                    related_users = %format_related_ids(&[*user_id, *actor_user_id]),
+                    "Enabled user"
+                );
+            }
+            Self::ScimTokenCreated {
+                token_id,
+                label,
+                actor_user_id,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "ScimTokenCreated1",
+                    token_id = %token_id,
+                    label = %label,
+                    related_users = %format_related_ids(&[*actor_user_id]),
+                    "Created SCIM token"
+                );
+            }
+            Self::ScimTokenDeleted {
+                token_id,
+                label,
+                actor_user_id,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "ScimTokenDeleted1",
+                    token_id = %token_id,
+                    label = %label,
+                    related_users = %format_related_ids(&[*actor_user_id]),
+                    "Deleted SCIM token"
                 );
             }
             Self::AccessRoleGranted {

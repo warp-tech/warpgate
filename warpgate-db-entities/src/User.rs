@@ -2,10 +2,11 @@ use std::str::FromStr;
 
 use ipnet::IpNet;
 use poem_openapi::Object;
-use sea_orm::Set;
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::{Func, IntoCondition};
+use sea_orm::{ActiveValue, Set};
 use serde::Serialize;
+use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::{User, UserDetails, WarpgateError};
 
@@ -31,6 +32,17 @@ pub struct Model {
     pub ldap_object_uuid: Option<Uuid>,
     #[sea_orm(column_type = "Text", nullable)]
     pub allowed_ip_ranges: serde_json::Value,
+    /// A disabled account can't log in anywhere (SCIM `active`).
+    pub enabled: bool,
+    /// The identity provider's own id for this user (SCIM `externalId`).
+    pub scim_external_id: Option<String>,
+    /// The SCIM attributes Warpgate has no column for (name, emails, …), kept
+    /// verbatim so the provisioning client reads back what it wrote.
+    #[sea_orm(column_type = "Text", nullable)]
+    pub scim_attributes: Option<String>,
+    /// Stamped by `before_save`; `None` only for rows older than the column.
+    pub created_at: Option<OffsetDateTime>,
+    pub updated_at: Option<OffsetDateTime>,
 }
 
 impl Related<super::Role::Entity> for Entity {
@@ -143,7 +155,33 @@ impl RelationTrait for Relation {
     }
 }
 
-impl ActiveModelBehavior for ActiveModel {}
+#[async_trait::async_trait]
+impl ActiveModelBehavior for ActiveModel {
+    /// Stamps the timestamps here rather than at each writer, so no caller can
+    /// forget. An explicitly `Set` value (a database copy) is kept.
+    async fn before_save<C>(mut self, _db: &C, insert: bool) -> Result<Self, DbErr>
+    where
+        C: ConnectionTrait,
+    {
+        stamp_timestamps(&mut self.created_at, &mut self.updated_at, insert);
+        Ok(self)
+    }
+}
+
+/// Shared by the user and role entities.
+pub fn stamp_timestamps(
+    created_at: &mut ActiveValue<Option<OffsetDateTime>>,
+    updated_at: &mut ActiveValue<Option<OffsetDateTime>>,
+    insert: bool,
+) {
+    let now = OffsetDateTime::now_utc();
+    if insert && !matches!(created_at, ActiveValue::Set(Some(_))) {
+        *created_at = Set(Some(now));
+    }
+    if !matches!(updated_at, ActiveValue::Set(Some(_))) {
+        *updated_at = Set(Some(now));
+    }
+}
 
 impl Entity {
     pub fn username_eq_ci(username: &str) -> impl IntoCondition {
@@ -182,6 +220,10 @@ impl TryFrom<Model> for User {
             ldap_server_id: model.ldap_server_id,
             allowed_ip_ranges: allowed_ip_ranges
                 .map(|ranges| ranges.into_iter().map(Into::into).collect()),
+            enabled: model.enabled,
+            scim_external_id: model.scim_external_id,
+            created_at: model.created_at,
+            updated_at: model.updated_at,
         })
     }
 }

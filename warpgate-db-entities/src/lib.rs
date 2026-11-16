@@ -24,6 +24,7 @@ macro_rules! with_every_entity {
             PublicKeyCredential,
             Recording,
             Role,
+            ScimToken,
             SecretBackend,
             SessionApprovalRequest,
             SshClientKey,

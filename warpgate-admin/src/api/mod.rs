@@ -26,6 +26,7 @@ mod password_credentials;
 mod public_key_credentials;
 pub mod recordings_detail;
 mod roles;
+mod scim_tokens;
 pub mod session_approvals;
 mod sessions_detail;
 pub mod sessions_list;
@@ -92,5 +93,6 @@ pub fn get() -> impl OpenApi {
             certificate_credentials::DetailApi,
         ),
         secret_backends::Api,
+        (scim_tokens::ListApi, scim_tokens::DetailApi),
     )
 }
