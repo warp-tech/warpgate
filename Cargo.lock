@@ -9238,7 +9238,7 @@ dependencies = [
 
 [[package]]
 name = "warpgate-azure"
-version = "0.29.1"
+version = "0.30.3"
 dependencies = [
  "azure_core",
  "azure_identity",

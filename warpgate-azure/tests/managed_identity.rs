@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use tokio::io::AsyncReadExt;
 use warpgate_azure::{
-    AzureBlobConfig, AzureBlobStorage, AzureCredentials, AzureError, ManagedIdentityCredentials,
+    AzureBlobConfig, AzureBlobStorage, AzureCredentials, ManagedIdentityCredentials,
 };
 
 /// Larger than the crate's 4 MiB block so the upload has to stage more than one.
@@ -101,27 +101,16 @@ async fn a_managed_identity_can_store_serve_and_delete_a_recording() {
 
     // Straddle the block boundary: the bytes either side were staged separately.
     let offset = (4 * 1024 * 1024) - 128;
+    assert_eq!(
+        storage.len(&path).await.expect("reading the size"),
+        expected.len() as u64,
+        "the reported size must be the blob's, not one block's"
+    );
     let ranged = storage
         .get_reader_from(&path, offset as u64)
         .await
         .expect("reading from an offset");
-    assert_eq!(
-        ranged.total,
-        expected.len() as u64,
-        "the reported total must be the blob's size, not one block's"
-    );
-    assert_eq!(ranged.len, (expected.len() - offset) as u64);
-    assert_eq!(read_all(ranged.reader).await, expected[offset..]);
-
-    // The players seek past the end to discover it; that has to be a refusal
-    // carrying the size, not a transport error.
-    match storage.get_reader_from(&path, expected.len() as u64).await {
-        Err(AzureError::RangeNotSatisfiable { total }) => {
-            assert_eq!(total, expected.len() as u64);
-        }
-        Ok(_) => panic!("a range starting at the end should not be satisfiable"),
-        Err(e) => panic!("expected RangeNotSatisfiable, got {e}"),
-    }
+    assert_eq!(read_all(ranged).await, expected[offset..]);
 
     storage.delete(&path).await.expect("deleting the recording");
     assert!(

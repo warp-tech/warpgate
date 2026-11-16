@@ -1,10 +1,12 @@
 use std::io::SeekFrom;
+use std::ops::Bound;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use poem::error::{InternalServerError, NotFoundError};
+use poem::web::headers::{HeaderMapExt, Range};
 use poem::web::websocket::{Message, WebSocket, WebSocketStream};
 use poem::web::{Data, Redirect, StaticFileRequest};
 use poem::{IntoResponse, handler};
@@ -16,11 +18,9 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader};
 use tokio::sync::broadcast;
 use tracing::error;
 use uuid::Uuid;
-use warpgate_aws::AwsError;
-use warpgate_azure::AzureError;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_core::recordings::{Error as RecordingsError, LiveChunk, RecordingFile};
+use warpgate_core::recordings::{FileAccess, LiveChunk, RecordingFile};
 use warpgate_db_entities::Recording::{self, RecordingKind};
 use warpgate_db_entities::TargetSession;
 
@@ -98,7 +98,7 @@ pub async fn api_get_recording_tcpdump(
             &recording,
             RecordingFile::TcpDumpData,
             static_req,
-            req.header("Range"),
+            req.headers().typed_get(),
         )
     })
     .await
@@ -121,7 +121,7 @@ pub async fn api_get_recording_data(
             &recording,
             RecordingFile::NDJsonData,
             static_req,
-            req.header("Range"),
+            req.headers().typed_get(),
         )
     })
     .await
@@ -144,7 +144,7 @@ pub async fn api_get_recording_index(
             &recording,
             RecordingFile::Index,
             static_req,
-            req.header("Range"),
+            req.headers().typed_get(),
         )
     })
     .await
@@ -155,7 +155,7 @@ async fn serve_recording_file(
     recording: &Recording::Model,
     file: RecordingFile,
     static_req: StaticFileRequest,
-    range: Option<&str>,
+    range: Option<Range>,
 ) -> poem::Result<poem::Response> {
     let access = ctx
         .services()
@@ -176,94 +176,79 @@ async fn serve_recording_file(
             .with_content_type(file.mime_type())
             .into_response())
     } else {
-        stream_recording_file(&access, file, range).await
+        stream_recording_file(&access, file, range.as_ref()).await
     }
 }
 
-/// The start and optional inclusive end of a single byte range.
+/// The first and last byte positions the header asks for in a file of `total`
+/// bytes, or `None` when it asks for nothing the file has.
 ///
-/// Only the first range of a `Range` header is honoured: a multipart response
-/// is not something the players ask for.
-fn parse_byte_range(header: &str) -> Option<(u64, Option<u64>)> {
-    let spec = header.trim().strip_prefix("bytes=")?;
-    let (start, end) = spec.split(',').next()?.split_once('-')?;
-    let start = start.trim().parse().ok()?;
-    let end = end.trim();
-    let end = if end.is_empty() {
-        None
-    } else {
-        Some(end.parse().ok()?)
+/// Only the first range is honoured: a multipart response is not something
+/// the players ask for.
+fn resolve_range(range: &Range, total: u64) -> Option<(u64, u64)> {
+    let end_of_file = total.checked_sub(1)?;
+    let (start, end) = range.satisfiable_ranges(total).next()?;
+    let start = match start {
+        Bound::Included(start) => start,
+        Bound::Excluded(start) => start.checked_add(1)?,
+        Bound::Unbounded => 0,
     };
-    // RFC 9110 §14.1.1: a last position before the first makes the range
-    // invalid, and an invalid range is ignored rather than answered with 206.
-    if end.is_some_and(|end| end < start) {
-        return None;
-    }
-    Some((start, end))
+    let last = match end {
+        Bound::Included(end) => end.min(end_of_file),
+        Bound::Excluded(end) => end.checked_sub(1)?.min(end_of_file),
+        Bound::Unbounded => end_of_file,
+    };
+    (start <= last).then_some((start, last))
 }
 
 /// Serve a recording's bytes through Warpgate rather than redirecting.
 ///
 /// The players fetch with `Range: bytes=N-` and seek by reopening at a new
-/// offset (`rangeStream.ts`), so a backend served this way has to answer 206
-/// and 416 the way the static-file handler does for the disk backend.
+/// offset (`rangeStream.ts`), reading a 416 as the end of the recording.
 async fn stream_recording_file(
-    access: &warpgate_core::recordings::FileAccess,
+    access: &FileAccess,
     file: RecordingFile,
-    range: Option<&str>,
+    range: Option<&Range>,
 ) -> poem::Result<poem::Response> {
-    let requested = range.and_then(parse_byte_range);
-    let start = requested.map_or(0, |(start, _)| start);
+    let total = access
+        .streamed_len()
+        .await
+        .map_err(InternalServerError)?
+        .ok_or_else(|| {
+            InternalServerError(std::io::Error::other(
+                "recording file access has neither an external URL nor a local path",
+            ))
+        })?;
 
-    // A range starting at or past the end is unsatisfiable, and the player
-    // depends on the 416 to know it has reached the end of the recording. The
-    // backend reports it rather than the caller pre-checking, because finding
-    // out costs a round trip either way and only the backend knows for certain.
-    let read = match access.open_read_from(start).await {
-        Ok(read) => read,
-        Err(
-            RecordingsError::Azure(AzureError::RangeNotSatisfiable { total })
-            | RecordingsError::Aws(AwsError::RangeNotSatisfiable { total }),
-        ) => {
-            return Ok(poem::Response::builder()
-                .status(poem::http::StatusCode::RANGE_NOT_SATISFIABLE)
-                .header("content-range", format!("bytes */{total}"))
-                .header("accept-ranges", "bytes")
-                .finish());
-        }
-        Err(e) => return Err(InternalServerError(e)),
-    }
-    .ok_or_else(|| {
-        InternalServerError(std::io::Error::other(
-            "recording file access has neither an external URL nor a local path",
-        ))
-    })?;
-
-    let Some((_, end)) = requested else {
+    let Some(range) = range else {
+        let reader = access.open_read().await.map_err(InternalServerError)?;
         return Ok(poem::Response::builder()
-            .status(poem::http::StatusCode::OK)
             .content_type(file.mime_type())
             .header("accept-ranges", "bytes")
-            .header("content-length", read.total.to_string())
-            .body(poem::Body::from_async_read(read.reader)));
+            .header("content-length", total.to_string())
+            .body(poem::Body::from_async_read(reader)));
     };
 
-    // The end is inclusive on the wire; clamp it to the last byte that exists.
-    let last = end
-        .unwrap_or(read.total.saturating_sub(1))
-        .min(read.total.saturating_sub(1));
-    let len = last.saturating_sub(start) + 1;
+    let Some((start, last)) = resolve_range(range, total) else {
+        return Ok(poem::Response::builder()
+            .status(poem::http::StatusCode::RANGE_NOT_SATISFIABLE)
+            .header("content-range", format!("bytes */{total}"))
+            .header("accept-ranges", "bytes")
+            .finish());
+    };
+    let len = last - start + 1;
+    let reader = access
+        .open_read_from(start)
+        .await
+        .map_err(InternalServerError)?;
 
     Ok(poem::Response::builder()
         .status(poem::http::StatusCode::PARTIAL_CONTENT)
         .content_type(file.mime_type())
         .header("accept-ranges", "bytes")
         .header("content-length", len.to_string())
-        .header(
-            "content-range",
-            format!("bytes {start}-{last}/{}", read.total),
-        )
-        .body(poem::Body::from_async_read(read.reader.take(len))))
+        .header("content-range", format!("bytes {start}-{last}/{total}"))
+        .body(poem::Body::from_async_read(reader.take(len))))
 }
 
 /// Messages pushed to a recording live-view WebSocket, serialised with a `type`
@@ -523,34 +508,27 @@ mod tests {
 
     use super::*;
 
-    /// `bytes=N-` is what the players send (`rangeStream.ts`). Only the first
-    /// range of a set is honoured: the players never ask for multipart.
-    #[test]
-    fn a_valid_range_is_read() {
-        for (header, expected) in [
-            ("bytes=0-", (0, None)),
-            ("bytes=4096-", (4096, None)),
-            ("bytes=10-19", (10, Some(19))),
-            ("bytes=5-5", (5, Some(5))),
-            ("bytes=0-9,20-29", (0, Some(9))),
-        ] {
-            assert_eq!(parse_byte_range(header), Some(expected), "{header}");
-        }
+    fn resolve(header: &'static str, total: u64) -> Option<(u64, u64)> {
+        let mut headers = poem::http::HeaderMap::new();
+        headers.insert("range", poem::http::HeaderValue::from_static(header));
+        resolve_range(&headers.typed_get::<Range>().unwrap(), total)
     }
 
-    /// Declining means serving the whole file with 200, which RFC 9110 allows
-    /// for any range the server does not support.
     #[test]
-    fn an_unusable_range_is_declined_rather_than_guessed() {
-        for header in [
-            "items=0-9",
-            "bytes=abc-",
-            "bytes=",
-            "",
-            "bytes=9-3",
-            "bytes=-500",
+    fn ranges_resolve_against_the_file_size() {
+        for (header, total, expected) in [
+            ("bytes=0-", 10, Some((0, 9))),
+            ("bytes=4-", 10, Some((4, 9))),
+            ("bytes=2-5", 10, Some((2, 5))),
+            ("bytes=5-99", 10, Some((5, 9))),
+            ("bytes=-3", 10, Some((7, 9))),
+            ("bytes=0-1,4-5", 10, Some((0, 1))),
+            // The players open at the end of the file to learn they reached it.
+            ("bytes=10-", 10, None),
+            ("bytes=0-", 0, None),
+            ("bytes=9-3", 10, None),
         ] {
-            assert_eq!(parse_byte_range(header), None, "{header}");
+            assert_eq!(resolve(header, total), expected, "{header} of {total}");
         }
     }
 

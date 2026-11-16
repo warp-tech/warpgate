@@ -4,12 +4,12 @@ use std::time::Duration;
 use bytes::Bytes;
 use sea_orm::DatabaseConnection;
 use tokio::fs::File;
-use tokio::io::{AsyncRead, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncSeekExt, AsyncWriteExt};
 use tracing::error;
 use warpgate_aws::{S3MultipartUpload, S3Storage};
 use warpgate_azure::{AzureBlobStorage, AzureBlockUpload};
 use warpgate_common::helpers::fs::secure_file;
-use warpgate_common::{GlobalParams, RangedRead, TargetSessionId};
+use warpgate_common::{GlobalParams, TargetSessionId};
 use warpgate_db_entities::Parameters::RecordingsStorageConfig;
 use warpgate_db_entities::{Parameters, Recording};
 
@@ -20,38 +20,117 @@ const SCRATCH_SUBDIR: &str = "data/recordings-scratch";
 /// How long a presigned recording URL handed to the browser stays valid.
 const PRESIGNED_URL_TTL: Duration = Duration::from_secs(3600);
 
-enum Backend {
-    Disk,
+type Reader = Box<dyn AsyncRead + Send + Unpin>;
+
+#[derive(Clone)]
+pub enum RemoteStorage {
     S3(S3Storage),
     Azure(AzureBlobStorage),
+}
+
+impl RemoteStorage {
+    const fn serves_through_warpgate(&self) -> bool {
+        match self {
+            Self::S3(s3) => s3.serves_through_warpgate(),
+            Self::Azure(azure) => azure.serves_through_warpgate(),
+        }
+    }
+
+    async fn start_upload(&self, key: &str) -> Result<RemoteUpload> {
+        Ok(match self {
+            // Boxed to keep the SDK's future out of the layout of every
+            // session future that starts a recording.
+            Self::S3(s3) => RemoteUpload::S3(Box::pin(s3.start_multipart(key)).await?),
+            Self::Azure(azure) => RemoteUpload::Azure(azure.start_upload(key)),
+        })
+    }
+
+    async fn delete(&self, key: &str) -> Result<()> {
+        match self {
+            Self::S3(s3) => s3.delete(key).await?,
+            Self::Azure(azure) => azure.delete(key).await?,
+        }
+        Ok(())
+    }
+
+    async fn len(&self, key: &str) -> Result<u64> {
+        Ok(match self {
+            Self::S3(s3) => s3.len(key).await?,
+            Self::Azure(azure) => azure.len(key).await?,
+        })
+    }
+
+    async fn get_reader(&self, key: &str) -> Result<Reader> {
+        Ok(match self {
+            Self::S3(s3) => s3.get_reader(key).await?,
+            Self::Azure(azure) => azure.get_reader(key).await?,
+        })
+    }
+
+    async fn get_reader_from(&self, key: &str, offset: u64) -> Result<Reader> {
+        Ok(match self {
+            Self::S3(s3) => s3.get_reader_from(key, offset).await?,
+            Self::Azure(azure) => azure.get_reader_from(key, offset).await?,
+        })
+    }
+
+    async fn signed_url(&self, key: &str) -> Result<String> {
+        Ok(match self {
+            Self::S3(s3) => s3.presign_get(key, PRESIGNED_URL_TTL).await?,
+            Self::Azure(azure) => azure.sas_url(key, PRESIGNED_URL_TTL).await?,
+        })
+    }
+}
+
+pub enum RemoteUpload {
+    S3(S3MultipartUpload),
+    Azure(AzureBlockUpload),
+}
+
+impl RemoteUpload {
+    fn key(&self) -> &str {
+        match self {
+            Self::S3(upload) => upload.key(),
+            Self::Azure(upload) => upload.key(),
+        }
+    }
+
+    async fn push(&mut self, data: &[u8]) -> Result<()> {
+        match self {
+            Self::S3(upload) => upload.push(data).await?,
+            Self::Azure(upload) => upload.push(data).await?,
+        }
+        Ok(())
+    }
+
+    async fn finish(self) -> Result<()> {
+        match self {
+            Self::S3(upload) => upload.finish().await?,
+            Self::Azure(upload) => upload.finish().await?,
+        }
+        Ok(())
+    }
+}
+
+enum Backend {
+    Disk,
+    Remote(RemoteStorage),
 }
 
 /// Where a recording file lives, resolved by [`Storage::access`].
 pub enum FileAccess {
     Local(PathBuf),
-    S3 {
-        s3: S3Storage,
-        key: String,
-    },
-    Azure {
-        azure: AzureBlobStorage,
-        key: String,
-    },
+    Remote { storage: RemoteStorage, key: String },
 }
 
 /// The destination for a RawRecordingWriter
-/// On S3, the scratch file is removed once the recording is marked ended
+/// On remote storage, the scratch file is removed once the recording is marked ended
 pub enum RecordingSink {
     Disk(File),
-    S3 {
+    Remote {
         scratch: File,
         scratch_path: PathBuf,
-        upload: Option<S3MultipartUpload>,
-    },
-    Azure {
-        scratch: File,
-        scratch_path: PathBuf,
-        upload: Option<AzureBlockUpload>,
+        upload: Option<RemoteUpload>,
     },
 }
 
@@ -59,29 +138,18 @@ impl RecordingSink {
     const fn file(&mut self) -> &mut File {
         match self {
             Self::Disk(file) => file,
-            Self::S3 { scratch, .. } | Self::Azure { scratch, .. } => scratch,
+            Self::Remote { scratch, .. } => scratch,
         }
     }
 
     pub async fn write_all(&mut self, bytes: &Bytes) -> Result<()> {
         self.file().write_all(bytes).await?;
 
-        match self {
-            Self::S3 { upload, .. } => {
-                if let Some(upload) = upload
-                    && let Err(error) = upload.push(bytes).await
-                {
-                    error!(%error, path=%upload.key(), "Failed to stream recording to S3");
-                }
-            }
-            Self::Azure { upload, .. } => {
-                if let Some(upload) = upload
-                    && let Err(error) = upload.push(bytes).await
-                {
-                    error!(%error, path=%upload.key(), "Failed to stream recording to Azure");
-                }
-            }
-            Self::Disk(_) => {}
+        if let Self::Remote { upload, .. } = self
+            && let Some(upload) = upload
+            && let Err(error) = upload.push(bytes).await
+        {
+            error!(%error, path=%upload.key(), "Failed to stream recording to remote storage");
         }
 
         Ok(())
@@ -96,70 +164,65 @@ impl RecordingSink {
     pub async fn finalize(mut self) -> Result<Option<PathBuf>> {
         self.flush().await?;
 
-        match self {
-            Self::S3 {
-                upload: Some(upload),
-                scratch_path,
-                ..
-            } => {
-                upload.finish().await?;
-                Ok(Some(scratch_path))
-            }
-            Self::Azure {
-                upload: Some(upload),
-                scratch_path,
-                ..
-            } => {
-                upload.finish().await?;
-                Ok(Some(scratch_path))
-            }
-            _ => Ok(None),
+        if let Self::Remote {
+            upload,
+            scratch_path,
+            ..
+        } = self
+            && let Some(upload) = upload
+        {
+            upload.finish().await?;
+            return Ok(Some(scratch_path));
         }
+
+        Ok(None)
     }
 }
 
 impl FileAccess {
-    pub async fn open_read(&self) -> Result<Box<dyn AsyncRead + Send + Unpin>> {
+    pub async fn open_read(&self) -> Result<Reader> {
         match self {
-            Self::S3 { s3, key } => Ok(s3.get_reader(key).await?),
-            Self::Azure { azure, key } => Ok(azure.get_reader(key).await?),
-            Self::Local(path) => Ok(Box::new(tokio::fs::File::open(path).await?)),
+            Self::Remote { storage, key } => storage.get_reader(key).await,
+            Self::Local(path) => Ok(Box::new(File::open(path).await?)),
         }
     }
 
-    /// Read from `offset` to the end, reporting the file's full size.
-    ///
-    /// `Some` only where the caller is expected to serve the bytes itself: a
-    /// remote backend configured to stream through Warpgate. Disk is served by
-    /// the static-file handler and a redirecting backend by its URL, so both
-    /// answer `None`.
-    pub async fn open_read_from(&self, offset: u64) -> Result<Option<RangedRead>> {
+    /// Read from `offset`, which must be within the file, to the end.
+    pub async fn open_read_from(&self, offset: u64) -> Result<Reader> {
         match self {
-            Self::S3 { s3, key } if s3.serves_through_warpgate() => {
-                Ok(Some(s3.get_reader_from(key, offset).await?))
+            Self::Remote { storage, key } => storage.get_reader_from(key, offset).await,
+            Self::Local(path) => {
+                let mut file = File::open(path).await?;
+                file.seek(std::io::SeekFrom::Start(offset)).await?;
+                Ok(Box::new(file))
             }
-            Self::Azure { azure, key } if azure.serves_through_warpgate() => {
-                Ok(Some(azure.get_reader_from(key, offset).await?))
+        }
+    }
+
+    /// Size of a file the caller has to serve itself: one on a remote backend
+    /// that streams through Warpgate. `None` for disk, served by the
+    /// static-file handler, and for a redirecting backend, served by its URL.
+    pub async fn streamed_len(&self) -> Result<Option<u64>> {
+        match self {
+            Self::Remote { storage, key } if storage.serves_through_warpgate() => {
+                Ok(Some(storage.len(key).await?))
             }
-            Self::S3 { .. } | Self::Azure { .. } | Self::Local(_) => Ok(None),
+            _ => Ok(None),
         }
     }
 
     pub async fn external_access_url(&self) -> Result<Option<String>> {
         match self {
-            // Configured to stream through Warpgate: report no external URL so
-            // the caller serves the bytes instead of redirecting.
-            Self::S3 { s3, .. } if s3.serves_through_warpgate() => Ok(None),
-            Self::Azure { azure, .. } if azure.serves_through_warpgate() => Ok(None),
-            Self::S3 { s3, key } => Ok(Some(s3.presign_get(key, PRESIGNED_URL_TTL).await?)),
-            Self::Azure { azure, key } => Ok(Some(azure.sas_url(key, PRESIGNED_URL_TTL).await?)),
-            Self::Local(_) => Ok(None),
+            Self::Remote { storage, key } if !storage.serves_through_warpgate() => {
+                Ok(Some(storage.signed_url(key).await?))
+            }
+            _ => Ok(None),
         }
     }
 
     pub fn local_path(&self) -> Option<&Path> {
         match self {
-            Self::S3 { .. } | Self::Azure { .. } => None,
+            Self::Remote { .. } => None,
             Self::Local(path) => Some(path),
         }
     }
@@ -187,11 +250,11 @@ impl Storage {
             }
             RecordingsStorageConfig::S3(s3) => {
                 local_root.push(s3.scratch_path.as_deref().unwrap_or(SCRATCH_SUBDIR));
-                Backend::S3(S3Storage::new(&s3).await?)
+                Backend::Remote(RemoteStorage::S3(S3Storage::new(&s3).await?))
             }
             RecordingsStorageConfig::Azure(azure) => {
                 local_root.push(SCRATCH_SUBDIR);
-                Backend::Azure(AzureBlobStorage::new(&azure).await?)
+                Backend::Remote(RemoteStorage::Azure(AzureBlobStorage::new(&azure).await?))
             }
         };
 
@@ -232,15 +295,14 @@ impl Storage {
         }
 
         Ok(match &self.backend {
-            Backend::S3(s3) => RecordingSink::S3 {
+            Backend::Remote(storage) => RecordingSink::Remote {
                 scratch: local_file,
                 scratch_path: local_path,
-                upload: Some(s3.start_multipart(&relative_path(recording, file)).await?),
-            },
-            Backend::Azure(azure) => RecordingSink::Azure {
-                scratch: local_file,
-                scratch_path: local_path,
-                upload: Some(azure.start_upload(&relative_path(recording, file))),
+                upload: Some(
+                    storage
+                        .start_upload(&relative_path(recording, file))
+                        .await?,
+                ),
             },
             Backend::Disk => RecordingSink::Disk(local_file),
         })
@@ -250,12 +312,8 @@ impl Storage {
     /// recordings and the disk backend, S3 for completed recordings on S3.
     pub(crate) fn access(&self, recording: &Recording::Model, file: RecordingFile) -> FileAccess {
         match &self.backend {
-            Backend::S3(s3) if recording.ended.is_some() => FileAccess::S3 {
-                s3: s3.clone(),
-                key: relative_path(recording, file),
-            },
-            Backend::Azure(azure) if recording.ended.is_some() => FileAccess::Azure {
-                azure: azure.clone(),
+            Backend::Remote(storage) if recording.ended.is_some() => FileAccess::Remote {
+                storage: storage.clone(),
                 key: relative_path(recording, file),
             },
             _ => FileAccess::Local(local_path_in(&self.local_root, recording, file)),
@@ -280,18 +338,10 @@ impl Storage {
             format!("{session_id}/{name}"),
         ];
 
-        match &self.backend {
-            Backend::S3(s3) => {
-                for key in &keys {
-                    s3.delete(key).await?;
-                }
+        if let Backend::Remote(storage) = &self.backend {
+            for key in &keys {
+                storage.delete(key).await?;
             }
-            Backend::Azure(azure) => {
-                for key in &keys {
-                    azure.delete(key).await?;
-                }
-            }
-            Backend::Disk => {}
         }
 
         let path = self.recording_folder(session_id, name);

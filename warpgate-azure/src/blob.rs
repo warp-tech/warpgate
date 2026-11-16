@@ -19,7 +19,7 @@ use poem_openapi::{Object, Union};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::error;
-use warpgate_common::{RangedRead, StoredSecret};
+use warpgate_common::StoredSecret;
 
 use crate::AzureError;
 
@@ -84,8 +84,10 @@ pub struct WorkloadIdentityCredentials {}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Object)]
 pub struct ServicePrincipalCredentials {
     /// Directory (tenant) ID.
+    #[oai(validator(min_length = 1))]
     pub tenant_id: String,
     /// Application (client) ID.
+    #[oai(validator(min_length = 1))]
     pub client_id: String,
     /// Blank in responses; blank in an update keeps the stored secret.
     pub client_secret: StoredSecret,
@@ -124,17 +126,6 @@ impl AzureCredentials {
         }
     }
 
-    /// Whether this mode carries a secret Warpgate has to store.
-    ///
-    /// The other three resolve their credential from the environment, so there
-    /// is nothing to redact on the way out or refill on the way back in.
-    pub const fn stored_secret(&self) -> Option<&StoredSecret> {
-        match self {
-            Self::ServicePrincipal(sp) => Some(&sp.client_secret),
-            _ => None,
-        }
-    }
-
     /// The stored secret, for redacting it on the way out or restoring it on
     /// the way back in.
     pub const fn stored_secret_mut(&mut self) -> Option<&mut StoredSecret> {
@@ -150,9 +141,14 @@ impl AzureCredentials {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Object)]
 pub struct AzureBlobConfig {
     /// Storage account name, e.g. `mywarpgatestorage`.
+    #[oai(validator(pattern = "^[a-z0-9]{3,24}$"))]
     pub account: String,
+    #[oai(validator(pattern = "^[a-z0-9-]{3,63}$"))]
     pub container: String,
-    /// Custom service endpoint (sovereign clouds, emulators); `None` = public Azure.
+    /// Service endpoint for a sovereign cloud; `None` = public Azure.
+    #[oai(validator(
+        pattern = r"^https://[a-z0-9.-]+\.blob\.(core\.windows\.net|core\.usgovcloudapi\.net|core\.chinacloudapi\.cn|storage\.azure\.net)/?$"
+    ))]
     pub endpoint: Option<String>,
     /// Blob-name prefix prepended to every recording path.
     pub prefix: String,
@@ -164,14 +160,10 @@ pub struct AzureBlobConfig {
     /// the container to carry a CORS policy allowing this origin to issue Range
     /// requests, and it needs the browser to be able to reach the storage
     /// account at all, which it cannot when the account sits behind a private
-    /// endpoint. Streaming always works, so it is the default.
-    #[serde(default = "default_true")]
-    #[oai(default = "default_true")]
+    /// endpoint.
+    #[serde(default)]
+    #[oai(default)]
     pub serve_through_warpgate: bool,
-}
-
-const fn default_true() -> bool {
-    true
 }
 
 impl AzureBlobConfig {
@@ -187,6 +179,32 @@ impl AzureBlobConfig {
             .clone()
             .unwrap_or_else(|| format!("https://{}.blob.core.windows.net", self.account))
     }
+}
+
+/// Hosts that are Azure Blob Storage itself.
+///
+/// Every request carries a bearer token good for any storage account the
+/// identity can reach, so it must never go to a host of the admin's choosing.
+const BLOB_HOST_SUFFIXES: [&str; 4] = [
+    ".blob.core.windows.net",
+    ".blob.core.usgovcloudapi.net",
+    ".blob.core.chinacloudapi.cn",
+    ".blob.storage.azure.net",
+];
+
+fn checked_service_url(url: &str) -> Result<azure_core::http::Url, AzureError> {
+    let url: azure_core::http::Url = url
+        .parse()
+        .map_err(|e| AzureError::Config(format!("invalid service URL: {e}")))?;
+    let is_azure = url
+        .host_str()
+        .is_some_and(|host| BLOB_HOST_SUFFIXES.iter().any(|s| host.ends_with(s)));
+    if url.scheme() != "https" || !is_azure {
+        return Err(AzureError::Config(
+            "the endpoint must be an https Azure Blob Storage host".into(),
+        ));
+    }
+    Ok(url)
 }
 
 /// How long a fetched user-delegation key is requested for.
@@ -231,10 +249,7 @@ pub struct AzureBlobStorage {
 
 impl AzureBlobStorage {
     pub async fn new(config: &AzureBlobConfig) -> Result<Self, AzureError> {
-        let url = config
-            .service_url()
-            .parse()
-            .map_err(|e| AzureError::Config(format!("invalid service URL: {e}")))?;
+        let url = checked_service_url(&config.service_url())?;
 
         let service = BlobServiceClient::new(url, Some(config.credentials.build()?), None)?;
         let container = service.blob_container_client(&config.container);
@@ -302,24 +317,13 @@ impl AzureBlobStorage {
         Ok(Box::new(tokio_util::io::StreamReader::new(stream)))
     }
 
-    /// Stream a recording from `offset` to its end, reporting the blob's full
-    /// size so the caller can answer a Range request.
-    ///
-    /// The size is asked for separately and deliberately. The download response
-    /// cannot supply it: for a ranged or partitioned read its `content_length`
-    /// is the byte count of the FIRST response rather than of the blob, so
-    /// deriving the total from it caps every recording at one chunk. That is
-    /// silent truncation during playback, not a visible failure.
-    ///
-    /// An offset at or past the end is [`AzureError::RangeNotSatisfiable`]:
-    /// the players seek by asking for a range they cannot know is out of
-    /// bounds, and read the refusal as the end of the recording.
-    pub async fn get_reader_from(&self, path: &str, offset: u64) -> Result<RangedRead, AzureError> {
-        let total = self.len(path).await?;
-        if total > 0 && offset >= total {
-            return Err(AzureError::RangeNotSatisfiable { total });
-        }
-
+    /// Stream a recording from `offset` to its end. `offset` must be within
+    /// the blob: Azure rejects a range starting at or past the end.
+    pub async fn get_reader_from(
+        &self,
+        path: &str,
+        offset: u64,
+    ) -> Result<Box<dyn tokio::io::AsyncRead + Send + Unpin>, AzureError> {
         let options = BlobClientDownloadOptions {
             range: Some((offset..).into()),
             ..Default::default()
@@ -333,15 +337,14 @@ impl AzureBlobStorage {
         let stream = response
             .body
             .map_err(|e| std::io::Error::other(e.to_string()));
-
-        Ok(RangedRead {
-            reader: Box::new(tokio_util::io::StreamReader::new(stream)),
-            len: total - offset,
-            total,
-        })
+        Ok(Box::new(tokio_util::io::StreamReader::new(stream)))
     }
 
     /// Size of a recording in bytes.
+    ///
+    /// A download response cannot supply it: for a ranged or partitioned read
+    /// its `content_length` is the byte count of the first response, not of
+    /// the blob.
     pub async fn len(&self, path: &str) -> Result<u64, AzureError> {
         let props = self
             .container
@@ -420,6 +423,7 @@ impl AzureBlobStorage {
             key: self.blob_name(path),
             block_ids: Vec::new(),
             buffer: Vec::with_capacity(BLOCK_SIZE),
+            failed: false,
         }
     }
 }
@@ -438,6 +442,8 @@ pub struct AzureBlockUpload {
     /// them itself, so encoding here would double-encode.
     block_ids: Vec<Vec<u8>>,
     buffer: Vec<u8>,
+    /// A block was dropped: its bytes left the buffer and never reached Azure.
+    failed: bool,
 }
 
 impl AzureBlockUpload {
@@ -467,12 +473,15 @@ impl AzureBlockUpload {
         let data = std::mem::take(&mut self.buffer);
         let len = data.len() as u64;
 
-        self.client
+        if let Err(error) = self
+            .client
             .stage_block(&block_id, len, RequestContent::from(data), None)
             .await
-            .inspect_err(
-                |error| error!(%error, key = %self.key, "Failed to stage recording block"),
-            )?;
+        {
+            error!(%error, key = %self.key, "Failed to stage recording block");
+            self.failed = true;
+            return Err(error.into());
+        }
 
         self.block_ids.push(block_id);
         Ok(())
@@ -481,6 +490,9 @@ impl AzureBlockUpload {
     /// Flush whatever is buffered and commit the block list.
     pub async fn finish(mut self) -> Result<(), AzureError> {
         self.stage_block().await?;
+        if self.failed {
+            return Err(AzureError::BlockFailed { key: self.key });
+        }
 
         let list = BlockLookupList {
             latest: Some(self.block_ids),
@@ -564,35 +576,57 @@ mod tests {
         assert_eq!(block_id(7), b"00000000000000000007".to_vec());
     }
 
-    /// Only the service principal carries something Warpgate stores. The other
-    /// three resolve from the environment, so there is nothing to encrypt,
-    /// redact or refill.
+    /// A block that fails to stage takes its bytes with it, so the upload
+    /// must refuse to commit a list that skips it.
+    #[tokio::test]
+    async fn an_upload_that_lost_a_block_refuses_to_commit() {
+        let options = azure_storage_blob::BlockBlobClientOptions {
+            client_options: azure_core::http::ClientOptions {
+                retry: azure_core::http::RetryOptions::none(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        // Nothing listens on port 1, so every request fails.
+        let client = BlockBlobClient::new(
+            "http://127.0.0.1:1/container/blob".parse().unwrap(),
+            None,
+            Some(options),
+        )
+        .unwrap();
+        let mut upload = AzureBlockUpload {
+            client,
+            key: "blob".into(),
+            block_ids: Vec::new(),
+            buffer: Vec::new(),
+            failed: false,
+        };
+
+        assert!(upload.push(&vec![0; BLOCK_SIZE]).await.is_err());
+        assert!(matches!(
+            upload.finish().await,
+            Err(AzureError::BlockFailed { .. })
+        ));
+    }
+
     #[test]
-    fn only_the_service_principal_carries_a_stored_secret() {
-        assert!(
-            AzureCredentials::ManagedIdentity(ManagedIdentityCredentials::default())
-                .stored_secret()
-                .is_none()
-        );
-        assert!(
-            AzureCredentials::WorkloadIdentity(WorkloadIdentityCredentials {})
-                .stored_secret()
-                .is_none()
-        );
-        assert!(
-            AzureCredentials::DeveloperTools(DeveloperToolsCredentials {})
-                .stored_secret()
-                .is_none()
-        );
-        assert!(
-            AzureCredentials::ServicePrincipal(ServicePrincipalCredentials {
-                tenant_id: "t".into(),
-                client_id: "c".into(),
-                client_secret: "s".to_owned().into(),
-            })
-            .stored_secret()
-            .is_some()
-        );
+    fn only_azure_hosts_are_accepted_as_the_endpoint() {
+        for url in [
+            "https://acct.blob.core.windows.net",
+            "https://acct.blob.core.usgovcloudapi.net/",
+            "https://acct.z01.blob.storage.azure.net",
+        ] {
+            assert!(checked_service_url(url).is_ok(), "{url}");
+        }
+        for url in [
+            "https://evil.example.com",
+            "http://acct.blob.core.windows.net",
+            "https://acct.blob.core.windows.net.evil.example.com",
+            "https://acct.blob.core.windows.net@evil.example.com",
+            "https://evil.example.com/.blob.core.windows.net",
+        ] {
+            assert!(checked_service_url(url).is_err(), "{url}");
+        }
     }
 
     /// Pins the stored form. A round trip would still pass after a variant or

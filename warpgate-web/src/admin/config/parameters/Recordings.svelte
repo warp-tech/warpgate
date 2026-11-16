@@ -31,7 +31,7 @@
                 container: '',
                 prefix: '',
                 credentials: { mode: 'ManagedIdentity' },
-                serveThroughWarpgate: true,
+                serveThroughWarpgate: false,
             }
         } else {
             parameters.recordingsStorage = {
@@ -241,6 +241,7 @@
                             class="form-control"
                             placeholder="mywarpgatestorage"
                             required
+                            pattern="[a-z0-9]{3,24}"
                             bind:value={azure.account}
                         >
                     </FormGroup>
@@ -249,6 +250,7 @@
                             type="text"
                             class="form-control"
                             required
+                            pattern="[a-z0-9-]{3,63}"
                             bind:value={azure.container}
                         >
                     </FormGroup>
@@ -257,6 +259,7 @@
                             type="text"
                             class="form-control"
                             placeholder="https://myaccount.blob.core.windows.net"
+                            pattern="https://[a-z0-9.\-]+\.blob\.(core\.windows\.net|core\.usgovcloudapi\.net|core\.chinacloudapi\.cn|storage\.azure\.net)/?"
                             value={azure.endpoint ?? ''}
                             oninput={e =>
                                 (azure.endpoint =

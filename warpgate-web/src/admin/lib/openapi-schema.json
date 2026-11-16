@@ -5298,14 +5298,17 @@
         "properties": {
           "account": {
             "type": "string",
-            "description": "Storage account name, e.g. `mywarpgatestorage`."
+            "description": "Storage account name, e.g. `mywarpgatestorage`.",
+            "pattern": "^[a-z0-9]{3,24}$"
           },
           "container": {
-            "type": "string"
+            "type": "string",
+            "pattern": "^[a-z0-9-]{3,63}$"
           },
           "endpoint": {
             "type": "string",
-            "description": "Custom service endpoint (sovereign clouds, emulators); `None` = public Azure."
+            "description": "Service endpoint for a sovereign cloud; `None` = public Azure.",
+            "pattern": "^https://[a-z0-9.-]+\\.blob\\.(core\\.windows\\.net|core\\.usgovcloudapi\\.net|core\\.chinacloudapi\\.cn|storage\\.azure\\.net)/?$"
           },
           "prefix": {
             "type": "string",
@@ -5316,8 +5319,8 @@
           },
           "serve_through_warpgate": {
             "type": "boolean",
-            "description": "Stream recordings through Warpgate instead of redirecting the browser to\na SAS URL.\n\nRedirecting is cheaper — the bytes never touch Warpgate — but it needs\nthe container to carry a CORS policy allowing this origin to issue Range\nrequests, and it needs the browser to be able to reach the storage\naccount at all, which it cannot when the account sits behind a private\nendpoint. Streaming always works, so it is the default.",
-            "default": true
+            "description": "Stream recordings through Warpgate instead of redirecting the browser to\na SAS URL.\n\nRedirecting is cheaper — the bytes never touch Warpgate — but it needs\nthe container to carry a CORS policy allowing this origin to issue Range\nrequests, and it needs the browser to be able to reach the storage\naccount at all, which it cannot when the account sits behind a private\nendpoint.",
+            "default": false
           }
         }
       },
@@ -7850,11 +7853,13 @@
         "properties": {
           "tenant_id": {
             "type": "string",
-            "description": "Directory (tenant) ID."
+            "description": "Directory (tenant) ID.",
+            "minLength": 1
           },
           "client_id": {
             "type": "string",
-            "description": "Application (client) ID."
+            "description": "Application (client) ID.",
+            "minLength": 1
           },
           "client_secret": {
             "type": "string",

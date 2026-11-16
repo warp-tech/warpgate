@@ -69,10 +69,10 @@ impl HTTPProtocolServer {
     }
 }
 
-/// The S3 bucket origin to allow-list in the admin document CSP, or `None` when
+/// The object storage origin to allow-list in the admin document CSP, or `None` when
 /// recordings are on disk (or the config can't be read). Read live so a storage
 /// config change takes effect on the next admin page load.
-async fn recordings_s3_browser_origin(ctx: &UnauthenticatedRequestContext) -> Option<String> {
+async fn recordings_storage_browser_origin(ctx: &UnauthenticatedRequestContext) -> Option<String> {
     match ctx
         .parameters()
         .await
@@ -218,7 +218,7 @@ impl ProtocolServer for HTTPProtocolServer {
                             // via presigned URLs, so the bucket origin must be allow-listed
                             // in this document's CSP.
                             let origin = match Data::<&UnauthenticatedRequestContext>::from_request_without_body(&req).await {
-                                Ok(ctx) => recordings_s3_browser_origin(ctx.0).await,
+                                Ok(ctx) => recordings_storage_browser_origin(ctx.0).await,
                                 Err(_) => None,
                             };
                             let mut resp = ep.call(req).await?.into_response();

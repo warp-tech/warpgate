@@ -8,7 +8,7 @@ use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use poem_openapi::{Object, Union};
 use serde::{Deserialize, Serialize};
 use tracing::error;
-use warpgate_common::{RangedRead, StoredSecret};
+use warpgate_common::StoredSecret;
 
 use crate::AwsError;
 
@@ -177,46 +177,38 @@ impl S3Storage {
         Ok(Box::new(output.body.into_async_read()))
     }
 
-    /// Read from `offset` to the end, reporting the object's full size.
-    ///
-    /// The size comes from a HEAD first: S3 answers a range past the end with
-    /// a bare 416, and the caller's 416 has to state the size.
-    pub async fn get_reader_from(&self, path: &str, offset: u64) -> Result<RangedRead, AwsError> {
-        let key = self.key(path);
+    pub async fn len(&self, path: &str) -> Result<u64, AwsError> {
         let head = self
             .client
             .head_object()
             .bucket(&self.bucket)
-            .key(&key)
+            .key(self.key(path))
             .send()
             .await
             .map_err(AwsError::sdk_error)?;
-        let total = head.content_length().map_or(0, |len| len.max(0) as u64);
-        if offset >= total {
-            if total == 0 && offset == 0 {
-                return Ok(RangedRead {
-                    reader: Box::new(tokio::io::empty()),
-                    len: 0,
-                    total: 0,
-                });
-            }
-            return Err(AwsError::RangeNotSatisfiable { total });
-        }
+        Ok(head
+            .content_length()
+            .and_then(|len| u64::try_from(len).ok())
+            .unwrap_or(0))
+    }
 
+    /// Read from `offset` to the end. `offset` must be within the object: S3
+    /// rejects a range starting at or past the end.
+    pub async fn get_reader_from(
+        &self,
+        path: &str,
+        offset: u64,
+    ) -> Result<Box<dyn tokio::io::AsyncRead + Send + Unpin>, AwsError> {
         let output = self
             .client
             .get_object()
             .bucket(&self.bucket)
-            .key(&key)
+            .key(self.key(path))
             .range(format!("bytes={offset}-"))
             .send()
             .await
             .map_err(AwsError::sdk_error)?;
-        Ok(RangedRead {
-            reader: Box::new(output.body.into_async_read()),
-            len: total - offset,
-            total,
-        })
+        Ok(Box::new(output.body.into_async_read()))
     }
 
     /// Presigned GET URL the browser can fetch directly (supports `Range`).
