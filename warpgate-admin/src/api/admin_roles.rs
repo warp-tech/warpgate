@@ -42,6 +42,8 @@ struct AdminRoleDataRequest {
     admin_roles_manage: bool,
 
     ticket_requests_manage: bool,
+
+    shell_commands_view: bool,
 }
 
 #[derive(ApiResponse)]
@@ -130,6 +132,14 @@ impl ListApi {
     ) -> Result<CreateAdminRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AdminRolesManage)?;
 
+        // The built-in role is provisioned by setup; a second row with its name
+        // would make anything keyed on that name ambiguous.
+        if body.name == BUILTIN_ADMIN_ROLE_NAME {
+            return Err(WarpgateError::InvalidRequest(
+                "reserved admin role name".into(),
+            ));
+        }
+
         let db = &admin.services().db;
         let values = AdminRole::ActiveModel {
             id: Set(Uuid::new_v4()),
@@ -154,6 +164,7 @@ impl ListApi {
             config_edit: Set(body.config_edit),
             admin_roles_manage: Set(body.admin_roles_manage),
             ticket_requests_manage: Set(body.ticket_requests_manage),
+            shell_commands_view: Set(body.shell_commands_view),
         };
 
         let role = values.insert(db).await?;
@@ -202,6 +213,16 @@ impl DetailApi {
             return Ok(UpdateAdminRoleResponse::NotFound);
         };
 
+        // No renaming the built-in role, and no renaming another role onto its
+        // name: both would break anything keyed on that name.
+        if body.name != role.name
+            && (role.name == BUILTIN_ADMIN_ROLE_NAME || body.name == BUILTIN_ADMIN_ROLE_NAME)
+        {
+            return Err(WarpgateError::InvalidRequest(
+                "cannot rename the built-in admin role or rename a role to it".into(),
+            ));
+        }
+
         let mut model: AdminRole::ActiveModel = role.into();
         model.name = Set(body.name.clone());
         model.description = Set(body.description.clone().unwrap_or_default());
@@ -224,6 +245,7 @@ impl DetailApi {
         model.config_edit = Set(body.config_edit);
         model.admin_roles_manage = Set(body.admin_roles_manage);
         model.ticket_requests_manage = Set(body.ticket_requests_manage);
+        model.shell_commands_view = Set(body.shell_commands_view);
         let role = model.update(db).await?;
         Ok(UpdateAdminRoleResponse::Ok(Json(role.into())))
     }

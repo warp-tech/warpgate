@@ -3,6 +3,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, OnceLock};
 
 use bytes::Bytes;
+use sea_orm::DatabaseConnection;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, oneshot};
 use tokio_util::sync::CancellationToken;
@@ -13,8 +14,9 @@ use warpgate_core::WarpgateServerHandle;
 use warpgate_core::recordings::{SessionRecordings, TerminalRecorder};
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_protocol_ssh::{
-    ChannelAudit, ChannelOperation, PtyRequest, RCCommand, RCCommandReply, SshClientError,
-    SshRecordingMetadata,
+    ChannelAudit, ChannelOperation, CommandRecordContext, PtyRequest, RCCommand, RCCommandReply,
+    SshClientError, SshRecordingMetadata, TargetNameHandle, new_target_name_handle,
+    stamp_target_name,
 };
 use warpgate_web_clients_common::{ManagedSession, Sheddable, WebSession};
 
@@ -45,6 +47,14 @@ pub struct WebSshSession {
     recordings: Arc<SessionRecordings>,
     channel_audits: Arc<Mutex<HashMap<Uuid, ChannelAudit>>>,
     pending_host_key: Arc<Mutex<Option<PendingHostKey>>>,
+    db: DatabaseConnection,
+    /// The authenticated username, recorded with detected shell commands.
+    username: Option<String>,
+    /// The target the session is bound to, shared with the command detector.
+    /// A web-SSH session only exists for an already-authorized target, so the
+    /// name is stamped at construction; it is a handle (not a copied value)
+    /// for symmetry with the SSH protocol's re-stamping.
+    target_name: TargetNameHandle,
 }
 
 impl WebSshSession {
@@ -58,7 +68,11 @@ impl WebSshSession {
         cancel: CancellationToken,
         command_tx: UnboundedSender<(RCCommand, Option<RCCommandReply>)>,
         recordings: Arc<SessionRecordings>,
+        db: DatabaseConnection,
+        username: Option<String>,
     ) -> Self {
+        let target_name_handle = new_target_name_handle();
+        stamp_target_name(&target_name_handle, target_name.clone());
         Self {
             core: WebSession::new(
                 id,
@@ -76,6 +90,9 @@ impl WebSshSession {
             recordings,
             channel_audits: Arc::new(Mutex::new(HashMap::new())),
             pending_host_key: Arc::new(Mutex::new(None)),
+            db,
+            username,
+            target_name: target_name_handle,
         }
     }
 
@@ -145,7 +162,13 @@ impl WebSshSession {
         let pty_request = make_pty_request(cols, rows);
         let mut audit = ChannelAudit::new(channel_id);
         let (cols, rows) = pty_request.screen_size();
-        audit.start_command_detection(cols, rows);
+        let command_context = CommandRecordContext {
+            db: self.db.clone(),
+            user_session_id: self.id().0,
+            username: self.username.clone(),
+            target_name: self.target_name.clone(),
+        };
+        audit.start_command_detection(cols, rows, Some(command_context));
         if let Some(recorder) = self.start_recording(target_session_id, channel_id).await {
             audit.set_recorder(recorder);
         }

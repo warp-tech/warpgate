@@ -10,6 +10,7 @@ macro_rules! with_every_entity {
             ApiToken,
             CertificateCredential,
             CertificateRevocation,
+            Command,
             FailedLoginAttempt,
             HttpSession,
             IpBlock,

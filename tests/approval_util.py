@@ -37,6 +37,7 @@ NO_ADMIN_PERMISSIONS = dict(
     config_edit=False,
     admin_roles_manage=False,
     ticket_requests_manage=False,
+    shell_commands_view=False,
 )
 
 

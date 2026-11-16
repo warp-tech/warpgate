@@ -83,6 +83,7 @@ pub struct AdminPermissions {
     config_edit: bool,
     admin_roles_manage: bool,
     ticket_requests_manage: bool,
+    shell_commands_view: bool,
 }
 
 impl From<AdminPermissionSet> for AdminPermissions {
@@ -107,6 +108,7 @@ impl From<AdminPermissionSet> for AdminPermissions {
             config_edit: set.contains(AdminPermission::ConfigEdit),
             admin_roles_manage: set.contains(AdminPermission::AdminRolesManage),
             ticket_requests_manage: set.contains(AdminPermission::TicketRequestsManage),
+            shell_commands_view: set.contains(AdminPermission::ShellCommandsView),
         }
     }
 }

@@ -75,6 +75,8 @@ impl WebSshClientManager {
             cancel,
             command_tx,
             services.recordings.clone(),
+            services.db.clone(),
+            Some(username.clone()),
         ));
         session.forward_cancellation(abort_tx);
 

@@ -79,6 +79,7 @@ def make_limited_admin_role_payload(**overrides):
         "config_edit": False,
         "admin_roles_manage": False,
         "ticket_requests_manage": False,
+        "shell_commands_view": False,
         **overrides,
     }
 
@@ -144,6 +145,16 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         permission="recordings_view",
         call=lambda api, r: api.get_recording_with_http_info(r["recording_id"]),
         expected_statuses={200, 404},
+    ),
+    AdminApiTestCase(
+        id="get_commands",
+        permission="shell_commands_view",
+        # A non-empty search is what actually exercises the filter - an empty one
+        # is skipped, so the case would pass without ever running the LIKE query
+        call=lambda api, r: api.get_commands_with_http_info(
+            sdk.GetCommandsRequest(search="test")
+        ),
+        expected_statuses={200},
     ),
     AdminApiTestCase(
         id="get_roles",

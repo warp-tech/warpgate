@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.30.0-modified"
+    "version": "v0.30.3-commands-3-g70ffc264"
   },
   "servers": [
     {
@@ -4400,6 +4400,41 @@
         "operationId": "reject_session"
       }
     },
+    "/commands": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/GetCommandsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_CommandEntry"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_commands"
+      }
+    },
     "/users/{user_id}/credentials/certificates": {
       "get": {
         "parameters": [
@@ -5056,7 +5091,8 @@
           "tickets_delete",
           "config_edit",
           "admin_roles_manage",
-          "ticket_requests_manage"
+          "ticket_requests_manage",
+          "shell_commands_view"
         ],
         "properties": {
           "id": {
@@ -5125,6 +5161,9 @@
           },
           "ticket_requests_manage": {
             "type": "boolean"
+          },
+          "shell_commands_view": {
+            "type": "boolean"
           }
         }
       },
@@ -5151,7 +5190,8 @@
           "tickets_delete",
           "config_edit",
           "admin_roles_manage",
-          "ticket_requests_manage"
+          "ticket_requests_manage",
+          "shell_commands_view"
         ],
         "properties": {
           "name": {
@@ -5215,6 +5255,9 @@
             "type": "boolean"
           },
           "ticket_requests_manage": {
+            "type": "boolean"
+          },
+          "shell_commands_view": {
             "type": "boolean"
           }
         }
@@ -5371,6 +5414,39 @@
           },
           "remote_key_base64": {
             "type": "string"
+          }
+        }
+      },
+      "CommandEntry": {
+        "type": "object",
+        "title": "CommandEntry",
+        "required": [
+          "id",
+          "timestamp",
+          "command",
+          "user_session_id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "username": {
+            "type": "string"
+          },
+          "target_name": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "user_session_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -5713,6 +5789,23 @@
           },
           "kind": {
             "$ref": "#/components/schemas/SSHClientKeyKind"
+          }
+        }
+      },
+      "GetCommandsRequest": {
+        "type": "object",
+        "title": "GetCommandsRequest",
+        "properties": {
+          "search": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "limit": {
+            "type": "integer",
+            "format": "uint64"
           }
         }
       },
@@ -6282,6 +6375,31 @@
           "ForcedOn",
           "ForcedOff"
         ]
+      },
+      "PaginatedResponse_CommandEntry": {
+        "type": "object",
+        "title": "PaginatedResponse_CommandEntry",
+        "required": [
+          "items",
+          "offset",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CommandEntry"
+            }
+          },
+          "offset": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "total": {
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
       },
       "PaginatedResponse_UserSessionSnapshot": {
         "type": "object",
