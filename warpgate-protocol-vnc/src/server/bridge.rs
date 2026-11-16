@@ -49,7 +49,7 @@ pub(super) async fn wait_for_backend_size(
         record_event(recorder, &event).await;
         match event {
             DesktopEvent::Resize { width, height } => return Ok((width, height)),
-            DesktopEvent::Error(message) => bail!("backend error before first frame: {message}"),
+            DesktopEvent::Error(error) => bail!("backend error before first frame: {error}"),
             DesktopEvent::State(DesktopState::Disconnected) => {
                 bail!("backend disconnected before first frame")
             }
@@ -198,7 +198,7 @@ pub(super) async fn run_proxy_session(session: ProxySession) -> Result<()> {
                                 }
                             }
                             DesktopEvent::State(DesktopState::Disconnected) => break Ok(()),
-                            DesktopEvent::Error(message) => break Err(anyhow!("backend error: {message}")),
+                            DesktopEvent::Error(error) => break Err(anyhow!("backend error: {error}")),
                             // PROXY_ENCODINGS rules out CopyRect/Cursor; Bell/Cursor ignored.
                             _ => {}
                         }
