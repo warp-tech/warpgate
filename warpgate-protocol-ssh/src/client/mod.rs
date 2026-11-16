@@ -29,7 +29,7 @@ use tracing::*;
 use uuid::Uuid;
 use warpgate_aws::AwsError;
 use warpgate_common::{
-    SSHTargetAuth, TargetOptionsVariant, TargetSSHOptions, UserFacingReason, UserSessionId,
+    SSHTargetAuth, Secret, TargetOptionsVariant, TargetSSHOptions, UserFacingReason, UserSessionId,
     WarpgateError, io_connect_reason,
 };
 use warpgate_core::{AdmittedTarget, ConfigProvider, Services};
@@ -294,7 +294,13 @@ enum ChannelOpen {
 
 #[derive(Clone, Debug)]
 pub enum RCCommand {
-    Connect(Vec<TargetSSHOptions>),
+    /// Connects through `chain`. `interactive_password` is the password the
+    /// user typed for a last hop whose auth is [`SSHTargetAuth::Interactive`];
+    /// it lives only in memory for this connection and is never stored.
+    Connect {
+        chain: Vec<TargetSSHOptions>,
+        interactive_password: Option<Secret<String>>,
+    },
     /// Connects as far as the last hop's host key, reports it and stops before
     /// authenticating to that hop. Jump hosts before it are still
     /// authenticated, and `requested_by` names who asked in the key ID of a
@@ -626,9 +632,16 @@ impl RemoteClient {
         reply: &mut Option<RCCommandReply>,
     ) -> Result<bool, SshClientError> {
         match cmd {
-            RCCommand::Connect(chain) => {
+            RCCommand::Connect {
+                chain,
+                interactive_password,
+            } => {
                 let connector = self.connector(None);
-                self.spawn_connection(async move { connector.connect_chain(chain, false).await });
+                self.spawn_connection(async move {
+                    connector
+                        .connect_chain(chain, false, interactive_password)
+                        .await
+                });
             }
             RCCommand::CheckHostKey {
                 chain,
@@ -638,7 +651,10 @@ impl RemoteClient {
                 // A check never hands over a connection, even one that came up
                 // without the last hop reporting its key.
                 self.spawn_connection(async move {
-                    connector.connect_chain(chain, true).await.map(|_| None)
+                    connector
+                        .connect_chain(chain, true, None)
+                        .await
+                        .map(|_| None)
                 });
             }
             RCCommand::Channel(ch, op) => {
@@ -828,10 +844,13 @@ impl Connector {
     ///
     /// With `stop_at_last_host_key`, the walk ends once the last hop has shown
     /// its host key, before anything is authenticated to it, and returns `None`.
+    ///
+    /// `interactive_password` is only ever offered to the last hop.
     async fn connect_chain(
         &self,
         chain: Vec<TargetSSHOptions>,
         stop_at_last_host_key: bool,
+        interactive_password: Option<Secret<String>>,
     ) -> Result<Option<Connection>, ConnectionError> {
         let last = chain.len().saturating_sub(1);
         let mut hops = chain.into_iter().enumerate();
@@ -863,6 +882,7 @@ impl Connector {
                 event_rx,
                 handshake_timeout,
                 stop_at_last_host_key && last == 0,
+                interactive_password.as_ref().filter(|_| last == 0),
             )
             .boxed()
             .await?
@@ -905,6 +925,7 @@ impl Connector {
                     event_rx,
                     handshake_timeout,
                     stop_at_last_host_key && index == last,
+                    interactive_password.as_ref().filter(|_| index == last),
                 )
                 .boxed()
                 .await?
@@ -925,6 +946,7 @@ impl Connector {
         mut event_rx: UnboundedReceiver<ClientHandlerEvent>,
         handshake_timeout: Duration,
         stop_after_host_key: bool,
+        interactive_password: Option<&Secret<String>>,
     ) -> Result<
         Option<(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>)>,
         ConnectionError,
@@ -981,7 +1003,8 @@ impl Connector {
                         &ssh_options.host,
                         &ssh_options.username,
                         &ssh_options.auth,
-                        ssh_options.allow_insecure_algos
+                        ssh_options.allow_insecure_algos,
+                        interactive_password,
                     ).await?;
 
                     return Ok(Some((session, event_rx)));
@@ -1022,6 +1045,7 @@ impl Connector {
         username: &str,
         auth: &SSHTargetAuth,
         allow_insecure_algos: bool,
+        interactive_password: Option<&Secret<String>>,
     ) -> Result<(), ConnectionError> {
         let mut auth_result = false;
         let mut auth_error_msg: Option<String> = None;
@@ -1043,6 +1067,32 @@ impl Connector {
                 } else {
                     auth_error_msg =
                         Some("Password authentication was rejected by the SSH target".to_string());
+                }
+            }
+            SSHTargetAuth::Interactive(_) => {
+                // The session collects the password from the user before it
+                // dials; a jump host, the web client or the target menu has
+                // no way to, and arrives here without one.
+                if let Some(password) = interactive_password {
+                    let response = session
+                        .authenticate_password(username.to_string(), password.expose_secret())
+                        .await?;
+                    auth_result = self
+                        .answer_with_password(session, username, response, password)
+                        .await?;
+                    if auth_result {
+                        debug!(
+                            username = username,
+                            "Authenticated with user-supplied password"
+                        );
+                    } else {
+                        auth_error_msg =
+                            Some("The SSH target rejected the password you entered".to_string());
+                    }
+                } else {
+                    auth_error_msg = Some(
+                        "This target asks for your credentials, which can only be entered when connecting directly as user:target@warpgate".to_string(),
+                    );
                 }
             }
             SSHTargetAuth::PublicKey(auth) => {
@@ -1203,6 +1253,59 @@ impl Connector {
 
         Ok(())
     }
+
+    /// Like [`Self::_handle_auth_result`], but answers a keyboard-interactive
+    /// password prompt with `password` instead of empty responses. Targets
+    /// that authenticate through PAM often offer only keyboard-interactive.
+    ///
+    /// Only a single round of hidden prompts is answered: a further challenge
+    /// (say, the target's own OTP) is something Warpgate cannot answer.
+    async fn answer_with_password(
+        &self,
+        session: &mut Handle<ClientHandler>,
+        username: &str,
+        result: AuthResult,
+        password: &Secret<String>,
+    ) -> Result<bool, ConnectionError> {
+        let AuthResult::Failure {
+            remaining_methods, ..
+        } = result
+        else {
+            return Ok(true);
+        };
+        if !remaining_methods
+            .iter()
+            .any(|m| matches!(m, MethodKind::KeyboardInteractive))
+        {
+            return Ok(false);
+        }
+
+        let mut answered = false;
+        let mut response = session
+            .authenticate_keyboard_interactive_start(username.to_string(), None)
+            .await?;
+        loop {
+            match response {
+                KeyboardInteractiveAuthResponse::Success => return Ok(true),
+                KeyboardInteractiveAuthResponse::Failure { .. } => return Ok(false),
+                KeyboardInteractiveAuthResponse::InfoRequest { prompts, .. } => {
+                    let answers = if prompts.is_empty() {
+                        vec![]
+                    } else if answered || prompts.iter().any(|p| p.echo) {
+                        debug!("Target asked for more than a password via keyboard-interactive");
+                        return Ok(false);
+                    } else {
+                        answered = true;
+                        vec![password.expose_secret().clone(); prompts.len()]
+                    };
+                    response = session
+                        .authenticate_keyboard_interactive_respond(answers)
+                        .await?;
+                }
+            }
+        }
+    }
+
     /// If presented with an additional keyboard-interactive challenge it will respond with empty
     /// strings. This ensures optional 2fa is respected, where this extra challenge always happens.
     ///

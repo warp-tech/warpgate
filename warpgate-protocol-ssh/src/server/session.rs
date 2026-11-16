@@ -27,8 +27,8 @@ use warpgate_common::auth::{
 use warpgate_common::eventhub::{EventHub, EventSender};
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{
-    Secret, TargetOptions, TargetSSHOptions, TargetSessionId, UserFacingReason, UserSessionId,
-    WarpgateError,
+    SSHTargetAuth, Secret, TargetOptions, TargetSSHOptions, TargetSessionId, UserFacingReason,
+    UserSessionId, WarpgateError,
 };
 use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::approvals::{GateOutcome, GatedConnection};
@@ -101,6 +101,23 @@ pub enum Event {
     AdminApprovalResolved {
         approved: Option<ApprovedTarget<TargetSSHOptions>>,
     },
+}
+
+/// Collecting the target's own password from the user, for a target whose
+/// SSH auth is [`SSHTargetAuth::Interactive`]. Runs as one extra
+/// keyboard-interactive round after Warpgate has fully accepted the user.
+enum CredentialPassthrough {
+    NotNeeded,
+    /// Warpgate accepted the user; their target password is still owed.
+    Pending {
+        /// The SSH username Warpgate accepted. The password round must come
+        /// under the same one, or it could ride on someone else's login.
+        ssh_username: String,
+        target_username: String,
+        prompt_sent: bool,
+    },
+    /// Held in memory only, until it is handed to the target connection.
+    Collected(Secret<String>),
 }
 
 struct PendingKeyboardInteractiveAuth {
@@ -179,6 +196,7 @@ pub struct ServerSession {
     /// A disconnect event used for the approval waiter
     disconnect_token: CancellationToken,
     keyboard_interactive_state: Option<PendingKeyboardInteractiveAuth>,
+    credential_passthrough: CredentialPassthrough,
     cached_successful_ticket_auth: Option<CachedSuccessfulTicketAuth>,
     allowed_auth_methods: MethodSet,
     /// Track the state of a client snooping around pre-auth
@@ -304,6 +322,7 @@ impl ServerSession {
             auth_state: None,
             disconnect_token: CancellationToken::new(),
             keyboard_interactive_state: None,
+            credential_passthrough: CredentialPassthrough::NotNeeded,
             cached_successful_ticket_auth: None,
             allowed_auth_methods: get_allowed_auth_methods(services).await?,
             probe: ProbeState::NoAttempt,
@@ -732,10 +751,21 @@ impl ServerSession {
         let ssh_chain = resolve_approved_ssh_chain(&self.services, admitted).await?;
 
         let visual_chain = self.make_visual_connection_chain(&ssh_chain[..]).await?;
+        let chain: Vec<_> = ssh_chain.into_iter().map(|x| x.ssh_options).collect();
+        // The client offers this only to a last hop whose freshly resolved
+        // auth is still interactive.
+        let interactive_password = match std::mem::replace(
+            &mut self.credential_passthrough,
+            CredentialPassthrough::NotNeeded,
+        ) {
+            CredentialPassthrough::Collected(password) => Some(password),
+            _ => None,
+        };
         self.rc_state = RCState::Connecting;
-        self.send_command(RCCommand::Connect(
-            ssh_chain.into_iter().map(|x| x.ssh_options).collect(),
-        ))
+        self.send_command(RCCommand::Connect {
+            chain,
+            interactive_password,
+        })
         .map_err(|_| anyhow::anyhow!("cannot send command"))?;
         self.emit_pty_output(b"\r\n")?;
         self.service_output.start_progress(visual_chain).await;
@@ -2115,7 +2145,7 @@ impl ServerSession {
                 {
                     warn!(?err, "Failed to update last_used for public key");
                 }
-                russh::server::Auth::Accept
+                self.accept_or_ask_target_credentials(&ssh_username)
             }
             Ok(AuthResult::Rejected) => {
                 reject_with_allowed_auth_methods(self.allowed_auth_methods.clone())
@@ -2156,7 +2186,7 @@ impl ServerSession {
             .await;
 
         match result {
-            Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
+            Ok(AuthResult::Accepted { .. }) => self.accept_or_ask_target_credentials(&ssh_username),
             Ok(AuthResult::Rejected) => russh::server::Auth::reject(),
             Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
                 proceed_with_methods: Some(self.get_remaining_auth_methods(kinds)),
@@ -2181,6 +2211,14 @@ impl ServerSession {
         info!("Keyboard-interactive auth as {:?}", selector);
         self.note_probe(&selector, "keyboard_interactive");
 
+        // Warpgate already accepted this user and offered keyboard-interactive
+        // for the target password itself, whether or not it is advertised for
+        // logging in.
+        if let Some(reply) = self.continue_credential_passthrough(&ssh_username, responses.clone())
+        {
+            return Ok(reply);
+        }
+
         if !self
             .allowed_auth_methods
             .contains(&MethodKind::KeyboardInteractive)
@@ -2201,7 +2239,15 @@ impl ServerSession {
             keyboard_interactive_state.and_then(|s| s.web_approval_retry_count);
 
         Ok(match self.try_auth_lazy(&selector, maybe_otp_cred).await {
-            Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
+            Ok(AuthResult::Accepted { .. }) => {
+                if self.begin_credential_passthrough(&ssh_username) {
+                    // Already inside keyboard-interactive: prompt right away.
+                    self.continue_credential_passthrough(&ssh_username, vec![])
+                        .unwrap_or_else(russh::server::Auth::reject)
+                } else {
+                    russh::server::Auth::Accept
+                }
+            }
             Ok(AuthResult::Rejected) => russh::server::Auth::reject(),
             Ok(AuthResult::Need(kinds)) => {
                 let mut auth_name = "Warpgate authentication".to_string();
@@ -2288,6 +2334,104 @@ impl ServerSession {
                 }
             }
         })
+    }
+
+    /// The username to log in to the selected target with, if its credentials
+    /// are to be asked from the user.
+    fn interactive_target_username(&self) -> Option<String> {
+        let options = match &self.target {
+            TargetSelection::Found(admitted) => admitted.options(),
+            TargetSelection::PendingApproval(authorization) => authorization.options(),
+            _ => return None,
+        };
+        if !matches!(options.auth, SSHTargetAuth::Interactive(_)) {
+            return None;
+        }
+        // Same substitution as `resolve_ssh_chain` makes when dialing.
+        if options.username.is_empty() {
+            Some(self.user_info.as_ref()?.username.clone())
+        } else {
+            Some(options.username.clone())
+        }
+    }
+
+    /// Called once Warpgate has accepted the user. Returns whether the
+    /// target's password must still be asked for.
+    fn begin_credential_passthrough(&mut self, ssh_username: &Secret<String>) -> bool {
+        match self.credential_passthrough {
+            CredentialPassthrough::Collected(_) => false,
+            CredentialPassthrough::Pending { .. } => true,
+            CredentialPassthrough::NotNeeded => {
+                let Some(target_username) = self.interactive_target_username() else {
+                    return false;
+                };
+                self.credential_passthrough = CredentialPassthrough::Pending {
+                    ssh_username: ssh_username.expose_secret().clone(),
+                    target_username,
+                    prompt_sent: false,
+                };
+                true
+            }
+        }
+    }
+
+    /// For a non-interactive method Warpgate accepted: either finish, or
+    /// report partial success and send the client on to keyboard-interactive
+    /// for the target password.
+    fn accept_or_ask_target_credentials(
+        &mut self,
+        ssh_username: &Secret<String>,
+    ) -> russh::server::Auth {
+        if !self.begin_credential_passthrough(ssh_username) {
+            return russh::server::Auth::Accept;
+        }
+        let mut methods = MethodSet::empty();
+        methods.push(MethodKind::KeyboardInteractive);
+        russh::server::Auth::Reject {
+            proceed_with_methods: Some(methods),
+            partial_success: true,
+        }
+    }
+
+    /// Drives the target password round; `None` when there is none pending.
+    fn continue_credential_passthrough(
+        &mut self,
+        ssh_username: &Secret<String>,
+        responses: Vec<Secret<String>>,
+    ) -> Option<russh::server::Auth> {
+        let CredentialPassthrough::Pending {
+            ssh_username: accepted_username,
+            target_username,
+            prompt_sent,
+        } = &mut self.credential_passthrough
+        else {
+            return None;
+        };
+
+        if ssh_username.expose_secret() != accepted_username {
+            warn!("Client changed its username while being asked for target credentials");
+            return Some(russh::server::Auth::Reject {
+                proceed_with_methods: None,
+                partial_success: false,
+            });
+        }
+
+        if !*prompt_sent {
+            *prompt_sent = true;
+            let prompt = format!("Password for {target_username} on the target: ");
+            return Some(russh::server::Auth::Partial {
+                name: "Target credentials".into(),
+                instructions:
+                    "This target uses your own credentials; Warpgate does not store them.\n".into(),
+                prompts: vec![(prompt.into(), false)].into(),
+            });
+        }
+
+        let Some(password) = responses.into_iter().next() else {
+            return Some(russh::server::Auth::reject());
+        };
+        self.credential_passthrough = CredentialPassthrough::Collected(password);
+        Some(russh::server::Auth::Accept)
     }
 
     fn get_remaining_auth_methods(&self, kinds: HashSet<CredentialKind>) -> MethodSet {

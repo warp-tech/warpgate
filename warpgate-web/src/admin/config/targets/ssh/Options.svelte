@@ -157,6 +157,9 @@
         <select bind:value={options.auth.kind} class="form-control">
             <option value="PublicKey">Warpgate's own private keys</option>
             <option value="Password">Password</option>
+            <option value="Interactive">
+                Ask the user for the password when connecting
+            </option>
             {#if hasSecretBackends || options.auth.kind === 'Certificate'}
                 <option value="Certificate">
                     Certificate signed by a secret backend's SSH CA
@@ -202,6 +205,15 @@
         </div>
     {/if}
 </div>
+
+{#if options.auth.kind === 'Interactive'}
+    <Alert color="info">
+        Nothing is stored: after logging in to Warpgate, users are asked for
+        their password on this target, which is used once to connect. Users
+        must connect directly as <code>user:target@warpgate</code> — the
+        target menu, the web SSH client and jump hosts cannot ask for it.
+    </Alert>
+{/if}
 
 {#if options.auth.kind === 'Certificate'}
     <CertificateOptions bind:auth={options.auth} />

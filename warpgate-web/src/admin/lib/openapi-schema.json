@@ -7191,6 +7191,9 @@
           },
           {
             "$ref": "#/components/schemas/SSHTargetAuth_SshTargetIamRoleAuth"
+          },
+          {
+            "$ref": "#/components/schemas/SSHTargetAuth_SshTargetInteractiveAuth"
           }
         ],
         "discriminator": {
@@ -7199,7 +7202,8 @@
             "Password": "#/components/schemas/SSHTargetAuth_SshTargetPasswordAuth",
             "PublicKey": "#/components/schemas/SSHTargetAuth_SshTargetPublicKeyAuth",
             "Certificate": "#/components/schemas/SSHTargetAuth_SshTargetCertificateAuth",
-            "IamRole": "#/components/schemas/SSHTargetAuth_SshTargetIamRoleAuth"
+            "IamRole": "#/components/schemas/SSHTargetAuth_SshTargetIamRoleAuth",
+            "Interactive": "#/components/schemas/SSHTargetAuth_SshTargetInteractiveAuth"
           }
         }
       },
@@ -7244,6 +7248,28 @@
           },
           {
             "$ref": "#/components/schemas/SshTargetIamRoleAuth"
+          }
+        ]
+      },
+      "SSHTargetAuth_SshTargetInteractiveAuth": {
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Interactive"
+                ],
+                "example": "Interactive"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/SshTargetInteractiveAuth"
           }
         ]
       },
@@ -7749,6 +7775,11 @@
       "SshTargetIamRoleAuth": {
         "type": "object",
         "title": "SshTargetIamRoleAuth"
+      },
+      "SshTargetInteractiveAuth": {
+        "type": "object",
+        "title": "SshTargetInteractiveAuth",
+        "description": "The username is the target's as usual (an empty one being the\nconnecting user's own); only the password is asked for."
       },
       "SshTargetPasswordAuth": {
         "type": "object",

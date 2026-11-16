@@ -56,6 +56,10 @@ pub enum SSHTargetAuth {
     Certificate(SshTargetCertificateAuth),
     #[serde(rename = "iam_role")]
     IamRole(SshTargetIamRoleAuth),
+    /// Credentials are not stored: the connecting user is asked for the
+    /// target's password (via keyboard-interactive) when they connect.
+    #[serde(rename = "interactive")]
+    Interactive(SshTargetInteractiveAuth),
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
@@ -101,6 +105,11 @@ impl Default for SshTargetCertificateAuth {
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
 pub struct SshTargetIamRoleAuth {}
+
+/// The username is the target's as usual (an empty one being the
+/// connecting user's own); only the password is asked for.
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, Default)]
+pub struct SshTargetInteractiveAuth {}
 
 impl Default for SSHTargetAuth {
     fn default() -> Self {
@@ -492,7 +501,8 @@ impl TargetSecrets for TargetSSHOptions {
             SSHTargetAuth::Password(auth) => vec![&mut auth.password],
             SSHTargetAuth::PublicKey(_)
             | SSHTargetAuth::Certificate(_)
-            | SSHTargetAuth::IamRole(_) => vec![],
+            | SSHTargetAuth::IamRole(_)
+            | SSHTargetAuth::Interactive(_) => vec![],
         }
     }
 }
@@ -622,10 +632,10 @@ mod tests {
     use super::{
         DatabaseTargetAuth, DatabaseTargetIamRoleAuth, DatabaseTargetPasswordAuth, MaybeSecretRef,
         PostgresProtocolVersion, RdpTargetCompression, RdpTlsSecurity, SSHTargetAuth, SecretRef,
-        SshTargetCertificateAuth, SshTargetIamRoleAuth, SshTargetPasswordAuth,
-        SshTargetPublicKeyAuth, Target, TargetHTTPOptions, TargetKubernetesOptions,
-        TargetMySqlOptions, TargetOptions, TargetPostgresOptions, TargetRdpOptions,
-        TargetSSHOptions, Tls,
+        SshTargetCertificateAuth, SshTargetIamRoleAuth, SshTargetInteractiveAuth,
+        SshTargetPasswordAuth, SshTargetPublicKeyAuth, Target, TargetHTTPOptions,
+        TargetKubernetesOptions, TargetMySqlOptions, TargetOptions, TargetPostgresOptions,
+        TargetRdpOptions, TargetSSHOptions, Tls,
     };
     use crate::{StoredSecrets, TargetSecrets};
 
@@ -649,6 +659,18 @@ mod tests {
 
     fn db_password_auth(password: MaybeSecretRef) -> DatabaseTargetAuth {
         DatabaseTargetAuth::Password(DatabaseTargetPasswordAuth { password })
+    }
+
+    #[test]
+    fn ssh_interactive_auth_round_trips() {
+        let options: TargetSSHOptions =
+            serde_json::from_str(r#"{"host":"h","auth":{"kind":"interactive"}}"#).unwrap();
+        assert_eq!(
+            options.auth,
+            SSHTargetAuth::Interactive(SshTargetInteractiveAuth {})
+        );
+        let json = serde_json::to_value(&options).unwrap();
+        assert_eq!(json["auth"]["kind"], "interactive");
     }
 
     #[test]
@@ -687,6 +709,9 @@ mod tests {
                 SshTargetCertificateAuth::default(),
             )),
             ssh_options(SSHTargetAuth::IamRole(SshTargetIamRoleAuth::default())),
+            ssh_options(SSHTargetAuth::Interactive(
+                SshTargetInteractiveAuth::default(),
+            )),
             TargetOptions::MySql(mysql),
             TargetOptions::Postgres(postgres),
             TargetOptions::Http(serde_json::from_str(r#"{"url":"http://x"}"#).unwrap()),
