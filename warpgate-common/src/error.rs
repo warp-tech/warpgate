@@ -3,7 +3,6 @@ use std::error::Error;
 use poem::error::ResponseError;
 use poem_openapi::ApiResponse;
 use uuid::Uuid;
-use warpgate_aws::AwsError;
 use warpgate_ca::CaError;
 use warpgate_ldap::LdapError;
 use warpgate_sso::SsoError;
@@ -82,7 +81,7 @@ pub enum WarpgateError {
     #[error("cannot modify a user with admin permissions you do not hold")]
     TargetUserOutranksAdmin,
     #[error("AWS: {0}")]
-    Aws(AwsError),
+    Aws(Box<dyn Error + Send + Sync>),
     #[error("IP address {0} is not in the allowed range for user {1}")]
     IpAddrNotAllowed(String, String),
     #[error("could not parse IP network address: {0}")]
