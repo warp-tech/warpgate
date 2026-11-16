@@ -355,3 +355,39 @@ impl ReparseForwardedResponse for Response {
         Ok(response)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use uuid::Uuid;
+    use warpgate_common_http::auth::SessionAuthorization;
+    use warpgate_common_http::{
+        RequestAuthorization, X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_IDENTITY_TOKEN,
+    };
+
+    use super::request_authorization_as_forwarded_identity_headers as headers;
+
+    #[test]
+    fn forwarded_identity_keeps_the_token_marker() {
+        let names = |auth| -> Vec<_> { headers(&auth).into_iter().map(|(name, _)| name).collect() };
+
+        let session = RequestAuthorization::Session(SessionAuthorization::User {
+            user_id: Uuid::nil(),
+            username: "alice".into(),
+        });
+        assert_eq!(names(session), [X_WARPGATE_CLUSTER_IDENTITY.clone()]);
+
+        let token = RequestAuthorization::UserToken {
+            user_id: Uuid::nil(),
+            username: "alice".into(),
+        };
+        assert_eq!(
+            names(token),
+            [
+                X_WARPGATE_CLUSTER_IDENTITY.clone(),
+                X_WARPGATE_CLUSTER_IDENTITY_TOKEN.clone()
+            ]
+        );
+
+        assert!(names(RequestAuthorization::AdminToken).is_empty());
+    }
+}

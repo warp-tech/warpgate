@@ -199,7 +199,7 @@ mod tests {
     use poem_openapi::payload::PlainText;
     use poem_openapi::{OpenApi, OpenApiService};
 
-    use super::AuthedSession;
+    use super::{AuthedSession, FullUser, WebSessionUser};
 
     struct TestApi;
 
@@ -207,6 +207,16 @@ mod tests {
     impl TestApi {
         #[oai(path = "/guarded", method = "get")]
         async fn guarded(&self, _auth: AuthedSession) -> PlainText<String> {
+            PlainText("reached".into())
+        }
+
+        #[oai(path = "/full-user", method = "get")]
+        async fn full_user(&self, _auth: FullUser) -> PlainText<String> {
+            PlainText("reached".into())
+        }
+
+        #[oai(path = "/web-session-user", method = "get")]
+        async fn web_session_user(&self, _auth: WebSessionUser) -> PlainText<String> {
             PlainText("reached".into())
         }
     }
@@ -219,29 +229,49 @@ mod tests {
         TestClient::new(OpenApiService::new(TestApi, "test", "1.0"))
     }
 
+    const PATHS: [&str; 3] = ["/guarded", "/full-user", "/web-session-user"];
+
     #[tokio::test]
     async fn rejects_unauthenticated_request_with_session_cookie() {
-        let resp = client()
-            .get("/guarded")
-            .header("cookie", "warpgate-http-session=anything")
-            .send()
-            .await;
-        resp.assert_status(http::StatusCode::UNAUTHORIZED);
+        for path in PATHS {
+            let resp = client()
+                .get(path)
+                .header("cookie", "warpgate-http-session=anything")
+                .send()
+                .await;
+            resp.assert_status(http::StatusCode::UNAUTHORIZED);
+        }
     }
 
     #[tokio::test]
     async fn rejects_request_with_no_credentials() {
-        let resp = client().get("/guarded").send().await;
-        resp.assert_status(http::StatusCode::UNAUTHORIZED);
+        for path in PATHS {
+            let resp = client().get(path).send().await;
+            resp.assert_status(http::StatusCode::UNAUTHORIZED);
+        }
     }
 
     #[tokio::test]
     async fn rejects_cluster_node_header_without_a_verified_peer() {
-        let resp = client()
-            .get("/guarded")
-            .header("x-warpgate-cluster-node", "anything")
-            .send()
-            .await;
-        resp.assert_status(http::StatusCode::UNAUTHORIZED);
+        for path in PATHS {
+            let resp = client()
+                .get(path)
+                .header("x-warpgate-cluster-node", "anything")
+                .send()
+                .await;
+            resp.assert_status(http::StatusCode::UNAUTHORIZED);
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_unresolved_token() {
+        for path in PATHS {
+            let resp = client()
+                .get(path)
+                .header("x-warpgate-token", "anything")
+                .send()
+                .await;
+            resp.assert_status(http::StatusCode::UNAUTHORIZED);
+        }
     }
 }
