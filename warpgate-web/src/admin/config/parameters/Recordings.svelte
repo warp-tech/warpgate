@@ -241,7 +241,7 @@
                             class="form-control"
                             placeholder="mywarpgatestorage"
                             required
-                            pattern="[a-z0-9]{3,24}"
+                            pattern={'[a-z0-9]{3,24}'}
                             bind:value={azure.account}
                         >
                     </FormGroup>
@@ -250,7 +250,7 @@
                             type="text"
                             class="form-control"
                             required
-                            pattern="[a-z0-9-]{3,63}"
+                            pattern={'[a-z0-9-]{3,63}'}
                             bind:value={azure.container}
                         >
                     </FormGroup>
