@@ -4,6 +4,7 @@ mod catchall;
 mod client_cache;
 mod common;
 mod middleware;
+mod path_matcher;
 pub mod proxy;
 mod session;
 mod session_handle;

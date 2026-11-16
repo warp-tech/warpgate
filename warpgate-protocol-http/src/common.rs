@@ -32,6 +32,7 @@ use warpgate_db_entities::User;
 use warpgate_sso::WarpgateIdToken;
 
 use crate::middleware::{assert_mfa_setup_gate, is_session_bootstrap_path, warpgate_surface_path};
+use crate::path_matcher::endpoint_pattern_matches;
 use crate::session::SessionStore;
 use crate::session_storage::SharedSessionStorage;
 
@@ -611,7 +612,11 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
                 .http
                 .user_api_token_allowed_endpoints
                 .as_ref()
-                .is_none_or(|list| list.iter().any(|e| e.eq_ignore_ascii_case(&endpoint)));
+                .is_none_or(|list| {
+                    list.iter().any(|e| {
+                        endpoint_pattern_matches(e, req.method().as_str(), req.uri().path())
+                    })
+                });
             if !allowed {
                 tracing::warn!(
                     session_username = %user.username,
