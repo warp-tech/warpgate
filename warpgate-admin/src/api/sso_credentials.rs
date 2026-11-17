@@ -14,12 +14,15 @@ struct ExistingSsoCredential {
     id: Uuid,
     provider: Option<String>,
     email: String,
+    subject: Option<String>,
 }
 
 #[derive(Object)]
 struct NewSsoCredential {
     provider: Option<String>,
     email: String,
+    #[oai(default)]
+    subject: Option<String>,
 }
 
 impl From<SsoCredential::Model> for ExistingSsoCredential {
@@ -28,6 +31,7 @@ impl From<SsoCredential::Model> for ExistingSsoCredential {
             id: credential.id,
             email: credential.email,
             provider: credential.provider,
+            subject: credential.subject,
         }
     }
 }
@@ -37,6 +41,7 @@ impl From<&NewSsoCredential> for UserSsoCredential {
         Self {
             email: credential.email.clone(),
             provider: credential.provider.clone(),
+            subject: credential.subject.clone(),
         }
     }
 }

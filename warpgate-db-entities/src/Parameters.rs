@@ -444,6 +444,7 @@ mod tests {
         UserAuthCredential::Sso(UserSsoCredential {
             provider: None,
             email: "user@example.com".into(),
+            subject: None,
         })
     }
 

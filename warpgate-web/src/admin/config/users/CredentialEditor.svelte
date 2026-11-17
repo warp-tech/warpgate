@@ -231,10 +231,15 @@
         }
     }
 
-    async function saveSsoCredential(provider: string | null, email: string) {
+    async function saveSsoCredential(
+        provider: string | null,
+        email: string,
+        subject: string | null,
+    ) {
         if (editingSsoCredentialInstance) {
             editingSsoCredentialInstance.provider = provider ?? undefined
             editingSsoCredentialInstance.email = email
+            editingSsoCredentialInstance.subject = subject ?? undefined
             await api.updateSsoCredential({
                 userId,
                 id: editingSsoCredentialInstance.id,
@@ -246,6 +251,7 @@
                 newSsoCredential: {
                     provider: provider ?? undefined,
                     email,
+                    subject: subject ?? undefined,
                 },
             })
             credentials.push({
@@ -413,6 +419,9 @@
                     <span class="label">Single sign-on</span>
                     <span class="text-muted me-auto">
                         {credential.email}
+                        {#if credential.subject}
+                            · sub {credential.subject}
+                        {/if}
                         {#if credential.provider}
                             ({credential.provider})
                         {/if}

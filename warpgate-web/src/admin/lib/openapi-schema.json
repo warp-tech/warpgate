@@ -5859,6 +5859,9 @@
           },
           "email": {
             "type": "string"
+          },
+          "subject": {
+            "type": "string"
           }
         }
       },
@@ -6442,6 +6445,10 @@
           },
           "email": {
             "type": "string"
+          },
+          "subject": {
+            "type": "string",
+            "default": null
           }
         }
       },

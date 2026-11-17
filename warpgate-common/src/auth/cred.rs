@@ -6,6 +6,7 @@ use sea_orm::sea_query::StringLen;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
+use warpgate_sso::{SsoLoginResponse, SsoMatchBy, SsoProviderConfig};
 
 use crate::{Secret, UserCertificateCredential};
 
@@ -80,12 +81,66 @@ pub enum AuthCredential {
     },
     Sso {
         provider: String,
-        email: String,
+        /// The verified `email` claim, if the IdP sent one.
+        email: Option<String>,
+        /// The IdP's subject (`sub`) from the verified ID token.
+        subject: String,
+        /// The provider's rule at login time: which of the two identifies the user.
+        match_by: SsoMatchBy,
     },
     WebUserApproval,
 }
 
+/// Why a verified SSO response cannot be turned into a credential.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SsoIdentityError {
+    /// `match_by: email`, and the IdP sent no `email` claim.
+    NoEmail,
+    /// `match_by: email`, and the IdP says the e-mail is not verified.
+    EmailNotVerified,
+}
+
 impl AuthCredential {
+    /// The credential for a verified SSO login, following the provider's `match_by`.
+    /// In `email` mode the e-mail must be present and not explicitly unverified, as
+    /// before; in `subject` mode only the always-present `sub` claim is needed.
+    pub fn from_sso_response(
+        provider_config: &SsoProviderConfig,
+        response: &SsoLoginResponse,
+    ) -> Result<Self, SsoIdentityError> {
+        if provider_config.match_by == SsoMatchBy::Email {
+            if response.email.is_none() {
+                return Err(SsoIdentityError::NoEmail);
+            }
+            if response.email_verified == Some(false) {
+                return Err(SsoIdentityError::EmailNotVerified);
+            }
+        }
+        Ok(Self::Sso {
+            provider: provider_config.name.clone(),
+            email: response.email.clone(),
+            subject: response.subject.clone(),
+            match_by: provider_config.match_by,
+        })
+    }
+
+    /// For logs and events: the claim this login is identified by.
+    pub fn sso_identity(&self) -> Option<&str> {
+        match self {
+            Self::Sso {
+                match_by: SsoMatchBy::Email,
+                email,
+                ..
+            } => email.as_deref(),
+            Self::Sso {
+                match_by: SsoMatchBy::Subject,
+                subject,
+                ..
+            } => Some(subject),
+            _ => None,
+        }
+    }
+
     pub const fn kind(&self) -> CredentialKind {
         match self {
             Self::Password { .. } => CredentialKind::Password,
