@@ -4,6 +4,7 @@ mod catchall;
 mod client_cache;
 mod common;
 mod middleware;
+mod path_matcher;
 pub mod proxy;
 mod session;
 mod session_handle;
@@ -69,10 +70,10 @@ impl HTTPProtocolServer {
     }
 }
 
-/// The S3 bucket origin to allow-list in the admin document CSP, or `None` when
+/// The object storage origin to allow-list in the admin document CSP, or `None` when
 /// recordings are on disk (or the config can't be read). Read live so a storage
 /// config change takes effect on the next admin page load.
-async fn recordings_s3_browser_origin(ctx: &UnauthenticatedRequestContext) -> Option<String> {
+async fn recordings_storage_browser_origin(ctx: &UnauthenticatedRequestContext) -> Option<String> {
     match ctx
         .parameters()
         .await
@@ -80,7 +81,12 @@ async fn recordings_s3_browser_origin(ctx: &UnauthenticatedRequestContext) -> Op
         .recordings_storage_config()
         .ok()?
     {
+        // Streaming through Warpgate keeps the fetch same-origin, so storage
+        // only needs allow-listing when the browser is redirected to it.
+        RecordingsStorageConfig::S3(s3) if s3.serve_through_warpgate => None,
+        RecordingsStorageConfig::Azure(azure) if azure.serve_through_warpgate => None,
         RecordingsStorageConfig::S3(s3) => s3.browser_origin(),
+        RecordingsStorageConfig::Azure(azure) => azure.browser_origin(),
         RecordingsStorageConfig::Disk(_) => None,
     }
 }
@@ -213,7 +219,7 @@ impl ProtocolServer for HTTPProtocolServer {
                             // via presigned URLs, so the bucket origin must be allow-listed
                             // in this document's CSP.
                             let origin = match Data::<&UnauthenticatedRequestContext>::from_request_without_body(&req).await {
-                                Ok(ctx) => recordings_s3_browser_origin(ctx.0).await,
+                                Ok(ctx) => recordings_storage_browser_origin(ctx.0).await,
                                 Err(_) => None,
                             };
                             let mut resp = ep.call(req).await?.into_response();

@@ -137,7 +137,7 @@ impl PostgresClient {
             warpgate_common::DatabaseTargetAuth::IamRole(_) => {
                 warpgate_aws::generate_rds_auth_token(&target.host, target.port, &target.username)
                     .await
-                    .map_err(WarpgateError::Aws)?
+                    .map_err(|e| WarpgateError::Aws(e.into()))?
             }
         };
 
@@ -162,6 +162,12 @@ impl PostgresClient {
                     pgwire::messages::startup::Authentication::Ok => {
                         info!("Authenticated at target");
                         break;
+                    }
+                    pgwire::messages::startup::Authentication::CleartextPassword
+                    | pgwire::messages::startup::Authentication::MD5Password(_)
+                        if !stream.is_tls() && target.tls.mode != TlsMode::Disabled =>
+                    {
+                        return Err(PostgresError::PasswordAuthWithoutTls);
                     }
                     pgwire::messages::startup::Authentication::CleartextPassword => {
                         let password_message =

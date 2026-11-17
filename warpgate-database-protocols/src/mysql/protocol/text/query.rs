@@ -1,4 +1,4 @@
-use bytes::{Buf, Bytes};
+use bytes::Bytes;
 
 use crate::error::Error;
 use crate::io::{BufExt, Decode, Encode};
@@ -25,7 +25,7 @@ impl Encode<'_, Capabilities> for Query {
 
 impl Decode<'_> for Query {
     fn decode_with(mut buf: Bytes, _: ()) -> Result<Self, Error> {
-        buf.advance(1);
+        buf.skip(1)?;
         let q = buf.get_str(buf.len())?;
         Ok(Query(q))
     }

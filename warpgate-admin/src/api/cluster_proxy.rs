@@ -24,15 +24,15 @@ use poem::{Body, IntoResponse, Request, Response};
 use poem_openapi::types::ParseFromJSON;
 use serde::Serialize;
 use tokio_tungstenite::{Connector, client_async_tls_with_config, tungstenite};
-use uuid::Uuid;
 use warpgate_ca::CLUSTER_TLS_SNI_NAME;
 use warpgate_common::helpers::websocket::pump_websocket;
-use warpgate_common::http_headers::may_forward_header;
+use warpgate_common::http_headers::{is_forwarding_header, may_forward_header};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::get_client_ip;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, X_WARPGATE_CLUSTER_CLIENT_IP,
-    X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_NODE, is_cluster_peer_request,
+    X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_IDENTITY_TOKEN, X_WARPGATE_CLUSTER_NODE,
+    is_cluster_peer_request,
 };
 use warpgate_core::Services;
 use warpgate_core::cluster::PeerConnection;
@@ -52,16 +52,32 @@ enum ForwardIdentity<'a> {
 }
 
 impl ForwardIdentity<'_> {
-    fn user_id(&self) -> Option<Uuid> {
+    fn as_headers(&self) -> Vec<(HeaderName, String)> {
         match self {
-            Self::User(auth) => auth.as_full_user().map(|u| u.user_id()),
-            Self::PendingLogin => None,
+            Self::User(auth) => request_authorization_as_forwarded_identity_headers(auth),
+            Self::PendingLogin => vec![],
         }
     }
 
     const fn forwards_cookie(&self) -> bool {
         matches!(self, Self::PendingLogin)
     }
+}
+
+fn request_authorization_as_forwarded_identity_headers(
+    auth: &RequestAuthorization,
+) -> Vec<(HeaderName, String)> {
+    let Some(user) = auth.as_full_user() else {
+        return vec![];
+    };
+    let mut headers = vec![(
+        X_WARPGATE_CLUSTER_IDENTITY.clone(),
+        user.user_id().to_string(),
+    )];
+    if matches!(auth, RequestAuthorization::UserToken { .. }) {
+        headers.push((X_WARPGATE_CLUSTER_IDENTITY_TOKEN.clone(), "1".into()));
+    }
+    headers
 }
 
 /// Serve a request with `serve_local`, or if the resource is owned by another
@@ -208,8 +224,8 @@ async fn forward_http_inner(
         .peer_request(&owner, req.method().clone(), path)
         .await?
         .headers(headers);
-    if let Some(user_id) = identity.user_id() {
-        request = request.header(X_WARPGATE_CLUSTER_IDENTITY.clone(), user_id.to_string());
+    for (name, value) in identity.as_headers() {
+        request = request.header(name, value);
     }
     // The peer's TCP peer is this node, so pass on who the client really is.
     if let Some(client_ip) = get_client_ip(req, services).await {
@@ -254,8 +270,8 @@ pub async fn forward_websocket(
         )
         .header(HOST, host)
         .header(X_WARPGATE_CLUSTER_NODE.clone(), cluster.node_id.to_string());
-    if let Some(user_id) = ctx.auth.as_full_user().map(|x| x.user_id()) {
-        builder = builder.header(X_WARPGATE_CLUSTER_IDENTITY.clone(), user_id.to_string());
+    for (name, value) in request_authorization_as_forwarded_identity_headers(&ctx.auth) {
+        builder = builder.header(name, value);
     }
     let request = builder.body(()).map_err(poem::error::InternalServerError)?;
 
@@ -298,9 +314,10 @@ fn path_and_query(req: &Request) -> String {
 /// (connection management plus any `x-warpgate-*` credential), plus message
 /// framing — the body is re-streamed, so the original framing headers don't
 /// apply — and the client's cookies: the peer hop is authorized by the node's
-/// TLS identity alone.
+/// TLS identity alone. Forwarding headers pass through so the peer resolves
+/// the same external host and scheme as this node would.
 fn should_forward(name: &HeaderName) -> bool {
-    may_forward_header(name)
+    (may_forward_header(name) || is_forwarding_header(name))
         && name != CONTENT_LENGTH
         && name != TRANSFER_ENCODING
         && name != COOKIE
@@ -336,5 +353,41 @@ pub async fn forwarded_error(response: Response) -> poem::Error {
 impl ReparseForwardedResponse for Response {
     async fn reparse_forwarded_response(response: Response) -> poem::Result<Self> {
         Ok(response)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use uuid::Uuid;
+    use warpgate_common_http::auth::SessionAuthorization;
+    use warpgate_common_http::{
+        RequestAuthorization, X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_IDENTITY_TOKEN,
+    };
+
+    use super::request_authorization_as_forwarded_identity_headers as headers;
+
+    #[test]
+    fn forwarded_identity_keeps_the_token_marker() {
+        let names = |auth| -> Vec<_> { headers(&auth).into_iter().map(|(name, _)| name).collect() };
+
+        let session = RequestAuthorization::Session(SessionAuthorization::User {
+            user_id: Uuid::nil(),
+            username: "alice".into(),
+        });
+        assert_eq!(names(session), [X_WARPGATE_CLUSTER_IDENTITY.clone()]);
+
+        let token = RequestAuthorization::UserToken {
+            user_id: Uuid::nil(),
+            username: "alice".into(),
+        };
+        assert_eq!(
+            names(token),
+            [
+                X_WARPGATE_CLUSTER_IDENTITY.clone(),
+                X_WARPGATE_CLUSTER_IDENTITY_TOKEN.clone()
+            ]
+        );
+
+        assert!(names(RequestAuthorization::AdminToken).is_empty());
     }
 }

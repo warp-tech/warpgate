@@ -58,6 +58,9 @@ Full documentation is available at [warpgate.null.page](https://warpgate.null.pa
 * [SSO](https://warpgate.null.page/sso/) - Single Sign-On with OpenID Connect
 * [Tickets](https://warpgate.null.page/tickets/) - Temporary access credentials
 
+For `warpgate.yaml` file options, see the [configuration schema](config-schema.json).
+Setup-generated config files include a `yaml-language-server` schema reference for editor completion and validation.
+
 ## How is Warpgate different from a jump host / VPN / Teleport?
 
 | Warpgate | SSH jump host | VPN | Teleport |

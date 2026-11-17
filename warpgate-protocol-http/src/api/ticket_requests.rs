@@ -15,7 +15,7 @@ use warpgate_core::ticket_requests::{
 use warpgate_db_entities::{Target, Ticket, TicketRequest};
 
 use super::common::get_user;
-use crate::api::auth_scheme::AuthedSession;
+use crate::api::auth_scheme::{AuthedSession, FullUser};
 
 const fn is_ticket_session(ctx: &AuthenticatedRequestContext) -> bool {
     matches!(
@@ -121,16 +121,12 @@ enum CreateTicketRequestResponse {
 enum GetTicketRequestsResponse {
     #[oai(status = 200)]
     Ok(Json<Vec<TicketRequestModel>>),
-    #[oai(status = 401)]
-    Unauthorized,
 }
 
 #[derive(ApiResponse)]
 enum GetTicketRequestResponse {
     #[oai(status = 200)]
     Ok(Json<TicketRequestResponse>),
-    #[oai(status = 401)]
-    Unauthorized,
     #[oai(status = 404)]
     NotFound,
 }
@@ -139,16 +135,12 @@ enum GetTicketRequestResponse {
 enum GetMyTicketsResponse {
     #[oai(status = 200)]
     Ok(Json<Vec<MyTicketModel>>),
-    #[oai(status = 401)]
-    Unauthorized,
 }
 
 #[derive(ApiResponse)]
 enum ActivateTicketRequestResponse {
     #[oai(status = 200)]
     Ok(Json<ActivatedTicketModel>),
-    #[oai(status = 401)]
-    Unauthorized,
     #[oai(status = 404)]
     NotFound,
     #[oai(status = 409)]
@@ -161,8 +153,6 @@ enum ActivateTicketRequestResponse {
 enum DeleteMyTicketResponse {
     #[oai(status = 204)]
     Deleted,
-    #[oai(status = 401)]
-    Unauthorized,
     #[oai(status = 404)]
     NotFound,
 }
@@ -233,18 +223,10 @@ impl Api {
     )]
     async fn api_get_my_ticket_requests(
         &self,
-        ctx: AuthedSession,
+        ctx: FullUser,
     ) -> Result<GetTicketRequestsResponse, WarpgateError> {
-        if is_ticket_session(&ctx) {
-            return Ok(GetTicketRequestsResponse::Unauthorized);
-        }
         let db = &ctx.services().db;
-        let Some(full) = ctx.auth.as_full_user() else {
-            return Ok(GetTicketRequestsResponse::Unauthorized);
-        };
-        let Some(user_model) = get_user(&full, db).await? else {
-            return Ok(GetTicketRequestsResponse::Unauthorized);
-        };
+        let user_model = &ctx.user;
 
         let requests = TicketRequest::Entity::find()
             .filter(TicketRequest::Column::UserId.eq(user_model.id))
@@ -286,19 +268,11 @@ impl Api {
     )]
     async fn api_get_my_ticket_request(
         &self,
-        ctx: AuthedSession,
+        ctx: FullUser,
         id: Path<Uuid>,
     ) -> Result<GetTicketRequestResponse, WarpgateError> {
-        if is_ticket_session(&ctx) {
-            return Ok(GetTicketRequestResponse::Unauthorized);
-        }
         let db = &ctx.services().db;
-        let Some(full) = ctx.auth.as_full_user() else {
-            return Ok(GetTicketRequestResponse::Unauthorized);
-        };
-        let Some(user_model) = get_user(&full, db).await? else {
-            return Ok(GetTicketRequestResponse::Unauthorized);
-        };
+        let user_model = &ctx.user;
 
         let Some(request) = TicketRequest::Entity::find_by_id(id.0)
             .filter(TicketRequest::Column::UserId.eq(user_model.id))
@@ -320,21 +294,10 @@ impl Api {
     )]
     async fn api_activate_ticket_request(
         &self,
-        ctx: AuthedSession,
+        ctx: FullUser,
         id: Path<Uuid>,
     ) -> Result<ActivateTicketRequestResponse, WarpgateError> {
-        if is_ticket_session(&ctx) {
-            return Ok(ActivateTicketRequestResponse::Unauthorized);
-        }
-        let db = &ctx.services().db;
-        let Some(full) = ctx.auth.as_full_user() else {
-            return Ok(ActivateTicketRequestResponse::Unauthorized);
-        };
-        let Some(user_model) = get_user(&full, db).await? else {
-            return Ok(ActivateTicketRequestResponse::Unauthorized);
-        };
-
-        match activate_ticket_request(&ctx.services().db, id.0, user_model.id).await {
+        match activate_ticket_request(&ctx.services().db, id.0, ctx.user.id).await {
             Ok(activated) => Ok(ActivateTicketRequestResponse::Ok(Json(
                 ActivatedTicketModel {
                     request: activated.request,
@@ -362,18 +325,10 @@ impl Api {
     #[oai(path = "/my-tickets", method = "get", operation_id = "get_my_tickets")]
     async fn api_get_my_tickets(
         &self,
-        ctx: AuthedSession,
+        ctx: FullUser,
     ) -> Result<GetMyTicketsResponse, WarpgateError> {
-        if is_ticket_session(&ctx) {
-            return Ok(GetMyTicketsResponse::Unauthorized);
-        }
         let db = &ctx.services().db;
-        let Some(full) = ctx.auth.as_full_user() else {
-            return Ok(GetMyTicketsResponse::Unauthorized);
-        };
-        let Some(user_model) = get_user(&full, db).await? else {
-            return Ok(GetMyTicketsResponse::Unauthorized);
-        };
+        let user_model = &ctx.user;
 
         // Only show self-service tickets — admin-created tickets are not visible to the user
         let tickets = Ticket::Entity::find()
@@ -411,19 +366,11 @@ impl Api {
     )]
     async fn api_delete_my_ticket(
         &self,
-        ctx: AuthedSession,
+        ctx: FullUser,
         id: Path<Uuid>,
     ) -> Result<DeleteMyTicketResponse, WarpgateError> {
-        if is_ticket_session(&ctx) {
-            return Ok(DeleteMyTicketResponse::Unauthorized);
-        }
         let db = &ctx.services().db;
-        let Some(full) = ctx.auth.as_full_user() else {
-            return Ok(DeleteMyTicketResponse::Unauthorized);
-        };
-        let Some(user_model) = get_user(&full, db).await? else {
-            return Ok(DeleteMyTicketResponse::Unauthorized);
-        };
+        let user_model = &ctx.user;
 
         // Users can only delete their own self-service tickets, not admin-issued ones
         let Some(ticket) = Ticket::Entity::find_by_id(id.0)

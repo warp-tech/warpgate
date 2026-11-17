@@ -255,6 +255,8 @@ impl Framebuffer {
                 );
             }
             DesktopEvent::Cursor { .. }
+            | DesktopEvent::CursorDefault
+            | DesktopEvent::CursorHidden
             | DesktopEvent::State(_)
             | DesktopEvent::Clipboard(_)
             | DesktopEvent::Bell
@@ -367,7 +369,9 @@ pub fn decode_jpeg_rgb(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::DesktopRect;
+    use std::sync::Arc;
+
+    use super::super::{DesktopConnectionError, DesktopRect};
     use super::*;
 
     fn decode_png(bytes: &[u8]) -> (u32, u32, Vec<u8>) {
@@ -510,7 +514,9 @@ mod tests {
             height: 1,
         });
         fb.apply(&DesktopEvent::Bell);
-        fb.apply(&DesktopEvent::Error("boom".into()));
+        fb.apply(&DesktopEvent::Error(Arc::new(
+            DesktopConnectionError::Session(anyhow::anyhow!("boom")),
+        )));
         assert_eq!(fb.size(), (1, 1));
     }
 

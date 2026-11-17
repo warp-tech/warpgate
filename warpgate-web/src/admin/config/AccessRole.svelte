@@ -5,6 +5,7 @@
     import { stringifyError } from 'common/errors'
     import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import { setCurrentSidebarSubtitle } from 'common/sidebarState.svelte'
     import * as rx from 'rxjs'
     import { link, replace } from 'svelte-spa-router'
     import { adminPermissions } from '../lib/store'
@@ -17,6 +18,7 @@
 
     let error: string | null = $state(null)
     let role: Role | undefined = $state()
+    setCurrentSidebarSubtitle(() => role?.name)
     const initPromise = init()
 
     async function init() {
@@ -72,7 +74,7 @@
         if (!role) return
         if (confirm(`Delete role ${role.name}?`)) {
             await api.deleteRole(role)
-            replace('/config/access-roles')
+            replace('/manage/access-roles')
         }
     }
 </script>
@@ -146,7 +148,7 @@
         {#snippet item(user)}
             <a
                 class="list-group-item list-group-item-action"
-                href="/config/users/{user.id}"
+                href="/manage/users/{user.id}"
                 use:link
             >
                 <div>
@@ -172,7 +174,7 @@
         {#snippet item(target)}
             <a
                 class="list-group-item list-group-item-action"
-                href="/config/targets/{target.id}"
+                href="/manage/targets/{target.id}"
                 use:link
             >
                 <div class="me-auto">

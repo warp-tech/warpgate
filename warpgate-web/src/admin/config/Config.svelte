@@ -1,63 +1,39 @@
 <script lang="ts">
-    import NavListItem from 'common/NavListItem.svelte'
-    import { serverInfo } from 'gateway/lib/store'
+    import Redirect from 'common/Redirect.svelte'
+    import { useSidebar } from 'common/sidebarState.svelte'
+    import Router from 'svelte-spa-router'
     import { wrap } from 'svelte-spa-router/wrap'
-    import SidebarNavContainer from './SidebarNavContainer.svelte'
 
     const routes = {
-        '/targets/create/:kind': wrap({
-            asyncComponent: () => import('./targets/CreateTarget.svelte'),
-        }),
-        '/targets/create': wrap({
-            asyncComponent: () => import('./targets/ChooseTargetKind.svelte'),
-        }),
-        '/targets/:id': wrap({
-            asyncComponent: () => import('./targets/Target.svelte'),
-        }),
-        '/access-roles/create': wrap({
-            asyncComponent: () => import('./CreateRole.svelte'),
-        }),
-        '/access-roles/:id': wrap({
-            asyncComponent: () => import('./AccessRole.svelte'),
-        }),
-        '/admin-roles/create': wrap({
-            asyncComponent: () => import('./CreateAdminRole.svelte'),
-        }),
-        '/admin-roles/:id': wrap({
-            asyncComponent: () => import('./AdminRole.svelte'),
-        }),
-        '/users/create': wrap({
-            asyncComponent: () => import('./CreateUser.svelte'),
-        }),
-        '/users/:id': wrap({
-            asyncComponent: () => import('./users/User.svelte'),
-        }),
-        '/users': wrap({
-            asyncComponent: () => import('./users/Users.svelte'),
-        }),
         '/parameters': wrap({
-            asyncComponent: () => import('./Parameters.svelte'),
+            component: Redirect,
+            props: { to: '/config/parameters/auth' },
         }),
-        '/policies': wrap({
-            asyncComponent: () => import('./Policies.svelte'),
+        '/parameters/auth': wrap({
+            asyncComponent: () => import('./parameters/Auth.svelte'),
         }),
-        '/access-roles': wrap({
-            asyncComponent: () => import('./AccessRoles.svelte'),
+        '/parameters/login-protection': wrap({
+            asyncComponent: () => import('./parameters/LoginProtection.svelte'),
         }),
-        '/admin-roles': wrap({
-            asyncComponent: () => import('./AdminRoles.svelte'),
+        '/parameters/ui': wrap({
+            asyncComponent: () => import('./parameters/Ui.svelte'),
         }),
-        '/targets': wrap({
-            asyncComponent: () => import('./targets/Targets.svelte'),
+        '/parameters/network': wrap({
+            asyncComponent: () => import('./parameters/Network.svelte'),
         }),
-        '/ssh': wrap({
-            asyncComponent: () => import('./SSHKeys.svelte'),
+        '/parameters/ssh': wrap({
+            asyncComponent: () => import('./parameters/Ssh.svelte'),
         }),
-        '/tickets': wrap({
-            asyncComponent: () => import('./Tickets.svelte'),
+        '/parameters/session-approvals': wrap({
+            asyncComponent: () =>
+                import('./parameters/SessionApprovals.svelte'),
         }),
-        '/tickets/create': wrap({
-            asyncComponent: () => import('./CreateTicket.svelte'),
+        '/parameters/recordings': wrap({
+            asyncComponent: () => import('./parameters/Recordings.svelte'),
+        }),
+        '/parameters/installation-counter': wrap({
+            asyncComponent: () =>
+                import('./parameters/InstallationCounter.svelte'),
         }),
         '/ldap-servers': wrap({
             asyncComponent: () => import('./ldap/LdapServers.svelte'),
@@ -75,111 +51,50 @@
             asyncComponent: () =>
                 import('./secret-backends/SecretBackends.svelte'),
         }),
-        '/target-groups/create': wrap({
-            asyncComponent: () =>
-                import('./target-groups/CreateTargetGroup.svelte'),
-        }),
-        '/target-groups/:id': wrap({
-            asyncComponent: () => import('./target-groups/TargetGroup.svelte'),
-        }),
-        '/target-groups': wrap({
-            asyncComponent: () => import('./target-groups/TargetGroups.svelte'),
-        }),
     }
+
+    useSidebar(() => [
+        {
+            title: 'Authentication',
+            href: '/config/parameters/auth',
+        },
+        {
+            title: 'Recordings',
+            href: '/config/parameters/recordings',
+        },
+        {
+            title: 'UI',
+            href: '/config/parameters/ui',
+        },
+        {
+            title: 'Session approvals',
+            href: '/config/parameters/session-approvals',
+        },
+        {
+            title: 'Login protection',
+            href: '/config/parameters/login-protection',
+        },
+        {
+            title: 'SSH',
+            href: '/config/parameters/ssh',
+        },
+        {
+            title: 'Network',
+            href: '/config/parameters/network',
+        },
+        {
+            title: 'Secret backends',
+            href: '/config/secret-backends',
+        },
+        {
+            title: 'LDAP servers',
+            href: '/config/ldap-servers',
+        },
+        {
+            title: 'Installation counter',
+            href: '/config/parameters/installation-counter',
+        },
+    ])
 </script>
 
-<SidebarNavContainer {routes} prefix="/config">
-    {#snippet navItems(
-        sidebarMode,
-    )}
-        <NavListItem
-            class="mb-2"
-            title="Targets"
-            description="Destinations for users to connect to"
-            href="/config/targets"
-            small={sidebarMode}
-        />
-
-        <NavListItem
-            class="mb-2"
-            title="Target groups"
-            description="Organize targets into groups"
-            href="/config/target-groups"
-            small={sidebarMode}
-        />
-
-        <NavListItem
-            class="mb-2"
-            title="Users"
-            description="Manage accounts and credentials"
-            href="/config/users"
-            small={sidebarMode}
-        />
-
-        <NavListItem
-            class="mb-2"
-            title="Access roles"
-            description="Grant users access to roles"
-            href="/config/access-roles"
-            small={sidebarMode}
-        />
-
-        <NavListItem
-            class="mb-2"
-            title="Admin roles"
-            description="Grant users access to the admin UI"
-            href="/config/admin-roles"
-            small={sidebarMode}
-        />
-
-        <NavListItem
-            class="mb-2"
-            title="Tickets"
-            description={$serverInfo?.ticketSelfServiceEnabled
-                ? 'Access credentials — users can request tickets from their profile'
-                : 'Temporary access credentials'}
-            href="/config/tickets"
-            small={sidebarMode}
-        />
-
-        <NavListItem
-            class="mb-2"
-            title="SSH keys"
-            description="Own keys and known hosts"
-            href="/config/ssh"
-            small={sidebarMode}
-        />
-
-        <NavListItem
-            class="mb-2"
-            title="Policies"
-            description="Edit auth policies"
-            href="/config/policies"
-            small={sidebarMode}
-        />
-
-        <NavListItem
-            class="mb-2"
-            title="Global parameters"
-            description="Change instance-wide settings"
-            href="/config/parameters"
-            small={sidebarMode}
-        />
-
-        <NavListItem
-            class="mb-2"
-            title="LDAP servers"
-            description="Connect to directory services"
-            href="/config/ldap-servers"
-            small={sidebarMode}
-        />
-
-        <NavListItem
-            class="mb-2"
-            title="Secret backends"
-            description="Vault / OpenBao connections"
-            href="/config/secret-backends"
-            small={sidebarMode}
-        />
-    {/snippet}
-</SidebarNavContainer>
+<Router {routes} prefix="/config" />

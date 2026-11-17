@@ -11,9 +11,9 @@
 
 [package]
 edition = "2024"
-rust-version = "1.89"
+rust-version = "1.94"
 name = "ironrdp-connector"
-version = "0.10.0"
+version = "0.12.0"
 authors = [
     "Devolutions Inc. <infos@devolutions.net>",
     "Teleport <goteleport.com>",
@@ -51,20 +51,20 @@ test = false
 doctest = false
 
 [dependencies.ironrdp-core]
-version = "0.2"
+version = "0.3"
 
 [dependencies.ironrdp-error]
 version = "0.2"
 
 [dependencies.ironrdp-pdu]
-version = "0.9"
+version = "0.11"
 features = ["std"]
 
 [dependencies.ironrdp-svc]
-version = "0.8"
+version = "0.10"
 
 [dependencies.picky]
-version = "=7.0.0-rc.25"
+version = "=7.0.0-rc.26"
 
 [dependencies.picky-asn1-der]
 version = "0.5"
@@ -76,8 +76,11 @@ version = "0.15"
 version = "0.9"
 features = ["std"]
 
+[dependencies.serde_json]
+version = "1"
+
 [dependencies.sspi]
-version = "0.21"
+version = "0.23"
 features = ["scard"]
 
 [dependencies.tracing]
@@ -180,7 +183,6 @@ wildcard_dependencies = "warn"
 wildcard_imports = "warn"
 
 [lints.rust]
-# Vendored code: silence upstream lints so they do not surface in our builds.
 warnings = { level = "allow", priority = 1 }
 absolute_paths_not_starting_with_crate = "warn"
 ambiguous_negative_literals = "warn"

@@ -17,15 +17,19 @@ use crate::BitmapUpdate;
 #[derive(Debug, Clone)]
 pub(crate) struct RfxEncoder {
     entropy_algorithm: rfx::EntropyAlgorithm,
+    quant: Quant,
 }
 
 impl RfxEncoder {
-    pub(crate) fn new(entropy_bits: EntropyBits) -> Self {
+    pub(crate) fn new(entropy_bits: EntropyBits, quant: Quant) -> Self {
         let entropy_algorithm = match entropy_bits {
             EntropyBits::Rlgr1 => rfx::EntropyAlgorithm::Rlgr1,
             EntropyBits::Rlgr3 => rfx::EntropyAlgorithm::Rlgr3,
         };
-        Self { entropy_algorithm }
+        Self {
+            entropy_algorithm,
+            quant,
+        }
     }
 
     pub(crate) fn encode(
@@ -75,7 +79,8 @@ impl RfxEncoder {
         let region = RegionPdu { rectangles };
         Block::CodecChannel(CodecChannel::Region(region)).encode(&mut cursor)?;
 
-        let quant = Quant::default();
+        let quant = self.quant.clone();
+        quant.validate()?;
 
         let (encoder, mut data) = UpdateEncoder::new(bitmap, quant.clone(), entropy_algorithm);
         let tiles = encoder.encode(&mut data)?;

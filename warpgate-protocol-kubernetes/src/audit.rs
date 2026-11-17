@@ -102,10 +102,13 @@ struct PodsPath {
     subresource: Option<String>,
 }
 
-/// `api_path` must already be the path the API server will see — percent-decoded
-/// and with `.`/`..` segments resolved — or a request could name one pod here
-/// and another upstream.
+/// `api_path` must already have its `.`/`..` segments resolved, or a request
+/// could name one pod here and another upstream. It is still percent-encoded:
+/// the API server routes on Go's decoded `URL.Path`, so it is decoded here the
+/// same way — whole, before splitting, so `%2F` separates segments as it does
+/// there — and `%65xec` classifies as `exec`.
 fn parse_pods_path(api_path: &str) -> Option<PodsPath> {
+    let api_path = percent_encoding::percent_decode_str(api_path).decode_utf8_lossy();
     let mut segments = api_path.split('/').filter(|s| !s.is_empty());
 
     if segments.next()? != "api" || segments.next()? != "v1" || segments.next()? != "namespaces" {
@@ -130,7 +133,7 @@ fn parse_pods_path(api_path: &str) -> Option<PodsPath> {
 }
 
 /// Matches Go's `strconv.ParseBool`, which is how the API server reads these.
-fn parse_bool(value: &str) -> bool {
+pub(crate) fn parse_bool(value: &str) -> bool {
     matches!(value, "1" | "t" | "T" | "TRUE" | "true" | "True")
 }
 
@@ -625,6 +628,19 @@ mod tests {
         assert!(stream("").is_none());
         assert!(classify_stream("/api/v1/namespaces/prod/services/api/exec", None).is_none());
         assert!(classify_stream("/healthz", None).is_none());
+    }
+
+    #[test]
+    fn percent_encoded_path_classifies_as_the_api_server_routes_it() {
+        let operation =
+            classify_stream("/api/v1/namespaces/%70rod/%70ods/api-7f9/%65xec", None).unwrap();
+        assert_eq!(operation.pod.namespace, "prod");
+        assert_eq!(operation.pod.pod, "api-7f9");
+        assert!(matches!(operation.kind, StreamKind::Exec { .. }));
+
+        let operation =
+            classify_stream("/api/v1/namespaces/prod/pods%2Fapi-7f9/attach", None).unwrap();
+        assert!(matches!(operation.kind, StreamKind::Attach { .. }));
         assert!(stream("/api-7f9/exec?command=sh").is_some());
     }
 

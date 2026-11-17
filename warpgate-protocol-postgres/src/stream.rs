@@ -163,4 +163,8 @@ where
         self.stream = self.stream.upgrade(config, leftover).await?;
         Ok(self)
     }
+
+    pub(crate) const fn is_tls(&self) -> bool {
+        self.stream.is_tls()
+    }
 }

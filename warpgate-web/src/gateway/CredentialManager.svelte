@@ -225,6 +225,10 @@
             <Alert color="info">
                 One-time passwords are required on this server.
             </Alert>
+        {:else if creds.otp.length === 0}
+            <p class="text-muted small">
+                Add an authenticator app as a second factor for logging in.
+            </p>
         {/if}
 
         <div class="d-flex align-items-center mt-4 mb-2">
@@ -289,6 +293,11 @@
                 Your credential policy requires using a public key for
                 authentication. Without one, you won't be able to log in.
             </Alert>
+        {:else if creds.publicKeys.length === 0 && !creds.ldapLinked}
+            <p class="text-muted small">
+                Add an SSH public key to connect to SSH targets without a
+                password.
+            </p>
         {/if}
 
         <div class="d-flex align-items-center mt-4 mb-2">
@@ -340,6 +349,10 @@
                 Your credential policy requires using a certificate for
                 authentication. Without one, you won't be able to log in.
             </Alert>
+        {:else if creds.certificates.length === 0}
+            <p class="text-muted small">
+                Issue a client certificate to connect to Kubernetes targets.
+            </p>
         {/if}
 
         {#if creds.sso.length > 0}

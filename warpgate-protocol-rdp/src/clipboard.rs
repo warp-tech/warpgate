@@ -1,15 +1,15 @@
 // https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpeclip/
 
 use std::any::Any;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use ironrdp::cliprdr::backend::{ClipboardMessage, CliprdrBackend};
-use ironrdp::cliprdr::pdu::{
+use ironrdp_cliprdr::backend::{ClipboardMessage, CliprdrBackend};
+use ironrdp_cliprdr::pdu::{
     ClipboardFormat, ClipboardFormatId, ClipboardGeneralCapabilityFlags, FileContentsRequest,
     FileContentsResponse, FormatDataRequest, FormatDataResponse, LockDataId,
 };
-use ironrdp::core::{AsAny, IntoOwned as _};
+use ironrdp_core::{AsAny, IntoOwned as _};
 use tracing::debug;
 use warpgate_core::MAX_CLIPBOARD_BYTES;
 
@@ -27,10 +27,45 @@ fn truncate_for_wire(text: &mut String, max: usize) {
 
 /// Only Unicode is advertised: a peer that wants ANSI text synthesises it from this in its
 /// own code page, which we have no way to render for it.
-fn advertise_text(sink: &impl ClipboardSink) {
-    sink.request(ClipboardMessage::SendInitiateCopy(vec![
-        ClipboardFormat::new(ClipboardFormatId::CF_UNICODETEXT),
-    ]));
+fn advertise_text(sink: &impl ClipboardSink, acks: &OfferAcks) {
+    announce(
+        sink,
+        acks,
+        vec![ClipboardFormat::new(ClipboardFormatId::CF_UNICODETEXT)],
+    );
+}
+
+/// The only way a format list goes out, so that [`OfferAcks`] sees every one of them.
+fn announce(sink: &impl ClipboardSink, acks: &OfferAcks, formats: Vec<ClipboardFormat>) {
+    acks.announced();
+    sink.request(ClipboardMessage::SendInitiateCopy(formats));
+}
+
+/// Format lists announced to the remote that it has not answered yet. The remote answers each
+/// one in turn once it has applied it, and until then its clipboard still holds the previous
+/// contents.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct OfferAcks(Arc<AtomicUsize>);
+
+impl OfferAcks {
+    pub(crate) fn announced(&self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub(crate) fn acknowledged(&self) {
+        let _ = self
+            .0
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1));
+    }
+
+    pub(crate) fn pending(&self) -> bool {
+        self.0.load(Ordering::SeqCst) > 0
+    }
+
+    /// Stop waiting for a remote that is not answering.
+    pub(crate) fn abandon(&self) {
+        self.0.store(0, Ordering::SeqCst);
+    }
 }
 
 /// The best text format a peer offers; some only put up ANSI text.
@@ -71,6 +106,7 @@ impl ClipboardText {
 pub(crate) struct Clipboard<S> {
     store: ClipboardText,
     ready: Arc<AtomicBool>,
+    acks: OfferAcks,
     sink: S,
 }
 
@@ -93,6 +129,7 @@ impl<S: ClipboardSink + Clone> Clipboard<S> {
         Self {
             store: ClipboardText::default(),
             ready: Arc::new(AtomicBool::new(ready)),
+            acks: OfferAcks::default(),
             sink,
         }
     }
@@ -105,6 +142,7 @@ impl<S: ClipboardSink + Clone> Clipboard<S> {
         TextClipboard {
             store: self.store.clone(),
             ready: Arc::clone(&self.ready),
+            acks: self.acks.clone(),
             sink: self.sink.clone(),
             paste_format: None,
         }
@@ -115,8 +153,12 @@ impl<S: ClipboardSink + Clone> Clipboard<S> {
         truncate_for_wire(&mut text, MAX_CLIPBOARD_BYTES);
         self.store.set(text);
         if self.ready.load(Ordering::SeqCst) {
-            advertise_text(&self.sink);
+            advertise_text(&self.sink, &self.acks);
         }
+    }
+
+    pub(crate) fn acks(&self) -> OfferAcks {
+        self.acks.clone()
     }
 }
 
@@ -125,6 +167,7 @@ impl<S: ClipboardSink + Clone> Clipboard<S> {
 pub(crate) struct TextClipboard<S> {
     store: ClipboardText,
     ready: Arc<AtomicBool>,
+    acks: OfferAcks,
     sink: S,
     paste_format: Option<ClipboardFormatId>,
 }
@@ -154,7 +197,7 @@ impl<S: ClipboardSink> CliprdrBackend for TextClipboard<S> {
         // list of identical content, which is legal and cheap — unlike an offer that outruns
         // the initialization sequence, which wedges the remote's clipboard for the session.
         if !self.ready.swap(true, Ordering::SeqCst) && !self.store.get().is_empty() {
-            advertise_text(&self.sink);
+            advertise_text(&self.sink, &self.acks);
         }
     }
 
@@ -165,11 +208,15 @@ impl<S: ClipboardSink> CliprdrBackend for TextClipboard<S> {
     /// answers with an empty format list — the standard "nothing to offer" announcement.
     fn on_request_format_list(&mut self) {
         if self.store.get().is_empty() {
-            self.sink
-                .request(ClipboardMessage::SendInitiateCopy(vec![]));
+            announce(&self.sink, &self.acks, vec![]);
         } else {
-            advertise_text(&self.sink);
+            advertise_text(&self.sink, &self.acks);
         }
+    }
+
+    /// A rejected format list is answered as much as an accepted one.
+    fn on_format_list_response(&mut self, _ok: bool) {
+        self.acks.acknowledged();
     }
 
     fn on_process_negotiated_capabilities(
@@ -410,6 +457,34 @@ mod tests {
             offered_formats(requests.try_recv().unwrap()),
             [ClipboardFormatId::CF_UNICODETEXT]
         );
+    }
+
+    /// The answer to an earlier format list says nothing about a later one.
+    #[test]
+    fn every_announced_format_list_awaits_its_own_answer() {
+        let (clipboard, mut backend, _requests, _texts) = fixture();
+        let acks = clipboard.acks();
+        assert!(!acks.pending());
+
+        backend.on_request_format_list();
+        clipboard.offer("text".to_owned());
+        backend.on_format_list_response(true);
+        assert!(acks.pending());
+
+        backend.on_format_list_response(false);
+        assert!(!acks.pending());
+
+        backend.on_format_list_response(true);
+        clipboard.offer("more".to_owned());
+        assert!(acks.pending());
+    }
+
+    /// Nothing was announced, so no answer is coming.
+    #[test]
+    fn a_stored_but_unannounced_offer_awaits_nothing() {
+        let (clipboard, _backend, _requests, _texts) = deferred_fixture();
+        clipboard.offer("early".to_owned());
+        assert!(!clipboard.acks().pending());
     }
 
     /// Nothing was offered while the channel came up, so becoming ready has nothing to

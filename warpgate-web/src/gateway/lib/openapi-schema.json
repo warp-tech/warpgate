@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.30.0-modified"
+    "version": "v0.30.3-37-g5aca27f8-modified"
   },
   "servers": [
     {
@@ -474,6 +474,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": ""
           }
         },
         "security": [
@@ -576,9 +579,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": ""
           }
         },
         "security": [
@@ -618,9 +618,6 @@
               }
             }
           },
-          "401": {
-            "description": ""
-          },
           "422": {
             "description": "",
             "content": {
@@ -636,9 +633,6 @@
           }
         },
         "security": [
-          {
-            "TokenSecurityScheme": []
-          },
           {
             "CookieSecurityScheme": []
           },
@@ -671,15 +665,9 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": ""
           }
         },
         "security": [
-          {
-            "TokenSecurityScheme": []
-          },
           {
             "CookieSecurityScheme": []
           },
@@ -709,9 +697,6 @@
           "204": {
             "description": ""
           },
-          "401": {
-            "description": ""
-          },
           "403": {
             "description": ""
           },
@@ -720,9 +705,6 @@
           }
         },
         "security": [
-          {
-            "TokenSecurityScheme": []
-          },
           {
             "CookieSecurityScheme": []
           },
@@ -756,17 +738,11 @@
               }
             }
           },
-          "401": {
-            "description": ""
-          },
           "403": {
             "description": ""
           }
         },
         "security": [
-          {
-            "TokenSecurityScheme": []
-          },
           {
             "CookieSecurityScheme": []
           },
@@ -796,9 +772,6 @@
           "204": {
             "description": ""
           },
-          "401": {
-            "description": ""
-          },
           "403": {
             "description": ""
           },
@@ -807,9 +780,6 @@
           }
         },
         "security": [
-          {
-            "TokenSecurityScheme": []
-          },
           {
             "CookieSecurityScheme": []
           },
@@ -842,15 +812,9 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": ""
           }
         },
         "security": [
-          {
-            "TokenSecurityScheme": []
-          },
           {
             "CookieSecurityScheme": []
           },
@@ -880,17 +844,11 @@
           "200": {
             "description": ""
           },
-          "401": {
-            "description": ""
-          },
           "404": {
             "description": ""
           }
         },
         "security": [
-          {
-            "TokenSecurityScheme": []
-          },
           {
             "CookieSecurityScheme": []
           },
@@ -916,9 +874,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": ""
           }
         },
         "security": [
@@ -965,15 +920,9 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": ""
           }
         },
         "security": [
-          {
-            "TokenSecurityScheme": []
-          },
           {
             "CookieSecurityScheme": []
           },
@@ -1001,9 +950,6 @@
         ],
         "responses": {
           "204": {
-            "description": ""
-          },
-          "401": {
             "description": ""
           },
           "404": {
@@ -1098,9 +1044,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": ""
           }
         },
         "security": [
@@ -1142,9 +1085,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": ""
           },
           "404": {
             "description": ""
@@ -1189,9 +1129,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": ""
           },
           "404": {
             "description": ""
@@ -1246,9 +1183,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": ""
           }
         },
         "security": [
@@ -1282,9 +1216,6 @@
         ],
         "responses": {
           "204": {
-            "description": ""
-          },
-          "401": {
             "description": ""
           },
           "404": {
