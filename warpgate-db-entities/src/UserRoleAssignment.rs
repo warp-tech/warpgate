@@ -7,6 +7,9 @@ use serde::Serialize;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+pub const SOURCE_SSO: &str = "sso";
+pub const SOURCE_MANUAL: &str = "manual";
+
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Object)]
 #[sea_orm(table_name = "user_roles")]
 #[oai(rename = "UserRoleAssignment")]
@@ -21,6 +24,8 @@ pub struct Model {
     pub expires_at: Option<OffsetDateTime>,
     /// When this role assignment was revoked (null = not revoked)
     pub revoked_at: Option<OffsetDateTime>,
+    /// Who created this assignment ("sso" or "manual"; null = before source tracking)
+    pub source: Option<String>,
 }
 
 impl Model {
@@ -57,6 +62,24 @@ impl Entity {
         role_id: Uuid,
         expires_at: Option<OffsetDateTime>,
     ) -> Result<Model, DbErr> {
+        Self::grant_with_source(db, user_id, role_id, expires_at, SOURCE_MANUAL).await
+    }
+
+    pub async fn idempotent_grant_from_sso(
+        db: &DatabaseConnection,
+        user_id: Uuid,
+        role_id: Uuid,
+    ) -> Result<Model, DbErr> {
+        Self::grant_with_source(db, user_id, role_id, None, SOURCE_SSO).await
+    }
+
+    async fn grant_with_source(
+        db: &DatabaseConnection,
+        user_id: Uuid,
+        role_id: Uuid,
+        expires_at: Option<OffsetDateTime>,
+        source: &str,
+    ) -> Result<Model, DbErr> {
         let existing = Self::find()
             .filter(Column::UserId.eq(user_id))
             .filter(Column::RoleId.eq(role_id))
@@ -67,6 +90,12 @@ impl Entity {
 
         Ok(if let Some(existing) = existing {
             if existing.active() {
+                // An explicit manual grant takes ownership without changing its lifetime.
+                if source == SOURCE_MANUAL && existing.source.as_deref() != Some(SOURCE_MANUAL) {
+                    let mut model: ActiveModel = existing.into();
+                    model.source = Set(Some(source.to_owned()));
+                    return model.update(db).await;
+                }
                 return Ok(existing);
             }
             // Re-activate a revoked/expired assignment
@@ -74,6 +103,7 @@ impl Entity {
             model.granted_at = Set(Some(now));
             model.expires_at = Set(expires_at);
             model.revoked_at = Set(None);
+            model.source = Set(Some(source.to_owned()));
             model.update(db).await?
         } else {
             let values = ActiveModel {
@@ -82,6 +112,7 @@ impl Entity {
                 granted_at: Set(Some(now)),
                 expires_at: Set(expires_at),
                 revoked_at: Set(None),
+                source: Set(Some(source.to_owned())),
             };
             values.insert(db).await?
         })

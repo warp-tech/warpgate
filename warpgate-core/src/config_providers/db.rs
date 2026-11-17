@@ -857,12 +857,18 @@ impl ConfigProvider for DatabaseConfigProvider {
             match (assignment, assigned_role_names.contains(&role_name)) {
                 (None, true) => {
                     info!("Adding role {role_name} for user {username} (from SSO)");
-                    entities::UserRoleAssignment::Entity::idempotent_grant(
-                        db, user.id, role.id, None,
+                    entities::UserRoleAssignment::Entity::idempotent_grant_from_sso(
+                        db, user.id, role.id,
                     )
                     .await?;
                 }
                 (Some(assignment), false) => {
+                    // Preserve manual grants, but keep legacy NULL sources revocable.
+                    if assignment.source.as_deref()
+                        == Some(entities::UserRoleAssignment::SOURCE_MANUAL)
+                    {
+                        continue;
+                    }
                     info!("Removing role {role_name} for user {username} (from SSO)");
                     let mut model: entities::UserRoleAssignment::ActiveModel = assignment.into();
                     model.revoked_at = Set(Some(OffsetDateTime::now_utc()));
@@ -1375,5 +1381,135 @@ mod tests {
                 .unwrap(),
             None,
         );
+    }
+
+    #[tokio::test]
+    async fn sso_sync_preserves_manual_expiring_roles() {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+        let user_id = user_named(&db, "alice").await;
+        let mut roles = Vec::new();
+        for name in ["lab-target-access", "unrelated"] {
+            roles.push(
+                entities::Role::ActiveModel {
+                    id: Set(Uuid::new_v4()),
+                    name: Set(name.to_owned()),
+                    ..Default::default()
+                }
+                .insert(&db)
+                .await
+                .unwrap(),
+            );
+        }
+        let manual = entities::UserRoleAssignment::Entity::idempotent_grant(
+            &db,
+            user_id,
+            roles[0].id,
+            Some(OffsetDateTime::now_utc() + time::Duration::hours(2)),
+        )
+        .await
+        .unwrap();
+        let provider = DatabaseConfigProvider::new(&db);
+        for assigned in [vec!["unrelated".to_owned()], vec![]] {
+            let sso_active = !assigned.is_empty();
+            provider
+                .apply_sso_role_mappings("alice", None, assigned)
+                .await
+                .unwrap();
+            let actual = entities::UserRoleAssignment::Entity::find_by_id((user_id, roles[0].id))
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(actual.active(), "SSO revoked a manually granted role");
+            assert!(actual.revoked_at.is_none());
+            assert_eq!(actual.expires_at, manual.expires_at);
+            assert_eq!(actual.granted_at, manual.granted_at);
+            let sso = entities::UserRoleAssignment::Entity::find_by_id((user_id, roles[1].id))
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                sso.source.as_deref(),
+                Some(entities::UserRoleAssignment::SOURCE_SSO)
+            );
+            assert_eq!(sso.active(), sso_active);
+            assert_eq!(sso.revoked_at.is_none(), sso_active);
+        }
+    }
+
+    #[tokio::test]
+    async fn role_grants_track_ownership_and_reactivation() {
+        use entities::UserRoleAssignment::{Entity, SOURCE_MANUAL, SOURCE_SSO};
+
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+        let user_id = user_named(&db, "alice").await;
+        let role = entities::Role::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            name: Set("lab-target-access".to_owned()),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        let provider = DatabaseConfigProvider::new(&db);
+        let sso = Entity::idempotent_grant_from_sso(&db, user_id, role.id)
+            .await
+            .unwrap();
+        assert_eq!(sso.source.as_deref(), Some(SOURCE_SSO));
+
+        // Both SSO and legacy grants can be explicitly taken over by an admin.
+        for source in [Some(SOURCE_SSO), None] {
+            let mut model: entities::UserRoleAssignment::ActiveModel = sso.clone().into();
+            model.source = Set(source.map(str::to_owned));
+            let original = model.update(&db).await.unwrap();
+            let manual = Entity::idempotent_grant(&db, user_id, role.id, None)
+                .await
+                .unwrap();
+            assert_eq!(manual.source.as_deref(), Some(SOURCE_MANUAL));
+            assert_eq!(manual.granted_at, original.granted_at);
+            assert_eq!(manual.expires_at, original.expires_at);
+            assert_eq!(manual.revoked_at, original.revoked_at);
+            assert_eq!(
+                Entity::idempotent_grant_from_sso(&db, user_id, role.id)
+                    .await
+                    .unwrap(),
+                manual
+            );
+        }
+
+        // Legacy grants remain revocable, and reactivation records the new source.
+        let mut legacy: entities::UserRoleAssignment::ActiveModel = sso.into();
+        legacy.source = Set(None);
+        legacy.update(&db).await.unwrap();
+        provider
+            .apply_sso_role_mappings("alice", None, vec![])
+            .await
+            .unwrap();
+        let revoked = Entity::find_by_id((user_id, role.id))
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(revoked.revoked_at.is_some());
+        let manual = Entity::idempotent_grant(&db, user_id, role.id, None)
+            .await
+            .unwrap();
+        assert_eq!(manual.source.as_deref(), Some(SOURCE_MANUAL));
+        assert!(manual.active());
+
+        let mut expired: entities::UserRoleAssignment::ActiveModel = manual.into();
+        expired.expires_at = Set(Some(OffsetDateTime::now_utc() - time::Duration::hours(1)));
+        expired.update(&db).await.unwrap();
+        let reactivated = Entity::idempotent_grant_from_sso(&db, user_id, role.id)
+            .await
+            .unwrap();
+        assert_eq!(reactivated.source.as_deref(), Some(SOURCE_SSO));
+        assert!(reactivated.active());
+        assert!(reactivated.expires_at.is_none());
     }
 }
