@@ -18,7 +18,6 @@
     import AsyncButton from 'common/AsyncButton.svelte'
     import EmptyState from 'common/EmptyState.svelte'
     import { stringifyError } from 'common/errors'
-    import { downloadBlob } from 'common/helpers'
     import ItemList, { type LoadOptions } from 'common/ItemList.svelte'
     import Loadable from 'common/Loadable.svelte'
     import RelativeDate from 'common/RelativeDate.svelte'
@@ -80,18 +79,6 @@
         }
         gen++
         await reloadServerInfo()
-    }
-
-    async function exportUnmanaged(): Promise<void> {
-        error = undefined
-        try {
-            downloadBlob(
-                await api.exportGitopsUnmanaged(),
-                'warpgate-unmanaged.yaml',
-            )
-        } catch (err) {
-            error = await stringifyError(err)
-        }
     }
 
     async function dryRun(): Promise<void> {
@@ -245,11 +232,6 @@
             <a class="btn btn-secondary me-auto" href="/config/gitops" use:link>
                 Configure
             </a>
-        {/if}
-        {#if canManage}
-            <AsyncButton color="link" click={exportUnmanaged}>
-                Export unmanaged
-            </AsyncButton>
         {/if}
     {/snippet}
     {#snippet children()}

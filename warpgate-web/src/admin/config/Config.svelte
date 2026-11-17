@@ -38,6 +38,9 @@
         '/gitops': wrap({
             asyncComponent: () => import('./GitopsSettings.svelte'),
         }),
+        '/gitops/schema': wrap({
+            asyncComponent: () => import('./GitopsSchema.svelte'),
+        }),
         '/ldap-servers': wrap({
             asyncComponent: () => import('./ldap/LdapServers.svelte'),
         }),

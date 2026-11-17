@@ -8,6 +8,7 @@
     import CopyableTextArea from 'common/CopyableTextArea.svelte'
     import DurationInput from 'common/DurationInput.svelte'
     import { stringifyError } from 'common/errors'
+    import { downloadBlob } from 'common/helpers'
     import Loadable from 'common/Loadable.svelte'
     import SecretRefInput from 'common/SecretRefInput.svelte'
     import StickyActionBar from 'common/StickyActionBar.svelte'
@@ -104,6 +105,18 @@
             }
             // Reloads the redacted source, so a saved password shows as stored
             await load()
+        } catch (err) {
+            error = await stringifyError(err)
+        }
+    }
+
+    async function exportUnmanaged(): Promise<void> {
+        error = undefined
+        try {
+            downloadBlob(
+                await api.exportGitopsUnmanaged(),
+                'warpgate-unmanaged.yaml',
+            )
         } catch (err) {
             error = await stringifyError(err)
         }
@@ -225,6 +238,14 @@
                     {/if}
                 {/if}
 
+                <a
+                    href="https://warpgate.null.page/gitops/?utm_source=app&utm_content=gitops"
+                    target="_blank"
+                    class="d-flex align-items-center gap-2"
+                >
+                    <Fa icon={faBook} />
+                    GitOps Documentation
+                </a>
                 {#if !source?.kind}
                     <a
                         href="/@warpgate/admin/api/playground#/operations/sync_gitops"
@@ -236,12 +257,12 @@
                     </a>
                 {/if}
                 <a
-                    href="XXX"
+                    href="/@warpgate/admin#/config/gitops/schema"
                     target="_blank"
                     class="mb-4 d-flex align-items-center gap-2"
                 >
                     <Fa icon={faBook} />
-                    [TODO] Config file format
+                    Config file schema
                 </a>
 
                 <h4>Options</h4>
@@ -330,6 +351,11 @@
                 {/if}
 
                 <StickyActionBar>
+                    {#snippet start()}
+                        <AsyncButton color="link" click={exportUnmanaged}>
+                            Export unmanaged
+                        </AsyncButton>
+                    {/snippet}
                     <AsyncButton
                         type="button"
                         color="primary"
