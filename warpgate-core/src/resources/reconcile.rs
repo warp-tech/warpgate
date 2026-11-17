@@ -170,12 +170,12 @@ impl From<DbErr> for ApplyError {
 }
 
 /// Writes `confirmed` in one transaction, as `provider`. The plan is computed
-/// again inside the transaction and must still be the one that was confirmed,
-/// so exactly what was shown gets written; a change made after that still
-/// rolls everything back, through the unique names and the ownership checks.
-/// A plan that another apply of the same files already carried out (a webhook
-/// delivered to two nodes) has nothing left to write and succeeds empty.
-/// `secrets` resolves the references of client keys, to derive their public keys.
+/// again inside the transaction and must equal `confirmed`, so only what was
+/// shown is written. A conflicting change made after that check fails on the
+/// unique names or the ownership checks and rolls everything back.
+/// If another apply of the same files already ran (a webhook delivered to two
+/// nodes), nothing is left to write and the result is empty.
+/// `secrets` resolves client key references, to derive their public keys.
 pub async fn apply<'p, C: ConnectionTrait + TransactionTrait>(
     db: &C,
     provider: ProviderId,
@@ -204,8 +204,8 @@ pub async fn apply<'p, C: ConnectionTrait + TransactionTrait>(
     }
 
     let actor = Actor::Provider(provider);
-    // Plans list groups, roles and keys before the targets that refer to them
-    // by name, so the names are read once all of those are in place
+    // Loaded at the first target. The groups, roles and keys that targets
+    // refer to by name are written by then.
     let mut names = None;
     let mut written = Vec::new();
     let (targets, others): (Vec<&Change>, Vec<&Change>) = confirmed
@@ -252,9 +252,9 @@ pub async fn apply<'p, C: ConnectionTrait + TransactionTrait>(
         written.push((change, id));
     }
 
-    // After the writes, so a replacement client key exists before the last
-    // one goes, and targets drop their references before what they referred
-    // to; in reverse plan order, so targets go before what they refer to
+    // Deletes run after the writes. By then a replacement client key exists
+    // and updated targets no longer reference the deleted rows. Reverse plan
+    // order deletes targets before the rows they reference.
     let mut admitted = Vec::new();
     for change in confirmed.changes.iter().rev() {
         let Change::Delete { kind, id, .. } = change else {
@@ -528,7 +528,7 @@ fn jump_hosts_first(mut pending: Vec<&Change>) -> Vec<&Change> {
             .into_iter()
             .partition(|change| jump_host(change).is_none_or(|host| !waiting.contains(&host)));
         if ready.is_empty() {
-            // A loop, which validation rejects; the writes then fail on it
+            // A jump host loop. Validation rejects these; the writes fail on one.
             ordered.extend(rest);
             break;
         }

@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.30.3-53-g4d66a86d-modified"
+    "version": "v0.30.3-62-g3a302323-modified"
   },
   "servers": [
     {
@@ -7358,7 +7358,7 @@
           },
           "gitops_git_password_set": {
             "type": "boolean",
-            "description": "Whether the Git source holds a stored password or token, which the\nredacted `gitops_source` can't show"
+            "description": "Whether the Git source has a stored password or token. `gitops_source`\nis redacted and can't show it."
           },
           "gitops_prune": {
             "type": "boolean"
@@ -7493,7 +7493,7 @@
       "ProviderSync": {
         "type": "object",
         "title": "ProviderSync",
-        "description": "One outcome of syncing a provider. A later sync that reaches the same\nunchanged or failed outcome moves `checked_at` instead of adding a row, so\na row reads \"in this state from `started_at` through `checked_at`\".",
+        "description": "One outcome of syncing a provider. A later sync with the same unchanged or\nfailed outcome moves `checked_at` instead of adding a row. A row therefore\ncovers the time from `started_at` through `checked_at`.",
         "required": [
           "id",
           "provider",
@@ -8594,7 +8594,7 @@
         "properties": {
           "force_prune": {
             "type": "boolean",
-            "description": "Deletes what is gone from the source even when that is most of it",
+            "description": "Prunes even when that deletes most of the managed resources",
             "default": false
           },
           "yaml": {

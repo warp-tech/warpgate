@@ -13,9 +13,8 @@ use super::pagination::PaginatedResponse;
 
 pub struct Api;
 
-/// A sync writes targets, groups and roles as the provider, and the export
-/// reads their credentials: ConfigEdit alone must not reach past what the
-/// resource permissions guard
+/// A sync writes targets, groups and roles, and the export reads their
+/// credentials, so ConfigEdit alone is not enough
 fn require_resource_permissions(admin: &AdminContext) -> Result<(), WarpgateError> {
     for permission in [
         AdminPermission::ConfigEdit,
@@ -29,7 +28,7 @@ fn require_resource_permissions(admin: &AdminContext) -> Result<(), WarpgateErro
 
 #[derive(Object)]
 struct SyncGitopsRequest {
-    /// Deletes what is gone from the source even when that is most of it
+    /// Prunes even when that deletes most of the managed resources
     #[oai(default)]
     force_prune: bool,
     /// Resource documents to use as the full desired state. The configured

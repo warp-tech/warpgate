@@ -34,9 +34,6 @@
         '/users': wrap({
             asyncComponent: () => import('./users/Users.svelte'),
         }),
-        '/gitops': wrap({
-            asyncComponent: () => import('./GitopsHistory.svelte'),
-        }),
         '/policies': wrap({
             asyncComponent: () => import('./Policies.svelte'),
         }),
@@ -102,10 +99,6 @@
         {
             title: 'Policies',
             href: '/manage/policies',
-        },
-        {
-            title: 'GitOps',
-            href: '/manage/gitops',
         },
     ])
 </script>

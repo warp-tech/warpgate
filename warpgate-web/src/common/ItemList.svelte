@@ -46,8 +46,8 @@
         class?: string
     }
 
-    // Absorbs the width no growing column takes, so what follows it stays
-    // right-aligned whichever columns are toggled off.
+    // Absorbs the width that no growing column takes, so the columns after it
+    // stay right-aligned.
     export interface SpacerColumn {
         id: string
         spacer: true
@@ -140,10 +140,10 @@
         columns?.filter(c => c.spacer || c.when !== false),
     )
     const enabledColumns = $derived(availableColumns?.filter(isShown))
-    // Free space goes to `fr` tracks when there are any; only without them
-    // does the grid stretch `auto` tracks, which is what lets a spacer take
-    // over once every growing column is toggled off. Content columns are
-    // `max-content` so that stretch never reaches them.
+    // Free space goes to `fr` tracks. The grid stretches `auto` tracks only
+    // when there are none, so a spacer takes the free space once every growing
+    // column is toggled off. Content columns are `max-content` and never
+    // stretch.
     const gridTemplate = $derived(
         enabledColumns
             ?.map(c =>

@@ -85,7 +85,7 @@ pub fn parse(source: &str) -> Result<Vec<Document>, Diagnostic> {
         aliases: HashSet::new(),
     };
 
-    // `load` is recursive and can overflow on a bad doc
+    // `load` is recursive and can overflow the stack on a deeply nested document
     for event in Parser::new_from_str(source) {
         let (event, span) = event.map_err(|error| Diagnostic::from(&error))?;
         loader.feed(event, span)?;
@@ -121,7 +121,7 @@ pub fn parse(source: &str) -> Result<Vec<Document>, Diagnostic> {
         .collect())
 }
 
-/// Does not expands aliases and limits nesting depth
+/// Does not expand aliases, and limits nesting depth
 struct GuardedLoader<'input> {
     loader: YamlLoader<'input, MarkedYaml<'input>>,
     depth: usize,
@@ -158,7 +158,7 @@ impl<'input> GuardedLoader<'input> {
     }
 }
 
-/// Converts from saphyr tree into serde_json
+/// Converts a saphyr tree into a `serde_json` value
 struct Converter<'a> {
     aliases: &'a HashSet<usize>,
     locations: HashMap<Path, NodeLocation>,
@@ -232,7 +232,7 @@ impl Converter<'_> {
         self.aliases.contains(&node.span.start.index())
     }
 
-    /// a node without JSON representation
+    /// Reports a node that has no JSON representation
     fn error(&mut self, path: &[Segment], location: Location, message: &str) -> Value {
         self.errors
             .push(Diagnostic::new(location, Path(path.to_vec()), message));

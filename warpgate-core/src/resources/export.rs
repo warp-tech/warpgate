@@ -22,8 +22,8 @@ pub async fn unmanaged<C: ConnectionTrait>(db: &C) -> Result<String, WarpgateErr
         current
             .roles
             .into_iter()
-            // Granting it is fine, but GitOps owning it would lock admins out
-            // of editing it
+            // A GitOps-owned admin role would lock admins out of editing it.
+            // Files can still grant it.
             .filter(|row| row.name != BUILTIN_ADMIN_ROLE_NAME)
             .collect(),
         Resource::Role,

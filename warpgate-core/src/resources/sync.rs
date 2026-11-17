@@ -38,16 +38,16 @@ const SCHEDULE_TICK: Duration = Duration::from_secs(15);
 /// Keeps a failure's text within MySQL's 64 KB `TEXT`
 const MAX_ERROR_CHARS: usize = 16_000;
 
-/// The transport only bounds connecting; a remote that then stalls would
-/// otherwise hold [`RUNNING`] for good
+/// The transport only bounds connecting. A remote that stalls afterwards
+/// would hold [`RUNNING`] forever.
 const CHECKOUT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 /// One sync at a time per node; across nodes, `apply` refuses a plan that
 /// another node's apply made stale
 static RUNNING: Mutex<()> = Mutex::const_new(());
 
-/// A webhook sync is waiting for [`RUNNING`]; further deliveries until it
-/// starts add nothing, since it fetches whatever is newest by then
+/// Set while a webhook sync waits for [`RUNNING`]. Deliveries that arrive
+/// before it starts are dropped: it fetches the newest revision anyway.
 static WEBHOOK_QUEUED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, thiserror::Error)]

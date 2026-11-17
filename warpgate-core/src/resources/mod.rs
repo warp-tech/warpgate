@@ -53,12 +53,12 @@ impl From<ResourceError> for WarpgateError {
     }
 }
 
-/// Who is writing. A row is changed only by whoever owns it: an admin for a
-/// row created by hand, the owning provider for a reconciled one. Admin API
-/// edits write as [`Actor::Admin`], so a provider's rows stay read-only
-/// through the API until an admin releases them; a provider writes only
-/// through [`reconcile::apply`], and never overwrites a hand-made row unless
-/// the resource sets `metadata.adopt_existing`.
+/// Who is writing. Only a row's owner may change it: an admin for a row
+/// created by hand, the owning provider for a reconciled one. The admin API
+/// writes as [`Actor::Admin`], so a provider's rows are read-only there until
+/// an admin releases them. A provider writes only through
+/// [`reconcile::apply`], and takes over a hand-made row only when the
+/// resource sets `metadata.adopt_existing`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Actor {
     Admin,
@@ -96,9 +96,9 @@ pub trait OwnedEntity: EntityTrait {
     const PROVIDER: Self::Column;
 }
 
-/// Sets a row's owner, changing nothing else: the one write that skips
-/// [`Actor::may_write`]. Only the reconciler hands a row to a provider, when
-/// applying a resource that sets `metadata.adopt_existing`.
+/// Sets a row's owner and nothing else. This is the only write that skips
+/// [`Actor::may_write`]. The reconciler assigns a row to a provider only for
+/// a resource that sets `metadata.adopt_existing`.
 pub(crate) async fn set_owner<E: OwnedEntity, C: ConnectionTrait>(
     db: &C,
     id: Uuid,

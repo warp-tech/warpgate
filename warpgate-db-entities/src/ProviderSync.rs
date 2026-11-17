@@ -94,9 +94,9 @@ pub struct PlannedChange {
 #[oai(from_parameter = false, from_multipart = false, to_header = false)]
 pub struct SyncPlan(pub Vec<PlannedChange>);
 
-/// One outcome of syncing a provider. A later sync that reaches the same
-/// unchanged or failed outcome moves `checked_at` instead of adding a row, so
-/// a row reads "in this state from `started_at` through `checked_at`".
+/// One outcome of syncing a provider. A later sync with the same unchanged or
+/// failed outcome moves `checked_at` instead of adding a row. A row therefore
+/// covers the time from `started_at` through `checked_at`.
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Object)]
 #[sea_orm(table_name = "provider_syncs")]
 #[oai(rename = "ProviderSync")]

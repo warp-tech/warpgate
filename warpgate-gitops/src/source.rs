@@ -91,8 +91,8 @@ fn clone(
         oauth_refresh_token: None,
     });
 
-    // Isolated: the server account's git config (URL rewrites, proxies,
-    // credential helpers) has no say
+    // Isolated, so the server account's git config (URL rewrites, proxies,
+    // credential helpers) is ignored
     let fetch = gix::clone::PrepareFetch::new(
         git.url.as_str(),
         into,
@@ -101,8 +101,8 @@ fn clone(
         gix::open::Options::isolated(),
     )
     .map_err(git_error)?
-    // `read_files` follows symlinks, which a repository could point at
-    // the server's own files; check them out as plain files instead
+    // `read_files` follows symlinks, and a repository could point one at
+    // the server's files. Check them out as plain files.
     .with_in_memory_config_overrides(["core.symlinks=false"])
     .with_shallow(Shallow::DepthAtRemote(NonZeroU32::MIN))
     // Answers every credential request, so nothing ever prompts

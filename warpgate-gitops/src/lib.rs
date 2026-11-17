@@ -24,8 +24,8 @@ pub fn json_schema() -> Value {
     schema
 }
 
-/// References made next to `properties`, which is how a `kind`-tagged variant
-/// adds its tag to the struct it refers to
+/// Definitions referenced by a `$ref` next to `properties`. A `kind`-tagged
+/// variant has this shape: `$ref` is its struct and `properties` adds the tag.
 fn collect_variant_targets(value: &Value, out: &mut HashSet<String>) {
     match value {
         Value::Object(object) => {
@@ -43,10 +43,10 @@ fn collect_variant_targets(value: &Value, out: &mut HashSet<String>) {
     }
 }
 
-/// Lets editors flag an unknown field, as `config validate` does. The struct a
-/// tagged variant refers to stays open and the variant is closed instead:
-/// `unevaluatedProperties` there sees the tag and the struct's fields together,
-/// while inside the struct it would reject the tag.
+/// Lets editors flag an unknown field, as `config validate` does. A struct
+/// that a tagged variant refers to stays open, and the variant is closed.
+/// `unevaluatedProperties` on the variant sees the tag and the struct's fields
+/// together. Inside the struct it would reject the tag.
 fn close_objects(value: &mut Value, definition: Option<&str>, variant_targets: &HashSet<String>) {
     match value {
         Value::Object(object) => {

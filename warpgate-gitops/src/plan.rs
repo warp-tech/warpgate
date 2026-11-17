@@ -150,9 +150,9 @@ pub enum Prune {
     Off,
     /// Deleted, unless that would delete all of the provider's rows, or more
     /// than half of them: a source that lost most of its files is more likely
-    /// broken (wrong branch or path) than meant
+    /// broken (wrong branch or path) than intended
     On,
-    /// Deleted however many there are
+    /// Deleted, with no limit
     Force,
 }
 
@@ -161,7 +161,7 @@ pub enum Prune {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Plan {
     pub changes: Vec<Change>,
-    /// The policy the plan was made with, which applying it re-plans with
+    /// The policy the plan was made with. Apply re-plans with the same one.
     pub prune: Prune,
 }
 
@@ -338,8 +338,8 @@ const fn apply_order(kind: Kind) -> u8 {
     }
 }
 
-/// An exact match wins over one that differs only in case, which a backend
-/// with case-sensitive names can hold alongside it
+/// An exact match wins over one that differs only in case. A backend with
+/// case-sensitive names can hold both.
 fn find_row<'a, 'b>(rows: &'a [LiveRow<'b>], name: &str) -> Option<&'a LiveRow<'b>> {
     rows.iter().find(|row| row.name == name).or_else(|| {
         let name = name.to_lowercase();
@@ -404,10 +404,11 @@ fn ssh_target_names(desired: &[Resource], current: &Current) -> HashSet<String> 
         .collect()
 }
 
-/// What the targets that stay after this plan refer to, keyed by kind and
-/// lowercase name, each with the name of one target referring to it: the
-/// targets in the files, and the live ones no file describes and this
-/// provider doesn't own (the rest are rewritten or pruned by the plan)
+/// References made by the targets that remain after this plan, keyed by kind
+/// and lowercase name. Each value is the name of one referring target.
+/// The remaining targets are those in the files, and the live ones that no
+/// file describes and this provider doesn't own. The plan rewrites or prunes
+/// the rest.
 fn referenced_names(
     desired: &[Resource],
     current: &Current,
@@ -552,8 +553,8 @@ fn compare_client_key(spec: &SshClientKeySpec) -> Compared {
     }
 }
 
-/// Paths of every credential field: whatever redaction changes, so the
-/// plan hides exactly what the API hides
+/// Paths of every credential field, found as the fields that redaction
+/// changes. The plan hides what the API hides.
 fn credential_paths(options: &TargetOptions) -> HashSet<Path> {
     let mut redacted = options.clone();
     redacted.redact();

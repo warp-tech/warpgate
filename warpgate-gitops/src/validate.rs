@@ -99,7 +99,7 @@ fn check_names_and_references<'a>(
         }
     }
 
-    // Lowercase target names to the target their jump host names, for SSH targets
+    // For each SSH target, its lowercase name and that of its jump host
     let mut jump_hosts: HashMap<String, Option<String>> = HashMap::new();
     let targets: HashSet<String> = documents
         .iter()

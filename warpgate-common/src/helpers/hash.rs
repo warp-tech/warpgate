@@ -54,7 +54,7 @@ mod tests {
 
     #[test]
     fn verifies_existing_phc_hashes() {
-        // Argon2 reference-implementation vector; stands in for hashes already stored in the DB.
+        // Argon2 reference-implementation vector, in the format of hashes already stored in the DB.
         let stored =
             "$argon2id$v=19$m=256,t=2,p=1$c29tZXNhbHQ$nf65EOgLrQMR/uIPnA4rEsF5h7TKyQwu9U1bMCHGi/4";
         assert!(verify_password_hash("password", stored).unwrap());

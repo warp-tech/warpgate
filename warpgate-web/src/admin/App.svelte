@@ -185,7 +185,7 @@
                 <Alert color="danger" fade={false} class="mb-3">
                     <strong>GitOps sync is failing:</strong>
                     {$serverInfo.gitopsSync.error?.split('\n')[0]}
-                    <a href="/manage/gitops" use:link>Details</a>
+                    <a href="/status/gitops" use:link>Details</a>
                 </Alert>
             {/if}
             <div class="d-flex">

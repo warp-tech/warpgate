@@ -141,7 +141,8 @@ pub async fn delete<C: ConnectionTrait + TransactionTrait>(
     Ok(AdmittedSessions(admitted))
 }
 
-/// An assignment belongs to its target, so the target's owner decides
+/// Role assignments have no owner column. The target's owner decides who may
+/// change them.
 async fn target_owner<C: ConnectionTrait>(
     db: &C,
     target_id: Uuid,

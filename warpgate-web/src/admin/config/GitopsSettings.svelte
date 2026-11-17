@@ -1,16 +1,18 @@
 <script lang="ts">
+    import { faBook } from '@fortawesome/free-solid-svg-icons'
     import { Alert, Button, FormGroup, Input } from '@sveltestrap/sveltestrap'
     import { api, type GitopsSource, type ParameterUpdate } from 'admin/lib/api'
     import HelpText from 'admin/lib/HelpText.svelte'
     import PermissionGate from 'admin/lib/PermissionGate.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
     import CopyableTextArea from 'common/CopyableTextArea.svelte'
-    import CopyButton from 'common/CopyButton.svelte'
     import DurationInput from 'common/DurationInput.svelte'
     import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
     import SecretRefInput from 'common/SecretRefInput.svelte'
     import StickyActionBar from 'common/StickyActionBar.svelte'
+    import { serverInfo } from 'gateway/lib/store'
+    import Fa from 'svelte-fa'
     import { link } from 'svelte-spa-router'
 
     let source: GitopsSource | undefined = $state()
@@ -111,7 +113,11 @@
 <div class="container-max-md">
     <div class="page-summary-bar">
         <h1>gitops settings</h1>
-        <a class="ms-auto" href="/manage/gitops" use:link>Sync history</a>
+        {#if $serverInfo?.gitopsSync}
+            <a class="ms-auto" href="/status/gitops" use:link>
+                Sync status &amp; history
+            </a>
+        {/if}
     </div>
 
     <PermissionGate
@@ -137,7 +143,7 @@
                         value={source?.kind ?? ''}
                         onchange={e => setKind(e.currentTarget.value)}
                     >
-                        <option value="">Off (API only)</option>
+                        <option value="">None (API submission only)</option>
                         <option value="Git">Git repository</option>
                         <option value="Directory">Local directory</option>
                     </select>
@@ -218,6 +224,25 @@
                         </HelpText>
                     {/if}
                 {/if}
+
+                {#if !source?.kind}
+                    <a
+                        href="/@warpgate/admin/api/playground#/operations/sync_gitops"
+                        target="_blank"
+                        class="d-flex align-items-center gap-2"
+                    >
+                        <Fa icon={faBook} />
+                        Config submission API
+                    </a>
+                {/if}
+                <a
+                    href="XXX"
+                    target="_blank"
+                    class="mb-4 d-flex align-items-center gap-2"
+                >
+                    <Fa icon={faBook} />
+                    [TODO] Config file format
+                </a>
 
                 <h4>Options</h4>
                 <label for="gitopsPrune" class="d-flex align-items-center mb-4">

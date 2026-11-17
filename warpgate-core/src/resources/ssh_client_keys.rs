@@ -132,7 +132,7 @@ pub async fn update<C: ConnectionTrait>(
     model.update(db).await.map_err(name_taken)
 }
 
-/// Targets that name the key fall back to the default keys
+/// Targets that used the key fall back to the default keys
 pub async fn delete<C: ConnectionTrait>(
     db: &C,
     actor: Actor,
@@ -150,8 +150,9 @@ pub async fn delete<C: ConnectionTrait>(
     Ok(())
 }
 
-/// Records the public key a referenced key resolves to now, after a rotation
-/// in its backend. Derived data, so whoever owns the row doesn't matter.
+/// Stores the public key that a referenced key resolves to after a rotation
+/// in its backend. The public key is derived data, so the row's owner is not
+/// checked.
 pub async fn refresh_public_key<C: ConnectionTrait>(
     db: &C,
     id: Uuid,

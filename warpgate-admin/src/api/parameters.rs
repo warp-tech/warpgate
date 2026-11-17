@@ -58,9 +58,9 @@ fn merge_secret(
     incoming
 }
 
-/// An empty inline password keeps the stored one, as long as the URL is the
-/// same: the browser never sees the password, and a stored token must not be
-/// sent to a host the admin only now typed in.
+/// An empty inline password keeps the stored one while the URL is unchanged.
+/// The browser never receives the password, and a stored token must not be
+/// sent to a different host.
 fn merge_git_password(
     mut incoming: GitopsSource,
     current: Option<&GitopsSource>,
@@ -133,8 +133,8 @@ struct ParameterValues {
     pub gitops_sync_interval_seconds: Option<i64>,
     pub gitops_sync_on_startup: bool,
     pub gitops_webhook_secret_set: bool,
-    /// Whether the Git source holds a stored password or token, which the
-    /// redacted `gitops_source` can't show
+    /// Whether the Git source has a stored password or token. `gitops_source`
+    /// is redacted and can't show it.
     pub gitops_git_password_set: bool,
     pub gitops_prune: bool,
 }

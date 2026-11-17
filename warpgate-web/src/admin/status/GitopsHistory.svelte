@@ -1,4 +1,9 @@
 <script lang="ts">
+    import {
+        faPenToSquare,
+        faTrashAlt,
+    } from '@fortawesome/free-regular-svg-icons'
+    import { faPlus, faSlash } from '@fortawesome/free-solid-svg-icons'
     import { Alert, Badge } from '@sveltestrap/sveltestrap'
     import {
         api,
@@ -17,8 +22,10 @@
     import ItemList, { type LoadOptions } from 'common/ItemList.svelte'
     import Loadable from 'common/Loadable.svelte'
     import RelativeDate from 'common/RelativeDate.svelte'
+    import StickyActionBar from 'common/StickyActionBar.svelte'
     import { reloadServerInfo } from 'gateway/lib/store'
     import { from } from 'rxjs'
+    import Fa, { FaLayers } from 'svelte-fa'
     import { link } from 'svelte-spa-router'
     import GitopsDryRunModal from './GitopsDryRunModal.svelte'
 
@@ -32,6 +39,12 @@
     let error: string | undefined = $state()
     let gen = $state(0)
     let dryRunResult: DryRun | undefined = $state()
+
+    const canManage = $derived(
+        $adminPermissions.configEdit &&
+            $adminPermissions.targetsEdit &&
+            $adminPermissions.accessRolesEdit,
+    )
 
     async function loadLatest(): Promise<GitopsHistoryLatest> {
         return api.getGitopsHistoryLatest()
@@ -105,23 +118,6 @@
 
 <div class="page-summary-bar">
     <h1>gitops</h1>
-    <div class="ms-auto d-flex align-items-center gap-3">
-        {#if $adminPermissions.configEdit}
-            <a class="btn btn-link" href="/config/gitops" use:link>
-                Configure
-            </a>
-        {/if}
-        <!-- A sync writes targets and roles, and the export reads their credentials -->
-        {#if $adminPermissions.configEdit &&
-            $adminPermissions.targetsEdit &&
-            $adminPermissions.accessRolesEdit}
-            <AsyncButton color="link" click={exportUnmanaged}>
-                Export unmanaged
-            </AsyncButton>
-            <AsyncButton color="link" click={dryRun}>Dry run</AsyncButton>
-            <AsyncButton color="primary" click={sync}>Sync now</AsyncButton>
-        {/if}
-    </div>
 </div>
 
 <GitopsDryRunModal bind:dryRun={dryRunResult} {sync} />
@@ -145,31 +141,62 @@
                     <code>{item.revision.slice(0, 12)}</code>
                 {/if}
                 <span class="text-muted">{TRIGGERS[item.triggeredBy]}</span>
-                <span class="ms-auto">
+                <span class="ms-auto d-flex align-items-center gap-2">
                     {const diff = summarizeDiff(item)}
                     {#if diff.create}
-                        <Badge color="success"> +{diff.create} </Badge>
+                        <Badge
+                            color="success"
+                            title="Objects added"
+                            class="d-flex align-items-center gap-1"
+                        >
+                            <Fa icon={faPlus} />
+                            {diff.create}
+                        </Badge>
                     {/if}
                     {#if diff.update}
-                        <Badge color="warning"> •{diff.update} </Badge>
+                        <Badge
+                            color="warning"
+                            title="Objects updated"
+                            class="d-flex align-items-center gap-1"
+                        >
+                            <Fa icon={faPenToSquare} />
+                            {diff.update}
+                        </Badge>
                     {/if}
                     {#if diff.blocked}
-                        <Badge color="danger"> &times;{diff.blocked} </Badge>
+                        <Badge
+                            color="danger"
+                            title="Objects blocked from deletion"
+                            class="d-flex align-items-center gap-1"
+                        >
+                            <FaLayers>
+                                <Fa icon={faTrashAlt} />
+                                <Fa icon={faSlash} />
+                            </FaLayers>
+                            {diff.blocked}
+                        </Badge>
                     {/if}
                     {#if diff.delete}
-                        <Badge color="danger"> –{diff.delete} </Badge>
+                        <Badge
+                            color="danger"
+                            title="Objects deleted"
+                            class="d-flex align-items-center gap-1"
+                        >
+                            <Fa icon={faTrashAlt} />
+                            {diff.delete}
+                        </Badge>
                     {/if}
                 </span>
-                <span class="text-muted small">
-                    <RelativeDate date={item.startedAt} />
-                </span>
             </div>
-            <div class="text-muted small">
-                From {item.source}
-                {#if item.checkedAt.valueOf() !== item.startedAt.valueOf()}
-                    · last checked
-                    <RelativeDate date={item.checkedAt} />
-                {/if}
+            <div class="d-flex align-items-center text-muted small">
+                <div>From {item.source}</div>
+                <div class="ms-auto">
+                    <RelativeDate date={item.startedAt} />
+                    {#if item.checkedAt.valueOf() !== item.startedAt.valueOf()}
+                        · last checked
+                        <RelativeDate date={item.checkedAt} />
+                    {/if}
+                </div>
             </div>
             {#if item.error}
                 <pre class="mt-1 mb-0">{item.error}</pre>
@@ -182,7 +209,7 @@
     <Loadable promise={loadLatest()}>
         {#snippet children(state)}
             {#if state.latest || state.latestSuccess}
-                <h2>Current</h2>
+                <h2>Current revision</h2>
             {/if}
             {#if state.latest}
                 {@render entry(state.latest)}
@@ -211,6 +238,27 @@
         {/snippet}
     </ItemList>
 {/key}
+
+<StickyActionBar>
+    {#snippet start()}
+        {#if $adminPermissions.configEdit}
+            <a class="btn btn-secondary me-auto" href="/config/gitops" use:link>
+                Configure
+            </a>
+        {/if}
+        {#if canManage}
+            <AsyncButton color="link" click={exportUnmanaged}>
+                Export unmanaged
+            </AsyncButton>
+        {/if}
+    {/snippet}
+    {#snippet children()}
+        {#if canManage}
+            <AsyncButton color="secondary" click={dryRun}>Dry run</AsyncButton>
+            <AsyncButton color="primary" click={sync}>Sync now</AsyncButton>
+        {/if}
+    {/snippet}
+</StickyActionBar>
 
 <style>
     pre {

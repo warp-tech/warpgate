@@ -20,7 +20,7 @@ use warpgate_common_http::auth::UnauthenticatedRequestContext;
 const MAX_BODY: usize = 25 * 1024 * 1024;
 
 /// Answers before the sync finishes: git hosts give up on a delivery after
-/// about 10 s, and the outcome lands in the sync history anyway.
+/// about 10 s, and the outcome is recorded in the sync history.
 #[handler]
 pub async fn api_post_gitops_webhook(
     ctx: Data<&UnauthenticatedRequestContext>,
