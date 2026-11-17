@@ -92,7 +92,13 @@ impl WebSshSession {
     }
 
     pub fn connect(&self, chain: Vec<TargetSSHOptions>) {
-        let _ = self.command_tx.send((RCCommand::Connect(chain), None));
+        let _ = self.command_tx.send((
+            RCCommand::Connect {
+                chain,
+                interactive_password: None,
+            },
+            None,
+        ));
     }
 
     async fn start_recording(
