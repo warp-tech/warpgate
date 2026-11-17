@@ -3,9 +3,10 @@
     import SchemaNode from 'admin/lib/SchemaNode.svelte'
     import { setCurrentSidebarSubtitle } from 'common/sidebarState.svelte'
     import { link } from 'svelte-spa-router'
-    import schema from '../../../../gitops-schema.json'
+    // `?raw` keeps TypeScript from opening the file, otherwise svelte-check --watch runs out of file handles
+    import schema from '../../../../gitops-schema.json?raw'
 
-    const root: JsonSchema = schema
+    const root: JsonSchema = JSON.parse(schema)
 
     setCurrentSidebarSubtitle(() => 'Config format')
 </script>
