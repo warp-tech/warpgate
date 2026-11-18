@@ -1,4 +1,8 @@
-use poem_openapi::NewType;
+use std::borrow::Cow;
+
+use poem_openapi::registry::{MetaSchemaRef, Registry};
+use poem_openapi::types::{ParseError, ParseFromJSON, ParseResult, ToJSON, Type};
+use poem_openapi::{NewType, Object};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -17,7 +21,6 @@ macro_rules! uuid_newtype {
             Hash,
             Serialize,
             Deserialize,
-            NewType,
         )]
         #[serde(transparent)]
         pub struct $name(pub Uuid);
@@ -77,9 +80,18 @@ macro_rules! uuid_newtype {
     };
 }
 
-uuid_newtype!(UserSessionId);
-uuid_newtype!(TargetSessionId);
-uuid_newtype!(NodeId);
+uuid_newtype!(
+    #[derive(NewType)]
+    UserSessionId
+);
+uuid_newtype!(
+    #[derive(NewType)]
+    TargetSessionId
+);
+uuid_newtype!(
+    #[derive(NewType)]
+    NodeId
+);
 uuid_newtype!(ProviderId);
 
 impl ProviderId {
@@ -91,6 +103,60 @@ impl ProviderId {
         } else {
             self.to_string()
         }
+    }
+}
+
+/// A provider as the API returns it: its ID and display name
+#[derive(Object)]
+#[oai(rename = "Provider")]
+struct ProviderRepr {
+    id: Uuid,
+    label: String,
+}
+
+impl Type for ProviderId {
+    const IS_REQUIRED: bool = true;
+    type RawValueType = Self;
+    type RawElementValueType = Self;
+
+    fn name() -> Cow<'static, str> {
+        ProviderRepr::name()
+    }
+
+    fn schema_ref() -> MetaSchemaRef {
+        ProviderRepr::schema_ref()
+    }
+
+    fn register(registry: &mut Registry) {
+        ProviderRepr::register(registry);
+    }
+
+    fn as_raw_value(&self) -> Option<&Self::RawValueType> {
+        Some(self)
+    }
+
+    fn raw_element_iter<'a>(
+        &'a self,
+    ) -> Box<dyn Iterator<Item = &'a Self::RawElementValueType> + 'a> {
+        Box::new(std::iter::once(self))
+    }
+}
+
+impl ParseFromJSON for ProviderId {
+    fn parse_from_json(value: Option<serde_json::Value>) -> ParseResult<Self> {
+        ProviderRepr::parse_from_json(value)
+            .map(|provider| Self(provider.id))
+            .map_err(|e| ParseError::custom(e.into_message()))
+    }
+}
+
+impl ToJSON for ProviderId {
+    fn to_json(&self) -> Option<serde_json::Value> {
+        ProviderRepr {
+            id: self.0,
+            label: self.label(),
+        }
+        .to_json()
     }
 }
 

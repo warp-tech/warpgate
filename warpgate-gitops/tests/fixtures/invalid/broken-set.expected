@@ -1,1 +1,1 @@
-tests/fixtures/invalid/broken-set/a.yaml:6:15 spec.is_default: invalid type: string "yes", expected a boolean
+tests/fixtures/invalid/broken-set/a.yaml:6:15 spec.is_default: invalid type: string, expected a boolean

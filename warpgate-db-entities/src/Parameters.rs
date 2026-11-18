@@ -242,7 +242,8 @@ pub struct GitopsGitSource {
     /// Branch, tag, full ref name or commit
     #[oai(validator(min_length = 1, max_length = 255))]
     pub reference: String,
-    /// `None` connects anonymously
+    /// Optional. Without it, a password or token is sent as user `git`. With
+    /// neither, the connection is anonymous.
     #[oai(validator(min_length = 1, max_length = 255))]
     pub username: Option<String>,
     /// Password or access token, inline or a `secret://` reference. The admin

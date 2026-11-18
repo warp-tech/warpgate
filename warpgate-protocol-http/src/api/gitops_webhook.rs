@@ -4,6 +4,9 @@
 //!   Forgejo) or `X-Hub-Signature` (Bitbucket)
 //! - the secret itself in `X-Gitlab-Token` (GitLab)
 //! - the secret as the Basic auth password, any username (Azure DevOps)
+//!
+//! One valid credential is enough. Other headers are ignored, because a proxy
+//! in front of Warpgate may add an `Authorization` header.
 
 use data_encoding::{BASE64, HEXLOWER_PERMISSIVE};
 use futures::StreamExt;
@@ -41,13 +44,21 @@ pub async fn api_post_gitops_webhook(
 }
 
 async fn is_signed(secret: &[u8], headers: &HeaderMap, body: Body) -> bool {
-    if let Some(token) = headers.get("x-gitlab-token") {
-        return token.as_bytes().ct_eq(secret).into();
-    }
-    if let Some(authorization) = headers.get(poem::http::header::AUTHORIZATION) {
-        return basic_password(authorization.as_bytes())
-            .is_some_and(|password| password.ct_eq(secret).into());
-    }
+    presents_secret(secret, headers) || signs_body(secret, headers, body).await
+}
+
+fn presents_secret(secret: &[u8], headers: &HeaderMap) -> bool {
+    let token = headers
+        .get("x-gitlab-token")
+        .is_some_and(|token| token.as_bytes().ct_eq(secret).into());
+    let password = headers
+        .get(poem::http::header::AUTHORIZATION)
+        .and_then(|authorization| basic_password(authorization.as_bytes()))
+        .is_some_and(|password| password.ct_eq(secret).into());
+    token || password
+}
+
+async fn signs_body(secret: &[u8], headers: &HeaderMap, body: Body) -> bool {
     // Bitbucket's `X-Hub-Signature` is SHA-256 too, despite the name GitHub
     // uses for SHA-1
     let Some(signature) = headers
@@ -95,10 +106,16 @@ mod tests {
     const SECRET: &[u8] = b"0123456789abcdef";
     const BODY: &str = r#"{"ref":"refs/heads/main"}"#;
 
-    async fn check(header: &'static str, value: &str) -> bool {
+    async fn check_all(sent: &[(&'static str, &str)]) -> bool {
         let mut headers = HeaderMap::new();
-        headers.insert(header, HeaderValue::from_str(value).unwrap());
+        for (header, value) in sent {
+            headers.insert(*header, HeaderValue::from_str(value).unwrap());
+        }
         is_signed(SECRET, &headers, Body::from_string(BODY.into())).await
+    }
+
+    async fn check(header: &'static str, value: &str) -> bool {
+        check_all(&[(header, value)]).await
     }
 
     #[tokio::test]
@@ -127,5 +144,19 @@ mod tests {
         assert!(!check("authorization", "Bearer 0123456789abcdef").await);
         assert!(!check("x-gitlab-token", "0123456789abcde").await);
         assert!(!is_signed(SECRET, &HeaderMap::new(), Body::from_string(BODY.into())).await);
+
+        let signed = ("x-hub-signature-256", format!("sha256={signature}"));
+        let proxy = basic("ingress:its-own-password");
+        for other in [
+            ("authorization", proxy.as_str()),
+            ("authorization", "Bearer token"),
+            ("x-gitlab-token", "0123456789abcde"),
+        ] {
+            assert!(
+                check_all(&[other, (signed.0, signed.1.as_str())]).await,
+                "{other:?}"
+            );
+            assert!(!check_all(&[other]).await, "{other:?}");
+        }
     }
 }

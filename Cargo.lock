@@ -10596,9 +10596,11 @@ dependencies = [
 
 [[package]]
 name = "warpgate-gitops"
-version = "0.30.0-beta.2"
+version = "0.30.3"
 dependencies = [
+ "data-encoding",
  "gix",
+ "poem-openapi",
  "saphyr",
  "saphyr-parser",
  "schemars 1.2.2",

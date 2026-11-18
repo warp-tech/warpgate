@@ -139,9 +139,10 @@
                     <ManagedObjectStatus
                         class="ms-auto"
                         provider={key.provider}
-                        onRelease={$adminPermissions.configEdit
-                            ? () => run(() => api.releaseSshOwnKey(key))
-                            : undefined}
+                        release={async () => {
+                            await api.releaseSshOwnKey(key)
+                            await load()
+                        }}
                     />
                     {#if $adminPermissions.configEdit && !key.provider}
                         <Button

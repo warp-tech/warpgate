@@ -1,46 +1,98 @@
 use poem_openapi::param::Query;
 use poem_openapi::payload::{Json, PlainText};
 use poem_openapi::{ApiResponse, Object, OpenApi};
-use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect};
+use sea_orm::{PaginatorTrait, QuerySelect};
+use time::OffsetDateTime;
+use uuid::Uuid;
 use warpgate_common::{AdminPermission, ProviderId, WarpgateError};
 use warpgate_common_http::errors::bad_request;
-use warpgate_core::resources::export;
-use warpgate_core::resources::sync::{DryRun, SyncError, SyncRequest, dry_run, latest};
-use warpgate_db_entities::ProviderSync;
+use warpgate_core::logging::AuditEvent;
+use warpgate_core::resources::sync::{
+    DryRun, SyncError, SyncRequest, dry_run, latest, newest_first,
+};
+use warpgate_core::resources::{OwnedEntity, export, release};
+use warpgate_db_entities::ProviderSync::{self, PlanStats, SyncStatus, SyncTrigger};
 
 use super::AdminContext;
 use super::pagination::PaginatedResponse;
 
 pub struct Api;
 
-/// A sync writes targets, groups and roles, and the export reads their
-/// credentials, so ConfigEdit alone is not enough
-fn require_resource_permissions(admin: &AdminContext) -> Result<(), WarpgateError> {
-    for permission in [
-        AdminPermission::ConfigEdit,
-        AdminPermission::TargetsEdit,
-        AdminPermission::AccessRolesEdit,
-    ] {
-        admin.require(permission)?;
+pub(super) async fn release_managed<E: OwnedEntity>(
+    admin: &AdminContext,
+    id: Uuid,
+) -> Result<(), WarpgateError> {
+    admin.require(AdminPermission::ConfigEdit)?;
+    if let Some(provider) = release::<E, _>(&admin.services().db, id).await? {
+        AuditEvent::ProviderResourceReleased {
+            provider: provider.label(),
+            kind: format!("{:?}", E::KIND),
+            id,
+            actor_user_id: admin.auth.user_id(),
+        }
+        .emit();
     }
     Ok(())
 }
 
 #[derive(Object)]
 struct SyncGitopsRequest {
-    /// Prunes even when that deletes most of the managed resources
+    /// Prunes even when that deletes most of the managed resources. Has no
+    /// effect while pruning is off.
     #[oai(default)]
     force_prune: bool,
-    /// Resource documents to use as the full desired state. The configured
-    /// source is not fetched for this run, and need not be set.
+    /// Resource documents to use as the full desired state. A sync refuses
+    /// them while a source is configured; a dry run doesn't.
     #[oai(validator(max_length = 16000000))]
     yaml: Option<String>,
+}
+
+#[derive(Object)]
+#[oai(rename = "ProviderSync")]
+struct SyncSummary {
+    id: Uuid,
+    provider: ProviderId,
+    triggered_by: SyncTrigger,
+    status: SyncStatus,
+    started_at: OffsetDateTime,
+    checked_at: OffsetDateTime,
+    // label / without credentials
+    source: String,
+    /// The commit, or a hash of the files
+    revision: Option<String>,
+    // Undocumented: a description here makes the schema wrap the reference,
+    // and the client generators then emit a second stats type
+    stats: Option<PlanStats>,
+    /// mass-deletion guard refuses the sync
+    needs_force: bool,
+    error: Option<String>,
+}
+
+impl From<ProviderSync::Model> for SyncSummary {
+    fn from(row: ProviderSync::Model) -> Self {
+        Self {
+            id: row.id,
+            provider: row.provider,
+            triggered_by: row.triggered_by,
+            status: row.status,
+            started_at: row.started_at,
+            checked_at: row.checked_at,
+            source: row.source,
+            revision: row.revision,
+            stats: row.plan.as_ref().map(ProviderSync::SyncPlan::stats),
+            needs_force: row
+                .plan
+                .as_ref()
+                .is_some_and(ProviderSync::SyncPlan::needs_force),
+            error: row.error,
+        }
+    }
 }
 
 #[derive(ApiResponse)]
 enum SyncGitopsResponse {
     #[oai(status = 200)]
-    Ok(Json<ProviderSync::Model>),
+    Ok(Json<SyncSummary>),
     #[oai(status = 400)]
     BadRequest(Json<String>),
 }
@@ -62,13 +114,13 @@ enum ExportGitopsResponse {
 #[derive(ApiResponse)]
 enum GetGitopsHistoryResponse {
     #[oai(status = 200)]
-    Ok(Json<PaginatedResponse<ProviderSync::Model>>),
+    Ok(Json<PaginatedResponse<SyncSummary>>),
 }
 
 #[derive(Object)]
 struct GitopsHistoryLatest {
-    latest: Option<ProviderSync::Model>,
-    latest_success: Option<ProviderSync::Model>,
+    latest: Option<SyncSummary>,
+    latest_success: Option<SyncSummary>,
 }
 
 #[derive(ApiResponse)]
@@ -86,7 +138,7 @@ impl Api {
         admin: AdminContext,
         body: Json<SyncGitopsRequest>,
     ) -> Result<SyncGitopsResponse, WarpgateError> {
-        require_resource_permissions(&admin)?;
+        admin.require(AdminPermission::ConfigEdit)?;
 
         let Json(SyncGitopsRequest { force_prune, yaml }) = body;
         let request = SyncRequest::Admin {
@@ -94,11 +146,11 @@ impl Api {
             force_prune,
         };
         match admin.services().sync_gitops(request, yaml).await {
-            Ok(row) => Ok(SyncGitopsResponse::Ok(Json(row))),
-            Err(error @ SyncError::NotConfigured) => Ok(SyncGitopsResponse::BadRequest(
-                bad_request(error.to_string()),
-            )),
+            Ok(row) => Ok(SyncGitopsResponse::Ok(Json(row.into()))),
             Err(SyncError::Other(error)) => Err(error),
+            Err(error) => Ok(SyncGitopsResponse::BadRequest(bad_request(
+                error.to_string(),
+            ))),
         }
     }
 
@@ -113,7 +165,7 @@ impl Api {
         admin: AdminContext,
         body: Json<SyncGitopsRequest>,
     ) -> Result<DryRunGitopsResponse, WarpgateError> {
-        require_resource_permissions(&admin)?;
+        admin.require(AdminPermission::ConfigEdit)?;
 
         let Json(SyncGitopsRequest { force_prune, yaml }) = body;
         let services = admin.services();
@@ -123,24 +175,28 @@ impl Api {
         };
         match dry_run(&services.db, &*services.secret_backends, request, yaml).await {
             Ok(dry_run) => Ok(DryRunGitopsResponse::Ok(Json(dry_run))),
-            Err(error @ SyncError::NotConfigured) => Ok(DryRunGitopsResponse::BadRequest(
-                bad_request(error.to_string()),
-            )),
             Err(SyncError::Other(error)) => Err(error),
+            Err(error) => Ok(DryRunGitopsResponse::BadRequest(bad_request(
+                error.to_string(),
+            ))),
         }
     }
 
     /// Every target, group, role and SSH client key that GitOps doesn't
-    /// manage yet, as resource documents annotated to be adopted. Contains
-    /// their credentials in plain text.
+    /// manage yet, as resource documents that adopt them. Contains their
+    /// credentials in plain text.
     #[oai(
         path = "/gitops/export",
         method = "get",
         operation_id = "export_gitops_unmanaged"
     )]
     async fn api_export(&self, admin: AdminContext) -> Result<ExportGitopsResponse, WarpgateError> {
-        require_resource_permissions(&admin)?;
+        admin.require(AdminPermission::ConfigEdit)?;
         let yaml = export::unmanaged(&admin.services().db).await?;
+        AuditEvent::UnmanagedResourcesExported {
+            actor_user_id: admin.auth.user_id(),
+        }
+        .emit();
         Ok(ExportGitopsResponse::Ok(PlainText(yaml)))
     }
 
@@ -156,10 +212,7 @@ impl Api {
         #[oai(validator(maximum(value = "1000")))] limit: Query<Option<u64>>,
     ) -> Result<GetGitopsHistoryResponse, WarpgateError> {
         let db = &admin.services().db;
-        let query = ProviderSync::Entity::find()
-            .filter(ProviderSync::Column::Provider.eq(ProviderId::GITOPS))
-            .order_by_desc(ProviderSync::Column::StartedAt)
-            .order_by_desc(ProviderSync::Column::Id);
+        let query = newest_first();
         let offset = offset.unwrap_or(0);
         let total = query.clone().count(db).await?;
         let items = query
@@ -168,7 +221,11 @@ impl Api {
             .all(db)
             .await?;
         Ok(GetGitopsHistoryResponse::Ok(Json(
-            PaginatedResponse::from_parts(items, offset, total),
+            PaginatedResponse::from_parts(
+                items.into_iter().map(SyncSummary::from).collect(),
+                offset,
+                total,
+            ),
         )))
     }
 
@@ -187,8 +244,8 @@ impl Api {
 
         Ok(GetGitopsHistoryLatestResponse::Ok(Json(
             GitopsHistoryLatest {
-                latest,
-                latest_success,
+                latest: latest.map(Into::into),
+                latest_success: latest_success.map(Into::into),
             },
         )))
     }

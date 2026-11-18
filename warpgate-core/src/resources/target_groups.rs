@@ -7,10 +7,12 @@ use sea_orm::{
 use uuid::Uuid;
 use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
 use warpgate_db_entities::{Target, TargetGroup};
+use warpgate_gitops::types::ResourceKind;
 
 use super::{Actor, OwnedEntity, ResourceError, check_name, name_taken};
 
 impl OwnedEntity for TargetGroup::Entity {
+    const KIND: ResourceKind = ResourceKind::TargetGroup;
     const ID: Self::Column = TargetGroup::Column::Id;
     const PROVIDER: Self::Column = TargetGroup::Column::Provider;
 }

@@ -29,7 +29,7 @@ from .util import wait_port
 @dataclass
 class AdminApiTestCase:
     id: str
-    permission: Optional[str | tuple[str, ...]]
+    permission: Optional[str]
     call: Callable[[sdk.DefaultApi, Dict[str, object]], sdk.ApiResponse]
     expected_statuses: Set[int]
 
@@ -182,7 +182,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     ),
     AdminApiTestCase(
         id="release_role",
-        permission="access_roles_edit",
+        permission="config_edit",
         call=lambda api, r: api.release_role_with_http_info(r["role_id"]),
         expected_statuses={200},
     ),
@@ -468,7 +468,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     ),
     AdminApiTestCase(
         id="release_target",
-        permission="targets_edit",
+        permission="config_edit",
         call=lambda api, r: api.release_target_with_http_info(r["target_id"]),
         expected_statuses={200},
     ),
@@ -533,7 +533,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     ),
     AdminApiTestCase(
         id="release_target_group",
-        permission="targets_edit",
+        permission="config_edit",
         call=lambda api, r: api.release_target_group_with_http_info(
             r["target_group_id"]
         ),
@@ -837,19 +837,19 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     ),
     AdminApiTestCase(
         id="sync_gitops",
-        permission=("config_edit", "targets_edit", "access_roles_edit"),
+        permission="config_edit",
         call=lambda api, r: api.sync_gitops_with_http_info(sdk.SyncGitopsRequest()),
         expected_statuses={200, 400},
     ),
     AdminApiTestCase(
         id="dry_run_gitops",
-        permission=("config_edit", "targets_edit", "access_roles_edit"),
+        permission="config_edit",
         call=lambda api, r: api.dry_run_gitops_with_http_info(sdk.SyncGitopsRequest()),
         expected_statuses={200, 400},
     ),
     AdminApiTestCase(
         id="export_gitops_unmanaged",
-        permission=("config_edit", "targets_edit", "access_roles_edit"),
+        permission="config_edit",
         call=lambda api, r: api.export_gitops_unmanaged_with_http_info(),
         expected_statuses={200},
     ),
@@ -1251,11 +1251,8 @@ def test_admin_api_permission_enforcement(
 
     # Base-check endpoints (permission=None) admit any admin. An admin holds at least one
     # permission — a permissionless role is not a real admin — so grant a benign baseline.
-    permissions = (
-        (case.permission,) if isinstance(case.permission, str) else case.permission
-    )
     allow_payload = make_limited_admin_role_payload(
-        **({p: True for p in permissions} if permissions else {"sessions_view": True})
+        **({case.permission: True} if case.permission else {"sessions_view": True})
     )
     allowed_role = _create_admin_role(admin_client, allow_payload)
     allowed_user = _create_user_with_role(admin_client, allowed_role.id)
@@ -1387,6 +1384,20 @@ def test_provider_cannot_be_set_by_clients(admin_client: sdk.DefaultApi, pg_wg):
     assert admin_client.get_role(created.json()["id"]).provider is None
 
 
+def _audited(admin_client: sdk.DefaultApi, count: int, **values: str) -> list[dict]:
+    """Audit entries carrying `values`, waiting up to 10 s for `count` of them."""
+    deadline = time.monotonic() + 10
+    while True:
+        entries = [
+            entry.values or {}
+            for entry in admin_client.get_logs(sdk.GetLogsRequest(limit=500))
+            if values.items() <= (entry.values or {}).items()
+        ]
+        if len(entries) >= count or time.monotonic() > deadline:
+            return entries
+        time.sleep(0.5)
+
+
 def _config(wg, *args: str) -> subprocess.CompletedProcess:
     """Runs a `warpgate config` subcommand against a running instance's database."""
     return subprocess.run(
@@ -1462,11 +1473,16 @@ spec:
     applied = _config(pg_wg, "apply", "--yes", str(files))
     assert applied.returncode == 0, applied.stdout + applied.stderr
     assert _config(pg_wg, "plan", str(files)).returncode == 0
+    recorded = admin_client.get_gitops_history().items[0]
+    assert (recorded.triggered_by, recorded.status) == ("Cli", "Applied")
+    assert recorded.stats.create == 4
+    assert len(_audited(admin_client, 5, sync_id=str(recorded.id))) == 5
 
     target = next(t for t in admin_client.get_targets() if t.name == name)
     role = next(r for r in admin_client.get_roles() if r.name == name)
     group = admin_client.get_target_group(target.group_id)
-    assert target.provider == "00000000-0000-0000-0000-000000000000"
+    assert target.provider.id == "00000000-0000-0000-0000-000000000000"
+    assert target.provider.label == "GitOps"
     assert role.provider == target.provider
     assert group.provider == target.provider
     key = next(k for k in admin_client.get_ssh_own_keys() if k.label == name)
@@ -1507,6 +1523,9 @@ spec:
         admin_client.release_ssh_own_key(key.id),
     ]
     assert [r.provider for r in released] == [None] * 4
+    assert _audited(
+        admin_client, 1, _type="ProviderResourceReleased1", id=str(target.id)
+    )
     admin_client.delete_target_role(target.id, role.id)
     planned = _config(pg_wg, "plan", str(files))
     assert planned.returncode == 1, planned.stdout + planned.stderr
@@ -1558,20 +1577,11 @@ spec:
     second = commit(2222)
 
     def audited(sync_id: str, count: int) -> list[dict]:
-        deadline = time.monotonic() + 10
-        while True:
-            entries = [
-                entry.values or {}
-                for entry in admin_client.get_logs(sdk.GetLogsRequest(limit=500))
-                if (entry.values or {}).get("sync_id") == str(sync_id)
-            ]
-            if len(entries) >= count or time.monotonic() > deadline:
-                return entries
-            time.sleep(0.5)
+        return _audited(admin_client, count, sync_id=str(sync_id))
 
     def port() -> int:
         target = next(t for t in admin_client.get_targets() if t.name == name)
-        assert target.provider == "00000000-0000-0000-0000-000000000000"
+        assert target.provider.id == "00000000-0000-0000-0000-000000000000"
         return target.options.actual_instance.port
 
     # Raw JSON: clearing needs an explicit null, which the generated client
@@ -1592,8 +1602,18 @@ spec:
         ]
         assert all(t.name != name for t in admin_client.get_targets()), "a dry run applies nothing"
 
+        with pytest.raises(sdk.ApiException) as err:
+            admin_client.sync_gitops(sdk.SyncGitopsRequest(yaml="{}"))
+        assert err.value.status == 400, "a source and pushed files exclude each other"
+        pushed = admin_client.dry_run_gitops(sdk.SyncGitopsRequest(yaml="{}"))
+        assert pushed.source == "request", "a dry run of pushed files writes nothing"
+        applied = _config(pg_wg, "apply", "--yes", str(repo / "warpgate"))
+        assert applied.returncode == 1, applied.stdout + applied.stderr
+        assert "a GitOps source is configured" in applied.stderr
+
         head = admin_client.sync_gitops(sdk.SyncGitopsRequest())
         assert (head.status, head.revision, head.error) == ("Applied", second, None)
+        assert (head.stats.create, head.stats.update) == (2, 0)
         assert port() == 2222
         assert f"file://{repo}@main" in head.source
         entries = audited(head.id, 3)
@@ -1682,6 +1702,7 @@ def test_gitops_syncs_request_files_and_exports_unmanaged_rows(
     exported = admin_client.export_gitops_unmanaged()
     assert f"name: {hand_made.name}" in exported
     assert "adopt_existing: true" in exported
+    assert _audited(admin_client, 1, _type="UnmanagedResourcesExported1")
 
     name = f"pushed-{uuid4()}"
     files = f"""apiVersion: warpgate/v1

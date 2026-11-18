@@ -1,20 +1,18 @@
 <script lang="ts">
     import { faBriefcase } from '@fortawesome/free-solid-svg-icons'
     import { Tooltip } from '@sveltestrap/sveltestrap'
-    import { providerLabel } from 'admin/lib/providers'
+    import type { Provider } from 'admin/lib/api'
     import Fa from 'svelte-fa'
 
     interface Props {
-        provider?: string
+        provider?: Provider
         class?: string
     }
 
     let { provider, class: className }: Props = $props()
 
     let wrapper: HTMLElement | null = $state(null)
-    let label = $derived(
-        provider ? `Managed by ${providerLabel(provider)}` : '',
-    )
+    let label = $derived(provider ? `Managed by ${provider.label}` : '')
 </script>
 
 {#if provider}

@@ -7,7 +7,7 @@ use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::errors::invalid_field;
 use warpgate_core::resources::target_groups::{self as store, TargetGroupDataRequest};
-use warpgate_core::resources::{self as resources, Actor, ResourceError};
+use warpgate_core::resources::{Actor, ResourceError};
 use warpgate_db_entities::TargetGroup;
 
 use super::AdminContext;
@@ -142,8 +142,7 @@ impl DetailApi {
         admin: AdminContext,
         id: Path<Uuid>,
     ) -> Result<GetTargetGroupResponse, WarpgateError> {
-        admin.require(AdminPermission::TargetsEdit)?;
-        resources::release::<TargetGroup::Entity, _>(&admin.services().db, id.0).await?;
+        super::gitops::release_managed::<TargetGroup::Entity>(&admin, id.0).await?;
         self.api_get_target_group(admin, id).await
     }
 

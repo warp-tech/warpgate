@@ -1,9 +1,11 @@
 /// The credential (re)encryption state machinery
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, Set,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, DbErr, EntityTrait,
+    PrimaryKeyTrait, QueryFilter, QuerySelect, Set, TransactionTrait,
 };
 use tracing::{error, info, warn};
+use uuid::Uuid;
 use warpgate_common::encryption::{Keyring, env_keyring};
 use warpgate_common::{
     SshHostKeyKind, StoredSecrets, TargetOptions, WarpgateError, emit_runtime_warning,
@@ -246,26 +248,65 @@ fn report_undecryptable(undecryptable: &[String], ring: &Keyring) {
     });
 }
 
+async fn row_ids<E: EntityTrait>(
+    db: &DatabaseConnection,
+    id: E::Column,
+) -> Result<Vec<Uuid>, DbErr> {
+    E::find()
+        .select_only()
+        .column(id)
+        .into_tuple()
+        .all(db)
+        .await
+}
+
+/// Reads a row under `FOR UPDATE`. The returned transaction holds the lock.
+/// `None` means the row is gone. The lock makes the rewrite start from the
+/// row's latest state: an earlier read would overwrite an admin edit or a
+/// GitOps apply made during the pass.
+async fn lock_row<E>(
+    db: &DatabaseConnection,
+    id: Uuid,
+) -> Result<Option<(DatabaseTransaction, E::Model)>, DbErr>
+where
+    E: EntityTrait,
+    E::PrimaryKey: PrimaryKeyTrait<ValueType = Uuid>,
+{
+    let txn = db.begin().await?;
+    let row = E::find_by_id(id).lock_exclusive().one(&txn).await?;
+    Ok(row.map(|row| (txn, row)))
+}
+
 async fn rewrite_all(db: &DatabaseConnection) -> Result<usize, WarpgateError> {
     let mut rewritten = 0;
 
-    for target in Target::Entity::find().all(db).await? {
+    for id in row_ids::<Target::Entity>(db, Target::Column::Id).await? {
+        let Some((txn, target)) = lock_row::<Target::Entity>(db, id).await? else {
+            continue;
+        };
         let Some(mut options) = parsed_options(&target) else {
             continue;
         };
         if matches!(options.reencrypt_all(), Ok(true)) {
             let mut model: Target::ActiveModel = target.into();
             model.options = Set(serde_json::to_value(options)?);
-            rewritten += update_unless_deleted(model.update(db).await)?;
+            model.update(&txn).await?;
+            txn.commit().await?;
+            rewritten += 1;
         }
     }
 
-    for key in SshClientKey::Entity::find().all(db).await? {
+    for id in row_ids::<SshClientKey::Entity>(db, SshClientKey::Column::Id).await? {
+        let Some((txn, key)) = lock_row::<SshClientKey::Entity>(db, id).await? else {
+            continue;
+        };
         let mut secret_key = key.secret_key.clone();
         if matches!(secret_key.reencrypt_all(), Ok(true)) {
             let mut model: SshClientKey::ActiveModel = key.into();
             model.secret_key = Set(secret_key);
-            rewritten += update_unless_deleted(model.update(db).await)?;
+            model.update(&txn).await?;
+            txn.commit().await?;
+            rewritten += 1;
         }
     }
 

@@ -3,13 +3,16 @@
         faPenToSquare,
         faTrashAlt,
     } from '@fortawesome/free-regular-svg-icons'
-    import { faPlus, faSlash } from '@fortawesome/free-solid-svg-icons'
+    import {
+        faPlus,
+        faSlash,
+        faTriangleExclamation,
+    } from '@fortawesome/free-solid-svg-icons'
     import { Alert, Badge } from '@sveltestrap/sveltestrap'
     import {
         api,
         type DryRun,
         type GitopsHistoryLatest,
-        PlanAction,
         type ProviderSync,
         SyncStatus,
         SyncTrigger,
@@ -33,17 +36,12 @@
         [SyncTrigger.Interval]: 'Scheduled',
         [SyncTrigger.Api]: 'Manual sync',
         [SyncTrigger.Webhook]: 'Webhook',
+        [SyncTrigger.Cli]: 'Command line',
     }
 
     let error: string | undefined = $state()
     let gen = $state(0)
     let dryRunResult: DryRun | undefined = $state()
-
-    const canManage = $derived(
-        $adminPermissions.configEdit &&
-            $adminPermissions.targetsEdit &&
-            $adminPermissions.accessRolesEdit,
-    )
 
     async function loadLatest(): Promise<GitopsHistoryLatest> {
         return api.getGitopsHistoryLatest()
@@ -58,21 +56,17 @@
     async function sync(forcePrune = false): Promise<void> {
         error = undefined
         try {
-            const result = await api.syncGitops({
+            const outcome = await api.syncGitops({
                 syncGitopsRequest: { forcePrune },
             })
             if (
                 !forcePrune &&
-                result.status === SyncStatus.Failed &&
-                result.plan?.some(c => c.action === PlanAction.Blocked)
+                outcome.needsForce &&
+                confirm(
+                    `This sync would delete more than half (${outcome.stats?.guarded}) of all managed objects. Sync anyway?`,
+                )
             ) {
-                if (
-                    confirm(
-                        'Syncing will delete more than a half of managed objects. Are you sure?',
-                    )
-                ) {
-                    await sync(true)
-                }
+                await sync(true)
             }
         } catch (err) {
             error = await stringifyError(err)
@@ -88,18 +82,6 @@
         } catch (err) {
             error = await stringifyError(err)
         }
-    }
-
-    function summarizeDiff(
-        row: ProviderSync,
-    ): Partial<Record<PlanAction, number>> {
-        const counts = new Map<PlanAction, number>()
-        for (const { action } of row.plan ?? []) {
-            if (action !== PlanAction.Unchanged) {
-                counts.set(action, (counts.get(action) ?? 0) + 1)
-            }
-        }
-        return Object.fromEntries(counts)
     }
 </script>
 
@@ -129,49 +111,61 @@
                 {/if}
                 <span class="text-muted">{TRIGGERS[item.triggeredBy]}</span>
                 <span class="ms-auto d-flex align-items-center gap-2">
-                    {const diff = summarizeDiff(item)}
-                    {#if diff.create}
-                        <Badge
-                            color="success"
-                            title="Objects added"
-                            class="d-flex align-items-center gap-1"
-                        >
-                            <Fa icon={faPlus} />
-                            {diff.create}
-                        </Badge>
-                    {/if}
-                    {#if diff.update}
-                        <Badge
-                            color="warning"
-                            title="Objects updated"
-                            class="d-flex align-items-center gap-1"
-                        >
-                            <Fa icon={faPenToSquare} />
-                            {diff.update}
-                        </Badge>
-                    {/if}
-                    {#if diff.blocked}
-                        <Badge
-                            color="danger"
-                            title="Objects blocked from deletion"
-                            class="d-flex align-items-center gap-1"
-                        >
-                            <FaLayers>
+                    {#if item.stats}
+                        {@const stats = item.stats}
+                        {#if stats.create}
+                            <Badge
+                                color="success"
+                                title="Objects added"
+                                class="d-flex align-items-center gap-1"
+                            >
+                                <Fa icon={faPlus} />
+                                {stats.create}
+                            </Badge>
+                        {/if}
+                        {#if stats.update + stats.adopt}
+                            <Badge
+                                color="warning"
+                                title="Objects updated or adopted"
+                                class="d-flex align-items-center gap-1"
+                            >
+                                <Fa icon={faPenToSquare} />
+                                {stats.update + stats.adopt}
+                            </Badge>
+                        {/if}
+                        {#if stats.guarded}
+                            <Badge
+                                color="danger"
+                                title="Deletions held back by the mass-deletion guard"
+                                class="d-flex align-items-center gap-1"
+                            >
+                                <FaLayers>
+                                    <Fa icon={faTrashAlt} />
+                                    <Fa icon={faSlash} />
+                                </FaLayers>
+                                {stats.guarded}
+                            </Badge>
+                        {/if}
+                        {#if stats.blocked + stats.collision}
+                            <Badge
+                                color="danger"
+                                title="Objects that can't be changed; see the error"
+                                class="d-flex align-items-center gap-1"
+                            >
+                                <Fa icon={faTriangleExclamation} />
+                                {stats.blocked + stats.collision}
+                            </Badge>
+                        {/if}
+                        {#if stats._delete}
+                            <Badge
+                                color="danger"
+                                title="Objects deleted"
+                                class="d-flex align-items-center gap-1"
+                            >
                                 <Fa icon={faTrashAlt} />
-                                <Fa icon={faSlash} />
-                            </FaLayers>
-                            {diff.blocked}
-                        </Badge>
-                    {/if}
-                    {#if diff.delete}
-                        <Badge
-                            color="danger"
-                            title="Objects deleted"
-                            class="d-flex align-items-center gap-1"
-                        >
-                            <Fa icon={faTrashAlt} />
-                            {diff.delete}
-                        </Badge>
+                                {stats._delete}
+                            </Badge>
+                        {/if}
                     {/if}
                 </span>
             </div>
@@ -235,7 +229,7 @@
         {/if}
     {/snippet}
     {#snippet children()}
-        {#if canManage}
+        {#if $adminPermissions.configEdit}
             <AsyncButton color="secondary" click={dryRun}>Dry run</AsyncButton>
             <AsyncButton color="primary" click={sync}>Sync now</AsyncButton>
         {/if}

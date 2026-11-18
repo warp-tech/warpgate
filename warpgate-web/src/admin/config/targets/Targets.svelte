@@ -58,6 +58,7 @@
             id: 'description',
             label: 'Description',
             cell: descriptionCell,
+            grow: true,
             class: 'text-truncate text-muted small',
         },
         { id: 'spacer', spacer: true },

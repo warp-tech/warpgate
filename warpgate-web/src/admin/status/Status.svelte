@@ -1,6 +1,5 @@
 <script lang="ts">
-    import { type SidebarItem, useSidebar } from 'common/sidebarState.svelte'
-    import { serverInfo } from 'gateway/lib/store'
+    import { useSidebar } from 'common/sidebarState.svelte'
     import Router from 'svelte-spa-router'
     import { wrap } from 'svelte-spa-router/wrap'
 
@@ -25,33 +24,28 @@
         }),
     }
 
-    const sidebarItems = $derived.by<SidebarItem[]>(() =>
-        [
-            {
-                title: 'Sessions',
-                href: '/status/sessions',
-            },
-            {
-                title: 'Requests',
-                href: '/status/requests',
-            },
-            $serverInfo?.gitopsSync
-                ? {
-                      title: 'GitOps',
-                      href: '/status/gitops',
-                  }
-                : null,
-            {
-                title: 'Login protection',
-                href: '/status/login-protection',
-            },
-            {
-                title: 'Network status',
-                href: '/status/network',
-            },
-        ].filter(x => !!x),
-    )
-    useSidebar(() => sidebarItems)
+    useSidebar(() => [
+        {
+            title: 'Sessions',
+            href: '/status/sessions',
+        },
+        {
+            title: 'Requests',
+            href: '/status/requests',
+        },
+        {
+            title: 'GitOps',
+            href: '/status/gitops',
+        },
+        {
+            title: 'Login protection',
+            href: '/status/login-protection',
+        },
+        {
+            title: 'Network status',
+            href: '/status/network',
+        },
+    ])
 </script>
 
 <Router {routes} prefix="/status" />

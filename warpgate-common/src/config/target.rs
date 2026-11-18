@@ -35,6 +35,7 @@ pub struct TargetSSHOptions {
     pub host: String,
     #[serde(default = "_default_ssh_port")]
     #[oai(validator(minimum(value = "1")))]
+    #[schemars(range(min = 1))]
     pub port: u16,
     #[serde(default = "_default_username")]
     pub username: String,
@@ -78,6 +79,7 @@ pub struct SshTargetPublicKeyAuth {
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
 pub struct SshTargetCertificateAuth {
     #[oai(validator(min_length = 1, max_length = 64, pattern = r"^[A-Za-z0-9._-]+$"))]
+    #[schemars(length(min = 1, max = 64), pattern(r"^[A-Za-z0-9._-]+$"))]
     pub backend: String,
 
     /// Mount of the SSH secrets engine
@@ -86,10 +88,12 @@ pub struct SshTargetCertificateAuth {
         default = "_default_ssh_ca_mount",
         validator(min_length = 1, max_length = 255, pattern = r"^[A-Za-z0-9_-]+$")
     )]
+    #[schemars(length(min = 1, max = 255), pattern(r"^[A-Za-z0-9_-]+$"))]
     pub mount: String,
 
     /// Signing role
     #[oai(validator(min_length = 1, max_length = 255, pattern = r"^[A-Za-z0-9_-]+$"))]
+    #[schemars(length(min = 1, max = 255), pattern(r"^[A-Za-z0-9_-]+$"))]
     pub role: String,
 }
 
@@ -182,6 +186,7 @@ pub struct TargetMySqlOptions {
 
     #[serde(default = "_default_mysql_port")]
     #[oai(validator(minimum(value = "1")))]
+    #[schemars(range(min = 1))]
     pub port: u16,
 
     #[serde(default = "_default_username")]
@@ -215,6 +220,7 @@ pub struct TargetPostgresOptions {
 
     #[serde(default = "_default_postgres_port")]
     #[oai(validator(minimum(value = "1")))]
+    #[schemars(range(min = 1))]
     pub port: u16,
 
     #[serde(default = "_default_username")]
@@ -243,6 +249,7 @@ pub struct TargetVncOptions {
 
     #[serde(default = "_default_vnc_port")]
     #[oai(validator(minimum(value = "1")))]
+    #[schemars(range(min = 1))]
     pub port: u16,
 
     #[serde(default)]
@@ -295,6 +302,7 @@ pub struct TargetRdpOptions {
 
     #[serde(default = "_default_rdp_port")]
     #[oai(validator(minimum(value = "1")))]
+    #[schemars(range(min = 1))]
     pub port: u16,
 
     #[serde(default = "_default_username")]
@@ -309,6 +317,7 @@ pub struct TargetRdpOptions {
     /// The target host must then be a name matching its `TERMSRV/` SPN, not an IP.
     #[serde(default)]
     #[oai(validator(max_length = 2048, pattern = r"^$|^(tcp|udp|https?)://.+"))]
+    #[schemars(length(max = 2048), pattern(r"^$|^(tcp|udp|https?)://.+"))]
     pub kdc_url: Option<String>,
 
     #[serde(default)]
@@ -428,6 +437,25 @@ pub struct Target {
     pub provider: Option<ProviderId>,
 }
 
+// The admin API's request body for creating or updating a target. GitOps
+// resource files are parsed through it too, which applies the same validators.
+// Not a doc comment: poem would copy one into the OpenAPI schema.
+#[derive(Object)]
+pub struct TargetDataRequest {
+    pub name: String,
+    pub description: Option<String>,
+    pub options: TargetOptions,
+    pub rate_limit_bytes_per_second: Option<u32>,
+    pub group_id: Option<Uuid>,
+    #[oai(validator(minimum(value = "1")))]
+    pub ticket_max_duration_seconds: Option<i64>,
+    pub ticket_requests_disabled: bool,
+    pub ticket_require_approval: bool,
+    pub require_approval: bool,
+    #[oai(validator(minimum(value = "1")))]
+    pub ticket_max_uses: Option<i16>,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union, JsonSchema)]
 #[oai(discriminator_name = "kind", one_of)]
 pub enum TargetOptions {
@@ -514,16 +542,19 @@ impl TargetHTTPOptions {
         // redact secrets/tokens that might be passed via headers
         self.headers.values_mut().for_each(String::clear);
         // redact auth from the URL
-        self.url = url::Url::parse(&self.url)
-            .ok()
-            .filter(url::Url::has_host)
-            .map(|mut url| {
-                // Infallible once the URL has a host
-                let _ = url.set_username("");
-                let _ = url.set_password(None);
-                url.into()
-            })
-            .unwrap_or_default();
+        let Some(mut url) = url::Url::parse(&self.url).ok().filter(url::Url::has_host) else {
+            self.url.clear();
+            return;
+        };
+        // Only a URL with credentials is rewritten. `Url` normalizes its
+        // output, and the GitOps plan treats every field that redaction
+        // changes as a credential.
+        if !url.username().is_empty() || url.password().is_some() {
+            // Infallible once the URL has a host
+            let _ = url.set_username("");
+            let _ = url.set_password(None);
+            self.url = url.into();
+        }
     }
 }
 
@@ -905,6 +936,7 @@ mod tests {
     fn url_redaction_only_touches_userinfo() {
         for (url, redacted) in [
             ("http://upstream/a@b?c=@", "http://upstream/a@b?c=@"),
+            ("HTTP://Upstream", "HTTP://Upstream"),
             ("http://a:b@c@upstream", "http://upstream/"),
             ("u:p@upstream/x", ""),
             ("", ""),

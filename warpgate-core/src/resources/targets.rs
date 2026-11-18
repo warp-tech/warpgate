@@ -1,36 +1,22 @@
-use poem_openapi::Object;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, ModelTrait, QueryFilter, Set,
     TransactionTrait,
 };
 use uuid::Uuid;
+pub use warpgate_common::TargetDataRequest;
 use warpgate_common::{ProviderId, StoredSecrets, TargetOptions, WarpgateError};
 use warpgate_db_entities::{
     KnownHost, Target, TargetRoleAssignment, TargetSession, Ticket, TicketRequest,
 };
+use warpgate_gitops::types::ResourceKind;
 
 use super::{Actor, AdmittedSessions, OwnedEntity, ResourceError, check_name, name_taken};
 use crate::db::is_unique_violation;
 
 impl OwnedEntity for Target::Entity {
+    const KIND: ResourceKind = ResourceKind::Target;
     const ID: Self::Column = Target::Column::Id;
     const PROVIDER: Self::Column = Target::Column::Provider;
-}
-
-#[derive(Object)]
-pub struct TargetDataRequest {
-    pub name: String,
-    pub description: Option<String>,
-    pub options: TargetOptions,
-    pub rate_limit_bytes_per_second: Option<u32>,
-    pub group_id: Option<Uuid>,
-    #[oai(validator(minimum(value = "1")))]
-    pub ticket_max_duration_seconds: Option<i64>,
-    pub ticket_requests_disabled: bool,
-    pub ticket_require_approval: bool,
-    pub require_approval: bool,
-    #[oai(validator(minimum(value = "1")))]
-    pub ticket_max_uses: Option<i16>,
 }
 
 fn serialize_options_for_storage(

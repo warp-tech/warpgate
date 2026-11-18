@@ -91,12 +91,7 @@
     }
 
     async function release() {
-        error = undefined
-        try {
-            target = await api.releaseTarget({ id: params.id })
-        } catch (err) {
-            error = await stringifyError(err)
-        }
+        target = await api.releaseTarget({ id: params.id })
     }
 
     async function remove() {
@@ -223,9 +218,7 @@
                         </div>
                         <ManagedObjectStatus
                             provider={target.provider}
-                            onRelease={$adminPermissions.targetsEdit
-                                ? release
-                                : undefined}
+                            {release}
                         />
                     </div>
                 </div>

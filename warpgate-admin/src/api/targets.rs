@@ -10,7 +10,7 @@ use warpgate_common::{
 };
 use warpgate_common_http::errors::invalid_field;
 use warpgate_core::resources::targets::{self as store, TargetDataRequest};
-use warpgate_core::resources::{self as resources, Actor, ResourceError};
+use warpgate_core::resources::{Actor, ResourceError};
 use warpgate_db_entities::Target::fuzzy_filter_targets;
 use warpgate_db_entities::{KnownHost, Role, Target, TargetGroup};
 
@@ -180,8 +180,7 @@ impl DetailApi {
         admin: AdminContext,
         id: Path<Uuid>,
     ) -> Result<GetTargetResponse, WarpgateError> {
-        admin.require(AdminPermission::TargetsEdit)?;
-        resources::release::<Target::Entity, _>(&admin.services().db, id.0).await?;
+        super::gitops::release_managed::<Target::Entity>(&admin, id.0).await?;
         self.api_get_target(admin, id).await
     }
 

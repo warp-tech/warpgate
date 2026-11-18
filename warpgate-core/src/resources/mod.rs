@@ -7,9 +7,10 @@ pub mod target_groups;
 pub mod targets;
 
 use sea_orm::prelude::Expr;
-use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect};
 use uuid::Uuid;
 use warpgate_common::{ProviderId, UserSessionId, WarpgateError};
+use warpgate_gitops::types::ResourceKind;
 
 use crate::db::is_unique_violation;
 
@@ -92,6 +93,7 @@ pub struct AdmittedSessions(pub Vec<UserSessionId>);
 
 /// A table whose rows a provider can own
 pub trait OwnedEntity: EntityTrait {
+    const KIND: ResourceKind;
     const ID: Self::Column;
     const PROVIDER: Self::Column;
 }
@@ -112,12 +114,24 @@ pub(crate) async fn set_owner<E: OwnedEntity, C: ConnectionTrait>(
     Ok(())
 }
 
-/// Hands a row back to manual editing
+/// Clears a row's provider, which makes the row editable by hand again.
+/// Returns the previous provider, or `None` if the row is gone or had none.
 pub async fn release<E: OwnedEntity, C: ConnectionTrait>(
     db: &C,
     id: Uuid,
-) -> Result<(), ResourceError> {
-    set_owner::<E, C>(db, id, None).await
+) -> Result<Option<ProviderId>, ResourceError> {
+    let owner: Option<Option<ProviderId>> = E::find()
+        .select_only()
+        .column(E::PROVIDER)
+        .filter(E::ID.eq(id))
+        .into_tuple()
+        .one(db)
+        .await?;
+    let Some(Some(owner)) = owner else {
+        return Ok(None);
+    };
+    set_owner::<E, C>(db, id, None).await?;
+    Ok(Some(owner))
 }
 
 const fn check_name(name: &str) -> Result<(), ResourceError> {
@@ -157,7 +171,7 @@ pub(crate) mod tests {
         db
     }
 
-    fn target(name: &str, options: serde_json::Value) -> TargetDataRequest {
+    pub(crate) fn target(name: &str, options: serde_json::Value) -> TargetDataRequest {
         TargetDataRequest {
             name: name.into(),
             description: None,

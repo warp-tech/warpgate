@@ -230,7 +230,7 @@ pub enum AuditEvent {
         actor_user_id: Option<Uuid>,
     },
     /// A resource that a provider sync created, changed or deleted
-    ProviderResourceChanged {
+    ManagedResourceChanged {
         sync_id: Uuid,
         provider: String,
         /// `Create`, `Update`, `Adopt` or `Delete`
@@ -241,6 +241,16 @@ pub enum AuditEvent {
         /// The changed fields as a JSON array, without credential values
         fields: Option<String>,
         actor_user_id: Option<Uuid>,
+    },
+    /// An admin made a provider's resource editable by hand again
+    ProviderResourceReleased {
+        provider: String,
+        kind: String,
+        id: Uuid,
+        actor_user_id: Uuid,
+    },
+    UnmanagedResourcesExported {
+        actor_user_id: Uuid,
     },
 }
 
@@ -730,7 +740,7 @@ impl AuditEvent {
                     "Provider synced"
                 );
             }
-            Self::ProviderResourceChanged {
+            Self::ManagedResourceChanged {
                 sync_id,
                 provider,
                 action,
@@ -753,6 +763,30 @@ impl AuditEvent {
                     fields = fields.as_deref(),
                     related_users = related_users.as_deref(),
                     "Provider sync changed a resource"
+                );
+            }
+            Self::ProviderResourceReleased {
+                provider,
+                kind,
+                id,
+                actor_user_id,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "ProviderResourceReleased1",
+                    provider = %provider,
+                    kind = %kind,
+                    id = %id,
+                    related_users = %format_related_ids(&[*actor_user_id]),
+                    "Managed resource manually released from its provider"
+                );
+            }
+            Self::UnmanagedResourcesExported { actor_user_id } => {
+                info!(
+                    target: "audit",
+                    _type = "UnmanagedResourcesExported1",
+                    related_users = %format_related_ids(&[*actor_user_id]),
+                    "Unmanaged resources exported with their credentials"
                 );
             }
         }

@@ -7,7 +7,10 @@ use warpgate_common::encryption::{EncryptionError, validate_encryption_config};
 use warpgate_common::{GlobalParams, ProviderId, WarpgateError, warnings};
 use warpgate_core::SecretBackendRegistry;
 use warpgate_core::db::{connect_to_db, has_pending_migrations};
+use warpgate_core::logging::flush_database_logger;
 use warpgate_core::resources::reconcile::{ApplyError, apply, load_current};
+use warpgate_core::resources::sync::{assert_may_apply_manual_local_config, record_cli_apply};
+use warpgate_db_entities::Parameters;
 use warpgate_db_entities::ProviderSync::SyncPlan;
 use warpgate_gitops::diagnostic::Diagnostic;
 use warpgate_gitops::plan::{Plan, Prune, format_plan, plan};
@@ -111,13 +114,21 @@ fn validate(paths: &[PathBuf], format: OutputFormat) -> Result<()> {
     }
 }
 
+/// The inputs that `plan` and `apply` share
+struct Prepared {
+    db: DatabaseConnection,
+    files: Vec<(PathBuf, String)>,
+    resources: Vec<Resource>,
+    plan: Plan,
+}
+
 /// Everything a plan needs: the validated files, the database they apply to,
 /// and the plan itself. Exits on anything that leaves no plan to show.
 async fn prepare(
     params: &GlobalParams,
     paths: &[PathBuf],
     format: OutputFormat,
-) -> Result<(DatabaseConnection, Vec<Resource>, Plan)> {
+) -> Result<Prepared> {
     let files = read_or_exit(paths);
     let resources = match check_files(&files) {
         Ok(checked) => {
@@ -158,7 +169,12 @@ async fn prepare(
     // Deleting a target closes the sessions it admitted, which needs the
     // running server's session registry; the server prunes, the CLI previews
     let plan = plan(ProviderId::GITOPS, &resources, &current, Prune::Off);
-    Ok((db, resources, plan))
+    Ok(Prepared {
+        db,
+        files,
+        resources,
+        plan,
+    })
 }
 
 async fn plan_command(
@@ -166,7 +182,7 @@ async fn plan_command(
     paths: &[PathBuf],
     format: OutputFormat,
 ) -> Result<()> {
-    let (_, _, plan) = prepare(params, paths, format).await?;
+    let Prepared { plan, .. } = prepare(params, paths, format).await?;
     match format {
         OutputFormat::Text => print!("{}", format_plan(&plan)),
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&SyncPlan::from(&plan))?),
@@ -181,7 +197,16 @@ async fn plan_command(
 }
 
 async fn apply_command(params: &GlobalParams, paths: &[PathBuf], yes: bool) -> Result<()> {
-    let (db, resources, plan) = prepare(params, paths, OutputFormat::Text).await?;
+    let Prepared {
+        db,
+        files,
+        resources,
+        plan,
+    } = prepare(params, paths, OutputFormat::Text).await?;
+    if let Err(error) = assert_may_apply_manual_local_config(&Parameters::Entity::get(&db).await?) {
+        eprintln!("Nothing applied: {error}");
+        exit(1);
+    }
     print!("{}", format_plan(&plan));
     if plan.has_errors() {
         eprintln!("Nothing applied: resolve the errors above first");
@@ -205,7 +230,17 @@ async fn apply_command(params: &GlobalParams, paths: &[PathBuf], yes: bool) -> R
 
     let secrets = SecretBackendRegistry::new(db.clone());
     match apply(&db, ProviderId::GITOPS, &resources, &plan, &secrets).await {
-        Ok(_) => {
+        Ok(applied) => {
+            let recorded = if applied.changes.is_empty() {
+                Ok(())
+            } else {
+                record_cli_apply(&db, &files, &plan, &applied).await
+            };
+            // No task in this process stores audit events. The changes are
+            // committed, so their events are stored even without a history row.
+            let flushed = flush_database_logger(&db).await;
+            recorded?;
+            flushed?;
             println!("Applied");
             Ok(())
         }

@@ -25,6 +25,10 @@
         [PlanAction.Adopt]: { label: 'Adopt', color: 'warning' },
         [PlanAction.Delete]: { label: 'Delete', color: 'danger' },
         [PlanAction.Blocked]: { label: 'Blocked', color: 'danger' },
+        [PlanAction.Guarded]: {
+            label: 'Delete (needs a forced sync)',
+            color: 'danger',
+        },
         [PlanAction.Collision]: { label: 'Collision', color: 'danger' },
         [PlanAction.WouldPrune]: {
             label: 'Keep (pruning is off)',
@@ -32,18 +36,7 @@
         },
         [PlanAction.Unchanged]: { label: 'Unchanged', color: 'secondary' },
     }
-    const PENDING: PlanAction[] = [
-        PlanAction.Create,
-        PlanAction.Update,
-        PlanAction.Adopt,
-        PlanAction.Delete,
-    ]
-
-    const plan = $derived(dryRun?.plan ?? [])
-    const changes = $derived(
-        plan.filter(c => c.action !== PlanAction.Unchanged),
-    )
-    const pending = $derived(changes.some(c => PENDING.includes(c.action)))
+    const changes = $derived(dryRun?.plan ?? [])
 
     function close() {
         dryRun = undefined
@@ -94,19 +87,16 @@
                     {/each}
                 </div>
             {/each}
-            {#if plan.length > changes.length}
-                <div class="text-muted">
-                    {plan.length - changes.length}
-                    unchanged
-                </div>
+            {#if dryRun.unchanged}
+                <div class="text-muted">{dryRun.unchanged} unchanged</div>
             {/if}
-            {#if !pending && !dryRun.error}
+            {#if !dryRun.pending && !dryRun.error}
                 <div>Nothing to apply.</div>
             {/if}
         {/if}
     </ModalBody>
     <ModalFooter>
-        {#if pending && !dryRun?.error}
+        {#if dryRun?.pending}
             <AsyncButton
                 color="primary"
                 class="modal-button"

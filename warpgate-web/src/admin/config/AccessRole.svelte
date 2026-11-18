@@ -1,7 +1,6 @@
 <script lang="ts">
     import { Alert, FormGroup, Input } from '@sveltestrap/sveltestrap'
     import { api, type Role, type Target, type User } from 'admin/lib/api'
-    import ManagedIcon from 'admin/lib/ManagedIcon.svelte'
     import ManagedObjectStatus from 'admin/lib/ManagedObjectStatus.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
@@ -74,12 +73,7 @@
     }
 
     async function release() {
-        error = null
-        try {
-            role = await api.releaseRole({ id: params.id })
-        } catch (err) {
-            error = await stringifyError(err)
-        }
+        role = await api.releaseRole({ id: params.id })
     }
 
     async function remove() {
@@ -100,12 +94,7 @@
                     <div class="text-muted d-flex align-items-center gap-2">
                         role
                     </div>
-                    <ManagedObjectStatus
-                        provider={role.provider}
-                        onRelease={$adminPermissions.accessRolesEdit
-                            ? release
-                            : undefined}
-                    />
+                    <ManagedObjectStatus provider={role.provider} {release} />
                 </div>
             </div>
 

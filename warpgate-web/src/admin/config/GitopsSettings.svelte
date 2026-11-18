@@ -12,7 +12,7 @@
     import Loadable from 'common/Loadable.svelte'
     import SecretRefInput from 'common/SecretRefInput.svelte'
     import StickyActionBar from 'common/StickyActionBar.svelte'
-    import { serverInfo } from 'gateway/lib/store'
+    import { reloadServerInfo } from 'gateway/lib/store'
     import Fa from 'svelte-fa'
     import { link } from 'svelte-spa-router'
 
@@ -105,6 +105,7 @@
             }
             // Reloads the redacted source, so a saved password shows as stored
             await load()
+            await reloadServerInfo()
         } catch (err) {
             error = await stringifyError(err)
         }
@@ -126,11 +127,9 @@
 <div class="container-max-md">
     <div class="page-summary-bar">
         <h1>gitops settings</h1>
-        {#if $serverInfo?.gitopsSync}
-            <a class="ms-auto" href="/status/gitops" use:link>
-                Sync status &amp; history
-            </a>
-        {/if}
+        <a class="ms-auto" href="/status/gitops" use:link>
+            Sync status &amp; history
+        </a>
     </div>
 
     <PermissionGate
@@ -145,10 +144,7 @@
                 bind:this={formEl}
                 oninput={refreshValidity}
                 onchange={refreshValidity}
-                onsubmit={e => {
-                    e.preventDefault()
-                    save()
-                }}
+                onsubmit={e => e.preventDefault()}
             >
                 <FormGroup floating label="Configuration source">
                     <select
@@ -213,7 +209,7 @@
                             type="text"
                             class="form-control"
                             autocomplete="off"
-                            placeholder="Anonymous"
+                            placeholder="Optional"
                             maxlength="255"
                             value={git.username ?? ''}
                             oninput={e =>
@@ -332,6 +328,7 @@
                         </FormGroup>
                         {#if webhookSecretSet && !webhookCleared}
                             <Button
+                                type="button"
                                 color="link"
                                 class="ms-2 mb-3"
                                 onclick={() => {
@@ -352,12 +349,15 @@
 
                 <StickyActionBar>
                     {#snippet start()}
-                        <AsyncButton color="link" click={exportUnmanaged}>
+                        <AsyncButton
+                            type="button"
+                            color="link"
+                            click={exportUnmanaged}
+                        >
                             Export unmanaged
                         </AsyncButton>
                     {/snippet}
                     <AsyncButton
-                        type="button"
                         color="primary"
                         disabled={!formValid}
                         click={save}

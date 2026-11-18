@@ -5,10 +5,12 @@ use sea_orm::{
 };
 use uuid::Uuid;
 use warpgate_db_entities::{Role, TargetRoleAssignment, UserRoleAssignment};
+use warpgate_gitops::types::ResourceKind;
 
 use super::{Actor, OwnedEntity, ResourceError, check_name, name_taken};
 
 impl OwnedEntity for Role::Entity {
+    const KIND: ResourceKind = ResourceKind::Role;
     const ID: Self::Column = Role::Column::Id;
     const PROVIDER: Self::Column = Role::Column::Provider;
 }

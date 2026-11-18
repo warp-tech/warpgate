@@ -11,7 +11,7 @@ use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{AdminPermission, ProviderId, SecretRef, WarpgateError};
 use warpgate_common_http::errors::bad_request;
 use warpgate_core::resources::ssh_client_keys::{self, KeyMaterial, SshClientKeyDataRequest};
-use warpgate_core::resources::{self as resources, Actor, ResourceError};
+use warpgate_core::resources::{Actor, ResourceError};
 use warpgate_db_entities::SshClientKey;
 
 use super::AdminContext;
@@ -26,7 +26,8 @@ struct SSHClientKey {
     pub public_key: String,
     pub is_default: bool,
     pub secret_backend: Option<String>,
-    /// The provider that manages the key, if any; such a key is read-only here
+    // Undocumented: a description here makes the schema wrap the reference,
+    // and the client generators then emit a second provider type
     pub provider: Option<ProviderId>,
 }
 
@@ -280,12 +281,12 @@ impl Api {
         admin: AdminContext,
         id: Path<Uuid>,
     ) -> Result<ReleaseSSHClientKeyResponse, WarpgateError> {
-        admin.require(AdminPermission::ConfigEdit)?;
-
-        let db = &admin.services().db;
-        resources::release::<SshClientKey::Entity, _>(db, id.0).await?;
+        super::gitops::release_managed::<SshClientKey::Entity>(&admin, id.0).await?;
         Ok(
-            match SshClientKey::Entity::find_by_id(id.0).one(db).await? {
+            match SshClientKey::Entity::find_by_id(id.0)
+                .one(&admin.services().db)
+                .await?
+            {
                 Some(key) => ReleaseSSHClientKeyResponse::Ok(Json(key.into())),
                 None => ReleaseSSHClientKeyResponse::NotFound,
             },

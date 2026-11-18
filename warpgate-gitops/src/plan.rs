@@ -13,7 +13,9 @@ use warpgate_common::{
 use warpgate_db_entities::ProviderSync::{PlanAction, PlannedChange, PlannedField, SyncPlan};
 
 use crate::diagnostic::{Path, Segment};
-use crate::types::{Kind, Resource, RoleSpec, SshClientKeySpec, TargetGroupSpec, TargetSpec};
+use crate::types::{
+    Resource, ResourceKind, RoleSpec, SshClientKeySpec, TargetGroupSpec, TargetSpec,
+};
 
 /// A row as it is in the database, with its references by name
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,38 +58,46 @@ pub enum Change {
         desired: Resource,
         fields: Vec<FieldChange>,
     },
-    /// Takes over a row created by hand, as the resource's annotation asks
+    /// A hand-made row that the provider takes ownership of, because the
+    /// resource sets `adopt_existing`
     Adopt {
         id: Uuid,
         desired: Resource,
         fields: Vec<FieldChange>,
     },
     Unchanged {
-        kind: Kind,
+        kind: ResourceKind,
         name: String,
     },
     /// A row of that name exists and isn't this provider's to change
     Collision {
-        kind: Kind,
+        kind: ResourceKind,
         name: String,
         owner: Option<ProviderId>,
     },
     /// The row is this provider's, but the change isn't made
     Blocked {
-        kind: Kind,
+        kind: ResourceKind,
+        name: String,
+        reason: String,
+    },
+    /// This provider's row that no resource describes any more, kept because
+    /// the mass-deletion guard of [`Prune::On`] refused to delete it
+    Guarded {
+        kind: ResourceKind,
         name: String,
         reason: String,
     },
     /// This provider's row that no resource describes any more, kept because
     /// pruning is off
     WouldPrune {
-        kind: Kind,
+        kind: ResourceKind,
         name: String,
         id: Uuid,
     },
     /// This provider's row that no resource describes any more
     Delete {
-        kind: Kind,
+        kind: ResourceKind,
         name: String,
         id: Uuid,
     },
@@ -102,12 +112,13 @@ impl Change {
             Self::Unchanged { .. } => PlanAction::Unchanged,
             Self::Collision { .. } => PlanAction::Collision,
             Self::Blocked { .. } => PlanAction::Blocked,
+            Self::Guarded { .. } => PlanAction::Guarded,
             Self::WouldPrune { .. } => PlanAction::WouldPrune,
             Self::Delete { .. } => PlanAction::Delete,
         }
     }
 
-    pub fn kind(&self) -> Kind {
+    pub fn kind(&self) -> ResourceKind {
         match self {
             Self::Create(resource)
             | Self::Update {
@@ -115,13 +126,19 @@ impl Change {
             }
             | Self::Adopt {
                 desired: resource, ..
-            } => Kind::from(resource),
+            } => ResourceKind::from(resource),
             Self::Unchanged { kind, .. }
             | Self::Collision { kind, .. }
             | Self::Blocked { kind, .. }
+            | Self::Guarded { kind, .. }
             | Self::WouldPrune { kind, .. }
             | Self::Delete { kind, .. } => *kind,
         }
+    }
+
+    /// Whether the change keeps the whole plan from being applied
+    pub const fn is_error(&self) -> bool {
+        self.action().is_error()
     }
 
     pub fn name(&self) -> &str {
@@ -136,6 +153,7 @@ impl Change {
             Self::Unchanged { name, .. }
             | Self::Collision { name, .. }
             | Self::Blocked { name, .. }
+            | Self::Guarded { name, .. }
             | Self::WouldPrune { name, .. }
             | Self::Delete { name, .. } => name,
         }
@@ -167,9 +185,7 @@ pub struct Plan {
 
 impl Plan {
     pub fn has_errors(&self) -> bool {
-        self.changes
-            .iter()
-            .any(|c| matches!(c, Change::Collision { .. } | Change::Blocked { .. }))
+        self.changes.iter().any(Change::is_error)
     }
 
     pub fn has_pending(&self) -> bool {
@@ -192,35 +208,50 @@ struct LiveRow<'a> {
 }
 
 pub fn plan(provider: ProviderId, desired: &[Resource], current: &Current, prune: Prune) -> Plan {
-    let canonical = canonical_names(desired, current);
+    let references = References::new(desired, current);
     let ssh_targets = ssh_target_names(desired, current);
-    let rows: HashMap<Kind, Vec<LiveRow<'_>>> = [
-        (Kind::TargetGroup, live_rows(&current.groups, plain)),
-        (Kind::Role, live_rows(&current.roles, plain)),
+    let rows: HashMap<ResourceKind, Vec<LiveRow<'_>>> = [
+        (ResourceKind::TargetGroup, live_rows(&current.groups, plain)),
+        (ResourceKind::Role, live_rows(&current.roles, plain)),
         (
-            Kind::SshClientKey,
+            ResourceKind::SshClientKey,
             live_rows(&current.ssh_client_keys, compare_client_key),
         ),
         (
-            Kind::Target,
+            ResourceKind::Target,
             live_rows(&current.targets, |s| compare_target(s, None)),
         ),
     ]
     .into_iter()
     .collect();
 
+    // IDs of the rows whose name matches a resource in the files
+    let named: HashSet<Uuid> = desired
+        .iter()
+        .filter_map(|resource| {
+            references.row(ResourceKind::from(resource), &resource.metadata().name)
+        })
+        .map(|(id, _)| id)
+        .collect();
     let mut matched = HashSet::new();
     let mut changes = Vec::new();
     for resource in desired {
-        let kind = Kind::from(resource);
+        let kind = ResourceKind::from(resource);
         let name = &resource.metadata().name;
         let candidates = rows.get(&kind).map(Vec::as_slice).unwrap_or_default();
-        let row = find_row(candidates, name);
+        let row = references
+            .row(kind, name)
+            .and_then(|(id, _)| candidates.iter().find(|row| row.id == id))
+            .or_else(|| {
+                renamed_client_key(resource, candidates, provider, |id| {
+                    named.contains(&id) || matched.contains(&id)
+                })
+            });
         if let Some(row) = row {
             matched.insert(row.id);
         }
         if let Resource::Target(target) = resource
-            && let Some(reason) = unresolved_reference(&target.spec, &canonical, &ssh_targets)
+            && let Some(reason) = unresolved_reference(&target.spec, &references, &ssh_targets)
         {
             changes.push(Change::Blocked {
                 kind,
@@ -247,7 +278,7 @@ pub fn plan(provider: ProviderId, desired: &[Resource], current: &Current, prune
             }
         };
 
-        let wanted = compare_resource(resource, &canonical);
+        let wanted = compare_resource(resource, &references);
         if wanted.protocol != row.compared.protocol {
             changes.push(Change::Blocked {
                 kind,
@@ -286,7 +317,7 @@ pub fn plan(provider: ProviderId, desired: &[Resource], current: &Current, prune
     }
 
     let referenced = referenced_names(desired, current, &matched, provider);
-    let owned: Vec<(Kind, &LiveRow<'_>)> = rows
+    let owned: Vec<(ResourceKind, &LiveRow<'_>)> = rows
         .iter()
         .flat_map(|(kind, rows)| rows.iter().map(|row| (*kind, row)))
         .filter(|(_, row)| row.provider == Some(provider))
@@ -309,7 +340,7 @@ pub fn plan(provider: ProviderId, desired: &[Resource], current: &Current, prune
                 name,
                 reason: format!("removed from the source, but Target `{target}` still refers to it"),
             },
-            (Prune::On, None) if guard_trips => Change::Blocked {
+            (Prune::On, None) if guard_trips => Change::Guarded {
                 kind,
                 name,
                 reason: format!(
@@ -329,22 +360,13 @@ pub fn plan(provider: ProviderId, desired: &[Resource], current: &Current, prune
     Plan { changes, prune }
 }
 
-const fn apply_order(kind: Kind) -> u8 {
+const fn apply_order(kind: ResourceKind) -> u8 {
     match kind {
-        Kind::TargetGroup => 0,
-        Kind::Role => 1,
-        Kind::SshClientKey => 2,
-        Kind::Target => 3,
+        ResourceKind::TargetGroup => 0,
+        ResourceKind::Role => 1,
+        ResourceKind::SshClientKey => 2,
+        ResourceKind::Target => 3,
     }
-}
-
-/// An exact match wins over one that differs only in case. A backend with
-/// case-sensitive names can hold both.
-fn find_row<'a, 'b>(rows: &'a [LiveRow<'b>], name: &str) -> Option<&'a LiveRow<'b>> {
-    rows.iter().find(|row| row.name == name).or_else(|| {
-        let name = name.to_lowercase();
-        rows.iter().find(|row| row.name.to_lowercase() == name)
-    })
 }
 
 fn live_rows<S>(rows: &[Row<S>], compare: impl Fn(&S) -> Compared) -> Vec<LiveRow<'_>> {
@@ -362,23 +384,81 @@ fn live_rows<S>(rows: &[Row<S>], compare: impl Fn(&S) -> Compared) -> Vec<LiveRo
         .collect()
 }
 
-/// The names references resolve to, keyed by kind and lowercase name: a
-/// resource in the files, else a row on the server
-fn canonical_names(desired: &[Resource], current: &Current) -> HashMap<(Kind, String), String> {
-    fn names<S>(kind: Kind, rows: &[Row<S>]) -> impl Iterator<Item = (Kind, &str)> {
-        rows.iter().map(move |row| (kind, row.name.as_str()))
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Referent<'a> {
+    /// The name in the files, or the row's name if the files don't define it
+    pub name: &'a str,
+    /// `None` when no row has this name yet: the files add the resource, or
+    /// rename a client key to it
+    pub id: Option<Uuid>,
+}
+
+/// Resolves reference names to resources and rows. Plan and apply share it,
+/// which makes apply bind the rows that the plan showed.
+#[derive(Debug)]
+pub struct References {
+    /// Names in the files, by kind and lowercase name
+    files: HashMap<(ResourceKind, String), String>,
+    /// Rows on the server in table order, by kind and lowercase name
+    rows: HashMap<(ResourceKind, String), Vec<(Uuid, String)>>,
+}
+
+impl References {
+    pub fn new(desired: &[Resource], current: &Current) -> Self {
+        fn rows<S>(
+            kind: ResourceKind,
+            rows: &[Row<S>],
+        ) -> impl Iterator<Item = (ResourceKind, Uuid, &str)> {
+            rows.iter()
+                .map(move |row| (kind, row.id, row.name.as_str()))
+        }
+        let live = rows(ResourceKind::TargetGroup, &current.groups)
+            .chain(rows(ResourceKind::Role, &current.roles))
+            .chain(rows(ResourceKind::SshClientKey, &current.ssh_client_keys))
+            .chain(rows(ResourceKind::Target, &current.targets));
+        let mut rows: HashMap<_, Vec<(Uuid, String)>> = HashMap::new();
+        for (kind, id, name) in live {
+            rows.entry((kind, name.to_lowercase()))
+                .or_default()
+                .push((id, name.to_owned()));
+        }
+        let files = desired
+            .iter()
+            .map(|resource| {
+                let name = &resource.metadata().name;
+                (
+                    (ResourceKind::from(resource), name.to_lowercase()),
+                    name.clone(),
+                )
+            })
+            .collect();
+        Self { files, rows }
     }
-    let live = names(Kind::TargetGroup, &current.groups)
-        .chain(names(Kind::Role, &current.roles))
-        .chain(names(Kind::SshClientKey, &current.ssh_client_keys))
-        .chain(names(Kind::Target, &current.targets));
-    let files = desired
-        .iter()
-        .map(|resource| (Kind::from(resource), resource.metadata().name.as_str()));
-    // Later entries win
-    live.chain(files)
-        .map(|(kind, name)| ((kind, name.to_lowercase()), name.to_owned()))
-        .collect()
+
+    /// The row that a name matches: the one with exactly that name, else the
+    /// first in table order whose name differs only in case. A backend with
+    /// case-sensitive names can hold both.
+    fn row(&self, kind: ResourceKind, name: &str) -> Option<(Uuid, &str)> {
+        let rows = self.rows.get(&(kind, name.to_lowercase()))?;
+        rows.iter()
+            .find(|(_, row)| row == name)
+            .or(rows.first())
+            .map(|(id, row)| (*id, row.as_str()))
+    }
+
+    /// A resource in the files wins over a row. Its `id` is the row of that
+    /// name, if any.
+    pub fn resolve(&self, kind: ResourceKind, name: &str) -> Option<Referent<'_>> {
+        match self.files.get(&(kind, name.to_lowercase())) {
+            Some(file) => Some(Referent {
+                name: file,
+                id: self.row(kind, file).map(|(id, _)| id),
+            }),
+            None => self
+                .row(kind, name)
+                .map(|(id, name)| Referent { name, id: Some(id) }),
+        }
+    }
 }
 
 /// Lowercase names of the SSH targets in the files, or else on the server
@@ -414,7 +494,7 @@ fn referenced_names(
     current: &Current,
     matched: &HashSet<Uuid>,
     provider: ProviderId,
-) -> HashMap<(Kind, String), String> {
+) -> HashMap<(ResourceKind, String), String> {
     let files = desired.iter().filter_map(|resource| match resource {
         Resource::Target(m) => Some((m.metadata.name.as_str(), &m.spec)),
         _ => None,
@@ -435,22 +515,22 @@ fn referenced_names(
     referenced
 }
 
-fn references_of(spec: &TargetSpec) -> impl Iterator<Item = (Kind, &String)> {
+fn references_of(spec: &TargetSpec) -> impl Iterator<Item = (ResourceKind, &String)> {
     spec.group
         .iter()
-        .map(|name| (Kind::TargetGroup, name))
-        .chain(spec.roles.iter().map(|name| (Kind::Role, name)))
+        .map(|name| (ResourceKind::TargetGroup, name))
+        .chain(spec.roles.iter().map(|name| (ResourceKind::Role, name)))
         .chain(
             spec.references
                 .client_key
                 .iter()
-                .map(|name| (Kind::SshClientKey, name)),
+                .map(|name| (ResourceKind::SshClientKey, name)),
         )
         .chain(
             spec.references
                 .jump_host
                 .iter()
-                .map(|name| (Kind::Target, name)),
+                .map(|name| (ResourceKind::Target, name)),
         )
 }
 
@@ -459,24 +539,23 @@ fn references_of(spec: &TargetSpec) -> impl Iterator<Item = (Kind, &String)> {
 // validate catches loops within the files
 fn unresolved_reference(
     spec: &TargetSpec,
-    canonical: &HashMap<(Kind, String), String>,
+    references: &References,
     ssh_targets: &HashSet<String>,
 ) -> Option<String> {
     for (kind, name) in references_of(spec) {
-        let lowercase = name.to_lowercase();
-        if !canonical.contains_key(&(kind, lowercase.clone())) {
+        if references.resolve(kind, name).is_none() {
             return Some(format!("unknown {kind:?} `{name}`"));
         }
-        if kind == Kind::Target && !ssh_targets.contains(&lowercase) {
+        if kind == ResourceKind::Target && !ssh_targets.contains(&name.to_lowercase()) {
             return Some(format!("jump host `{name}` is not an SSH target"));
         }
     }
     None
 }
 
-fn compare_resource(resource: &Resource, canonical: &HashMap<(Kind, String), String>) -> Compared {
+fn compare_resource(resource: &Resource, references: &References) -> Compared {
     let mut compared = match resource {
-        Resource::Target(m) => compare_target(&m.spec, Some(canonical)),
+        Resource::Target(m) => compare_target(&m.spec, Some(references)),
         Resource::TargetGroup(m) => plain(&m.spec),
         Resource::Role(m) => plain(&m.spec),
         Resource::SshClientKey(m) => compare_client_key(&m.spec),
@@ -493,37 +572,34 @@ fn plain<S: Serialize>(spec: &S) -> Compared {
     }
 }
 
-fn compare_target(
-    spec: &TargetSpec,
-    canonical: Option<&HashMap<(Kind, String), String>>,
-) -> Compared {
-    let resolve = |kind: Kind, name: &String| {
-        canonical
-            .and_then(|names| names.get(&(kind, name.to_lowercase())))
-            .unwrap_or(name)
-            .clone()
+fn compare_target(spec: &TargetSpec, references: Option<&References>) -> Compared {
+    let resolve = |kind: ResourceKind, name: &String| {
+        references
+            .and_then(|references| references.resolve(kind, name))
+            .map_or(name.as_str(), |referent| referent.name)
+            .to_owned()
     };
     let mut spec = spec.clone();
     spec.group = spec
         .group
         .as_ref()
-        .map(|group| resolve(Kind::TargetGroup, group));
+        .map(|group| resolve(ResourceKind::TargetGroup, group));
     let roles: BTreeSet<String> = spec
         .roles
         .iter()
-        .map(|role| resolve(Kind::Role, role))
+        .map(|role| resolve(ResourceKind::Role, role))
         .collect();
     spec.roles = roles.into_iter().collect();
     spec.references.jump_host = spec
         .references
         .jump_host
         .as_ref()
-        .map(|target| resolve(Kind::Target, target));
+        .map(|target| resolve(ResourceKind::Target, target));
     spec.references.client_key = spec
         .references
         .client_key
         .as_ref()
-        .map(|key| resolve(Kind::SshClientKey, key));
+        .map(|key| resolve(ResourceKind::SshClientKey, key));
 
     let options = to_value(&spec.options);
     let mut value = to_value(&spec);
@@ -536,21 +612,48 @@ fn compare_target(
 }
 
 /// A literal key compares by its public key, so the same key in another
-/// format is no change; a reference compares as written
-fn compare_client_key(spec: &SshClientKeySpec) -> Compared {
-    let private_key = match &spec.private_key {
+/// format is no change; a reference compares as written. Null if a literal
+/// isn't a private key.
+fn key_identity(spec: &SshClientKeySpec) -> Value {
+    match &spec.private_key {
         MaybeSecretRef::Inline(secret) => secret
             .reveal()
             .ok()
             .and_then(|pem| public_key_of_pem(pem.expose_secret()).ok())
             .map_or(Value::Null, Value::String),
         other => to_value(other),
-    };
+    }
+}
+
+fn compare_client_key(spec: &SshClientKeySpec) -> Compared {
     Compared {
-        value: json!({ "spec": { "private_key": private_key, "is_default": spec.is_default } }),
+        value: json!({ "spec": { "private_key": key_identity(spec), "is_default": spec.is_default } }),
         credentials: HashSet::from([Path::keys(&["spec", "private_key"])]),
         protocol: None,
     }
+}
+
+/// The row that a client key resource renames. It is this provider's row
+/// with the same key, unless `taken` says another resource claims it. A key
+/// can be stored only once, so creating a second row for it would fail.
+fn renamed_client_key<'r, 'a>(
+    resource: &Resource,
+    rows: &'r [LiveRow<'a>],
+    provider: ProviderId,
+    taken: impl Fn(Uuid) -> bool,
+) -> Option<&'r LiveRow<'a>> {
+    let Resource::SshClientKey(manifest) = resource else {
+        return None;
+    };
+    let key = key_identity(&manifest.spec);
+    if key.is_null() {
+        return None;
+    }
+    rows.iter().find(|row| {
+        row.provider == Some(provider)
+            && !taken(row.id)
+            && row.compared.value.pointer("/spec/private_key") == Some(&key)
+    })
 }
 
 /// Paths of every credential field, found as the fields that redaction
@@ -558,11 +661,17 @@ fn compare_client_key(spec: &SshClientKeySpec) -> Compared {
 fn credential_paths(options: &TargetOptions) -> HashSet<Path> {
     let mut redacted = options.clone();
     redacted.redact();
+    changed_paths(options, &redacted).into_iter().collect()
+}
+
+/// Paths from the resource's root at which `altered` differs from `options`,
+/// in key order
+pub(crate) fn changed_paths(options: &TargetOptions, altered: &TargetOptions) -> Vec<Path> {
     let mut changes = Vec::new();
     let mut prefix = vec![Segment::Key("spec".into()), Segment::Key("options".into())];
     diff(
         &to_value(options),
-        &to_value(&redacted),
+        &to_value(altered),
         &mut prefix,
         &HashSet::new(),
         &mut changes,
@@ -625,7 +734,7 @@ fn diff(
 
 fn collision_reason(owner: Option<ProviderId>) -> String {
     match owner {
-        None => format!("created by hand; set metadata.adopt_existing to take it over"),
+        None => "created by hand; set metadata.adopt_existing to take it over".to_owned(),
         Some(owner) => format!("managed by {}", owner.label()),
     }
 }
@@ -659,7 +768,7 @@ pub fn format_plan(plan: &Plan) -> String {
                 }
             }
             Change::Unchanged { .. } => {}
-            Change::Collision { .. } | Change::Blocked { .. } => {
+            Change::Collision { .. } | Change::Blocked { .. } | Change::Guarded { .. } => {
                 if let Some(line) = error_line(change) {
                     let _ = writeln!(out, "{line}");
                 }
@@ -685,7 +794,7 @@ pub fn format_plan(plan: &Plan) -> String {
         count(|c| matches!(c, Change::Adopt { .. })),
         count(|c| matches!(c, Change::Delete { .. })),
         count(|c| matches!(c, Change::Unchanged { .. })),
-        count(|c| matches!(c, Change::Collision { .. } | Change::Blocked { .. })),
+        count(Change::is_error),
     );
     out
 }
@@ -709,7 +818,9 @@ fn error_line(change: &Change) -> Option<String> {
             "collision {kind:?} {name}: {}",
             collision_reason(*owner)
         )),
-        Change::Blocked { reason, .. } => Some(format!("blocked {kind:?} {name}: {reason}")),
+        Change::Blocked { reason, .. } | Change::Guarded { reason, .. } => {
+            Some(format!("blocked {kind:?} {name}: {reason}"))
+        }
         _ => None,
     }
 }
@@ -727,7 +838,9 @@ impl From<&Change> for PlannedChange {
                 (fields.iter().map(PlannedField::from).collect(), None)
             }
             Change::Collision { owner, .. } => (vec![], Some(collision_reason(*owner))),
-            Change::Blocked { reason, .. } => (vec![], Some(reason.clone())),
+            Change::Blocked { reason, .. } | Change::Guarded { reason, .. } => {
+                (vec![], Some(reason.clone()))
+            }
             Change::Create(_)
             | Change::Unchanged { .. }
             | Change::WouldPrune { .. }
@@ -790,6 +903,14 @@ mod tests {
 
     fn role(name: &str) -> Resource {
         manifest("Role", name, json!({}))
+    }
+
+    fn client_key(name: &str, private_key: &str) -> Resource {
+        manifest(
+            "SshClientKey",
+            name,
+            json!({"private_key": private_key, "is_default": true}),
+        )
     }
 
     fn adopting(mut resource: Resource) -> Resource {
@@ -1020,7 +1141,23 @@ mod tests {
     }
 
     #[test]
-    fn only_annotated_resources_adopt_hand_made_rows() {
+    fn a_url_without_credentials_is_shown() {
+        let at = |url: &str| manifest("Target", "web", json!({"options": {"http": {"url": url}}}));
+        let before = at("https://web");
+        let live = current(&[(&before, Some(GITOPS))]);
+        let plan_ = plan(GITOPS, &[at("https://elsewhere")], &live, Prune::Off);
+        assert_eq!(
+            fields(&plan_, "web"),
+            [value(
+                &["spec", "options", "http", "url"],
+                json!("https://web"),
+                json!("https://elsewhere")
+            )]
+        );
+    }
+
+    #[test]
+    fn only_resources_that_ask_adopt_hand_made_rows() {
         let other = ProviderId(Uuid::new_v4());
         let (legacy, adoptable, theirs) = (role("legacy"), role("adoptable"), role("theirs"));
         let live = current(&[(&legacy, None), (&adoptable, None), (&theirs, Some(other))]);
@@ -1037,7 +1174,7 @@ mod tests {
         );
         assert!(plan.has_errors());
         assert!(plan.changes.contains(&Change::Collision {
-            kind: Kind::Role,
+            kind: ResourceKind::Role,
             name: "theirs".into(),
             owner: Some(other),
         }));
@@ -1077,7 +1214,7 @@ mod tests {
         let blocked = plan(GITOPS, &[a.clone()], &live, Prune::On);
         assert_eq!(
             summary(&blocked),
-            ["unchanged Role a", "blocked Role b", "blocked Role c"]
+            ["unchanged Role a", "guarded Role b", "guarded Role c"]
         );
         assert!(blocked.has_errors());
 
@@ -1276,13 +1413,7 @@ mod tests {
 
     #[test]
     fn client_keys_compare_without_showing_the_key() {
-        let key = |name: &str, private_key: &str| {
-            manifest(
-                "SshClientKey",
-                name,
-                json!({"private_key": private_key, "is_default": true}),
-            )
-        };
+        let key = client_key;
         let (pem, other_pem) = (
             SshHostKeyKind::Ed25519.generate_pem().unwrap(),
             SshHostKeyKind::Ed25519.generate_pem().unwrap(),
@@ -1317,5 +1448,40 @@ mod tests {
         assert!(!rendered.contains("PRIVATE"), "{rendered}");
         assert!(!rendered.contains("ssh-ed25519"), "{rendered}");
         assert!(!rendered.contains("secret://"), "{rendered}");
+    }
+
+    #[test]
+    fn a_client_key_under_a_new_name_renames_its_row() {
+        let pem = SshHostKeyKind::Ed25519.generate_pem().unwrap();
+        let deploy = client_key("deploy", &pem);
+        let live = current(&[(&deploy, Some(GITOPS))]);
+
+        let renamed = plan(GITOPS, &[client_key("deploy-prod", &pem)], &live, Prune::On);
+        assert_eq!(summary(&renamed), ["update SshClientKey deploy-prod"]);
+        assert_eq!(
+            fields(&renamed, "deploy-prod"),
+            [value(&["name"], json!("deploy"), json!("deploy-prod"))]
+        );
+
+        // `deploy` still claims its row by name, so `copy` can't rename it
+        let copied = plan(
+            GITOPS,
+            &[client_key("copy", &pem), deploy.clone()],
+            &live,
+            Prune::Off,
+        );
+        assert_eq!(
+            summary(&copied),
+            ["create SshClientKey copy", "unchanged SshClientKey deploy"]
+        );
+
+        let by_hand = current(&[(&deploy, None)]);
+        let beside = plan(
+            GITOPS,
+            &[client_key("deploy-prod", &pem)],
+            &by_hand,
+            Prune::Off,
+        );
+        assert_eq!(summary(&beside), ["create SshClientKey deploy-prod"]);
     }
 }

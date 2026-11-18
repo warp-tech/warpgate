@@ -366,15 +366,24 @@
     "SshTargetCertificateAuth": {
       "properties": {
         "backend": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._-]+$",
           "type": "string"
         },
         "mount": {
           "default": "ssh",
           "description": "Mount of the SSH secrets engine",
+          "maxLength": 255,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_-]+$",
           "type": "string"
         },
         "role": {
           "description": "Signing role",
+          "maxLength": 255,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_-]+$",
           "type": "string"
         }
       },
@@ -530,7 +539,7 @@
           "default": 3306,
           "format": "uint16",
           "maximum": 65535,
-          "minimum": 0,
+          "minimum": 1,
           "type": "integer"
         },
         "tls": {
@@ -667,7 +676,7 @@
           "default": 5432,
           "format": "uint16",
           "maximum": 65535,
-          "minimum": 0,
+          "minimum": 1,
           "type": "integer"
         },
         "protocol_version": {
@@ -721,6 +730,8 @@
         "kdc_url": {
           "default": null,
           "description": "Kerberos KDC for network-level authentication: `tcp://dc:88`, `udp://dc:88`\nor a KDC proxy `https://` URL. When set, CredSSP negotiates Kerberos (falling\nback to NTLM), which accounts barred from NTLM (Protected Users) require.\nThe target host must then be a name matching its `TERMSRV/` SPN, not an IP.",
+          "maxLength": 2048,
+          "pattern": "^$|^(tcp|udp|https?)://.+",
           "type": [
             "string",
             "null"
@@ -730,7 +741,7 @@
           "default": 3389,
           "format": "uint16",
           "maximum": 65535,
-          "minimum": 0,
+          "minimum": 1,
           "type": "integer"
         },
         "tls_security": {
@@ -777,7 +788,7 @@
           "default": 22,
           "format": "uint16",
           "maximum": 65535,
-          "minimum": 0,
+          "minimum": 1,
           "type": "integer"
         },
         "username": {
@@ -829,6 +840,7 @@
         },
         "ticket_max_duration_seconds": {
           "format": "int64",
+          "minimum": 1,
           "type": [
             "integer",
             "null"
@@ -837,7 +849,7 @@
         "ticket_max_uses": {
           "format": "int16",
           "maximum": 32767,
-          "minimum": -32768,
+          "minimum": 1,
           "type": [
             "integer",
             "null"
@@ -893,7 +905,7 @@
           "default": 5900,
           "format": "uint16",
           "maximum": 65535,
-          "minimum": 0,
+          "minimum": 1,
           "type": "integer"
         }
       },

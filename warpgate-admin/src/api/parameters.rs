@@ -560,8 +560,7 @@ mod tests {
     use warpgate_db_entities::Parameters::GitopsSource;
 
     use super::{
-        ParameterUpdate, RecordingsStorageConfig, merge_git_password, merge_secret,
-        storage_to_save,
+        ParameterUpdate, RecordingsStorageConfig, merge_git_password, merge_secret, storage_to_save,
     };
 
     fn git(url: &str, password: &str) -> GitopsSource {

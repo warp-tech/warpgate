@@ -152,7 +152,7 @@ pub(crate) enum Commands {
     },
     /// Perform basic config checks
     Check,
-    /// Validate resource files, or print their schema
+    /// Validate, plan and apply resource files, or print their schema
     Config {
         #[clap(subcommand)]
         command: crate::commands::config::ConfigCommand,

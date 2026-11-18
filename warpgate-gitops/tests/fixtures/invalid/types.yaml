@@ -54,3 +54,15 @@ spec:
   options:
     ssh:
       host: h
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: unquoted-numeric-password
+spec:
+  options:
+    mysql:
+      host: db
+      auth:
+        kind: password
+        password: 90210777

@@ -78,12 +78,7 @@
     }
 
     async function release() {
-        error = undefined
-        try {
-            group = await api.releaseTargetGroup({ id: groupId })
-        } catch (e) {
-            error = await stringifyError(e)
-        }
+        group = await api.releaseTargetGroup({ id: groupId })
     }
 
     async function remove() {
@@ -114,12 +109,7 @@
                     <div class="text-muted d-flex align-items-center gap-2">
                         Target group
                     </div>
-                    <ManagedObjectStatus
-                        provider={group.provider}
-                        onRelease={$adminPermissions.targetsEdit
-                            ? release
-                            : undefined}
-                    />
+                    <ManagedObjectStatus provider={group.provider} {release} />
                 </div>
             </div>
 

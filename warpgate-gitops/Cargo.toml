@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-gitops"
-version = "0.30.0-beta.2"
+version = "0.30.3"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -10,6 +10,7 @@ name = "gitops-schema"
 path = "src/gitops_schema.rs"
 
 [dependencies]
+data-encoding.workspace = true
 # HTTPS comes from the workspace's reqwest (`rustls-no-provider`, provider
 # installed by the binary); gix's own TLS features would add aws-lc-rs
 gix = { version = "0.90", default-features = false, features = [
@@ -17,6 +18,7 @@ gix = { version = "0.90", default-features = false, features = [
     "worktree-mutation",
     "sha1",
 ] }
+poem-openapi.workspace = true
 saphyr = { version = "0.2", default-features = false }
 saphyr-parser = { version = "0.2", default-features = false }
 schemars.workspace = true

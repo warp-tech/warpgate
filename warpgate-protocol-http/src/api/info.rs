@@ -14,7 +14,7 @@ use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
 };
 use warpgate_core::ConfigProvider;
-use warpgate_core::resources::sync::{REQUEST_SOURCE, latest};
+use warpgate_core::resources::sync::{REQUEST_SOURCE, latest_outcome};
 use warpgate_db_entities::ProviderSync::SyncStatus;
 use warpgate_db_entities::{LdapServer, Parameters};
 
@@ -309,7 +309,7 @@ impl Api {
         // Without a source, only syncs pushed through the API count: an old
         // failure from a source since removed would never clear
         let gitops_sync = if permission_set.is_some_and(AdminPermissionSet::is_admin) {
-            latest(&ctx.services().db, false)
+            latest_outcome(&ctx.services().db)
                 .await
                 .context("loading the latest GitOps sync")?
                 .filter(|sync| parameters.gitops_source.is_some() || sync.source == REQUEST_SOURCE)

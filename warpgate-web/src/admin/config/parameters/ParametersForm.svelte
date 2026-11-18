@@ -68,6 +68,13 @@
             // is dropped by JSON.stringify, so the server keeps the old value.
             const parameterUpdate = {
                 ...parameters,
+                // These are edited on the GitOps settings page. This page's
+                // copy may be stale, and writing it back would also drop the
+                // Git token.
+                gitopsSource: undefined,
+                gitopsSyncIntervalSeconds: undefined,
+                gitopsSyncOnStartup: undefined,
+                gitopsPrune: undefined,
                 rateLimitBytesPerSecond:
                     parameters.rateLimitBytesPerSecond ?? null,
                 ticketMaxDurationSeconds:

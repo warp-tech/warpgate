@@ -48,8 +48,8 @@ warpgate-ca = { path = "../warpgate-ca" }
 warpgate-common = { path = "../warpgate-common" }
 warpgate-common-cache = { path = "../warpgate-common-cache" }
 warpgate-db-entities = { path = "../warpgate-db-entities" }
-warpgate-gitops = { path = "../warpgate-gitops" }
 warpgate-db-migrations = { path = "../warpgate-db-migrations" }
+warpgate-gitops = { path = "../warpgate-gitops" }
 warpgate-ldap = { path = "../warpgate-ldap" }
 warpgate-secrets-vault = { path = "../warpgate-secrets-vault" }
 warpgate-sso = { path = "../warpgate-sso", default-features = false }
@@ -57,10 +57,10 @@ warpgate-tls = { path = "../warpgate-tls" }
 webpki = { version = "0.22", default-features = false }
 zune-jpeg.workspace = true
 
+[dev-dependencies]
+tempfile = "3"
+
 [features]
 postgres = ["sea-orm/sqlx-postgres"]
 mysql = ["sea-orm/sqlx-mysql"]
 sqlite = ["sea-orm/sqlx-sqlite"]
-
-[dev-dependencies]
-tempfile = "3"

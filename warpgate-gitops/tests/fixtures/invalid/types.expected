@@ -1,6 +1,7 @@
-tests/fixtures/invalid/types.yaml:10:13 spec.options.ssh.port: invalid type: string "22", expected u16
+tests/fixtures/invalid/types.yaml:10:13 spec.options.ssh.port: invalid type: string, expected u16
 tests/fixtures/invalid/types.yaml:21:15 spec.options.mysql.tls.mode: unknown variant `strict`, expected one of `disabled`, `preferred`, `required`
 tests/fixtures/invalid/types.yaml:32:15 spec.options.ssh.auth.kind: unknown variant `pubkey`, expected one of `password`, `publickey`, `certificate`, `iam_role`
 tests/fixtures/invalid/types.yaml:40:5 spec.options: unknown variant `telnet`, expected one of `ssh`, `http`, `kubernetes`, `mysql`, `postgres`, `vnc`, `rdp`
 tests/fixtures/invalid/types.yaml:45:11 metadata: missing field `name`
-tests/fixtures/invalid/types.yaml:53:10 spec.roles: invalid type: string "dba", expected a sequence
+tests/fixtures/invalid/types.yaml:53:10 spec.roles: invalid type: string, expected a sequence
+tests/fixtures/invalid/types.yaml:67:9 spec.options.mysql.auth: invalid type: integer, expected a string

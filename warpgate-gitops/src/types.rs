@@ -1,7 +1,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use warpgate_common::{MaybeSecretRef, TargetOptions};
+use uuid::Uuid;
+use warpgate_common::{MaybeSecretRef, TargetDataRequest, TargetOptions};
 use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
 
 pub type DeserializeError = serde_path_to_error::Error<serde_json::Error>;
@@ -15,7 +16,7 @@ pub enum ApiVersion {
 /// One document of a Warpgate resource file
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, strum::EnumDiscriminants)]
 #[serde(tag = "kind")]
-#[strum_discriminants(name(Kind), derive(Deserialize, Hash))]
+#[strum_discriminants(name(ResourceKind), derive(Deserialize, Hash))]
 #[allow(clippy::large_enum_variant)]
 pub enum Resource {
     Target(Manifest<TargetSpec>),
@@ -31,12 +32,12 @@ impl Resource {
     pub fn from_value(value: &Value) -> Result<Self, DeserializeError> {
         #[derive(Deserialize)]
         struct Header {
-            kind: Kind,
+            kind: ResourceKind,
         }
 
         let Header { kind } = serde_path_to_error::deserialize(value)?;
         Ok(match kind {
-            Kind::Target => {
+            ResourceKind::Target => {
                 let mut value = value.clone();
                 let references = value
                     .get_mut("spec")
@@ -46,9 +47,13 @@ impl Resource {
                 manifest.spec.references = references;
                 Self::Target(manifest)
             }
-            Kind::TargetGroup => Self::TargetGroup(serde_path_to_error::deserialize(value)?),
-            Kind::Role => Self::Role(serde_path_to_error::deserialize(value)?),
-            Kind::SshClientKey => Self::SshClientKey(serde_path_to_error::deserialize(value)?),
+            ResourceKind::TargetGroup => {
+                Self::TargetGroup(serde_path_to_error::deserialize(value)?)
+            }
+            ResourceKind::Role => Self::Role(serde_path_to_error::deserialize(value)?),
+            ResourceKind::SshClientKey => {
+                Self::SshClientKey(serde_path_to_error::deserialize(value)?)
+            }
         })
     }
 
@@ -92,6 +97,7 @@ pub struct TargetSpec {
     pub roles: Vec<String>,
     pub options: TargetOptions,
     pub rate_limit_bytes_per_second: Option<u32>,
+    #[schemars(range(min = 1))]
     pub ticket_max_duration_seconds: Option<i64>,
     #[serde(default)]
     pub ticket_requests_disabled: bool,
@@ -99,10 +105,49 @@ pub struct TargetSpec {
     pub ticket_require_approval: bool,
     #[serde(default)]
     pub require_approval: bool,
+    #[schemars(range(min = 1))]
     pub ticket_max_uses: Option<i16>,
     /// Names written in `options` where the database holds row IDs
     #[serde(skip)]
     pub references: OptionReferences,
+}
+
+impl TargetSpec {
+    /// The admin API request for this target. Files refer to other resources
+    /// by name and the API by ID, so the caller passes `options` and
+    /// `group_id` with the IDs resolved.
+    pub fn data_request(
+        &self,
+        name: &str,
+        options: TargetOptions,
+        group_id: Option<Uuid>,
+    ) -> TargetDataRequest {
+        let Self {
+            description,
+            group: _,
+            roles: _,
+            options: _,
+            rate_limit_bytes_per_second,
+            ticket_max_duration_seconds,
+            ticket_requests_disabled,
+            ticket_require_approval,
+            require_approval,
+            ticket_max_uses,
+            references: _,
+        } = self;
+        TargetDataRequest {
+            name: name.to_owned(),
+            description: Some(description.clone()),
+            options,
+            rate_limit_bytes_per_second: *rate_limit_bytes_per_second,
+            group_id,
+            ticket_max_duration_seconds: *ticket_max_duration_seconds,
+            ticket_requests_disabled: *ticket_requests_disabled,
+            ticket_require_approval: *ticket_require_approval,
+            require_approval: *require_approval,
+            ticket_max_uses: *ticket_max_uses,
+        }
+    }
 }
 
 /// A resource file refers to other resources by name, also inside

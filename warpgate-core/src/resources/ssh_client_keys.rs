@@ -10,10 +10,12 @@ use warpgate_common::{
     public_key_line, public_key_of_pem,
 };
 use warpgate_db_entities::SshClientKey;
+use warpgate_gitops::types::ResourceKind;
 
 use super::{Actor, OwnedEntity, ResourceError, check_name, name_taken};
 
 impl OwnedEntity for SshClientKey::Entity {
+    const KIND: ResourceKind = ResourceKind::SshClientKey;
     const ID: Self::Column = SshClientKey::Column::Id;
     const PROVIDER: Self::Column = SshClientKey::Column::Provider;
 }

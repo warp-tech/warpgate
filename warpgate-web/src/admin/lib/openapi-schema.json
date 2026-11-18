@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.30.3-65-g1e41d66a-modified"
+    "version": "v0.30.3-68-g030d44a9-modified"
   },
   "servers": [
     {
@@ -5328,7 +5328,7 @@
     },
     "/gitops/export": {
       "get": {
-        "summary": "Every target, group, role and SSH client key that GitOps doesn't\nmanage yet, as resource documents annotated to be adopted. Contains\ntheir credentials in plain text.",
+        "summary": "Every target, group, role and SSH client key that GitOps doesn't\nmanage yet, as resource documents that adopt them. Contains their\ncredentials in plain text.",
         "responses": {
           "200": {
             "description": "",
@@ -6201,7 +6201,9 @@
         "title": "DryRun",
         "description": "What a sync would do",
         "required": [
-          "source"
+          "source",
+          "unchanged",
+          "pending"
         ],
         "properties": {
           "source": {
@@ -6216,6 +6218,15 @@
             "items": {
               "$ref": "#/components/schemas/PlannedChange"
             }
+          },
+          "unchanged": {
+            "type": "integer",
+            "format": "uint64",
+            "description": "How many resources a sync would leave unchanged. `plan` omits them."
+          },
+          "pending": {
+            "type": "boolean",
+            "description": "Whether a sync would write anything"
           },
           "error": {
             "type": "string",
@@ -6423,7 +6434,7 @@
           },
           "username": {
             "type": "string",
-            "description": "`None` connects anonymously",
+            "description": "Optional. Without it, a password or token is sent as user `git`. With\nneither, the connection is anonymous.",
             "maxLength": 255,
             "minLength": 1
           },
@@ -7597,9 +7608,59 @@
           "unchanged",
           "collision",
           "blocked",
+          "guarded",
           "would_prune",
           "delete"
         ]
+      },
+      "PlanStats": {
+        "type": "object",
+        "title": "PlanStats",
+        "description": "How many resources of a plan fall under each [`PlanAction`]",
+        "required": [
+          "create",
+          "update",
+          "adopt",
+          "delete",
+          "collision",
+          "blocked",
+          "guarded",
+          "would_prune"
+        ],
+        "properties": {
+          "create": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "update": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "adopt": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "delete": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "collision": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "blocked": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "guarded": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "would_prune": {
+            "type": "integer",
+            "format": "uint32"
+          }
+        }
       },
       "PlannedChange": {
         "type": "object",
@@ -7662,10 +7723,27 @@
           "3.2"
         ]
       },
+      "Provider": {
+        "type": "object",
+        "title": "Provider",
+        "description": "A provider as the API returns it: its ID and display name",
+        "required": [
+          "id",
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
       "ProviderSync": {
         "type": "object",
         "title": "ProviderSync",
-        "description": "One outcome of syncing a provider. A later sync with the same unchanged or\nfailed outcome moves `checked_at` instead of adding a row. A row therefore\ncovers the time from `started_at` through `checked_at`.",
         "required": [
           "id",
           "provider",
@@ -7673,7 +7751,8 @@
           "status",
           "started_at",
           "checked_at",
-          "source"
+          "source",
+          "needs_force"
         ],
         "properties": {
           "id": {
@@ -7681,8 +7760,7 @@
             "format": "uuid"
           },
           "provider": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/Provider"
           },
           "triggered_by": {
             "$ref": "#/components/schemas/SyncTrigger"
@@ -7699,20 +7777,18 @@
             "format": "date-time"
           },
           "source": {
-            "type": "string",
-            "description": "Where the files came from, without credentials"
+            "type": "string"
           },
           "revision": {
             "type": "string",
-            "description": "The commit, or a hash of a directory's files"
+            "description": "The commit, or a hash of the files"
           },
-          "plan": {
-            "type": "array",
-            "title": "A sync's plan, one entry per resource",
-            "description": "Same JSON as `warpgate config plan --format json`",
-            "items": {
-              "$ref": "#/components/schemas/PlannedChange"
-            }
+          "stats": {
+            "$ref": "#/components/schemas/PlanStats"
+          },
+          "needs_force": {
+            "type": "boolean",
+            "description": "mass-deletion guard refuses the sync"
           },
           "error": {
             "type": "string"
@@ -7977,8 +8053,7 @@
             "type": "boolean"
           },
           "provider": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/Provider"
           }
         }
       },
@@ -8137,9 +8212,7 @@
             "type": "string"
           },
           "provider": {
-            "type": "string",
-            "format": "uuid",
-            "description": "The provider that manages the key, if any; such a key is read-only here"
+            "$ref": "#/components/schemas/Provider"
           }
         }
       },
@@ -8823,12 +8896,12 @@
         "properties": {
           "force_prune": {
             "type": "boolean",
-            "description": "Prunes even when that deletes most of the managed resources",
+            "description": "Prunes even when that deletes most of the managed resources. Has no\neffect while pruning is off.",
             "default": false
           },
           "yaml": {
             "type": "string",
-            "description": "Resource documents to use as the full desired state. The configured\nsource is not fetched for this run, and need not be set.",
+            "description": "Resource documents to use as the full desired state. A sync refuses\nthem while a source is configured; a dry run doesn't.",
             "maxLength": 16000000
           }
         }
@@ -8847,7 +8920,8 @@
           "Startup",
           "Interval",
           "Api",
-          "Webhook"
+          "Webhook",
+          "Cli"
         ]
       },
       "Target": {
@@ -8909,8 +8983,7 @@
             "format": "int16"
           },
           "provider": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/Provider"
           }
         }
       },
@@ -8993,8 +9066,7 @@
             "$ref": "#/components/schemas/BootstrapThemeColor"
           },
           "provider": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/Provider"
           }
         }
       },

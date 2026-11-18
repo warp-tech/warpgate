@@ -2,12 +2,16 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path as FilePath, PathBuf};
 
+use poem_openapi::types::{ParseFromJSON, ToJSON};
 use serde_json::Value;
-use warpgate_common::{MaybeSecretRef, TargetOptions, public_key_of_pem};
+use warpgate_common::{
+    MaybeSecretRef, TargetDataRequest, TargetOptions, TargetSecrets, public_key_of_pem,
+};
 
 use crate::diagnostic::{Diagnostic, Level, Location, Path, Segment};
 use crate::parse::{Document, parse};
-use crate::types::{Kind, OptionReferences, Resource};
+use crate::plan::changed_paths;
+use crate::types::{OptionReferences, Resource, ResourceKind};
 
 /// A valid fileset
 #[derive(Debug)]
@@ -73,9 +77,9 @@ fn check_names_and_references<'a>(
     diagnostics: &mut Vec<(&'a FilePath, Diagnostic)>,
 ) {
     let name_path = Path::keys(&["metadata", "name"]);
-    let mut names: HashMap<(Kind, String), (&FilePath, Location)> = HashMap::new();
+    let mut names: HashMap<(ResourceKind, String), (&FilePath, Location)> = HashMap::new();
     for (file, doc, resource) in documents {
-        let kind = Kind::from(resource);
+        let kind = ResourceKind::from(resource);
         let name = &resource.metadata().name;
         let location = doc.value_location(&name_path);
         match names.entry((kind, name.to_lowercase())) {
@@ -136,7 +140,7 @@ fn check_names_and_references<'a>(
                 Some(Diagnostic::note(
                     location,
                     path,
-                    not_in_files(Kind::Target, jump_host),
+                    not_in_files(ResourceKind::Target, jump_host),
                 ))
             } else if !jump_hosts.contains_key(&lowercase) {
                 Some(Diagnostic::new(
@@ -155,19 +159,21 @@ fn check_names_and_references<'a>(
             };
             diagnostics.extend(found.map(|d| (*file, d)));
         }
-        let group = target
-            .spec
-            .group
-            .iter()
-            .map(|name| (Path::keys(&["spec", "group"]), Kind::TargetGroup, name));
+        let group = target.spec.group.iter().map(|name| {
+            (
+                Path::keys(&["spec", "group"]),
+                ResourceKind::TargetGroup,
+                name,
+            )
+        });
         let roles = target.spec.roles.iter().enumerate().map(|(index, name)| {
             let mut path = Path::keys(&["spec", "roles"]);
             path.0.push(Segment::Index(index));
-            (path, Kind::Role, name)
+            (path, ResourceKind::Role, name)
         });
         let client_key = target.spec.references.client_key.iter().map(|name| {
             let path = Path::pointer(&format!("/spec{}", OptionReferences::CLIENT_KEY));
-            (path, Kind::SshClientKey, name)
+            (path, ResourceKind::SshClientKey, name)
         });
         for (path, kind, name) in group.chain(roles).chain(client_key) {
             if !names.contains_key(&(kind, name.to_lowercase())) {
@@ -180,7 +186,7 @@ fn check_names_and_references<'a>(
     }
 }
 
-fn not_in_files(kind: Kind, name: &str) -> String {
+fn not_in_files(kind: ResourceKind, name: &str) -> String {
     format!("{kind:?} `{name}` is not in these files and must exist on the server")
 }
 
@@ -214,7 +220,7 @@ pub fn check_document(doc: &Document) -> (Option<Resource>, Vec<Diagnostic>) {
                 diagnostics.push(Diagnostic::new(
                     location,
                     path,
-                    error.into_inner().to_string(),
+                    without_value(&error.into_inner().to_string()),
                 ));
             }
             return (None, diagnostics);
@@ -242,26 +248,33 @@ pub fn check_document(doc: &Document) -> (Option<Resource>, Vec<Diagnostic>) {
             "must not be empty",
         ));
     }
-    let ports = get(&canonical, &["spec", "options"])
-        .and_then(Value::as_object)
-        .into_iter()
-        .flat_map(|protocols| protocols.keys())
-        .map(|protocol| vec!["spec", "options", protocol.as_str(), "port"]);
-    let ticket_limits = [
-        vec!["spec", "ticket_max_uses"],
-        vec!["spec", "ticket_max_duration_seconds"],
-    ];
-    for keys in ports.chain(ticket_limits) {
-        if get(&canonical, &keys)
-            .and_then(Value::as_i64)
-            .is_some_and(|value| value < 1)
-        {
-            let path = Path::keys(&keys);
-            diagnostics.push(Diagnostic::new(
-                doc.value_location(&path),
-                path,
-                "must be at least 1",
-            ));
+    if let Resource::Target(target) = &resource {
+        let options = &target.spec.options;
+        let malformed = malformed_references(options);
+        // The target is parsed as the admin API would parse it. That applies
+        // the API's validators here, which keeps the two inputs from drifting
+        // apart. poem reports only the first violation.
+        let request = target
+            .spec
+            .data_request(&target.metadata.name, options.clone(), None);
+        let rejected = TargetDataRequest::parse_from_json(request.to_json())
+            .err()
+            .map(|error| innermost(&error.into_message()));
+        let root = Path::keys(&["spec"]);
+        let constraint = rejected
+            .as_deref()
+            .and_then(|message| broken_constraint(get(&canonical, &["spec"])?, &root, message));
+        let located = match (constraint, rejected) {
+            (Some(constraint), _) => Some(constraint),
+            // The API rejected a malformed reference, which is reported separately
+            (None, Some(_)) if !malformed.is_empty() => None,
+            (None, rejected) => rejected.map(|message| (root, message)),
+        };
+        let malformed = malformed
+            .into_iter()
+            .map(|path| (path, MALFORMED_REFERENCE.to_owned()));
+        for (path, message) in malformed.chain(located) {
+            diagnostics.push(Diagnostic::new(doc.value_location(&path), path, message));
         }
     }
 
@@ -276,9 +289,7 @@ pub fn check_document(doc: &Document) -> (Option<Resource>, Vec<Diagnostic>) {
                     "not a private key in OpenSSH or PKCS#8 PEM format without a passphrase",
                 ),
             MaybeSecretRef::Reference(_) => None,
-            MaybeSecretRef::Malformed(_) => {
-                Some("not a valid secret://backend/mount/path#field reference")
-            }
+            MaybeSecretRef::Malformed(_) => Some(MALFORMED_REFERENCE),
         };
         if let Some(problem) = problem {
             let path = Path::keys(&["spec", "private_key"]);
@@ -287,6 +298,97 @@ pub fn check_document(doc: &Document) -> (Option<Resource>, Vec<Diagnostic>) {
     }
 
     (Some(resource), diagnostics)
+}
+
+const MALFORMED_REFERENCE: &str = "not a valid secret://backend/mount/path#field reference";
+
+/// Paths of the `secret://` references in the options that don't parse
+fn malformed_references(options: &TargetOptions) -> Vec<Path> {
+    let mut blanked = options.clone();
+    for secret in blanked.secrets_mut() {
+        if matches!(secret, MaybeSecretRef::Malformed(_)) {
+            *secret = MaybeSecretRef::default();
+        }
+    }
+    changed_paths(options, &blanked)
+}
+
+/// The path and rule of the validator that poem's error `message` reports.
+/// poem gives the field's name but not its parent object, so this searches
+/// `spec` for the name. `root` is the path of `spec`. Returns `None` unless
+/// exactly one field matches.
+fn broken_constraint(spec: &Value, root: &Path, message: &str) -> Option<(Path, String)> {
+    let (field, rule) = message
+        .strip_prefix("field `")?
+        .split_once("` verification failed. ")?;
+    let mut found = Vec::new();
+    paths_to_key(spec, field, &mut root.0.clone(), &mut found);
+    match found.as_slice() {
+        [path] => Some((path.clone(), format!("must satisfy {rule}"))),
+        _ => None,
+    }
+}
+
+fn paths_to_key(value: &Value, key: &str, here: &mut Vec<Segment>, found: &mut Vec<Path>) {
+    let children: Vec<(Segment, &Value)> = match value {
+        Value::Object(fields) => fields
+            .iter()
+            .map(|(name, child)| (Segment::Key(name.clone()), child))
+            .collect(),
+        Value::Array(items) => items
+            .iter()
+            .enumerate()
+            .map(|(index, child)| (Segment::Index(index), child))
+            .collect(),
+        _ => return,
+    };
+    for (segment, child) in children {
+        let is_match = segment == Segment::Key(key.to_owned());
+        here.push(segment);
+        if is_match {
+            found.push(Path(here.clone()));
+        }
+        paths_to_key(child, key, here, found);
+        here.pop();
+    }
+}
+
+/// serde quotes the value it could not use, which may be a credential, and
+/// the message ends up in logs and in the sync history. This keeps the
+/// value's type and drops the value.
+fn without_value(message: &str) -> String {
+    let Some(rest) = message.strip_prefix("invalid type: ") else {
+        return message.to_owned();
+    };
+    // For a type without a value, such as `null` or `map`, `found` is only
+    // the type's name
+    let (found, expected) = match rest.rsplit_once(", expected ") {
+        Some((found, expected)) => (found, Some(expected)),
+        None => (rest, None),
+    };
+    let kind = found
+        .split(['`', '"'])
+        .next()
+        .unwrap_or_default()
+        .trim_end();
+    match expected {
+        Some(expected) => format!("invalid type: {kind}, expected {expected}"),
+        None => format!("invalid type: {kind}"),
+    }
+}
+
+/// The cause in a poem parse error, without the chain of types around it:
+/// `failed to parse "A": cause (occurred while parsing "B")`
+fn innermost(message: &str) -> String {
+    let cause = message
+        .split(" (occurred while parsing ")
+        .next()
+        .unwrap_or(message);
+    match cause.split_once("\": ") {
+        Some((outer, cause)) if outer.starts_with("failed to parse \"") => cause,
+        _ => cause,
+    }
+    .to_owned()
 }
 
 fn unknown_fields(
@@ -360,6 +462,31 @@ mod tests {
 
     const ROLE_DBA: &str =
         "apiVersion: warpgate/v1\nkind: Role\nmetadata:\n  name: dba\nspec: {}\n";
+
+    #[test]
+    fn invalid_type_messages_lose_the_value_and_nothing_else() {
+        for (message, kept) in [
+            (
+                "invalid type: string \"hunter2\", expected a boolean",
+                "invalid type: string, expected a boolean",
+            ),
+            (
+                "invalid type: integer `90210`, expected a string",
+                "invalid type: integer, expected a string",
+            ),
+            (
+                "invalid type: null, expected a string",
+                "invalid type: null, expected a string",
+            ),
+            (
+                "invalid type: map, expected a sequence",
+                "invalid type: map, expected a sequence",
+            ),
+            ("unknown variant `x`", "unknown variant `x`"),
+        ] {
+            assert_eq!(without_value(message), kept);
+        }
+    }
 
     #[test]
     fn a_broken_document_skips_the_cross_document_checks() {
