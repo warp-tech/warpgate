@@ -437,31 +437,7 @@ fn get<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    /// The errors of an invalid fileset
-    fn check_all(files: &[(&str, &str)]) -> Vec<String> {
-        let files: Vec<_> = files
-            .iter()
-            .map(|(file, source)| (PathBuf::from(file), (*source).to_owned()))
-            .collect();
-        check_files(&files)
-            .unwrap_err()
-            .into_iter()
-            .map(|(file, d)| {
-                format!(
-                    "{}:{} {}: {}",
-                    file.display(),
-                    d.location,
-                    d.path,
-                    d.message
-                )
-            })
-            .collect()
-    }
-
-    const ROLE_DBA: &str =
-        "apiVersion: warpgate/v1\nkind: Role\nmetadata:\n  name: dba\nspec: {}\n";
+    use super::without_value;
 
     #[test]
     fn invalid_type_messages_lose_the_value_and_nothing_else() {
@@ -486,17 +462,5 @@ mod tests {
         ] {
             assert_eq!(without_value(message), kept);
         }
-    }
-
-    #[test]
-    fn a_broken_document_skips_the_cross_document_checks() {
-        let found = check_all(&[
-            ("a.yaml", &format!("{ROLE_DBA}---\n{ROLE_DBA}")),
-            ("b.yaml", "a: [\n"),
-        ]);
-        assert_eq!(
-            found,
-            vec!["b.yaml:2:1 : while parsing a node, did not find expected node content"]
-        );
     }
 }

@@ -38,7 +38,7 @@ pub mod provider_sync {
 
 const INDEX: &str = "provider_syncs__provider__started_at";
 
-fn parameter_columns() -> [ColumnDef; 4] {
+fn parameter_columns() -> [ColumnDef; 5] {
     [
         ColumnDef::new(Alias::new("gitops_source"))
             .json()
@@ -47,6 +47,11 @@ fn parameter_columns() -> [ColumnDef; 4] {
         ColumnDef::new(Alias::new("gitops_sync_interval_seconds"))
             .big_integer()
             .null()
+            .to_owned(),
+        ColumnDef::new(Alias::new("gitops_sync_on_startup"))
+            .boolean()
+            .not_null()
+            .default(true)
             .to_owned(),
         ColumnDef::new(Alias::new("gitops_webhook_secret"))
             .text()

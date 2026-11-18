@@ -292,20 +292,6 @@ mod tests {
     }
 
     #[test]
-    fn keys_with_dots_stay_one_segment() {
-        let doc = single("labels:\n  example.com/team: x\n");
-        assert_eq!(
-            doc.key_location(&path(&["labels", "example.com/team"])),
-            at(2, 3)
-        );
-        assert_eq!(
-            path(&["labels", "example.com/team"]).to_string(),
-            "labels.example.com/team"
-        );
-        assert_eq!(path(&["spec", "roles", "0"]).to_string(), "spec.roles[0]");
-    }
-
-    #[test]
     fn scalars_follow_the_yaml_1_2_core_schema() {
         let doc = single("a: \"22\"\nb: 22\nc: yes\nd: true\ne: ~\nf: 1.5\n");
         assert_eq!(

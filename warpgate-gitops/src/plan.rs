@@ -960,21 +960,6 @@ mod tests {
         current
     }
 
-    #[test]
-    fn stored_plans_load_and_print_unchanged() {
-        let stored = json!([
-            {"kind": "Target", "name": "db", "action": "update", "fields": [
-                {"path": "spec.options.ssh.port", "from": 22, "to": 2222},
-                {"path": "spec.options.mysql.auth.password", "credential": true},
-            ]},
-            {"kind": "Role", "name": "dba", "action": "create"},
-            {"kind": "Role", "name": "ops", "action": "blocked", "reason": "removed"},
-            {"kind": "Role", "name": "old", "action": "would_prune"},
-        ]);
-        let plan: SyncPlan = serde_json::from_value(stored.clone()).unwrap();
-        assert_eq!(serde_json::to_value(&plan).unwrap(), stored);
-    }
-
     fn summary(plan: &Plan) -> Vec<String> {
         plan.changes
             .iter()

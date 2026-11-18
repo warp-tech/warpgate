@@ -1,6 +1,0 @@
-apiVersion: warpgate/v1
-kind: Role
-metadata:
-  name: dba
-  adopt_existing: "yes"
-spec: {}

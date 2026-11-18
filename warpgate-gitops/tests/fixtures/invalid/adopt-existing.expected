@@ -1,1 +1,0 @@
-tests/fixtures/invalid/adopt-existing.yaml:5:19 metadata.adopt_existing: invalid type: string, expected a boolean

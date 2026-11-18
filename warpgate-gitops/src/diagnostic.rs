@@ -21,7 +21,7 @@ pub enum Segment {
 }
 
 /// The address of a node within its document. Mapping keys are kept whole, so
-/// a key such as `example.com/team` stays a single segment.
+/// a key that contains a dot stays a single segment.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Path(pub Vec<Segment>);
 
