@@ -42,9 +42,8 @@ pub async fn unmanaged<C: ConnectionTrait>(db: &C) -> Result<String, WarpgateErr
     });
 
     let mut out = format!(
-        "# Exported in version {version}\n# yaml-language-server: $schema={schema}\n",
+        "# Exported in version {version}\n",
         version = warpgate_version(),
-        schema = repository_file_url("gitops-schema.json"),
     );
     if plan.has_errors() {
         out.push_str("#\n# Left out, because a sync would refuse them:\n");
@@ -55,6 +54,12 @@ pub async fn unmanaged<C: ConnectionTrait>(db: &C) -> Result<String, WarpgateErr
     }
     out.push('\n');
     out.push_str(&to_yaml(&resources));
+
+    let schema_tag = format!(
+        "\n\n---\n# yaml-language-server: $schema={url}\n\n",
+        url = repository_file_url("gitops-schema.json"),
+    );
+    out = out.replace("\n---\n", &schema_tag);
     Ok(out)
 }
 

@@ -57,7 +57,7 @@ fn login_too_old(
         RequestAuthorization::Session(SessionAuthorization::User { .. }) => {
             auth_time.is_none_or(|auth_time| now.saturating_sub(auth_time) >= max_age)
         }
-        /// token has no session age and always fails
+        // token has no session age and always fails
         RequestAuthorization::UserToken { .. } => true,
         RequestAuthorization::Session(SessionAuthorization::Ticket { .. })
         | RequestAuthorization::AdminToken

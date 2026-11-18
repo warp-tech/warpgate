@@ -351,7 +351,7 @@
                     {#snippet start()}
                         <AsyncButton
                             type="button"
-                            color="link"
+                            color="secondary"
                             click={exportUnmanaged}
                         >
                             Export unmanaged
