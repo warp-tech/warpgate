@@ -55,10 +55,7 @@ fn merge_secret(
 /// An empty inline password keeps the stored one while the URL is unchanged.
 /// The browser never receives the password, and a stored token must not be
 /// sent to a different host.
-fn merge_git_password(
-    mut incoming: GitopsSource,
-    current: Option<&GitopsSource>,
-) -> Result<GitopsSource, WarpgateError> {
+fn merge_git_password(mut incoming: GitopsSource, current: Option<&GitopsSource>) -> GitopsSource {
     if let GitopsSource::Git(git) = &mut incoming
         && git
             .password
@@ -69,8 +66,7 @@ fn merge_git_password(
     {
         git.password = current.password.clone();
     }
-    incoming.encrypt_all()?;
-    Ok(incoming)
+    incoming
 }
 
 /// The serialized config as it goes into the parameters row, secrets encrypted.
@@ -397,10 +393,11 @@ impl Api {
             None => None,
         };
         let gitops_source = match body.gitops_source.clone() {
-            Some(Some(incoming)) => Set(Some(merge_git_password(
-                incoming,
-                current.gitops_source.as_ref(),
-            )?)),
+            Some(Some(incoming)) => {
+                let mut source = merge_git_password(incoming, current.gitops_source.as_ref());
+                source.encrypt_all()?;
+                Set(Some(source))
+            }
             Some(None) => Set(None),
             None => NotSet,
         };
@@ -578,17 +575,15 @@ mod tests {
         let GitopsSource::Git(mut git) = source else {
             panic!()
         };
-        let inline = git.password.inline_mut().unwrap().reveal().unwrap();
-        inline.expose_secret().clone()
+        git.password.inline_mut().unwrap().stored_value().to_owned()
     }
 
     #[test]
     fn a_blank_git_password_is_kept_only_for_the_same_url() {
-        let stored = merge_git_password(git("https://git.example.com/a", "token"), None).unwrap();
-        let kept = merge_git_password(git("https://git.example.com/a", ""), Some(&stored)).unwrap();
+        let stored = merge_git_password(git("https://git.example.com/a", "token"), None);
+        let kept = merge_git_password(git("https://git.example.com/a", ""), Some(&stored));
         assert_eq!(password(kept), "token");
-        let elsewhere =
-            merge_git_password(git("https://evil.example.com/a", ""), Some(&stored)).unwrap();
+        let elsewhere = merge_git_password(git("https://evil.example.com/a", ""), Some(&stored));
         assert_eq!(password(elsewhere), "");
     }
 
