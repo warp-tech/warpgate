@@ -8,6 +8,7 @@ use warpgate_common::encryption::{Keyring, env_keyring};
 use warpgate_common::{
     SshHostKeyKind, StoredSecrets, TargetOptions, WarpgateError, emit_runtime_warning,
 };
+use warpgate_db_entities::Parameters::RecordingsStorageConfig;
 use warpgate_db_entities::{Parameters, SecretBackend, SshClientKey, Target};
 
 use crate::cluster::alive_nodes;
@@ -172,6 +173,13 @@ fn parsed_options(target: &Target::Model) -> Option<TargetOptions> {
         .ok()
 }
 
+fn parsed_recordings_storage(parameters: &Parameters::Model) -> Option<RecordingsStorageConfig> {
+    parameters
+        .recordings_storage_config()
+        .map_err(|error| warn!(%error, "Skipping unreadable recordings storage settings"))
+        .ok()
+}
+
 /// Display names of the rows whose credentials cannot be decrypted
 async fn probe_undecryptable(db: &DatabaseConnection) -> Result<Vec<String>, WarpgateError> {
     let mut undecryptable = vec![];
@@ -212,6 +220,9 @@ async fn probe_undecryptable(db: &DatabaseConnection) -> Result<Vec<String>, War
         && secret.reveal().is_err()
     {
         undecryptable.push("GitOps webhook secret".into());
+    }
+    if parsed_recordings_storage(&parameters).is_some_and(|mut config| !config.all_decryptable()) {
+        undecryptable.push("recordings storage".into());
     }
 
     Ok(undecryptable)
@@ -296,6 +307,12 @@ async fn rewrite_all(db: &DatabaseConnection) -> Result<usize, WarpgateError> {
         && matches!(secret.reencrypt_all(), Ok(true))
     {
         model.gitops_webhook_secret = Set(Some(secret));
+        changed = true;
+    }
+    if let Some(mut config) = parsed_recordings_storage(&parameters)
+        && matches!(config.reencrypt_all(), Ok(true))
+    {
+        model.recordings_storage = Set(serde_json::to_string(&config)?);
         changed = true;
     }
     if changed {
