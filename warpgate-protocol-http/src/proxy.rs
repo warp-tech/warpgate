@@ -220,6 +220,29 @@ fn rewrite_response(
         }
     }
 
+    // Targets must not set the session cookie. An unparseable header could be
+    // one, so it is dropped too.
+    let cookies: Vec<_> = headers
+        .get_all(http::header::SET_COOKIE)
+        .iter()
+        .filter(|value| {
+            let keep = value
+                .to_str()
+                .ok()
+                .and_then(|value| Cookie::parse(value).ok())
+                .is_some_and(|cookie| cookie.name() != SESSION_COOKIE_NAME);
+            if !keep {
+                warn!(header=?value, "Dropped a response cookie");
+            }
+            keep
+        })
+        .cloned()
+        .collect();
+    headers.remove(http::header::SET_COOKIE);
+    for value in cookies {
+        headers.append(http::header::SET_COOKIE, value);
+    }
+
     if let http::header::Entry::Occupied(mut entry) = headers.entry(http::header::SET_COOKIE) {
         for value in entry.iter_mut() {
             try_block!({
@@ -843,6 +866,27 @@ mod tests {
             .collect();
         assert_eq!(cookie_headers.len(), 1);
         Cookie::parse(cookie_headers[0].clone()).unwrap()
+    }
+
+    #[test]
+    fn rewrite_response_drops_session_and_unparseable_cookies() {
+        let mut resp = poem::Response::builder()
+            .header(
+                http::header::SET_COOKIE,
+                format!("{SESSION_COOKIE_NAME}=planted; Path=/"),
+            )
+            .header(http::header::SET_COOKIE, "no-equals-sign")
+            .header(http::header::SET_COOKIE, "app=1; Path=/")
+            .body(());
+        let options = make_options("https://100.0.0.1:7080");
+        let source_uri = Uri::try_from("https://100.0.0.1:7080/").unwrap();
+        rewrite_response(&mut resp, &options, &source_uri).unwrap();
+        let cookies: Vec<_> = resp
+            .headers()
+            .get_all(http::header::SET_COOKIE)
+            .iter()
+            .collect();
+        assert_eq!(cookies, ["app=1; Path=/"]);
     }
 
     #[test]

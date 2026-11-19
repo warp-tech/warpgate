@@ -475,7 +475,7 @@ impl Api {
         Ok(DeleteCredentialResponse::Deleted)
     }
 
-    // Path allowlisted in the MFA setup gate (`is_mfa_setup_allowed`)
+    // Path allowlisted in the MFA setup gate (`is_mfa_setup_path`)
     #[oai(
         path = "/profile/credentials/otp",
         method = "post",
