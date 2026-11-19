@@ -15,6 +15,7 @@
         type Target,
         type TargetGroup,
     } from 'admin/lib/api'
+    import ManagedObjectStatus from 'admin/lib/ManagedObjectStatus.svelte'
     import Section from 'admin/lib/Section.svelte'
     import SectionedForm from 'admin/lib/SectionedForm.svelte'
     import { adminPermissions } from 'admin/lib/store'
@@ -87,6 +88,10 @@
         } catch (err) {
             error = await stringifyError(err)
         }
+    }
+
+    async function release() {
+        target = await api.releaseTarget({ id: params.id })
     }
 
     async function remove() {
@@ -194,7 +199,7 @@
                 <div class="page-summary-bar">
                     <div>
                         <h1>{target.name}</h1>
-                        <div class="text-muted">
+                        <div class="text-muted d-flex align-items-center gap-2">
                             {#if target.options.kind === 'MySql'}
                                 MySQL target
                             {/if}
@@ -211,461 +216,501 @@
                                 Kubernetes target
                             {/if}
                         </div>
+                        <ManagedObjectStatus
+                            provider={target.provider}
+                            {release}
+                        />
                     </div>
                 </div>
 
-                <SectionedForm>
-                    <Section id="general" title="General">
-                        <div class="row">
-                            <div
-                                class:col-md-8={groups.length > 0}
-                                class:col-md-12={!groups.length}
-                            >
-                                <FormGroup floating label="Name">
-                                    <Input
-                                        class="form-control"
-                                        bind:value={target.name}
-                                    />
-                                </FormGroup>
-                            </div>
-
-                            {#if groups.length > 0}
-                                <div class="col-md-4">
-                                    <FormGroup floating label="Group">
-                                        <select
+                <fieldset disabled={!!target.provider}>
+                    <SectionedForm>
+                        <Section id="general" title="General">
+                            <div class="row">
+                                <div
+                                    class:col-md-8={groups.length > 0}
+                                    class:col-md-12={!groups.length}
+                                >
+                                    <FormGroup floating label="Name">
+                                        <Input
                                             class="form-control"
-                                            bind:value={target.groupId}
-                                        >
-                                            <option value={undefined}>
-                                                No group
-                                            </option>
-                                            {#each groups as group (group.id)}
-                                                <option value={group.id}>
-                                                    {group.name}
-                                                </option>
-                                            {/each}
-                                        </select>
+                                            bind:value={target.name}
+                                        />
                                     </FormGroup>
                                 </div>
-                            {/if}
-                        </div>
 
-                        <FormGroup floating label="Description">
-                            <Input bind:value={target.description} />
-                        </FormGroup>
-                    </Section>
+                                {#if groups.length > 0}
+                                    <div class="col-md-4">
+                                        <FormGroup floating label="Group">
+                                            <select
+                                                class="form-control"
+                                                bind:value={target.groupId}
+                                            >
+                                                <option value={undefined}>
+                                                    No group
+                                                </option>
+                                                {#each groups as group (group.id)}
+                                                    <option value={group.id}>
+                                                        {group.name}
+                                                    </option>
+                                                {/each}
+                                            </select>
+                                        </FormGroup>
+                                    </div>
+                                {/if}
+                            </div>
 
-                    <Section id="target-options" title="Target options">
-                        {#if target.options.kind === 'Ssh'}
-                            <TargetSshOptions
-                                id={target.id}
-                                name={target.name}
-                                options={target.options}
-                            />
-                        {/if}
-
-                        {#if target.options.kind === 'Vnc'}
-                            <TargetVncOptions
-                                id={target.id}
-                                name={target.name}
-                                bind:options={target.options}
-                            />
-                        {/if}
-
-                        {#if target.options.kind === 'Rdp'}
-                            <TargetRdpOptions
-                                id={target.id}
-                                name={target.name}
-                                bind:options={target.options}
-                            />
-                        {/if}
-
-                        {#if target.options.kind === 'Http'}
-                            <FormGroup floating label="Target URL">
-                                <input
-                                    class="form-control"
-                                    bind:value={target.options.url}
-                                >
+                            <FormGroup floating label="Description">
+                                <Input bind:value={target.description} />
                             </FormGroup>
+                        </Section>
 
-                            <TlsConfiguration bind:value={target.options.tls} />
-
-                            {#if $serverInfo?.externalHost}
-                                <FormGroup floating label="Bind to a domain">
-                                    <Input
-                                        type="text"
-                                        placeholder={`foo.${$serverInfo.externalHost}`}
-                                        bind:value={target.options.externalHost}
-                                    />
-                                </FormGroup>
+                        <Section id="target-options" title="Target options">
+                            {#if target.options.kind === 'Ssh'}
+                                <TargetSshOptions
+                                    id={target.id}
+                                    name={target.name}
+                                    options={target.options}
+                                />
                             {/if}
 
-                            <h4 class="mt-4">Additional headers</h4>
-                            <HttpHeadersEditor
-                                bind:value={target.options.headers}
-                            />
-                        {/if}
+                            {#if target.options.kind === 'Vnc'}
+                                <TargetVncOptions
+                                    id={target.id}
+                                    name={target.name}
+                                    bind:options={target.options}
+                                />
+                            {/if}
+
+                            {#if target.options.kind === 'Rdp'}
+                                <TargetRdpOptions
+                                    id={target.id}
+                                    name={target.name}
+                                    bind:options={target.options}
+                                />
+                            {/if}
+
+                            {#if target.options.kind === 'Http'}
+                                <FormGroup floating label="Target URL">
+                                    <input
+                                        class="form-control"
+                                        bind:value={target.options.url}
+                                    >
+                                </FormGroup>
+
+                                <TlsConfiguration
+                                    bind:value={target.options.tls}
+                                />
+
+                                {#if $serverInfo?.externalHost}
+                                    <FormGroup
+                                        floating
+                                        label="Bind to a domain"
+                                    >
+                                        <Input
+                                            type="text"
+                                            placeholder={`foo.${$serverInfo.externalHost}`}
+                                            bind:value={target.options
+                                                .externalHost}
+                                        />
+                                    </FormGroup>
+                                {/if}
+
+                                <h4 class="mt-4">Additional headers</h4>
+                                <HttpHeadersEditor
+                                    bind:value={target.options.headers}
+                                />
+                            {/if}
+
+                            {#if target.options.kind === 'MySql' ||
+                                target.options.kind === 'Postgres'}
+                                <div class="row">
+                                    <div class="col-8">
+                                        <FormGroup floating label="Target host">
+                                            <input
+                                                class="form-control"
+                                                bind:value={target.options.host}
+                                            >
+                                        </FormGroup>
+                                    </div>
+                                    <div class="col-4">
+                                        <FormGroup floating label="Target port">
+                                            <input
+                                                class="form-control"
+                                                type="number"
+                                                bind:value={target.options.port}
+                                                min="1"
+                                                max="65535"
+                                                step="1"
+                                            >
+                                        </FormGroup>
+                                    </div>
+                                </div>
+
+                                <div class="row">
+                                    <div class="col">
+                                        <FormGroup floating label="Username">
+                                            <input
+                                                class="form-control"
+                                                bind:value={target.options
+                                                    .username}
+                                            >
+                                        </FormGroup>
+                                    </div>
+                                    <div class="col">
+                                        {#if target.options.auth}
+                                            <FormGroup
+                                                floating
+                                                label="Authenticate using"
+                                            >
+                                                <select
+                                                    class="form-control"
+                                                    bind:value={target.options
+                                                        .auth.kind}
+                                                >
+                                                    <option value="Password">
+                                                        Password
+                                                    </option>
+                                                    {#if $serverInfo?.runningOnEc2}
+                                                        <option value="IamRole">
+                                                            IAM Role
+                                                        </option>
+                                                    {/if}
+                                                </select>
+                                            </FormGroup>
+                                        {/if}
+                                    </div>
+                                </div>
+
+                                {#if target.options.auth?.kind === 'Password'}
+                                    <SecretRefInput
+                                        bind:value={target.options.auth
+                                            .password}
+                                        inlineLabel="Password"
+                                        disabled={!$adminPermissions.targetsEdit}
+                                        intendedUsage={{
+                                            kind: 'Target',
+                                            id: target.id,
+                                            name: target.name,
+                                        }}
+                                    />
+                                {/if}
+
+                                <TlsConfiguration
+                                    bind:value={target.options.tls}
+                                />
+                            {/if}
+
+                            {#if target.options.kind === 'Kubernetes'}
+                                <FormGroup floating label="Cluster URL">
+                                    <input
+                                        class="form-control"
+                                        bind:value={target.options.clusterUrl}
+                                        placeholder="https://kubernetes.example.com:6443"
+                                    >
+                                </FormGroup>
+
+                                <h5 class="mt-3">Authentication</h5>
+                                <FormGroup floating label="Auth Type">
+                                    <select
+                                        class="form-control"
+                                        bind:value={target.options.auth.kind}
+                                    >
+                                        <option value="Certificate">
+                                            Certificate
+                                        </option>
+                                        <option value="Token">Token</option>
+                                        {#if $serverInfo?.runningOnEc2}
+                                            <option value="IamRole">
+                                                IAM Role
+                                            </option>
+                                        {/if}
+                                    </select>
+                                </FormGroup>
+
+                                {#if target.options.auth.kind === 'Certificate'}
+                                    <FormGroup
+                                        floating
+                                        label="Client Certificate"
+                                    >
+                                        <textarea
+                                            class="form-control"
+                                            style="height: 18rem;"
+                                            bind:value={target.options.auth
+                                                .certificate}
+                                            placeholder="-----BEGIN CERTIFICATE-----"
+                                        ></textarea>
+                                    </FormGroup>
+                                    <FormGroup
+                                        floating
+                                        label="Client Private Key"
+                                    >
+                                        <textarea
+                                            class="form-control"
+                                            style="height: 12rem;"
+                                            bind:value={target.options.auth
+                                                .privateKey}
+                                            placeholder="-----BEGIN RSA PRIVATE KEY-----"
+                                        ></textarea>
+                                    </FormGroup>
+                                {/if}
+
+                                {#if target.options.auth.kind === 'Token'}
+                                    <SecretRefInput
+                                        bind:value={target.options.auth.token}
+                                        inlineLabel="Bearer Token"
+                                        disabled={!$adminPermissions.targetsEdit}
+                                        intendedUsage={{
+                                            kind: 'Target',
+                                            id: target.id,
+                                            name: target.name,
+                                        }}
+                                    />
+                                {/if}
+
+                                <TlsConfiguration
+                                    bind:value={target.options.tls}
+                                />
+                            {/if}
+                        </Section>
+
+                        <Section
+                            id="roles"
+                            title="Roles"
+                            bodyTitle="Allow access for roles"
+                        >
+                            <Loadable promise={loadRolesPromise}>
+                                {#snippet children(roles)}
+                                    <div
+                                        class="list-group list-group-flush mb-3"
+                                    >
+                                        {#each roles as role (role.id)}
+                                            <label
+                                                for="role-{role.id}"
+                                                class="list-group-item list-group-item-action d-flex align-items-center"
+                                            >
+                                                <Input
+                                                    id="role-{role.id}"
+                                                    class="mb-0 me-2"
+                                                    type="switch"
+                                                    disabled={!$adminPermissions.targetsEdit}
+                                                    on:change={() =>
+                                                        toggleRole(role)}
+                                                    checked={roleIsAllowed[
+                                                        role.id
+                                                    ]}
+                                                />
+                                                <div>
+                                                    <div>{role.name}</div>
+                                                    {#if role.description}
+                                                        <small
+                                                            class="text-muted"
+                                                            >{role.description}</small
+                                                        >
+                                                    {/if}
+                                                </div>
+                                            </label>
+                                        {/each}
+                                    </div>
+                                {/snippet}
+                            </Loadable>
+                        </Section>
+
+                        <Section id="network" title="Network">
+                            <FormGroup>
+                                <label for="rateLimitBytesPerSecond">
+                                    Global bandwidth limit
+                                </label>
+                                <RateLimitInput
+                                    id="rateLimitBytesPerSecond"
+                                    bind:value={target.rateLimitBytesPerSecond}
+                                />
+                            </FormGroup>
+                        </Section>
 
                         {#if target.options.kind === 'MySql' ||
                             target.options.kind === 'Postgres'}
-                            <div class="row">
-                                <div class="col-8">
-                                    <FormGroup floating label="Target host">
-                                        <input
-                                            class="form-control"
-                                            bind:value={target.options.host}
-                                        >
-                                    </FormGroup>
-                                </div>
-                                <div class="col-4">
-                                    <FormGroup floating label="Target port">
-                                        <input
-                                            class="form-control"
-                                            type="number"
-                                            bind:value={target.options.port}
-                                            min="1"
-                                            max="65535"
-                                            step="1"
-                                        >
-                                    </FormGroup>
-                                </div>
-                            </div>
-
-                            <div class="row">
-                                <div class="col">
-                                    <FormGroup floating label="Username">
-                                        <input
-                                            class="form-control"
-                                            bind:value={target.options.username}
-                                        >
-                                    </FormGroup>
-                                </div>
-                                <div class="col">
-                                    {#if target.options.auth}
-                                        <FormGroup
-                                            floating
-                                            label="Authenticate using"
-                                        >
-                                            <select
-                                                class="form-control"
-                                                bind:value={target.options.auth
-                                                    .kind}
-                                            >
-                                                <option value="Password">
-                                                    Password
-                                                </option>
-                                                {#if $serverInfo?.runningOnEc2}
-                                                    <option value="IamRole">
-                                                        IAM Role
-                                                    </option>
-                                                {/if}
-                                            </select>
-                                        </FormGroup>
-                                    {/if}
-                                </div>
-                            </div>
-
-                            {#if target.options.auth?.kind === 'Password'}
-                                <SecretRefInput
-                                    bind:value={target.options.auth.password}
-                                    inlineLabel="Password"
-                                    disabled={!$adminPermissions.targetsEdit}
-                                    intendedUsage={{
-                                        kind: 'Target',
-                                        id: target.id,
-                                        name: target.name,
-                                    }}
-                                />
-                            {/if}
-
-                            <TlsConfiguration bind:value={target.options.tls} />
-                        {/if}
-
-                        {#if target.options.kind === 'Kubernetes'}
-                            <FormGroup floating label="Cluster URL">
-                                <input
-                                    class="form-control"
-                                    bind:value={target.options.clusterUrl}
-                                    placeholder="https://kubernetes.example.com:6443"
-                                >
-                            </FormGroup>
-
-                            <h5 class="mt-3">Authentication</h5>
-                            <FormGroup floating label="Auth Type">
-                                <select
-                                    class="form-control"
-                                    bind:value={target.options.auth.kind}
-                                >
-                                    <option value="Certificate">
-                                        Certificate
-                                    </option>
-                                    <option value="Token">Token</option>
-                                    {#if $serverInfo?.runningOnEc2}
-                                        <option value="IamRole">
-                                            IAM Role
-                                        </option>
-                                    {/if}
-                                </select>
-                            </FormGroup>
-
-                            {#if target.options.auth.kind === 'Certificate'}
-                                <FormGroup floating label="Client Certificate">
-                                    <textarea
-                                        class="form-control"
-                                        style="height: 18rem;"
-                                        bind:value={target.options.auth
-                                            .certificate}
-                                        placeholder="-----BEGIN CERTIFICATE-----"
-                                    ></textarea>
-                                </FormGroup>
-                                <FormGroup floating label="Client Private Key">
-                                    <textarea
-                                        class="form-control"
-                                        style="height: 12rem;"
-                                        bind:value={target.options.auth
-                                            .privateKey}
-                                        placeholder="-----BEGIN RSA PRIVATE KEY-----"
-                                    ></textarea>
-                                </FormGroup>
-                            {/if}
-
-                            {#if target.options.auth.kind === 'Token'}
-                                <SecretRefInput
-                                    bind:value={target.options.auth.token}
-                                    inlineLabel="Bearer Token"
-                                    disabled={!$adminPermissions.targetsEdit}
-                                    intendedUsage={{
-                                        kind: 'Target',
-                                        id: target.id,
-                                        name: target.name,
-                                    }}
-                                />
-                            {/if}
-
-                            <TlsConfiguration bind:value={target.options.tls} />
-                        {/if}
-                    </Section>
-
-                    <Section
-                        id="roles"
-                        title="Roles"
-                        bodyTitle="Allow access for roles"
-                    >
-                        <Loadable promise={loadRolesPromise}>
-                            {#snippet children(roles)}
-                                <div class="list-group list-group-flush mb-3">
-                                    {#each roles as role (role.id)}
-                                        <label
-                                            for="role-{role.id}"
-                                            class="list-group-item list-group-item-action d-flex align-items-center"
-                                        >
-                                            <Input
-                                                id="role-{role.id}"
-                                                class="mb-0 me-2"
-                                                type="switch"
-                                                disabled={!$adminPermissions.targetsEdit}
-                                                on:change={() =>
-                                                    toggleRole(role)}
-                                                checked={roleIsAllowed[role.id]}
-                                            />
-                                            <div>
-                                                <div>{role.name}</div>
-                                                {#if role.description}
-                                                    <small class="text-muted"
-                                                        >{role.description}</small
-                                                    >
-                                                {/if}
-                                            </div>
-                                        </label>
-                                    {/each}
-                                </div>
-                            {/snippet}
-                        </Loadable>
-                    </Section>
-
-                    <Section id="network" title="Network">
-                        <FormGroup>
-                            <label for="rateLimitBytesPerSecond">
-                                Global bandwidth limit
-                            </label>
-                            <RateLimitInput
-                                id="rateLimitBytesPerSecond"
-                                bind:value={target.rateLimitBytesPerSecond}
-                            />
-                        </FormGroup>
-                    </Section>
-
-                    {#if target.options.kind === 'MySql' ||
-                        target.options.kind === 'Postgres'}
-                        <Section id="advanced" title="Advanced">
-                            {#if target.options.kind === 'Postgres'}
-                                <FormGroup floating label="Protocol version">
-                                    <select
-                                        class="form-control"
-                                        bind:value={target.options
-                                            .protocolVersion}
+                            <Section id="advanced" title="Advanced">
+                                {#if target.options.kind === 'Postgres'}
+                                    <FormGroup
+                                        floating
+                                        label="Protocol version"
                                     >
-                                        <option value="3.2">3.2</option>
-                                        <option value="3.0">3.0</option>
-                                    </select>
-                                    <small class="form-text text-muted">
-                                        Postgres protocol version for the target
-                                        connection. You might have to choose 3.0
-                                        here for some non-compliant Postgres
-                                        proxies that do not implement automatic
-                                        version negotiation.
-                                    </small>
-                                </FormGroup>
+                                        <select
+                                            class="form-control"
+                                            bind:value={target.options
+                                                .protocolVersion}
+                                        >
+                                            <option value="3.2">3.2</option>
+                                            <option value="3.0">3.0</option>
+                                        </select>
+                                        <small class="form-text text-muted">
+                                            Postgres protocol version for the
+                                            target connection. You might have to
+                                            choose 3.0 here for some
+                                            non-compliant Postgres proxies that
+                                            do not implement automatic version
+                                            negotiation.
+                                        </small>
+                                    </FormGroup>
 
-                                <FormGroup floating label="Idle timeout">
+                                    <FormGroup floating label="Idle timeout">
+                                        <input
+                                            class="form-control"
+                                            type="text"
+                                            placeholder="10m"
+                                            bind:value={target.options
+                                                .idleTimeout}
+                                            title="Human-readable duration (e.g., '30m', '1h', '2h30m'). Default: 10m"
+                                        >
+                                        <small class="form-text text-muted">
+                                            How long an authenticated session
+                                            can remain idle before requiring
+                                            re-authentication. Examples: 30m,
+                                            1h, 2h30m. Leave empty for default
+                                            (10m).
+                                        </small>
+                                    </FormGroup>
+                                {/if}
+
+                                <FormGroup
+                                    floating
+                                    label="Default database name for connection examples"
+                                >
                                     <input
                                         class="form-control"
                                         type="text"
-                                        placeholder="10m"
-                                        bind:value={target.options.idleTimeout}
-                                        title="Human-readable duration (e.g., '30m', '1h', '2h30m'). Default: 10m"
+                                        placeholder="database-name"
+                                        bind:value={target.options
+                                            .defaultDatabaseName}
                                     >
                                     <small class="form-text text-muted">
-                                        How long an authenticated session can
-                                        remain idle before requiring
-                                        re-authentication. Examples: 30m, 1h,
-                                        2h30m. Leave empty for default (10m).
+                                        Default database name used in connection
+                                        examples. This is only for display
+                                        purposes and does not restrict which
+                                        databases users can access. Leave empty
+                                        to use the global default.
                                     </small>
                                 </FormGroup>
-                            {/if}
+                            </Section>
+                        {/if}
 
-                            <FormGroup
-                                floating
-                                label="Default database name for connection examples"
-                            >
-                                <input
-                                    class="form-control"
-                                    type="text"
-                                    placeholder="database-name"
-                                    bind:value={target.options
-                                        .defaultDatabaseName}
-                                >
-                                <small class="form-text text-muted">
-                                    Default database name used in connection
-                                    examples. This is only for display purposes
-                                    and does not restrict which databases users
-                                    can access. Leave empty to use the global
-                                    default.
-                                </small>
-                            </FormGroup>
-                        </Section>
-                    {/if}
-
-                    <Section id="access-control" title="Access control">
-                        <label
-                            for="requireApproval"
-                            class="d-flex align-items-center mb-2"
-                        >
-                            <Input
-                                id="requireApproval"
-                                class="mb-0 me-2"
-                                type="switch"
-                                on:change={() => {
-                                    target.requireApproval =
-                                        !target.requireApproval
-                                    update()
-                                }}
-                                checked={target.requireApproval}
-                            />
-                            <div>
-                                Require administrator approval for each
-                                connection
-                            </div>
-                        </label>
-                        <small class="form-text text-muted">
-                            Sessions are held after authentication — including
-                            ticket connections — until an administrator approves
-                            them. HTTP and Kubernetes requests are refused with
-                            a retryable response until then.
-                        </small>
-                    </Section>
-
-                    {#if $serverInfo?.ticketSelfServiceEnabled}
-                        <Section
-                            id="self-service-tickets"
-                            title="Self-service tickets"
-                        >
+                        <Section id="access-control" title="Access control">
                             <label
-                                for="ticketRequestsDisabled"
+                                for="requireApproval"
                                 class="d-flex align-items-center mb-2"
                             >
                                 <Input
-                                    id="ticketRequestsDisabled"
+                                    id="requireApproval"
                                     class="mb-0 me-2"
                                     type="switch"
                                     on:change={() => {
-                                        target.ticketRequestsDisabled =
-                                            !target.ticketRequestsDisabled
+                                        target.requireApproval =
+                                            !target.requireApproval
                                         update()
                                     }}
-                                    checked={target.ticketRequestsDisabled}
+                                    checked={target.requireApproval}
                                 />
                                 <div>
-                                    Disable ticket requests for this target
+                                    Require administrator approval for each
+                                    connection
                                 </div>
                             </label>
-
-                            <label
-                                for="ticketRequireApproval"
-                                class="d-flex align-items-center mb-2"
-                            >
-                                <Input
-                                    id="ticketRequireApproval"
-                                    class="mb-0 me-2"
-                                    type="switch"
-                                    on:change={() => {
-                                        target.ticketRequireApproval =
-                                            !target.ticketRequireApproval
-                                        update()
-                                    }}
-                                    checked={target.ticketRequireApproval}
-                                />
-                                <div>Always require admin approval</div>
-                            </label>
-
-                            <DurationInput
-                                label="Max self-service ticket duration"
-                                seconds={target.ticketMaxDurationSeconds}
-                                onChange={v => {
-                                    target.ticketMaxDurationSeconds = v
-                                    update()
-                                }}
-                                class="mb-1"
-                            />
-                            <small class="form-text text-muted mb-3 d-block">
-                                Examples: 30m, 8h, 1d. Leave empty to use the
-                                global default.
+                            <small class="form-text text-muted">
+                                Sessions are held after authentication —
+                                including ticket connections — until an
+                                administrator approves them. HTTP and Kubernetes
+                                requests are refused with a retryable response
+                                until then.
                             </small>
+                        </Section>
 
-                            <FormGroup floating label="Max uses per ticket">
-                                <input
-                                    type="number"
-                                    min="1"
-                                    class="form-control"
-                                    value={target.ticketMaxUses ?? ''}
-                                    onchange={e => {
-                                        const v = parseInt(
-                                            e.currentTarget.value,
-                                            10,
-                                        )
-                                        target.ticketMaxUses = Number.isNaN(v)
-                                            ? undefined
-                                            : v
+                        {#if $serverInfo?.ticketSelfServiceEnabled}
+                            <Section
+                                id="self-service-tickets"
+                                title="Self-service tickets"
+                            >
+                                <label
+                                    for="ticketRequestsDisabled"
+                                    class="d-flex align-items-center mb-2"
+                                >
+                                    <Input
+                                        id="ticketRequestsDisabled"
+                                        class="mb-0 me-2"
+                                        type="switch"
+                                        on:change={() => {
+                                            target.ticketRequestsDisabled =
+                                                !target.ticketRequestsDisabled
+                                            update()
+                                        }}
+                                        checked={target.ticketRequestsDisabled}
+                                    />
+                                    <div>
+                                        Disable ticket requests for this target
+                                    </div>
+                                </label>
+
+                                <label
+                                    for="ticketRequireApproval"
+                                    class="d-flex align-items-center mb-2"
+                                >
+                                    <Input
+                                        id="ticketRequireApproval"
+                                        class="mb-0 me-2"
+                                        type="switch"
+                                        on:change={() => {
+                                            target.ticketRequireApproval =
+                                                !target.ticketRequireApproval
+                                            update()
+                                        }}
+                                        checked={target.ticketRequireApproval}
+                                    />
+                                    <div>Always require admin approval</div>
+                                </label>
+
+                                <DurationInput
+                                    label="Max self-service ticket duration"
+                                    seconds={target.ticketMaxDurationSeconds}
+                                    onChange={v => {
+                                        target.ticketMaxDurationSeconds = v
                                         update()
                                     }}
+                                    class="mb-1"
+                                />
+                                <small
+                                    class="form-text text-muted mb-3 d-block"
                                 >
-                                <small class="form-text text-muted">
-                                    Leave empty to use the global default.
+                                    Examples: 30m, 8h, 1d. Leave empty to use
+                                    the global default.
                                 </small>
-                            </FormGroup>
-                        </Section>
-                    {/if}
-                </SectionedForm>
+
+                                <FormGroup floating label="Max uses per ticket">
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        class="form-control"
+                                        value={target.ticketMaxUses ?? ''}
+                                        onchange={e => {
+                                            const v = parseInt(
+                                                e.currentTarget.value,
+                                                10,
+                                            )
+                                            target.ticketMaxUses = Number.isNaN(
+                                                v,
+                                            )
+                                                ? undefined
+                                                : v
+                                            update()
+                                        }}
+                                    >
+                                    <small class="form-text text-muted">
+                                        Leave empty to use the global default.
+                                    </small>
+                                </FormGroup>
+                            </Section>
+                        {/if}
+                    </SectionedForm>
+                </fieldset>
             </div>
 
             {#if target}
@@ -705,7 +750,7 @@
     <AsyncButton
         color="primary"
         click={update}
-        disabled={!$adminPermissions.targetsEdit}
+        disabled={!$adminPermissions.targetsEdit || !!target?.provider}
     >
         Update configuration
     </AsyncButton>
@@ -713,7 +758,7 @@
     <AsyncButton
         color="danger"
         click={remove}
-        disabled={!$adminPermissions.targetsDelete}
+        disabled={!$adminPermissions.targetsDelete || !!target?.provider}
     >
         Remove
     </AsyncButton>

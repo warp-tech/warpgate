@@ -116,6 +116,7 @@ impl ListApi {
             ldap_server_id: Set(None),
             ldap_object_uuid: Set(None),
             allowed_ip_ranges: Set(serde_json::Value::Null),
+            ..Default::default()
         };
 
         let user = values.insert(db).await.map_err(WarpgateError::from)?;

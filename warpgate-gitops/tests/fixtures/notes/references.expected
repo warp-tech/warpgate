@@ -1,0 +1,4 @@
+tests/fixtures/notes/references.yaml:12:10 spec.group: note: TargetGroup `prod` is not in these files and must exist on the server
+tests/fixtures/notes/references.yaml:13:16 spec.roles[1]: note: Role `ops` is not in these files and must exist on the server
+tests/fixtures/notes/references.yaml:17:18 spec.options.ssh.jump_host: note: Target `bastion` is not in these files and must exist on the server
+tests/fixtures/notes/references.yaml:20:17 spec.options.ssh.auth.key_id: note: SshClientKey `deploy-key` is not in these files and must exist on the server

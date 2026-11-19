@@ -9,6 +9,7 @@
         Tooltip,
     } from '@sveltestrap/sveltestrap'
     import { api, type Target, type TargetGroup } from 'admin/lib/api'
+    import ManagedIcon from 'admin/lib/ManagedIcon.svelte'
     import { targetAddress } from 'admin/lib/targetAddress'
     import CollapsibleGroupHeader from 'common/CollapsibleGroupHeader.svelte'
     import EmptyState from 'common/EmptyState.svelte'
@@ -54,19 +55,22 @@
             cell: requiresApprovalCell,
         },
         {
-            id: 'address',
-            label: 'Address',
-            hiddenByDefault: true,
-            cell: addressCell,
-            class: 'text-muted small font-monospace',
-        },
-        {
             id: 'description',
             label: 'Description',
             cell: descriptionCell,
             grow: true,
             class: 'text-truncate text-muted small',
         },
+        { id: 'spacer', spacer: true },
+        {
+            id: 'address',
+            label: 'Address',
+            hiddenByDefault: true,
+            cell: addressCell,
+            class: 'text-muted small font-monospace',
+        },
+        { id: 'spacer2', spacer: true },
+        { id: 'managed', label: 'Managed status', cell: managedCell },
         {
             id: 'kind',
             label: 'Type',
@@ -120,6 +124,10 @@
     {target.description}
 {/snippet}
 
+{#snippet managedCell(target: Target)}
+    <ManagedIcon provider={target.provider} />
+{/snippet}
+
 {#snippet kindCell(target: Target)}
     {TARGET_KIND_LABELS[target.options.kind]}
 {/snippet}
@@ -128,8 +136,8 @@
     {const id = uuid()}
     {#if target.requireApproval}
         <Fa icon={faLock} {id}></Fa>
+        <Tooltip target={id} delay="500"> Requires admin approval </Tooltip>
     {/if}
-    <Tooltip target={id} delay="500"> Requires admin approval </Tooltip>
 {/snippet}
 
 <div>

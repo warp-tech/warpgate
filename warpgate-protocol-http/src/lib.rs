@@ -233,6 +233,10 @@ impl ProtocolServer for HTTPProtocolServer {
                 )
                 .at("/api/logo", poem::get(api::logo::api_get_logo))
                 .at(
+                    "/api/gitops/webhook",
+                    poem::post(api::gitops_webhook::api_post_gitops_webhook),
+                )
+                .at(
                     "/api/auth/web-auth-requests/stream",
                     endpoint_auth(api::auth::api_get_web_auth_requests_stream),
                 )

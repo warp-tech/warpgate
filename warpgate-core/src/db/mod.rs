@@ -118,6 +118,10 @@ pub async fn migrate_all(connection: &DatabaseConnection) -> Result<()> {
     Ok(())
 }
 
+pub async fn has_pending_migrations(connection: &DatabaseConnection) -> Result<bool> {
+    Ok(warpgate_db_migrations::has_pending_migrations(connection).await?)
+}
+
 /// Apply `steps` pending migrations.
 pub async fn migrate_up(connection: &DatabaseConnection, steps: u32) -> Result<()> {
     migrate_database_up(connection, steps).await?;
@@ -137,12 +141,17 @@ pub async fn cleanup_db(
     audit_retention: &Duration,
 ) -> Result<()> {
     use warpgate_db_entities::{
-        LogEntry, Recording, SessionApprovalRequest, Ticket, TicketRequest,
+        LogEntry, ProviderSync, Recording, SessionApprovalRequest, Ticket, TicketRequest,
     };
     let audit_cutoff = OffsetDateTime::now_utc() - time::Duration::try_from(*audit_retention)?;
     let recording_cutoff = OffsetDateTime::now_utc() - time::Duration::try_from(*retention)?;
 
     SessionApprovalRequest::delete_all_before(db, audit_cutoff).await?;
+
+    ProviderSync::Entity::delete_many()
+        .filter(Expr::col(ProviderSync::Column::CheckedAt).lt(audit_cutoff))
+        .exec(db)
+        .await?;
 
     LogEntry::Entity::delete_many()
         .filter(Expr::col(LogEntry::Column::Target).eq("audit"))

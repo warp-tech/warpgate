@@ -86,7 +86,7 @@ where
             .to_string(),
         };
 
-        let _ = writeln!(io::stdout(), "{json}");
+        let _ = writeln!(io::stderr(), "{json}");
     }
 
     fn on_new_span(

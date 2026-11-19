@@ -11,7 +11,7 @@ const INDEX: &str = "roles_name_unique";
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        add_unique_name_index(manager, TABLE, INDEX).await
+        add_unique_name_index(manager, TABLE, "name", INDEX).await
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
@@ -33,12 +33,7 @@ mod tests {
     async fn duplicate_role_names_are_renamed_and_then_rejected() {
         set_config_migration_values(ConfigMigrationValues::default());
         let db = Database::connect("sqlite::memory:").await.unwrap();
-        let before = Migrator::migrations()
-            .iter()
-            .position(|migration| migration.name() == "m00094_unique_role_names")
-            .unwrap();
-        let before = u32::try_from(before).unwrap();
-        Migrator::up(&db, Some(before)).await.unwrap();
+        crate::migrate_up_to(&db, "m00094_unique_role_names").await;
 
         let backend = db.get_database_backend();
         let insert = |name: &str| {

@@ -1,0 +1,8 @@
+apiVersion: warpgate/v1
+kind: TargetGroup
+metadata: &meta
+  name: prod
+spec:
+  color: !team Danger
+  description: *meta
+  1: one

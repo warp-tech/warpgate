@@ -12,6 +12,7 @@ members = [
     "warpgate-tls",
     "warpgate-core",
     "warpgate-desktop-auth",
+    "warpgate-gitops",
     "warpgate-db-migrations",
     "warpgate-db-entities",
     "warpgate-database-protocols",
@@ -55,9 +56,10 @@ aes-gcm = { version = "0.11", default-features = false, features = [
 ] }
 anyhow = { version = "1.0", default-features = false, features = ["std"] }
 async-trait = { version = "0.1", default-features = false }
-argon2 = { version = "0.5", default-features = false, features = [
+argon2 = { version = "0.6", default-features = false, features = [
     "password-hash",
     "alloc",
+    "getrandom",
 ] }
 bytes = { version = "1.4", default-features = false }
 data-encoding = { version = "2.3", default-features = false, features = [
@@ -113,9 +115,6 @@ poem-openapi = { version = "5.1", features = [
     "static-files",
     "cookie",
     "time",
-], default-features = false }
-password-hash = { version = "0.5", features = [
-    "std",
 ], default-features = false }
 delegate = { version = "0.13", default-features = false }
 subtle = { version = "2", default-features = false }

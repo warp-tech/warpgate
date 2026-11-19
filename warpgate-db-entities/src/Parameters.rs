@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use data_encoding::HEXLOWER;
 use data_url::DataUrl;
 use poem_openapi::{Enum, Object, Union};
+use sea_orm::FromJsonQueryResult;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -12,7 +13,7 @@ use warpgate_aws::S3StorageConfig;
 use warpgate_azure::AzureBlobConfig;
 use warpgate_common::auth::CredentialKind;
 use warpgate_common::{
-    PasswordPolicy, Protocol, StoredSecret, StoredSecrets, UserAuthCredential,
+    MaybeSecretRef, PasswordPolicy, Protocol, StoredSecret, StoredSecrets, UserAuthCredential,
     UserRequireCredentialsPolicy,
 };
 
@@ -215,6 +216,73 @@ pub struct RecordingsDiskConfig {
     pub path: String,
 }
 
+/// Where the GitOps provider reads resource files from. Serves as both the
+/// stored and the admin-API representation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Union, FromJsonQueryResult)]
+#[serde(tag = "kind")]
+#[oai(discriminator_name = "kind", one_of)]
+pub enum GitopsSource {
+    Directory(GitopsDirectorySource),
+    Git(GitopsGitSource),
+}
+
+/// A directory on the node, such as a mounted ConfigMap or git-sync volume.
+/// In a cluster every node must see the same files.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Object)]
+pub struct GitopsDirectorySource {
+    #[oai(validator(min_length = 1, max_length = 4096))]
+    pub path: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Object)]
+pub struct GitopsGitSource {
+    /// `https://` URL without credentials; `file://` is for tests
+    #[oai(validator(max_length = 2048, pattern = r"^(https|file)://[^@/]*(/.*)?$"))]
+    pub url: String,
+    /// Branch, tag, full ref name or commit
+    #[oai(validator(min_length = 1, max_length = 255))]
+    pub reference: String,
+    /// Optional. Without it, a password or token is sent as user `git`. With
+    /// neither, the connection is anonymous.
+    #[oai(validator(min_length = 1, max_length = 255))]
+    pub username: Option<String>,
+    /// Password or access token, inline or a `secret://` reference. The admin
+    /// API returns an inline value empty, and an empty one on update keeps the
+    /// stored value while the URL stays the same
+    #[serde(default)]
+    #[oai(default)]
+    pub password: MaybeSecretRef,
+    /// Directory inside the repository that holds the files; the root if unset.
+    /// Relative, and no segment starts with a dot, so it can't leave the checkout.
+    #[oai(validator(max_length = 4096, pattern = r"^[^/\\.][^/\\]*(/[^/\\.][^/\\]*)*$"))]
+    pub path: Option<String>,
+}
+
+impl GitopsSource {
+    /// The source as shown in history and logs: never carries credentials
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Directory(dir) => dir.path.clone(),
+            Self::Git(git) => {
+                let mut out = format!("{}@{}", git.url, git.reference);
+                if let Some(path) = &git.path {
+                    out.push_str(&format!(" ({path})"));
+                }
+                out
+            }
+        }
+    }
+}
+
+impl StoredSecrets for GitopsSource {
+    fn stored_secrets_mut(&mut self) -> Vec<&mut StoredSecret> {
+        match self {
+            Self::Directory(_) => vec![],
+            Self::Git(git) => git.password.stored_secrets_mut(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "parameters")]
 pub struct Model {
@@ -299,6 +367,19 @@ pub struct Model {
     pub ssh_host_key_rsa: StoredSecret,
     #[sea_orm(column_type = "Text")]
     pub logo: Option<String>, // data URI
+    /// Where the GitOps provider syncs from; `None` turns syncing off
+    #[sea_orm(column_type = "Json", nullable)]
+    pub gitops_source: Option<GitopsSource>,
+    /// How often the source is synced; `None` syncs only on request and,
+    /// with `gitops_sync_on_startup`, at startup
+    pub gitops_sync_interval_seconds: Option<i64>,
+    /// Whether the source is synced when Warpgate starts
+    pub gitops_sync_on_startup: bool,
+    /// Authenticates push webhooks from the repository host
+    #[sea_orm(column_type = "Text", nullable)]
+    pub gitops_webhook_secret: Option<StoredSecret>,
+    /// Whether a sync deletes managed resources that are gone from the source
+    pub gitops_prune: bool,
 }
 
 impl Model {
@@ -518,6 +599,11 @@ mod tests {
             ssh_host_key_ed25519: StoredSecret::default(),
             ssh_host_key_rsa: StoredSecret::default(),
             logo: None,
+            gitops_source: None,
+            gitops_sync_interval_seconds: None,
+            gitops_sync_on_startup: true,
+            gitops_webhook_secret: None,
+            gitops_prune: false,
         }
     }
 
