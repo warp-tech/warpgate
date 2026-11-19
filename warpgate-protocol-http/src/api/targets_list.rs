@@ -31,7 +31,7 @@ pub struct TargetSnapshot {
     pub description: String,
     pub kind: Target::TargetKind,
     pub external_host: Option<String>,
-    /// Initial HTTP path and query, omitted for the root path without a query.
+    /// Initial HTTP path, query and fragment, omitted for the bare root path.
     pub default_http_path: Option<String>,
     pub group: Option<GroupInfo>,
     pub default_database_name: Option<String>,
@@ -131,7 +131,7 @@ mod tests {
     use super::default_http_path;
 
     #[test]
-    fn extracts_http_landing_path() {
+    fn extracts_default_http_path() {
         for (url, expected) in [
             ("https://cluster.example.com", None),
             ("https://cluster.example.com/", None),
@@ -142,13 +142,13 @@ mod tests {
             ),
             (
                 "https://cluster.example.com/prometheus/?view=graph&name=a%2Fb#section",
-                Some("/prometheus/?view=graph&name=a%2Fb"),
+                Some("/prometheus/?view=graph&name=a%2Fb#section"),
             ),
             (
                 "https://cluster.example.com/?view=graph",
                 Some("/?view=graph"),
             ),
-            ("https://cluster.example.com/#section", None),
+            ("https://cluster.example.com/#section", Some("/#section")),
         ] {
             assert_eq!(default_http_path(url).as_deref(), expected, "{url}");
         }

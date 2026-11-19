@@ -2653,7 +2653,7 @@
           },
           "default_http_path": {
             "type": "string",
-            "description": "Initial HTTP path and query, omitted for the root path without a query."
+            "description": "Initial HTTP path, query and fragment, omitted for the bare root path."
           },
           "group": {
             "$ref": "#/components/schemas/GroupInfo"
