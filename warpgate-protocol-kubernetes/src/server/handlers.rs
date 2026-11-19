@@ -20,7 +20,7 @@ use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
-use warpgate_common_http::read_body_limited_with_timeout;
+use warpgate_common_http::{UpstreamBody, buffer_response, read_body_limited_with_timeout};
 use warpgate_core::logging::KubernetesAuditSubject;
 use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
 use warpgate_core::{Services, WarpgateServerHandle};
@@ -39,6 +39,12 @@ use crate::server::auth::{
 /// 1.5 MiB request limit). The apiserver does not apply it to `.../proxy`
 /// subresources; this does.
 const MAX_REQUEST_BODY_BYTES: usize = 3 * 1024 * 1024;
+
+/// Responses up to this size are buffered. Larger ones are streamed and
+/// recorded without their body. The limit equals [`MAX_REQUEST_BODY_BYTES`]
+/// because a write usually returns the object it was sent. It applies to the
+/// body after reqwest has decompressed it.
+const MAX_BUFFERED_RESPONSE_BYTES: usize = 3 * 1024 * 1024;
 
 /// A client-supplied impersonation header (`Impersonate-User`,
 /// `Impersonate-Group`, `Impersonate-Uid`, `Impersonate-Extra-*`). These let a
@@ -280,6 +286,45 @@ where
     })
 }
 
+/// Streams chunked, watch and follow responses as they arrive and buffers the
+/// rest up to [`MAX_BUFFERED_RESPONSE_BYTES`]. A write's response is buffered
+/// even if it is chunked, and reading it ignores `closed`, so a close can't
+/// truncate a response that fits in the buffer.
+async fn take_response_body(
+    response: reqwest::Response,
+    is_write: bool,
+    query: Option<&str>,
+    closed: &CancellationToken,
+) -> Result<UpstreamBody, WarpgateError> {
+    let is_chunked = response
+        .headers()
+        .get(http::header::TRANSFER_ENCODING)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.eq_ignore_ascii_case("chunked"));
+
+    // watch: used by kubectl to await changes
+    // follow: used by kubectl logs
+    let is_streaming_response = query.is_some_and(|q| {
+        url::form_urlencoded::parse(q.as_bytes())
+            .any(|(k, v)| (k == "watch" || k == "follow") && crate::audit::parse_bool(&v))
+    });
+
+    if !is_write && (is_chunked || is_streaming_response) {
+        return Ok(UpstreamBody::Streamed(response.bytes_stream().boxed()));
+    }
+
+    let read = buffer_response(response, MAX_BUFFERED_RESPONSE_BYTES);
+    Ok(if is_write {
+        read.await
+    } else {
+        closed
+            .run_until_cancelled(read)
+            .await
+            .ok_or(WarpgateError::UserSessionEnded)?
+    }
+    .context("reading kubernetes response")?)
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn _handle_normal_request_inner(
     req: &Request,
@@ -473,48 +518,19 @@ async fn _handle_normal_request_inner(
         "Received response from upstream Kubernetes API"
     );
 
-    let (response_body, body_for_recording) = {
-        // k8s uses streaming chunked responses for watch API
-        let transfer_encoding = response_headers
-            .get(poem::http::header::TRANSFER_ENCODING)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or_default()
-            .to_lowercase();
-
-        let query_pairs: Vec<_> = req
-            .uri()
-            .query()
-            .map(|q| url::form_urlencoded::parse(q.as_bytes()).collect())
-            .unwrap_or_default();
-
-        // watch: used by kubectl to await changes
-        // follow: used by kubectl logs
-        let is_streaming_response = query_pairs
-            .iter()
-            .any(|(k, v)| (k == "watch" || k == "follow") && crate::audit::parse_bool(v));
-
-        // A write's response is always read in full, even if it is framed as
-        // chunked, so a close can't cut off its answer.
-        if !is_write && (transfer_encoding == "chunked" || is_streaming_response) {
-            let upstream = response.bytes_stream().map_err(std::io::Error::other);
-            (
-                Body::from_bytes_stream(end_on_close(upstream, closed, handle)),
-                None,
-            )
-        } else {
-            let bytes = if is_write {
-                response.bytes().await
-            } else {
-                closed
-                    .run_until_cancelled(response.bytes())
-                    .await
-                    .ok_or(WarpgateError::UserSessionEnded)?
-            }
-            .context("reading kubernetes response")?;
-
-            (Body::from_bytes(bytes.clone()), Some(bytes.to_vec()))
-        }
-    };
+    // A streamed body is recorded as empty.
+    let (response_body, body_for_recording) =
+        match take_response_body(response, is_write, req.uri().query(), &closed).await? {
+            UpstreamBody::Buffered(bytes) => (Body::from_bytes(bytes.clone()), bytes),
+            UpstreamBody::Streamed(upstream) => (
+                Body::from_bytes_stream(end_on_close(
+                    upstream.map_err(std::io::Error::other),
+                    closed,
+                    handle,
+                )),
+                bytes::Bytes::new(),
+            ),
+        };
 
     // Record the response
     if let Some(ref mut recorder) = recorder_opt
@@ -525,7 +541,7 @@ async fn _handle_normal_request_inner(
                 redacted_headers,
                 &body_bytes,
                 status.as_u16(),
-                body_for_recording.unwrap_or_default().as_ref(),
+                &body_for_recording,
             )
             .await
     {
@@ -674,12 +690,8 @@ async fn _handle_websocket_request_inner(
             }
         }
         if !established {
-            let client_response = client_response.into_inner();
-            let body = closed
-                .run_until_cancelled(client_response.text())
-                .await
-                .context("Session closed while reading Kubernetes API rejection response")??;
-            bail!("Unexpected websocket response status from Kubernetes API: {status}: {body}");
+            // The refusal body is the cluster's to size, so it is not read.
+            bail!("Unexpected websocket response status from Kubernetes API: {status}");
         }
 
         let client_socket = closed
@@ -762,6 +774,66 @@ async fn _handle_websocket_request_inner(
 
 #[cfg(test)]
 mod tests {
+    fn upstream_response(body: &[u8]) -> reqwest::Response {
+        let chunks: Vec<_> = body
+            .chunks(64 * 1024)
+            .map(|chunk| Ok::<_, std::io::Error>(chunk.to_vec()))
+            .collect();
+        http::Response::new(reqwest::Body::wrap_stream(futures::stream::iter(chunks))).into()
+    }
+
+    fn body_of_len(len: usize) -> Vec<u8> {
+        b"0123456789".iter().copied().cycle().take(len).collect()
+    }
+
+    #[tokio::test]
+    async fn response_within_the_buffer_limit_is_held_in_memory() {
+        use tokio_util::sync::CancellationToken;
+        use warpgate_common_http::UpstreamBody;
+
+        use super::{MAX_BUFFERED_RESPONSE_BYTES, take_response_body};
+
+        let body = body_of_len(MAX_BUFFERED_RESPONSE_BYTES);
+        let taken = take_response_body(
+            upstream_response(&body),
+            false,
+            None,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        let UpstreamBody::Buffered(taken) = taken else {
+            panic!("a response within the limit must be buffered, so that it is recorded");
+        };
+        assert_eq!(taken, body);
+    }
+
+    #[tokio::test]
+    async fn response_over_the_buffer_limit_is_streamed_whole() {
+        use futures::TryStreamExt;
+        use tokio_util::sync::CancellationToken;
+        use warpgate_common_http::UpstreamBody;
+
+        use super::{MAX_BUFFERED_RESPONSE_BYTES, take_response_body};
+
+        let body = body_of_len(MAX_BUFFERED_RESPONSE_BYTES + 1);
+        for is_write in [false, true] {
+            let taken = take_response_body(
+                upstream_response(&body),
+                is_write,
+                None,
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+            let UpstreamBody::Streamed(taken) = taken else {
+                panic!("a response over the limit must not be buffered (is_write={is_write})");
+            };
+            let chunks: Vec<bytes::Bytes> = taken.try_collect().await.unwrap();
+            assert_eq!(chunks.concat(), body, "is_write={is_write}");
+        }
+    }
+
     use std::collections::HashMap;
 
     use super::{is_impersonation_header, named_target_path, redact_headers};
