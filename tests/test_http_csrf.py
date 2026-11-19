@@ -113,6 +113,22 @@ class TestHttpCsrf:
         info = session.get(f"{_url(CONTROL_PLANE, wg.http_port)}/@warpgate/api/info")
         assert info.json()["username"] is None
 
+    def test_host_bound_target_is_not_remembered_for_the_main_host(self, wg, setup):
+        session = _login(CONTROL_PLANE, wg.http_port, setup["admin"].username)
+
+        resp = session.get(
+            f"{_url(TARGET_HOST, wg.http_port)}/probe", allow_redirects=False
+        )
+        assert resp.status_code // 100 == 2, resp.text
+
+        resp = session.get(
+            f"{_url(CONTROL_PLANE, wg.http_port)}/probe",
+            headers=NAVIGATION,
+            allow_redirects=False,
+        )
+        assert resp.status_code == 307, resp.text
+        assert resp.headers["Location"] == "/@warpgate"
+
     def test_control_plane_same_origin_allowed(self, wg, setup):
         cp = _url(CONTROL_PLANE, wg.http_port)
         session = _login(CONTROL_PLANE, wg.http_port, setup["admin"].username)

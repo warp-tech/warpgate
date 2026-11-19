@@ -45,14 +45,15 @@ pub async fn catchall_endpoint(
     http_client_cache: Data<&HttpClientCache>,
     session_store: Data<&Arc<Mutex<SessionStore>>>,
 ) -> poem::Result<Response> {
-    let Some(authorization) = get_target_for_request(req, &ctx).await? else {
+    let Some(RequestTarget {
+        authorization,
+        remember,
+    }) = get_target_for_request(req, &ctx).await?
+    else {
         return Ok(target_select_redirect());
     };
 
-    if should_remember_target(
-        authorization.options(),
-        ctx.trusted_hostname(req).as_deref(),
-    ) {
+    if remember {
         session.set_target_name(authorization.target().name.clone());
     }
 
@@ -130,19 +131,19 @@ fn is_http_authorization(
     authorization.narrow().ok()
 }
 
-/// A target served on its own bound domain is selected by the host on every
-/// request, so remembering it would only make the main host proxy to it too.
-fn should_remember_target(options: &TargetHTTPOptions, request_host: Option<&str>) -> bool {
-    options
-        .external_host
-        .as_deref()
-        .is_none_or(|external_host| Some(external_host) != request_host)
+struct RequestTarget {
+    authorization: TargetAuthorization<TargetHTTPOptions>,
+    /// Whether later requests that name no target should get this one. False
+    /// when something other than the user's choice fixes the target on every
+    /// request (its bound domain, or a ticket): remembering it would make the
+    /// main host proxy to it instead of showing the target list.
+    remember: bool,
 }
 
 async fn get_target_for_request(
     req: &Request,
     ctx: &AuthenticatedRequestContext,
-) -> poem::Result<Option<TargetAuthorization<TargetHTTPOptions>>> {
+) -> poem::Result<Option<RequestTarget>> {
     let config_provider = ctx.services().config_provider.as_ref();
 
     // A ticket is bound to one target row, and it was authorized against that row
@@ -168,8 +169,8 @@ async fn get_target_for_request(
             .into());
         }
 
-        return Ok(is_http_authorization(
-            TargetAuthorization::for_ticket_session(
+        return Ok(
+            is_http_authorization(TargetAuthorization::for_ticket_session(
                 AuthStateUserInfo {
                     id: *user_id,
                     username: username.clone(),
@@ -177,8 +178,12 @@ async fn get_target_for_request(
                 target,
                 *ticket_id,
                 crate::common::PROTOCOL_NAME,
-            )?,
-        ));
+            )?)
+            .map(|authorization| RequestTarget {
+                authorization,
+                remember: false,
+            }),
+        );
     }
 
     let RequestAuthorization::Session(SessionAuthorization::User { .. }) = &ctx.auth else {
@@ -219,14 +224,16 @@ async fn get_target_for_request(
         .or_else(|| host_based_target.as_ref().map(|target| target.name.clone()));
 
     if let Some(target_name) = final_target_name {
-        let target =
-            if let Some(target) = host_based_target.filter(|target| target.name == target_name) {
-                Some(target)
-            } else {
+        let host_based_target = host_based_target.filter(|target| target.name == target_name);
+        let remember = host_based_target.is_none();
+        let target = match host_based_target {
+            Some(target) => Some(target),
+            None => {
                 config_provider
                     .get_target_by_name(target_name.as_str())
                     .await?
-            };
+            }
+        };
 
         // Reached only for a `SessionAuthorization::User` (ticket sessions are
         // handled separately above), so the session is the prior-auth evidence.
@@ -240,7 +247,10 @@ async fn get_target_for_request(
                 authorize_for_target(config_provider, &identity, target).await?
             && let Some(authorization) = is_http_authorization(authorization)
         {
-            return Ok(Some(authorization));
+            return Ok(Some(RequestTarget {
+                authorization,
+                remember,
+            }));
         }
     }
 
@@ -251,42 +261,4 @@ async fn get_target_for_request(
     }
 
     Ok(None)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn make_options(external_host: Option<&str>) -> TargetHTTPOptions {
-        TargetHTTPOptions {
-            url: "http://target.internal".to_string(),
-            tls: Default::default(),
-            headers: Default::default(),
-            external_host: external_host.map(str::to_string),
-        }
-    }
-
-    #[test]
-    fn target_on_its_bound_domain_is_not_remembered() {
-        let options = make_options(Some("a.wg.example.com"));
-        assert!(!should_remember_target(&options, Some("a.wg.example.com")));
-    }
-
-    #[test]
-    fn target_without_bound_domain_is_remembered() {
-        let options = make_options(None);
-        assert!(should_remember_target(&options, Some("wg.example.com")));
-    }
-
-    #[test]
-    fn target_on_another_domain_is_remembered() {
-        let options = make_options(Some("a.wg.example.com"));
-        assert!(should_remember_target(&options, Some("wg.example.com")));
-    }
-
-    #[test]
-    fn target_without_request_host_is_remembered() {
-        let options = make_options(Some("a.wg.example.com"));
-        assert!(should_remember_target(&options, None));
-    }
 }
