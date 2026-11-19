@@ -23,7 +23,7 @@ import pytest
 from .api_client import admin_client, sdk
 from .approval_util import wait_for_pending_approval
 from .conftest import ProcessManager, WarpgateProcess, K3sInstance
-from .util import alloc_port, wait_port
+from .util import alloc_port, post_declaring_length, wait_port
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -913,6 +913,24 @@ class TestKubernetesIntegration:
                     if process is not None and process.poll() is None:
                         process.kill()
                         process.communicate()
+
+    @pytest.mark.asyncio
+    async def test_oversized_body_never_reaches_upstream(
+        self, processes, shared_wg: WarpgateProcess
+    ):
+        _, user, target_name, url = _provision_kubernetes_target(
+            processes, shared_wg, "body-limit"
+        )
+        user_token = await _issue_user_token(url, user, "body-limit-token")
+        status, body = post_declaring_length(
+            shared_wg.kubernetes_port,
+            f"/{target_name}/api/v1/namespaces/default/configmaps",
+            4 * 1024 * 1024,
+            headers={"Authorization": f"Bearer {user_token}"},
+        )
+        assert status == 413
+        # The apiserver refuses this size too, but with a JSON Status object.
+        assert body == "request body too large"
 
     @pytest.mark.asyncio
     async def test_kubectl_run(self, processes, shared_wg: WarpgateProcess):

@@ -8,15 +8,45 @@ pub mod logging;
 pub mod mtls_acceptor;
 mod request;
 
+use std::time::Duration;
+
 pub use auth::{AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization};
+use bytes::Bytes;
 pub use cluster_tls::{ClusterPeer, cluster_peer, cluster_peer_extension, is_cluster_peer_request};
 pub use keepalive::{SessionKeepalive, SessionKeepaliveGuard};
-use poem::Request;
+use poem::error::ReadBodyError;
 use poem::http::{HeaderMap, HeaderName, HeaderValue, header};
+use poem::{Body, Request};
+use warpgate_common::WarpgateError;
 pub use warpgate_common::http_headers::{
     X_WARPGATE_CLUSTER_CLIENT_IP, X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_IDENTITY_TOKEN,
     X_WARPGATE_CLUSTER_NODE, X_WARPGATE_TOKEN,
 };
+
+const BODY_READ_TIMEOUT: Duration = Duration::from_secs(30);
+pub const HTTP2_MAX_CONCURRENT_STREAMS_PER_CONN: u32 = 200; // hyper default = 200, poem = unlimited
+
+pub async fn read_body_limited_with_timeout(
+    headers: &HeaderMap,
+    body: Body,
+    limit: usize,
+) -> Result<Bytes, WarpgateError> {
+    if let Some(declared) = headers
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<usize>().ok())
+        && declared > limit
+    {
+        return Err(WarpgateError::RequestBodyTooLarge);
+    }
+    tokio::time::timeout(BODY_READ_TIMEOUT, body.into_bytes_limit(limit))
+        .await
+        .map_err(|_| WarpgateError::RequestBodyTimeout)?
+        .map_err(|error| match error {
+            ReadBodyError::PayloadTooLarge => WarpgateError::RequestBodyTooLarge,
+            error => WarpgateError::InvalidRequest(format!("reading request body: {error}")),
+        })
+}
 
 /// The credential from the first `Authorization` header using `scheme`
 /// (compared case-insensitively, as RFC 7235 requires).
