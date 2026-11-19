@@ -61,6 +61,9 @@ use crate::session::SessionStore;
 use crate::session_handle::warpgate_server_handle_for_request;
 use crate::session_storage::SharedSessionStorage;
 
+/// Where the admin API sits under `/@warpgate`
+const ADMIN_API_MOUNT: &str = "/admin/api";
+
 pub struct HTTPProtocolServer {
     services: Services,
 }
@@ -207,7 +210,7 @@ impl ProtocolServer for HTTPProtocolServer {
                     EmbeddedFilesEndpoint::<Assets>::new().with(cache_static()),
                 )
                 .nest(
-                    "/admin/api",
+                    ADMIN_API_MOUNT,
                     endpoint_auth(admin_api_app).with(cache_bust()),
                 )
                 .at(
@@ -236,7 +239,7 @@ impl ProtocolServer for HTTPProtocolServer {
                 )
                 .at("/api/logo", poem::get(api::logo::api_get_logo))
                 .at(
-                    "/api/gitops/webhook",
+                    api::gitops_webhook::PATH,
                     poem::post(api::gitops_webhook::api_post_gitops_webhook),
                 )
                 .at(

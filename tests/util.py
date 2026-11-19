@@ -181,7 +181,9 @@ def create_ticket(url, username, target_name):
     return response.json()["secret"]
 
 
-def post_declaring_length(port: int, path: str, length: int, headers=None):
+def post_declaring_length(
+    port: int, path: str, length: int, headers=None, method="POST"
+):
     """POST to the local HTTPS port with a `Content-Length` but no body.
 
     A server that honours the declared length before reading answers at once;
@@ -192,7 +194,7 @@ def post_declaring_length(port: int, path: str, length: int, headers=None):
     )
     try:
         conn.request(
-            "POST",
+            method,
             path,
             headers={
                 "Content-Type": "application/json",

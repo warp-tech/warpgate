@@ -14,6 +14,7 @@ use warpgate_core::resources::{OwnedEntity, export, release};
 use warpgate_db_entities::ProviderSync::{self, PlanStats, SyncStatus, SyncTrigger};
 
 use super::AdminContext;
+use super::limited_json::LimitedJson;
 use super::pagination::PaginatedResponse;
 
 pub struct Api;
@@ -34,6 +35,10 @@ pub(super) async fn release_managed<E: OwnedEntity>(
     }
     Ok(())
 }
+
+/// Room for the `yaml` of a [`SyncGitopsRequest`], whose line breaks and
+/// quotes take two bytes each in JSON.
+const SYNC_BODY_LIMIT: usize = 32 * 1024 * 1024;
 
 #[derive(Object)]
 struct SyncGitopsRequest {
@@ -136,11 +141,11 @@ impl Api {
     async fn api_sync(
         &self,
         admin: AdminContext,
-        body: Json<SyncGitopsRequest>,
+        body: LimitedJson<SyncGitopsRequest, SYNC_BODY_LIMIT>,
     ) -> Result<SyncGitopsResponse, WarpgateError> {
         admin.require(AdminPermission::ConfigEdit)?;
 
-        let Json(SyncGitopsRequest { force_prune, yaml }) = body;
+        let LimitedJson(SyncGitopsRequest { force_prune, yaml }) = body;
         let request = SyncRequest::Admin {
             user_id: admin.auth.user_id(),
             force_prune,
@@ -163,11 +168,11 @@ impl Api {
     async fn api_dry_run(
         &self,
         admin: AdminContext,
-        body: Json<SyncGitopsRequest>,
+        body: LimitedJson<SyncGitopsRequest, SYNC_BODY_LIMIT>,
     ) -> Result<DryRunGitopsResponse, WarpgateError> {
         admin.require(AdminPermission::ConfigEdit)?;
 
-        let Json(SyncGitopsRequest { force_prune, yaml }) = body;
+        let LimitedJson(SyncGitopsRequest { force_prune, yaml }) = body;
         let services = admin.services();
         let request = SyncRequest::Admin {
             user_id: admin.auth.user_id(),

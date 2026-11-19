@@ -18,11 +18,6 @@
         title: string
         /** Bind to keep script-level access to the loaded parameters. */
         parameters?: ParameterValues
-        /**
-         * Extra fields merged into the update request on save. Untyped
-         * because the generated model can't express `null` as "clear".
-         */
-        extraUpdate?: () => Record<string, unknown>
         onsaved?: () => Promise<void> | void
         /** Sections; call `refreshValidity` after programmatic value changes. */
         children: Snippet<
@@ -30,13 +25,7 @@
         >
     }
 
-    let {
-        title,
-        parameters = $bindable(),
-        extraUpdate,
-        onsaved,
-        children,
-    }: Props = $props()
+    let { title, parameters = $bindable(), onsaved, children }: Props = $props()
 
     let updateError: string | undefined = $state()
     let formEl: HTMLFormElement | undefined = $state()
@@ -89,7 +78,6 @@
                     parameters.adminApprovalTimeoutSeconds ?? null,
                 adminApprovalGracePeriodSeconds:
                     parameters.adminApprovalGracePeriodSeconds ?? null,
-                ...extraUpdate?.(),
             } as unknown as ParameterUpdate
             await api.updateParameters({ parameterUpdate })
             await onsaved?.()

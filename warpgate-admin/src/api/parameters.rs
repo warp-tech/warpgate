@@ -3,6 +3,7 @@ use poem_openapi::payload::Json;
 use poem_openapi::types::{ParseError, ParseFromJSON, ParseResult};
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::ActiveValue::NotSet;
+use sea_orm::sea_query::Expr;
 use sea_orm::{EntityTrait, IntoActiveModel, Set};
 use serde::Serialize;
 use serde_json::Value;
@@ -16,6 +17,7 @@ use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::{GitopsSource, RecordingsStorageConfig};
 
 use super::AdminContext;
+use super::limited_json::LimitedJson;
 
 pub struct Api;
 
@@ -192,17 +194,6 @@ struct ParameterUpdate {
     pub lp_user_lockout_duration_seconds: Option<i32>,
     pub lp_user_exempt_admins: Option<bool>,
     pub banner: Option<String>,
-    /// Only browser-renderable image data URLs are stored: the value is served
-    /// to every visitor as an image, so nothing else must ever end up in it.
-    /// `null` clears the logo. The size cap is mirrored in the Parameters UI.
-    #[oai(
-        deserialize_with = "parse_nullable",
-        validator(
-            max_length = 4_194_304,
-            pattern = r"^data:image/(png|jpeg|gif|webp|svg\+xml);base64,[A-Za-z0-9+/]+={0,2}$"
-        )
-    )]
-    pub logo: Option<Option<String>>,
     pub web_clients_enabled: Option<bool>,
     #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
     pub web_auth_max_age_seconds: Option<Option<i64>>,
@@ -233,6 +224,31 @@ struct ParameterUpdate {
     pub gitops_prune: Option<bool>,
 }
 
+/// Fits the longest `logo` a [`LogoUpdate`] accepts, with room for JSON
+/// escaping of its slashes.
+const LOGO_BODY_LIMIT: usize = 5 * 1024 * 1024;
+
+#[derive(Object)]
+struct LogoUpdate {
+    /// Only browser-renderable image data URLs are stored: the value is served
+    /// to every visitor as an image, so nothing else must ever end up in it.
+    /// The size cap is mirrored in the Parameters UI.
+    #[oai(validator(
+        max_length = 4_194_304,
+        pattern = r"^data:image/(png|jpeg|gif|webp|svg\+xml);base64,[A-Za-z0-9+/]+={0,2}$"
+    ))]
+    logo: String,
+}
+
+/// `None` removes the logo.
+async fn store_logo(admin: &AdminContext, logo: Option<String>) -> Result<(), WarpgateError> {
+    Parameters::Entity::update_many()
+        .col_expr(Parameters::Column::Logo, Expr::value(logo))
+        .exec(&admin.services().db)
+        .await?;
+    Ok(())
+}
+
 #[derive(Serialize, Object)]
 struct AnalyticsPreview {
     /// The target URL the report would be POSTed to.
@@ -257,6 +273,12 @@ enum GetAnalyticsPreviewResponse {
 enum UpdateParametersResponse {
     #[oai(status = 201)]
     Done,
+}
+
+#[derive(ApiResponse)]
+enum DeleteLogoResponse {
+    #[oai(status = 204)]
+    Deleted,
 }
 
 #[derive(Serialize, Object)]
@@ -374,14 +396,6 @@ impl Api {
     ) -> Result<UpdateParametersResponse, WarpgateError> {
         admin.require(AdminPermission::ConfigEdit)?;
 
-        if let Some(Some(logo)) = &body.logo
-            && Parameters::LogoImage::from_data_url(logo).is_none()
-        {
-            return Err(WarpgateError::InvalidRequest(
-                "logo is not a valid image data URL".into(),
-            ));
-        }
-
         let services = admin.services();
         let db = &services.db;
         let current = admin.parameters().await?.clone();
@@ -476,7 +490,6 @@ impl Api {
             body.lp_user_lockout_duration_seconds.map_or(NotSet, Set);
         parameters.lp_user_exempt_admins = body.lp_user_exempt_admins.map_or(NotSet, Set);
         parameters.banner = body.banner.clone().map_or(NotSet, Set);
-        parameters.logo = body.logo.clone().map_or(NotSet, Set);
         parameters.web_clients_enabled = body.web_clients_enabled.map_or(NotSet, Set);
         parameters.web_auth_max_age_seconds = body.web_auth_max_age_seconds.map_or(NotSet, Set);
         parameters.web_approval_grace_period_seconds =
@@ -506,6 +519,40 @@ impl Api {
         .await?;
 
         Ok(UpdateParametersResponse::Done)
+    }
+
+    /// Replaces the Warpgate logo in the web UI. `GET /@warpgate/api/logo`
+    /// serves it.
+    #[oai(path = "/parameters/logo", method = "put", operation_id = "set_logo")]
+    async fn api_set_logo(
+        &self,
+        admin: AdminContext,
+        body: LimitedJson<LogoUpdate, LOGO_BODY_LIMIT>,
+    ) -> Result<UpdateParametersResponse, WarpgateError> {
+        admin.require(AdminPermission::ConfigEdit)?;
+
+        let LimitedJson(LogoUpdate { logo }) = body;
+        if Parameters::LogoImage::from_data_url(&logo).is_none() {
+            return Err(WarpgateError::InvalidRequest(
+                "logo is not a valid image data URL".into(),
+            ));
+        }
+        store_logo(&admin, Some(logo)).await?;
+        Ok(UpdateParametersResponse::Done)
+    }
+
+    #[oai(
+        path = "/parameters/logo",
+        method = "delete",
+        operation_id = "delete_logo"
+    )]
+    async fn api_delete_logo(
+        &self,
+        admin: AdminContext,
+    ) -> Result<DeleteLogoResponse, WarpgateError> {
+        admin.require(AdminPermission::ConfigEdit)?;
+        store_logo(&admin, None).await?;
+        Ok(DeleteLogoResponse::Deleted)
     }
 
     #[oai(
@@ -557,7 +604,8 @@ mod tests {
     use warpgate_db_entities::Parameters::GitopsSource;
 
     use super::{
-        ParameterUpdate, RecordingsStorageConfig, merge_git_password, merge_secret, storage_to_save,
+        LogoUpdate, ParameterUpdate, RecordingsStorageConfig, merge_git_password, merge_secret,
+        storage_to_save,
     };
 
     fn git(url: &str, password: &str) -> GitopsSource {
@@ -745,23 +793,23 @@ mod tests {
     #[test]
     fn logo_accepts_only_image_data_urls() {
         for body in [
-            json!({ "logo": null }),
             json!({ "logo": "data:image/png;base64,iVBORw0KGgo=" }),
             json!({ "logo": "data:image/svg+xml;base64,PHN2Zy8+" }),
         ] {
             assert!(
-                ParameterUpdate::parse_from_json(Some(body.clone())).is_ok(),
+                LogoUpdate::parse_from_json(Some(body.clone())).is_ok(),
                 "{body} was rejected"
             );
         }
         for body in [
+            json!({ "logo": null }),
             json!({ "logo": "" }),
             json!({ "logo": "https://example.com/logo.png" }),
             json!({ "logo": "data:text/html;base64,PHNjcmlwdC8+" }),
             json!({ "logo": "data:image/png;base64,not base64!" }),
         ] {
             assert!(
-                ParameterUpdate::parse_from_json(Some(body.clone())).is_err(),
+                LogoUpdate::parse_from_json(Some(body.clone())).is_err(),
                 "{body} was accepted"
             );
         }
