@@ -61,6 +61,22 @@ impl Channel {
         }
     }
 
+    pub async fn record_input(&mut self, data: &[u8]) -> anyhow::Result<()> {
+        self.audit.on_input(data).await?;
+        if let Some(recorder) = self.traffic_recorder.as_mut() {
+            recorder.write_tx(data).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn record_output(&mut self, data: &[u8]) -> anyhow::Result<()> {
+        self.audit.on_output(data).await?;
+        if let Some(recorder) = self.traffic_recorder.as_mut() {
+            recorder.write_rx(data).await?;
+        }
+        Ok(())
+    }
+
     pub const fn server_id(&self) -> Option<ServerChannelId> {
         self.server_id
     }

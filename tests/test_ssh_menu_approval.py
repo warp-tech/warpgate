@@ -1,4 +1,5 @@
 from pathlib import Path
+import socket
 import subprocess
 import threading
 import time
@@ -6,8 +7,8 @@ from uuid import uuid4
 
 from .api_client import admin_client, sdk
 from .conftest import ProcessManager, WarpgateProcess
-from .approval_util import wait_for_pending_approval
-from .util import wait_port
+from .approval_util import wait_for_pending_approval, wait_for_recording
+from .util import alloc_port, wait_port
 
 
 def _create_menu_target(api, ssh_port: int, require_approval: bool):
@@ -44,11 +45,14 @@ def _create_menu_target(api, ssh_port: int, require_approval: bool):
     return user, target, request
 
 
-def _start_menu_client(processes: ProcessManager, wg: WarpgateProcess, username: str):
+def _start_menu_client(
+    processes: ProcessManager, wg: WarpgateProcess, username: str, *options
+):
     # No target in the selector -> the menu. -tt: force a pty even though our
     # stdin is a pipe, otherwise the menu never starts.
     return processes.start_ssh_client(
         "-tt",
+        *options,
         f"{username}@localhost",
         "-p",
         str(wg.ssh_port),
@@ -162,3 +166,46 @@ class Test:
         client.wait(timeout=timeout)
         reader.join(timeout=timeout)
         assert b"approved-ok" in output
+
+    def test_a_port_forward_opened_in_the_menu_is_recorded(
+        self,
+        processes: ProcessManager,
+        wg_c_ed25519_pubkey: Path,
+        timeout,
+        shared_wg: WarpgateProcess,
+    ):
+        # The forward is opened while the menu is up, before the target
+        # session exists
+        ssh_port = processes.start_ssh_server(
+            trusted_keys=[wg_c_ed25519_pubkey.read_text()]
+        )
+        wait_port(ssh_port)
+
+        url = f"https://localhost:{shared_wg.http_port}"
+        with admin_client(url) as api:
+            user, _, _ = _create_menu_target(api, ssh_port, require_approval=False)
+
+        local_port = alloc_port()
+        client = _start_menu_client(
+            processes, shared_wg, user.username, "-L", f"{local_port}:localhost:22"
+        )
+        try:
+            wait_port(local_port, recv=False)
+            with socket.create_connection(("localhost", local_port)) as s:
+                s.settimeout(3)
+                # Enter selects the only target. The menu may not have
+                # rendered yet, so retry. The target's sshd sends its banner
+                # first
+                banner = b""
+                for _ in range(5):
+                    client.stdin.write(b"\r")
+                    client.stdin.flush()
+                    try:
+                        banner = s.recv(4)
+                        break
+                    except socket.timeout:
+                        continue
+                assert banner.startswith(b"SSH-")
+            wait_for_recording(url, user.username, sdk.RecordingKind.TRAFFIC)
+        finally:
+            client.kill()
