@@ -5,7 +5,6 @@ mod bouncy_ball;
 mod framebuffer;
 mod logo;
 
-use std::convert::Infallible;
 use std::fmt::Write;
 
 use embedded_graphics::image::Image;
@@ -45,11 +44,11 @@ impl Default for Screen {
 const BG: Rgb888 = Rgb888::new(0x14, 0x14, 0x1a);
 const FG: Rgb888 = Rgb888::new(0xc1, 0xc9, 0xe4);
 
-pub fn render_connecting(screen: Screen, tick: u64) -> Result<Vec<u8>, Infallible> {
+pub fn render_connecting(screen: Screen, tick: u64) -> Vec<u8> {
     render(screen, tick, "Connecting", None)
 }
 
-pub fn render_awaiting_approval(screen: Screen, tick: u64) -> Result<Vec<u8>, Infallible> {
+pub fn render_awaiting_approval(screen: Screen, tick: u64) -> Vec<u8> {
     render(
         screen,
         tick,
@@ -59,7 +58,7 @@ pub fn render_awaiting_approval(screen: Screen, tick: u64) -> Result<Vec<u8>, In
 }
 
 /// The login banner, shown until the viewer acknowledges it with any key or click.
-pub fn render_banner(screen: Screen, tick: u64, banner: &str) -> Result<Vec<u8>, Infallible> {
+pub fn render_banner(screen: Screen, tick: u64, banner: &str) -> Vec<u8> {
     render(
         screen,
         tick,
@@ -78,11 +77,7 @@ pub enum AuthPrompt {
     },
 }
 
-pub fn render_authentication(
-    screen: Screen,
-    tick: u64,
-    prompt: &AuthPrompt,
-) -> Result<Vec<u8>, Infallible> {
+pub fn render_authentication(screen: Screen, tick: u64, prompt: &AuthPrompt) -> Vec<u8> {
     match prompt {
         AuthPrompt::WebApproval { url, security_key } => {
             let mut text = String::new();
@@ -125,12 +120,7 @@ const LOGO_GAP: i32 = 40;
 /// Logo offset from the top on a screen with room to spare.
 const LOGO_Y: i32 = 60;
 
-fn render(
-    screen: Screen,
-    tick: u64,
-    text: &str,
-    boxes: Option<CharBoxes>,
-) -> Result<Vec<u8>, Infallible> {
+fn render(screen: Screen, tick: u64, text: &str, boxes: Option<CharBoxes>) -> Vec<u8> {
     let (w, h) = (i32::from(screen.width), i32::from(screen.height));
     let mut fb = Framebuffer::new(u32::from(screen.width), u32::from(screen.height), BG);
 
@@ -143,16 +133,21 @@ fn render(
     let logo_y = LOGO_Y
         .min(cy - image.size().height.cast_signed() - LOGO_GAP)
         .max(0);
-    Image::new(image, Point::new(x0, logo_y)).draw(&mut fb)?;
+    Image::new(image, Point::new(x0, logo_y))
+        .draw(&mut fb)
+        .into_ok();
 
     bouncy_ball::bouncy_ball(tick, cx, cy)
         .into_styled(PrimitiveStyle::with_fill(FG))
-        .draw(&mut fb)?;
+        .draw(&mut fb)
+        .into_ok();
 
     let style = MonoTextStyle::new(&FONT_10X20, FG);
     let mut y = cy + 88;
     for line in text.split('\n') {
-        Text::with_alignment(line, Point::new(cx, y), style, Alignment::Center).draw(&mut fb)?;
+        Text::with_alignment(line, Point::new(cx, y), style, Alignment::Center)
+            .draw(&mut fb)
+            .into_ok();
         y += 26;
     }
 
@@ -161,7 +156,7 @@ fn render(
         draw_char_boxes(&mut fb, cx, y + 8, boxes.text, boxes.slots, style);
     }
 
-    Ok(fb.take_pixels())
+    fb.take_pixels()
 }
 
 mod char_boxes {

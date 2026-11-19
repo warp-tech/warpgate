@@ -1,4 +1,3 @@
-use warpgate_common::UserId;
 use std::ops::Deref;
 
 use poem_openapi::Enum;
@@ -10,7 +9,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::auth::{ApprovalKind, ApprovalScope};
 use warpgate_common::helpers::username::username_eq_ci;
-use warpgate_common::{NodeId, UserSessionId, WarpgateError};
+use warpgate_common::{NodeId, UserId, UserSessionId, WarpgateError};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Enum, EnumIter, DeriveActiveEnum, Serialize)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
@@ -114,11 +113,7 @@ impl StatusTransition {
     }
 
     /// returns change count
-    async fn apply(
-        self,
-        db: &DatabaseConnection,
-        which: Condition,
-    ) -> Result<u64, WarpgateError> {
+    async fn apply(self, db: &DatabaseConnection, which: Condition) -> Result<u64, WarpgateError> {
         let mut query = Entity::update_many()
             .col_expr(Column::Status, self.to.into())
             .filter(which)
@@ -271,7 +266,7 @@ async fn try_refresh_pending(db: &DatabaseConnection, row: &ActiveModel) -> Resu
     }
 }
 
-enum Reopened {
+enum ReopenOutcome {
     Reopened,
     /// The entry to be reopened just got refreshed by someone else
     NotUnanswered,
@@ -284,7 +279,7 @@ async fn try_reopen_unanswered(
     key: &Key,
     ticket_id: Option<Uuid>,
     row: &ActiveModel,
-) -> Result<Reopened, WarpgateError> {
+) -> Result<ReopenOutcome, WarpgateError> {
     if let Some(ticket_id) = ticket_id {
         let unanswered_row_exists = Entity::find()
             .filter(key.clone().into_condition())
@@ -293,11 +288,11 @@ async fn try_reopen_unanswered(
             .await?
             .is_some();
         if !unanswered_row_exists {
-            return Ok(Reopened::NotUnanswered);
+            return Ok(ReopenOutcome::NotUnanswered);
         }
         match super::Ticket::spend_use(db, ticket_id).await {
             Ok(()) => {}
-            Err(WarpgateError::InvalidTicket(_)) => return Ok(Reopened::TicketExhausted),
+            Err(WarpgateError::InvalidTicket(_)) => return Ok(ReopenOutcome::TicketExhausted),
             Err(error) => return Err(error),
         }
     }
@@ -317,11 +312,11 @@ async fn try_reopen_unanswered(
         .exec(db)
         .await
     {
-        Ok(_) => Ok(Reopened::Reopened),
-        Err(DbErr::RecordNotUpdated) => Ok(Reopened::NotUnanswered),
+        Ok(_) => Ok(ReopenOutcome::Reopened),
+        Err(DbErr::RecordNotUpdated) => Ok(ReopenOutcome::NotUnanswered),
         Err(error) => Err(error.into()),
     };
-    if !matches!(result, Ok(Reopened::Reopened))
+    if !matches!(result, Ok(ReopenOutcome::Reopened))
         && let Some(ticket_id) = ticket_id
         && let Err(error) = super::Ticket::refund_use(db, ticket_id).await
     {
@@ -331,6 +326,7 @@ async fn try_reopen_unanswered(
 }
 
 /// Result of an upsert_request
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Advertised {
     /// Created or reopened an entry
@@ -354,8 +350,8 @@ pub async fn upsert_request(
         return Ok(Advertised::AlreadyAdvertised);
     }
     match try_reopen_unanswered(db, &key, ticket_id, &row).await? {
-        Reopened::Reopened => return Ok(Advertised::Asked),
-        Reopened::TicketExhausted => {
+        ReopenOutcome::Reopened => return Ok(Advertised::Asked),
+        ReopenOutcome::TicketExhausted => {
             return Ok(if try_refresh_pending(db, &row).await? {
                 // The other requester has already spent a ticket so it's fine
                 Advertised::AlreadyAdvertised
@@ -363,7 +359,7 @@ pub async fn upsert_request(
                 Advertised::TicketExhausted
             });
         }
-        Reopened::NotUnanswered => {}
+        ReopenOutcome::NotUnanswered => {}
     }
 
     match Entity::insert(row.clone()).exec(db).await {
@@ -374,9 +370,9 @@ pub async fn upsert_request(
                 return Ok(Advertised::AlreadyAdvertised);
             }
             match try_reopen_unanswered(db, &key, ticket_id, &row).await? {
-                Reopened::Reopened => Ok(Advertised::Asked),
-                Reopened::TicketExhausted => Ok(Advertised::TicketExhausted),
-                Reopened::NotUnanswered => Ok(Advertised::AlreadyAdvertised),
+                ReopenOutcome::Reopened => Ok(Advertised::Asked),
+                ReopenOutcome::TicketExhausted => Ok(Advertised::TicketExhausted),
+                ReopenOutcome::NotUnanswered => Ok(Advertised::AlreadyAdvertised),
             }
         }
         Err(error) => Err(error.into()),

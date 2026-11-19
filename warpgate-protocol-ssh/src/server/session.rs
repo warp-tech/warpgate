@@ -88,6 +88,7 @@ enum TargetSelection {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum Event {
     Command(SessionHandleCommand),
     ServerHandler(ServerHandlerEvent),

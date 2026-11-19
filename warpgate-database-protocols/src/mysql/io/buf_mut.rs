@@ -48,7 +48,7 @@ fn test_encodes_int_lenenc_u8() {
 #[test]
 fn test_encodes_int_lenenc_u16() {
     let mut buf = Vec::with_capacity(1024);
-    buf.put_uint_lenenc(std::u16::MAX as u64);
+    buf.put_uint_lenenc(u16::MAX as u64);
 
     assert_eq!(&buf[..], b"\xFC\xFF\xFF");
 }
@@ -64,7 +64,7 @@ fn test_encodes_int_lenenc_u24() {
 #[test]
 fn test_encodes_int_lenenc_u64() {
     let mut buf = Vec::with_capacity(1024);
-    buf.put_uint_lenenc(std::u64::MAX);
+    buf.put_uint_lenenc(u64::MAX);
 
     assert_eq!(&buf[..], b"\xFE\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF");
 }

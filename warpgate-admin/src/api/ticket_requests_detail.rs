@@ -24,6 +24,7 @@ struct DenyTicketRequestBody {
 }
 
 #[derive(ApiResponse)]
+#[allow(clippy::large_enum_variant)]
 enum ApproveTicketRequestResponse {
     #[oai(status = 200)]
     Ok(Json<TicketRequestDetails>),
@@ -32,6 +33,7 @@ enum ApproveTicketRequestResponse {
 }
 
 #[derive(ApiResponse)]
+#[allow(clippy::large_enum_variant)]
 enum DenyTicketRequestResponse {
     #[oai(status = 200)]
     Ok(Json<TicketRequestDetails>),

@@ -129,7 +129,7 @@ impl From<LdapServer::Model> for LdapServerResponse {
             username_attribute: model
                 .username_attribute
                 .as_str()
-                .try_into()
+                .parse()
                 .unwrap_or(LdapUsernameAttribute::Cn),
             ssh_key_attribute: model.ssh_key_attribute,
             uuid_attribute: model.uuid_attribute,

@@ -16,7 +16,6 @@ pem = { version = "3.0", default-features = false }
 rcgen.workspace = true
 spki = { version = "0.7", default-features = false, features = ["pem"] }
 thiserror.workspace = true
-tracing.workspace = true
 uuid.workspace = true
 x509-cert = { version = "0.2", features = [
     "builder",

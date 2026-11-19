@@ -1,4 +1,3 @@
-use std::convert::Infallible;
 use std::error::Error;
 
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
@@ -6,7 +5,7 @@ use warpgate_desktop_ui::{
     AuthPrompt, SCREEN_H, SCREEN_W, Screen, render_authentication, render_connecting,
 };
 
-fn screen(n: u8, tick: u64) -> Result<Vec<u8>, Infallible> {
+fn screen(n: u8, tick: u64) -> Vec<u8> {
     let screen = Screen::default();
     match n {
         2 => render_authentication(
@@ -66,7 +65,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
 
-        let rgb = screen(current, tick)?;
+        let rgb = screen(current, tick);
 
         // Pack RGB888 into the 0x00RRGGBB words minifb expects.
         for (px, out) in rgb.chunks_exact(3).zip(buffer.iter_mut()) {

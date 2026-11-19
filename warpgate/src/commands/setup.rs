@@ -210,7 +210,7 @@ impl Answers {
     fn config(&self, db_path: &Path) -> WarpgateConfigStore {
         let database_url = self.database_url.clone().unwrap_or_else(|| {
             let db_path = db_path.to_string_lossy();
-            format!("sqlite:{}", db_path.strip_suffix("./").unwrap_or(&db_path))
+            format!("sqlite:{}", db_path.trim_suffix("./"))
         });
         let mut store = WarpgateConfigStore {
             database_url: Secret::new(database_url),

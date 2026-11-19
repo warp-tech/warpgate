@@ -57,6 +57,7 @@ pub fn logout(session: &Session, session_middleware: &mut SessionStore) {
 
 /// Outcome of the checks that guard the in-browser clients. Each endpoint maps
 /// it onto its own `ApiResponse` enum.
+#[allow(clippy::large_enum_variant)]
 pub enum WebClientTargetAccess {
     Authorized(TargetAuthorization),
     ReauthRequired,

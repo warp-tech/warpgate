@@ -17,7 +17,6 @@ clap = { version = "4.0", features = [
     "usage",
 ], default-features = false }
 console = { version = "0.16", default-features = false }
-console-subscriber = { version = "0.5", optional = true, default-features = false }
 data-encoding.workspace = true
 dialoguer.workspace = true
 dotenv = "0.15.0"
@@ -71,7 +70,6 @@ tempfile = "3"
 
 [features]
 default = ["sqlite"]
-tokio-console = ["dep:console-subscriber", "tokio/tracing"]
 postgres = ["warpgate-core/postgres"]
 mysql = ["warpgate-core/mysql"]
 sqlite = ["warpgate-core/sqlite"]

@@ -286,7 +286,7 @@ impl MaybeSecretRef {
     /// An already stored value. Unlike [`Self::from_str`], a malformed
     /// reference is kept as [MaybeSecretRef::Malformed]
     pub fn from_stored(s: String) -> Self {
-        Self::from_str(&s).unwrap_or_else(|_| Self::Malformed(s))
+        Self::from_str(&s).unwrap_or(Self::Malformed(s))
     }
 
     fn as_string(&self) -> String {

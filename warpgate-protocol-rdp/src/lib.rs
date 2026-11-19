@@ -1,4 +1,5 @@
 #![feature(once_cell_try)]
+#![recursion_limit = "256"]
 //! In-workspace RDP integration for Warpgate.
 //!
 //! [`client`] drives IronRDP against a target host; [`server`] runs IronRDP's server state
