@@ -680,6 +680,13 @@
             "client_secret": {
               "type": "string"
             },
+            "discovery_url": {
+              "description": "Full discovery document URL when it is hosted separately from the issuer.\nThe document and ID tokens must still match issuer_url exactly.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "issuer_url": {
               "type": "string"
             },
