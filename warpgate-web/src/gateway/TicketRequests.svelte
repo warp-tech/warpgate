@@ -81,7 +81,10 @@
     let descriptionTouched = $state(false)
     let durationText = $state(paramDuration || '8h')
 
-    let maxDurationSeconds = $derived($serverInfo?.ticketMaxDurationSeconds)
+    let maxDurationSeconds = $derived(
+        ticketRequestTargets?.find(t => t.name === selectedTarget)
+            ?.ticketMaxDurationSeconds ?? $serverInfo?.ticketMaxDurationSeconds,
+    )
 
     let unavailableTarget = $derived.by(() => {
         if (!selectedTarget || !ticketRequestTargets) {
