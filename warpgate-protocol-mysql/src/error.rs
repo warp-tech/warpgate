@@ -2,6 +2,7 @@ use std::error::Error;
 
 use warpgate_common::WarpgateError;
 use warpgate_database_protocols::error::Error as SqlxError;
+use warpgate_protocol_ssh::ConnectionError;
 use warpgate_tls::{MaybeTlsStreamError, RustlsSetupError};
 
 use crate::stream::MySqlStreamError;
@@ -38,6 +39,8 @@ pub enum MySqlError {
     Utf8(#[from] std::str::Utf8Error),
     #[error(transparent)]
     Warpgate(#[from] WarpgateError),
+    #[error("SSH jump host: {0}")]
+    JumpHost(#[from] ConnectionError),
 }
 
 impl MySqlError {
