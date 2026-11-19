@@ -79,12 +79,31 @@
         [...(paramDescription ?? '')].slice(0, DESCRIPTION_MAX_LENGTH).join(''),
     )
     let descriptionTouched = $state(false)
-    let durationText = $state(paramDuration || '8h')
-
-    let maxDurationSeconds = $derived(
-        ticketRequestTargets?.find(t => t.name === selectedTarget)
-            ?.ticketMaxDurationSeconds ?? $serverInfo?.ticketMaxDurationSeconds,
+    const DEFAULT_DURATION_SECONDS = 8 * 3600
+    let durationText = $state(
+        paramDuration || formatDurationAsHumantime(DEFAULT_DURATION_SECONDS),
     )
+    let durationTouched = $state(!!paramDuration)
+
+    let selectedTicketRequestTarget = $derived(
+        ticketRequestTargets?.find(target => target.name === selectedTarget),
+    )
+    let maxDurationSeconds = $derived(
+        selectedTicketRequestTarget?.ticketMaxDurationSeconds ??
+            $serverInfo?.ticketMaxDurationSeconds,
+    )
+
+    $effect(() => {
+        if (durationTouched) {
+            return
+        }
+        durationText = formatDurationAsHumantime(
+            Math.min(
+                DEFAULT_DURATION_SECONDS,
+                maxDurationSeconds || DEFAULT_DURATION_SECONDS,
+            ),
+        )
+    })
 
     let unavailableTarget = $derived.by(() => {
         if (!selectedTarget || !ticketRequestTargets) {
@@ -311,6 +330,7 @@
                             class="form-control"
                             class:is-invalid={!!durationError}
                             placeholder="e.g. 8h, 30m, 1d"
+                            oninput={() => (durationTouched = true)}
                         >
                         {#if durationError}
                             <div class="invalid-feedback">{durationError}</div>
