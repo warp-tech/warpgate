@@ -69,7 +69,6 @@ feature-depth = 1
 ignore = [
     "RUSTSEC-2023-0071", # Marvin Attack: potential key recovery through timing sidechannels
     "RUSTSEC-2025-0134", # rustls-pemfile is deprecated but poem is still using it
-    "RUSTSEC-2026-0173", # proc-macro-error2 is unmaintained - waiting for a sea-orm update
     "RUSTSEC-2026-0195", # quick-xml memory exhaustion - we don't parse untrusted XML
     "RUSTSEC-2026-0194", # quick-xml quadratic time - see above
     "RUSTSEC-2021-0141", # dotenv is unmaintaned - only used for dev
