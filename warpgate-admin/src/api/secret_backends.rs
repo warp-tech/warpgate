@@ -95,13 +95,13 @@ pub struct TestResolveRequest {
 
 #[derive(Object)]
 pub struct SecretReferenceUsageTarget {
-    pub id: Uuid,
+    pub id: warpgate_common::TargetId,
     pub name: String,
 }
 
 #[derive(Object)]
 pub struct SecretReferenceUsageSshClientKey {
-    pub id: Uuid,
+    pub id: warpgate_common::SshClientKeyId,
     pub label: String,
 }
 

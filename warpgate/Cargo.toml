@@ -1,6 +1,6 @@
 [package]
 name = "warpgate"
-version = "0.30.3"
+version = "0.30.6"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -16,9 +16,7 @@ clap = { version = "4.0", features = [
     "std",
     "usage",
 ], default-features = false }
-config = { version = "0.15", features = ["yaml"], default-features = false }
 console = { version = "0.16", default-features = false }
-console-subscriber = { version = "0.5", optional = true, default-features = false }
 data-encoding.workspace = true
 dialoguer.workspace = true
 dotenv = "0.15.0"
@@ -57,6 +55,7 @@ warpgate-ca = { path = "../warpgate-ca" }
 warpgate-common = { path = "../warpgate-common" }
 warpgate-core = { path = "../warpgate-core" }
 warpgate-db-entities = { path = "../warpgate-db-entities" }
+warpgate-gitops = { path = "../warpgate-gitops" }
 warpgate-protocol-http = { path = "../warpgate-protocol-http" }
 warpgate-protocol-kubernetes = { path = "../warpgate-protocol-kubernetes" }
 warpgate-protocol-mysql = { path = "../warpgate-protocol-mysql" }
@@ -72,7 +71,6 @@ tempfile = "3"
 
 [features]
 default = ["sqlite"]
-tokio-console = ["dep:console-subscriber", "tokio/tracing"]
 postgres = ["warpgate-core/postgres"]
 mysql = ["warpgate-core/mysql"]
 sqlite = ["warpgate-core/sqlite"]

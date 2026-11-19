@@ -4,7 +4,6 @@ mod protocol;
 mod rfb;
 mod session_handle;
 
-use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -420,11 +419,11 @@ impl RenderState {
     async fn paint<W, R>(&mut self, viewer_wr: &mut W, render_frame: R) -> Result<()>
     where
         W: AsyncWrite + Unpin,
-        R: FnOnce(ui::Screen, u64) -> Result<Vec<u8>, Infallible>,
+        R: FnOnce(ui::Screen, u64) -> Vec<u8>,
     {
         // VNC dictates the framebuffer size in its ServerInit, so it is always the default.
         let screen = ui::Screen::default();
-        let image = render_frame(screen, self.tick)?;
+        let image = render_frame(screen, self.tick);
         let pixels = pack_rgb(&self.caps.pixel_format, &image);
         write_raw_rect(viewer_wr, 0, 0, screen.width, screen.height, &pixels).await?;
         self.tick += 1;

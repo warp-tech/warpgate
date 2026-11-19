@@ -1,13 +1,15 @@
 /// The credential (re)encryption state machinery
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, Set,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, DbErr, EntityTrait,
+    PrimaryKeyTrait, QueryFilter, QuerySelect, Set, TransactionTrait, TryGetableMany,
 };
 use tracing::{error, info, warn};
 use warpgate_common::encryption::{Keyring, env_keyring};
 use warpgate_common::{
     SshHostKeyKind, StoredSecrets, TargetOptions, WarpgateError, emit_runtime_warning,
 };
+use warpgate_db_entities::Parameters::RecordingsStorageConfig;
 use warpgate_db_entities::{Parameters, SecretBackend, SshClientKey, Target};
 
 use crate::cluster::alive_nodes;
@@ -172,6 +174,13 @@ fn parsed_options(target: &Target::Model) -> Option<TargetOptions> {
         .ok()
 }
 
+fn parsed_recordings_storage(parameters: &Parameters::Model) -> Option<RecordingsStorageConfig> {
+    parameters
+        .recordings_storage_config()
+        .map_err(|error| warn!(%error, "Skipping unreadable recordings storage settings"))
+        .ok()
+}
+
 /// Display names of the rows whose credentials cannot be decrypted
 async fn probe_undecryptable(db: &DatabaseConnection) -> Result<Vec<String>, WarpgateError> {
     let mut undecryptable = vec![];
@@ -203,6 +212,19 @@ async fn probe_undecryptable(db: &DatabaseConnection) -> Result<Vec<String>, War
             undecryptable.push(format!("SSH host key ({kind:?})"));
         }
     }
+    if let Some(mut source) = parameters.gitops_source.clone()
+        && !source.all_decryptable()
+    {
+        undecryptable.push("GitOps source password".into());
+    }
+    if let Some(secret) = &parameters.gitops_webhook_secret
+        && secret.reveal().is_err()
+    {
+        undecryptable.push("GitOps webhook secret".into());
+    }
+    if parsed_recordings_storage(&parameters).is_some_and(|mut config| !config.all_decryptable()) {
+        undecryptable.push("recordings storage".into());
+    }
 
     Ok(undecryptable)
 }
@@ -225,26 +247,69 @@ fn report_undecryptable(undecryptable: &[String], ring: &Keyring) {
     });
 }
 
+type RowId<E> = <<E as EntityTrait>::PrimaryKey as PrimaryKeyTrait>::ValueType;
+
+async fn row_ids<E: EntityTrait>(
+    db: &DatabaseConnection,
+    id: E::Column,
+) -> Result<Vec<RowId<E>>, DbErr>
+where
+    RowId<E>: TryGetableMany,
+{
+    E::find()
+        .select_only()
+        .column(id)
+        .into_tuple()
+        .all(db)
+        .await
+}
+
+/// Reads a row under `FOR UPDATE`. The returned transaction holds the lock.
+/// `None` means the row is gone. The lock makes the rewrite start from the
+/// row's latest state: an earlier read would overwrite an admin edit or a
+/// GitOps apply made during the pass.
+async fn lock_row<E>(
+    db: &DatabaseConnection,
+    id: RowId<E>,
+) -> Result<Option<(DatabaseTransaction, E::Model)>, DbErr>
+where
+    E: EntityTrait,
+{
+    let txn = db.begin().await?;
+    let row = E::find_by_id(id).lock_exclusive().one(&txn).await?;
+    Ok(row.map(|row| (txn, row)))
+}
+
 async fn rewrite_all(db: &DatabaseConnection) -> Result<usize, WarpgateError> {
     let mut rewritten = 0;
 
-    for target in Target::Entity::find().all(db).await? {
+    for id in row_ids::<Target::Entity>(db, Target::Column::Id).await? {
+        let Some((txn, target)) = lock_row::<Target::Entity>(db, id).await? else {
+            continue;
+        };
         let Some(mut options) = parsed_options(&target) else {
             continue;
         };
         if matches!(options.reencrypt_all(), Ok(true)) {
             let mut model: Target::ActiveModel = target.into();
             model.options = Set(serde_json::to_value(options)?);
-            rewritten += update_unless_deleted(model.update(db).await)?;
+            model.update(&txn).await?;
+            txn.commit().await?;
+            rewritten += 1;
         }
     }
 
-    for key in SshClientKey::Entity::find().all(db).await? {
+    for id in row_ids::<SshClientKey::Entity>(db, SshClientKey::Column::Id).await? {
+        let Some((txn, key)) = lock_row::<SshClientKey::Entity>(db, id).await? else {
+            continue;
+        };
         let mut secret_key = key.secret_key.clone();
         if matches!(secret_key.reencrypt_all(), Ok(true)) {
             let mut model: SshClientKey::ActiveModel = key.into();
             model.secret_key = Set(secret_key);
-            rewritten += update_unless_deleted(model.update(db).await)?;
+            model.update(&txn).await?;
+            txn.commit().await?;
+            rewritten += 1;
         }
     }
 
@@ -275,6 +340,24 @@ async fn rewrite_all(db: &DatabaseConnection) -> Result<usize, WarpgateError> {
             *slot = Set(key);
             changed = true;
         }
+    }
+    if let Some(mut source) = parameters.gitops_source.clone()
+        && matches!(source.reencrypt_all(), Ok(true))
+    {
+        model.gitops_source = Set(Some(source));
+        changed = true;
+    }
+    if let Some(mut secret) = parameters.gitops_webhook_secret.clone()
+        && matches!(secret.reencrypt_all(), Ok(true))
+    {
+        model.gitops_webhook_secret = Set(Some(secret));
+        changed = true;
+    }
+    if let Some(mut config) = parsed_recordings_storage(&parameters)
+        && matches!(config.reencrypt_all(), Ok(true))
+    {
+        model.recordings_storage = Set(serde_json::to_string(&config)?);
+        changed = true;
     }
     if changed {
         rewritten += update_unless_deleted(model.update(db).await)?;

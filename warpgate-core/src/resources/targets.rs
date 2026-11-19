@@ -1,31 +1,23 @@
-use poem_openapi::Object;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, ModelTrait, QueryFilter, Set,
-    TransactionTrait,
+    TransactionSession, TransactionTrait,
 };
 use uuid::Uuid;
-use warpgate_common::{StoredSecrets, TargetOptions, WarpgateError};
+pub use warpgate_common::TargetDataRequest;
+use warpgate_common::{ProviderId, RoleId, StoredSecrets, TargetId, TargetOptions, WarpgateError};
 use warpgate_db_entities::{
     KnownHost, Target, TargetRoleAssignment, TargetSession, Ticket, TicketRequest,
 };
+use warpgate_gitops::types::ResourceKind;
 
-use super::{AdmittedSessions, ResourceError, check_name, name_taken};
+use super::{Actor, AdmittedSessions, OwnedEntity, ResourceError, check_name, name_taken};
 use crate::db::is_unique_violation;
 
-#[derive(Object)]
-pub struct TargetDataRequest {
-    pub name: String,
-    pub description: Option<String>,
-    pub options: TargetOptions,
-    pub rate_limit_bytes_per_second: Option<u32>,
-    pub group_id: Option<Uuid>,
-    #[oai(validator(minimum(value = "1")))]
-    pub ticket_max_duration_seconds: Option<i64>,
-    pub ticket_requests_disabled: bool,
-    pub ticket_require_approval: bool,
-    pub require_approval: bool,
-    #[oai(validator(minimum(value = "1")))]
-    pub ticket_max_uses: Option<i16>,
+impl OwnedEntity for Target::Entity {
+    type Id = TargetId;
+    const KIND: ResourceKind = ResourceKind::Target;
+    const ID: Self::Column = Target::Column::Id;
+    const PROVIDER: Self::Column = Target::Column::Provider;
 }
 
 fn serialize_options_for_storage(
@@ -54,12 +46,14 @@ fn set_data(
 
 pub async fn create<C: ConnectionTrait>(
     db: &C,
+    actor: Actor,
     data: &TargetDataRequest,
 ) -> Result<Target::Model, ResourceError> {
     check_name(&data.name)?;
     let mut model = Target::ActiveModel {
-        id: Set(Uuid::new_v4()),
+        id: Set(TargetId(Uuid::new_v4())),
         kind: Set((&data.options).into()),
+        provider: Set(actor.provider_id()),
         ..Default::default()
     };
     set_data(&mut model, data)?;
@@ -68,7 +62,8 @@ pub async fn create<C: ConnectionTrait>(
 
 pub async fn update<C: ConnectionTrait>(
     db: &C,
-    id: Uuid,
+    actor: Actor,
+    id: TargetId,
     data: &TargetDataRequest,
 ) -> Result<Target::Model, ResourceError> {
     check_name(&data.name)?;
@@ -76,6 +71,7 @@ pub async fn update<C: ConnectionTrait>(
         .one(db)
         .await?
         .ok_or(ResourceError::NotFound)?;
+    actor.may_write(target.provider)?;
     if target.kind != (&data.options).into() {
         return Err(ResourceError::ProtocolChange);
     }
@@ -87,13 +83,15 @@ pub async fn update<C: ConnectionTrait>(
 
 pub async fn delete<C: ConnectionTrait + TransactionTrait>(
     db: &C,
-    id: Uuid,
+    actor: Actor,
+    id: TargetId,
 ) -> Result<AdmittedSessions, ResourceError> {
     let txn = db.begin().await?;
     let target = Target::Entity::find_by_id(id)
         .one(&txn)
         .await?
         .ok_or(ResourceError::NotFound)?;
+    actor.may_write(target.provider)?;
 
     TargetRoleAssignment::Entity::delete_many()
         .filter(TargetRoleAssignment::Column::TargetId.eq(target.id))
@@ -130,11 +128,26 @@ pub async fn delete<C: ConnectionTrait + TransactionTrait>(
     Ok(AdmittedSessions(admitted))
 }
 
+/// Role assignments have no owner column. The target's owner decides who may
+/// change them.
+async fn target_owner<C: ConnectionTrait>(
+    db: &C,
+    target_id: TargetId,
+) -> Result<Option<ProviderId>, ResourceError> {
+    Ok(Target::Entity::find_by_id(target_id)
+        .one(db)
+        .await?
+        .ok_or(ResourceError::NotFound)?
+        .provider)
+}
+
 pub async fn add_role<C: ConnectionTrait>(
     db: &C,
-    target_id: Uuid,
-    role_id: Uuid,
+    actor: Actor,
+    target_id: TargetId,
+    role_id: RoleId,
 ) -> Result<(), ResourceError> {
+    actor.may_write(target_owner(db, target_id).await?)?;
     TargetRoleAssignment::ActiveModel {
         target_id: Set(target_id),
         role_id: Set(role_id),
@@ -153,9 +166,11 @@ pub async fn add_role<C: ConnectionTrait>(
 
 pub async fn remove_role<C: ConnectionTrait>(
     db: &C,
-    target_id: Uuid,
-    role_id: Uuid,
+    actor: Actor,
+    target_id: TargetId,
+    role_id: RoleId,
 ) -> Result<(), ResourceError> {
+    actor.may_write(target_owner(db, target_id).await?)?;
     let result = TargetRoleAssignment::Entity::delete_by_id((target_id, role_id))
         .exec(db)
         .await?;

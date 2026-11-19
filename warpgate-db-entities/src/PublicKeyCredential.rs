@@ -1,3 +1,4 @@
+use warpgate_common::UserId;
 use sea_orm::Set;
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::ForeignKeyAction;
@@ -11,7 +12,7 @@ use warpgate_common::{UserAuthCredential, UserPublicKeyCredential};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
-    pub user_id: Uuid,
+    pub user_id: UserId,
     pub label: String,
     pub date_added: Option<OffsetDateTime>,
     pub last_used: Option<OffsetDateTime>,

@@ -3,17 +3,21 @@ use poem_openapi::payload::Json;
 use poem_openapi::types::{ParseError, ParseFromJSON, ParseResult};
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::ActiveValue::NotSet;
+use sea_orm::sea_query::Expr;
 use sea_orm::{EntityTrait, IntoActiveModel, Set};
 use serde::Serialize;
 use serde_json::Value;
-use warpgate_aws::{S3Credentials, S3Storage};
+use warpgate_aws::S3Storage;
+use warpgate_azure::AzureBlobStorage;
 use warpgate_common::{
-    AdminPermission, PasswordPolicy, UserRequireCredentialsPolicy, WarpgateError,
+    AdminPermission, PasswordPolicy, StoredSecret, StoredSecrets, UserRequireCredentialsPolicy,
+    WarpgateError,
 };
 use warpgate_db_entities::Parameters;
-use warpgate_db_entities::Parameters::RecordingsStorageConfig;
+use warpgate_db_entities::Parameters::{GitopsSource, RecordingsStorageConfig};
 
 use super::AdminContext;
+use super::limited_json::LimitedJson;
 
 pub struct Api;
 
@@ -28,33 +32,53 @@ fn parse_nullable<T: ParseFromJSON>(value: Option<Value>) -> ParseResult<Option<
     })
 }
 
-/// The stored S3 secret is never sent to the browser.
-fn redact_secret(mut config: RecordingsStorageConfig) -> RecordingsStorageConfig {
-    if let RecordingsStorageConfig::S3(s3) = &mut config
-        && let S3Credentials::Static(creds) = &mut s3.credentials
-    {
-        creds.secret_access_key = None;
-    }
-    config
-}
-
-/// A `None` incoming secret keeps the one already stored (the UI never sees it,
-/// so it round-trips the redacted `None` unless the admin types a new value).
+/// An empty incoming secret keeps the one already stored (the UI never sees it,
+/// so it round-trips the redacted value unless the admin types a new one).
+/// Only within the same backend: a secret never carries across to another one.
 fn merge_secret(
     mut incoming: RecordingsStorageConfig,
     current: &RecordingsStorageConfig,
 ) -> RecordingsStorageConfig {
-    if let RecordingsStorageConfig::S3(s3) = &mut incoming
-        && let S3Credentials::Static(creds) = &mut s3.credentials
-        && creds.secret_access_key.is_none()
-        && let RecordingsStorageConfig::S3(current_s3) = current
-        && let S3Credentials::Static(current_creds) = &current_s3.credentials
-    {
-        creds
-            .secret_access_key
-            .clone_from(&current_creds.secret_access_key);
+    if std::mem::discriminant(&incoming) == std::mem::discriminant(current) {
+        let mut current = current.clone();
+        for (secret, stored) in incoming
+            .stored_secrets_mut()
+            .into_iter()
+            .zip(current.stored_secrets_mut())
+        {
+            if secret.stored_value().is_empty() {
+                *secret = stored.clone();
+            }
+        }
     }
     incoming
+}
+
+/// An empty inline password keeps the stored one while the URL is unchanged.
+/// The browser never receives the password, and a stored token must not be
+/// sent to a different host.
+fn merge_git_password(mut incoming: GitopsSource, current: Option<&GitopsSource>) -> GitopsSource {
+    if let GitopsSource::Git(git) = &mut incoming
+        && git
+            .password
+            .inline_mut()
+            .is_some_and(|p| p.stored_value().is_empty())
+        && let Some(GitopsSource::Git(current)) = current
+        && current.url == git.url
+    {
+        git.password = current.password.clone();
+    }
+    incoming
+}
+
+/// The serialized config as it goes into the parameters row, secrets encrypted.
+fn storage_to_save(
+    incoming: RecordingsStorageConfig,
+    current: &RecordingsStorageConfig,
+) -> Result<String, WarpgateError> {
+    let mut config = merge_secret(incoming, current);
+    config.encrypt_all()?;
+    Ok(serde_json::to_string(&config)?)
 }
 
 #[derive(Serialize, Object)]
@@ -107,6 +131,14 @@ struct ParameterValues {
     pub analytics_normal: bool,
     pub recordings_enable: bool,
     pub recordings_storage: RecordingsStorageConfig,
+    pub gitops_source: Option<GitopsSource>,
+    pub gitops_sync_interval_seconds: Option<i64>,
+    pub gitops_sync_on_startup: bool,
+    pub gitops_webhook_secret_set: bool,
+    /// Whether the Git source has a stored password or token. `gitops_source`
+    /// is redacted and can't show it.
+    pub gitops_git_password_set: bool,
+    pub gitops_prune: bool,
 }
 
 #[derive(Serialize, Object)]
@@ -162,17 +194,6 @@ struct ParameterUpdate {
     pub lp_user_lockout_duration_seconds: Option<i32>,
     pub lp_user_exempt_admins: Option<bool>,
     pub banner: Option<String>,
-    /// Only browser-renderable image data URLs are stored: the value is served
-    /// to every visitor as an image, so nothing else must ever end up in it.
-    /// `null` clears the logo. The size cap is mirrored in the Parameters UI.
-    #[oai(
-        deserialize_with = "parse_nullable",
-        validator(
-            max_length = 4_194_304,
-            pattern = r"^data:image/(png|jpeg|gif|webp|svg\+xml);base64,[A-Za-z0-9+/]+={0,2}$"
-        )
-    )]
-    pub logo: Option<Option<String>>,
     pub web_clients_enabled: Option<bool>,
     #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
     pub web_auth_max_age_seconds: Option<Option<i64>>,
@@ -186,6 +207,46 @@ struct ParameterUpdate {
     pub analytics_normal: Option<bool>,
     pub recordings_enable: Option<bool>,
     pub recordings_storage: Option<RecordingsStorageConfig>,
+    #[oai(deserialize_with = "parse_nullable")]
+    pub gitops_source: Option<Option<GitopsSource>>,
+    /// Checked every 15 seconds; `null` syncs at startup and on request only
+    #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
+    pub gitops_sync_interval_seconds: Option<Option<i64>>,
+    pub gitops_sync_on_startup: Option<bool>,
+    /// Authenticates pushes to `/@warpgate/api/gitops/webhook`, sent as
+    /// `X-Hub-Signature-256` or `X-Gitlab-Token`. Write-only; `null` turns the
+    /// webhook off
+    #[oai(
+        deserialize_with = "parse_nullable",
+        validator(min_length = 16, max_length = 255)
+    )]
+    pub gitops_webhook_secret: Option<Option<String>>,
+    pub gitops_prune: Option<bool>,
+}
+
+/// Fits the longest `logo` a [`LogoUpdate`] accepts, with room for JSON
+/// escaping of its slashes.
+const LOGO_BODY_LIMIT: usize = 5 * 1024 * 1024;
+
+#[derive(Object)]
+struct LogoUpdate {
+    /// Only browser-renderable image data URLs are stored: the value is served
+    /// to every visitor as an image, so nothing else must ever end up in it.
+    /// The size cap is mirrored in the Parameters UI.
+    #[oai(validator(
+        max_length = 4_194_304,
+        pattern = r"^data:image/(png|jpeg|gif|webp|svg\+xml);base64,[A-Za-z0-9+/]+={0,2}$"
+    ))]
+    logo: String,
+}
+
+/// `None` removes the logo.
+async fn store_logo(admin: &AdminContext, logo: Option<String>) -> Result<(), WarpgateError> {
+    Parameters::Entity::update_many()
+        .col_expr(Parameters::Column::Logo, Expr::value(logo))
+        .exec(&admin.services().db)
+        .await?;
+    Ok(())
 }
 
 #[derive(Serialize, Object)]
@@ -214,6 +275,12 @@ enum UpdateParametersResponse {
     Done,
 }
 
+#[derive(ApiResponse)]
+enum DeleteLogoResponse {
+    #[oai(status = 204)]
+    Deleted,
+}
+
 #[derive(Serialize, Object)]
 struct TestRecordingsStorageResult {
     /// Whether the backend accepted a write/delete round-trip.
@@ -233,7 +300,7 @@ impl Api {
     #[oai(path = "/parameters", method = "get", operation_id = "get_parameters")]
     async fn api_get(&self, admin: AdminContext) -> Result<GetParametersResponse, WarpgateError> {
         let parameters = admin.parameters().await?.clone();
-        let recordings_storage = redact_secret(parameters.recordings_storage_config()?);
+        let recordings_storage = parameters.recordings_storage_config()?.redacted();
         let logo_etag = parameters.logo_etag();
 
         Ok(GetParametersResponse::Ok(Json(ParameterValues {
@@ -284,6 +351,15 @@ impl Api {
             analytics_normal: parameters.analytics_normal,
             recordings_enable: parameters.recordings_enable,
             recordings_storage,
+            gitops_git_password_set: matches!(
+                &parameters.gitops_source,
+                Some(GitopsSource::Git(git)) if git.password.as_inline().is_some_and(|p| !p.stored_value().is_empty())
+            ),
+            gitops_source: parameters.gitops_source.map(|source| source.redacted()),
+            gitops_sync_interval_seconds: parameters.gitops_sync_interval_seconds,
+            gitops_sync_on_startup: parameters.gitops_sync_on_startup,
+            gitops_webhook_secret_set: parameters.gitops_webhook_secret.is_some(),
+            gitops_prune: parameters.gitops_prune,
         })))
     }
 
@@ -320,23 +396,29 @@ impl Api {
     ) -> Result<UpdateParametersResponse, WarpgateError> {
         admin.require(AdminPermission::ConfigEdit)?;
 
-        if let Some(Some(logo)) = &body.logo
-            && Parameters::LogoImage::from_data_url(logo).is_none()
-        {
-            return Err(WarpgateError::InvalidRequest(
-                "logo is not a valid image data URL".into(),
-            ));
-        }
-
         let services = admin.services();
         let db = &services.db;
         let current = admin.parameters().await?.clone();
         let storage = match &body.recordings_storage {
-            Some(incoming) => Some(serde_json::to_string(&merge_secret(
+            Some(incoming) => Some(storage_to_save(
                 incoming.clone(),
                 &current.recordings_storage_config()?,
-            ))?),
+            )?),
             None => None,
+        };
+        let gitops_source = match body.gitops_source.clone() {
+            Some(Some(incoming)) => {
+                let mut source = merge_git_password(incoming, current.gitops_source.as_ref());
+                source.encrypt_all()?;
+                Set(Some(source))
+            }
+            Some(None) => Set(None),
+            None => NotSet,
+        };
+        let gitops_webhook_secret = match body.gitops_webhook_secret.clone() {
+            Some(Some(secret)) => Set(Some(StoredSecret::encrypted(secret)?)),
+            Some(None) => Set(None),
+            None => NotSet,
         };
         let mut parameters = current.into_active_model();
 
@@ -408,7 +490,6 @@ impl Api {
             body.lp_user_lockout_duration_seconds.map_or(NotSet, Set);
         parameters.lp_user_exempt_admins = body.lp_user_exempt_admins.map_or(NotSet, Set);
         parameters.banner = body.banner.clone().map_or(NotSet, Set);
-        parameters.logo = body.logo.clone().map_or(NotSet, Set);
         parameters.web_clients_enabled = body.web_clients_enabled.map_or(NotSet, Set);
         parameters.web_auth_max_age_seconds = body.web_auth_max_age_seconds.map_or(NotSet, Set);
         parameters.web_approval_grace_period_seconds =
@@ -422,6 +503,12 @@ impl Api {
 
         parameters.recordings_enable = body.recordings_enable.map_or(NotSet, Set);
         parameters.recordings_storage = storage.map_or(NotSet, Set);
+        parameters.gitops_source = gitops_source;
+        parameters.gitops_sync_interval_seconds =
+            body.gitops_sync_interval_seconds.map_or(NotSet, Set);
+        parameters.gitops_sync_on_startup = body.gitops_sync_on_startup.map_or(NotSet, Set);
+        parameters.gitops_webhook_secret = gitops_webhook_secret;
+        parameters.gitops_prune = body.gitops_prune.map_or(NotSet, Set);
 
         Parameters::Entity::update(parameters).exec(db).await?;
 
@@ -432,6 +519,40 @@ impl Api {
         .await?;
 
         Ok(UpdateParametersResponse::Done)
+    }
+
+    /// Replaces the Warpgate logo in the web UI. `GET /@warpgate/api/logo`
+    /// serves it.
+    #[oai(path = "/parameters/logo", method = "put", operation_id = "set_logo")]
+    async fn api_set_logo(
+        &self,
+        admin: AdminContext,
+        body: LimitedJson<LogoUpdate, LOGO_BODY_LIMIT>,
+    ) -> Result<UpdateParametersResponse, WarpgateError> {
+        admin.require(AdminPermission::ConfigEdit)?;
+
+        let LimitedJson(LogoUpdate { logo }) = body;
+        if Parameters::LogoImage::from_data_url(&logo).is_none() {
+            return Err(WarpgateError::InvalidRequest(
+                "logo is not a valid image data URL".into(),
+            ));
+        }
+        store_logo(&admin, Some(logo)).await?;
+        Ok(UpdateParametersResponse::Done)
+    }
+
+    #[oai(
+        path = "/parameters/logo",
+        method = "delete",
+        operation_id = "delete_logo"
+    )]
+    async fn api_delete_logo(
+        &self,
+        admin: AdminContext,
+    ) -> Result<DeleteLogoResponse, WarpgateError> {
+        admin.require(AdminPermission::ConfigEdit)?;
+        store_logo(&admin, None).await?;
+        Ok(DeleteLogoResponse::Deleted)
     }
 
     #[oai(
@@ -455,6 +576,10 @@ impl Api {
                 Ok(storage) => storage.test().await.err().map(|e| e.to_string()),
                 Err(e) => Some(e.to_string()),
             },
+            RecordingsStorageConfig::Azure(azure) => match AzureBlobStorage::new(&azure).await {
+                Ok(storage) => storage.test().await.err().map(|e| e.to_string()),
+                Err(e) => Some(e.to_string()),
+            },
             // Disk is always reachable; nothing to test.
             RecordingsStorageConfig::Disk(_) => None,
         };
@@ -472,8 +597,171 @@ impl Api {
 mod tests {
     use poem_openapi::types::ParseFromJSON;
     use serde_json::json;
+    use warpgate_aws::{S3Credentials, S3StorageConfig, StaticCredentials};
+    use warpgate_azure::{AzureBlobConfig, AzureCredentials, ServicePrincipalCredentials};
+    use warpgate_common::StoredSecrets;
+    use warpgate_common::encryption::{env_keyring, is_envelope};
+    use warpgate_db_entities::Parameters::GitopsSource;
 
-    use super::ParameterUpdate;
+    use super::{
+        LogoUpdate, ParameterUpdate, RecordingsStorageConfig, merge_git_password, merge_secret,
+        storage_to_save,
+    };
+
+    fn git(url: &str, password: &str) -> GitopsSource {
+        let update = ParameterUpdate::parse_from_json(Some(json!({ "gitops_source": {
+            "kind": "Git", "url": url, "reference": "main", "username": "ci", "password": password,
+        }})));
+        match update.map(|update| update.gitops_source) {
+            Ok(Some(Some(source))) => source,
+            Ok(other) => panic!("{other:?}"),
+            Err(error) => panic!("{}", error.into_message()),
+        }
+    }
+
+    fn password(source: GitopsSource) -> String {
+        let GitopsSource::Git(mut git) = source else {
+            panic!()
+        };
+        git.password.inline_mut().unwrap().stored_value().to_owned()
+    }
+
+    #[test]
+    fn a_blank_git_password_is_kept_only_for_the_same_url() {
+        let stored = merge_git_password(git("https://git.example.com/a", "token"), None);
+        let kept = merge_git_password(git("https://git.example.com/a", ""), Some(&stored));
+        assert_eq!(password(kept), "token");
+        let elsewhere = merge_git_password(git("https://evil.example.com/a", ""), Some(&stored));
+        assert_eq!(password(elsewhere), "");
+    }
+
+    #[test]
+    fn gitops_fields_are_validated() {
+        for invalid in [
+            json!({ "gitops_source": { "kind": "Git", "url": "https://user:pw@git.example.com/a", "reference": "main" } }),
+            json!({ "gitops_source": { "kind": "Git", "url": "http://git.example.com/a", "reference": "main" } }),
+            json!({ "gitops_source": { "kind": "Git", "url": "https://git.example.com/a", "reference": "main", "path": "../etc" } }),
+            json!({ "gitops_source": { "kind": "Git", "url": "https://git.example.com/a", "reference": "main", "path": "/etc" } }),
+            json!({ "gitops_sync_interval_seconds": 0 }),
+            json!({ "gitops_webhook_secret": "short" }),
+        ] {
+            assert!(
+                ParameterUpdate::parse_from_json(Some(invalid.clone())).is_err(),
+                "{invalid}"
+            );
+        }
+        assert!(
+            ParameterUpdate::parse_from_json(Some(json!({
+                "gitops_source": { "kind": "Git", "url": "https://git.example.com/a", "reference": "main", "path": "deploy/warpgate" },
+                "gitops_sync_interval_seconds": null,
+                "gitops_webhook_secret": null,
+            })))
+            .is_ok()
+        );
+    }
+
+    fn s3_with_secret(secret: Option<&str>) -> RecordingsStorageConfig {
+        RecordingsStorageConfig::S3(S3StorageConfig {
+            bucket: "b".into(),
+            region: "us-east-1".into(),
+            endpoint: None,
+            path_style: false,
+            prefix: String::new(),
+            credentials: S3Credentials::Static(StaticCredentials {
+                access_key_id: "AKIA".into(),
+                secret_access_key: secret.map(|s| s.to_owned().into()),
+            }),
+            scratch_path: None,
+            serve_through_warpgate: false,
+        })
+    }
+
+    fn secret_of(config: &RecordingsStorageConfig) -> String {
+        let mut config = config.clone();
+        config.stored_secrets_mut()[0].stored_value().to_owned()
+    }
+
+    fn azure_with_secret(secret: &str) -> RecordingsStorageConfig {
+        RecordingsStorageConfig::Azure(AzureBlobConfig {
+            account: "acct".into(),
+            container: "recordings".into(),
+            endpoint: None,
+            prefix: String::new(),
+            serve_through_warpgate: true,
+            credentials: AzureCredentials::ServicePrincipal(ServicePrincipalCredentials {
+                tenant_id: "tenant".into(),
+                client_id: "client".into(),
+                client_secret: secret.to_owned().into(),
+            }),
+        })
+    }
+
+    #[test]
+    fn stored_secrets_never_leave_the_server() {
+        assert_eq!(secret_of(&azure_with_secret("real-secret").redacted()), "");
+        assert_eq!(
+            secret_of(&s3_with_secret(Some("real-secret")).redacted()),
+            ""
+        );
+    }
+
+    /// The form posts back what it was given, so an untouched secret arrives
+    /// blank (or, from older clients, absent) and has to be restored rather
+    /// than saved over the stored one.
+    #[test]
+    fn a_blank_secret_keeps_the_stored_one() {
+        let merged = merge_secret(azure_with_secret(""), &azure_with_secret("real-secret"));
+        assert_eq!(secret_of(&merged), "real-secret");
+        for incoming in [None, Some("")] {
+            let merged = merge_secret(
+                s3_with_secret(incoming),
+                &s3_with_secret(Some("real-secret")),
+            );
+            assert_eq!(secret_of(&merged), "real-secret");
+        }
+    }
+
+    #[test]
+    fn a_supplied_secret_replaces_the_stored_one() {
+        let merged = merge_secret(
+            azure_with_secret("new-secret"),
+            &azure_with_secret("old-secret"),
+        );
+        assert_eq!(secret_of(&merged), "new-secret");
+    }
+
+    /// Switching backends must not carry a secret across from the old one.
+    #[test]
+    fn merging_across_different_backends_changes_nothing() {
+        let merged = merge_secret(azure_with_secret(""), &s3_with_secret(Some("s3-secret")));
+        assert_eq!(secret_of(&merged), "");
+    }
+
+    #[test]
+    fn a_saved_secret_is_encrypted_at_rest() {
+        // SAFETY: no other test in this binary reads the keyring, and this runs
+        // before the keyring is first initialised from the environment.
+        unsafe {
+            std::env::set_var(
+                "WARPGATE_ENCRYPTION_KEY",
+                "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+            );
+        }
+        assert!(env_keyring().primary().is_some());
+
+        for config in [
+            azure_with_secret("real-secret"),
+            s3_with_secret(Some("real-secret")),
+        ] {
+            let saved = storage_to_save(config, &RecordingsStorageConfig::default()).unwrap();
+            assert!(!saved.contains("real-secret"));
+
+            let mut loaded: RecordingsStorageConfig = serde_json::from_str(&saved).unwrap();
+            let secret = loaded.stored_secrets_mut()[0].clone();
+            assert!(is_envelope(secret.stored_value()));
+            assert_eq!(secret.reveal().unwrap().expose_secret(), "real-secret");
+        }
+    }
 
     fn parse_rate_limit(value: serde_json::Value) -> Option<Option<u32>> {
         match ParameterUpdate::parse_from_json(Some(value)) {
@@ -505,23 +793,23 @@ mod tests {
     #[test]
     fn logo_accepts_only_image_data_urls() {
         for body in [
-            json!({ "logo": null }),
             json!({ "logo": "data:image/png;base64,iVBORw0KGgo=" }),
             json!({ "logo": "data:image/svg+xml;base64,PHN2Zy8+" }),
         ] {
             assert!(
-                ParameterUpdate::parse_from_json(Some(body.clone())).is_ok(),
+                LogoUpdate::parse_from_json(Some(body.clone())).is_ok(),
                 "{body} was rejected"
             );
         }
         for body in [
+            json!({ "logo": null }),
             json!({ "logo": "" }),
             json!({ "logo": "https://example.com/logo.png" }),
             json!({ "logo": "data:text/html;base64,PHNjcmlwdC8+" }),
             json!({ "logo": "data:image/png;base64,not base64!" }),
         ] {
             assert!(
-                ParameterUpdate::parse_from_json(Some(body.clone())).is_err(),
+                LogoUpdate::parse_from_json(Some(body.clone())).is_err(),
                 "{body} was accepted"
             );
         }

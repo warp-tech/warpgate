@@ -3,7 +3,9 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ExprTrait, QueryFilter,
+};
 use serde::Serialize;
 use time::OffsetDateTime;
 use tokio::sync::{Mutex, broadcast};
@@ -94,6 +96,9 @@ pub enum Error {
 
     #[error("Storage backend: {0}")]
     Aws(#[from] warpgate_aws::AwsError),
+
+    #[error(transparent)]
+    Azure(#[from] warpgate_azure::AzureError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

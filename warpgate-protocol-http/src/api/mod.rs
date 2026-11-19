@@ -5,6 +5,7 @@ pub mod auth;
 mod auth_scheme;
 pub(crate) mod common;
 mod credentials;
+pub mod gitops_webhook;
 pub mod info;
 pub mod logo;
 pub mod sso_backchannel_logout;
