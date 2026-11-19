@@ -7,7 +7,7 @@ use warpgate_common::{AdminPermission, UserSsoCredential, WarpgateError};
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_db_entities::{SsoCredential, User};
 
-use super::AdminContext;
+use super::{AdminContext, guard_user_mutation};
 
 #[derive(Object)]
 struct ExistingSsoCredential {
@@ -94,7 +94,8 @@ impl ListApi {
     #[oai(
         path = "/users/:user_id/credentials/sso",
         method = "post",
-        operation_id = "create_sso_credential"
+        operation_id = "create_sso_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_create(
         &self,
@@ -149,7 +150,8 @@ impl DetailApi {
     #[oai(
         path = "/users/:user_id/credentials/sso/:id",
         method = "put",
-        operation_id = "update_sso_credential"
+        operation_id = "update_sso_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_update(
         &self,
@@ -184,7 +186,8 @@ impl DetailApi {
     #[oai(
         path = "/users/:user_id/credentials/sso/:id",
         method = "delete",
-        operation_id = "delete_sso_credential"
+        operation_id = "delete_sso_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_delete(
         &self,

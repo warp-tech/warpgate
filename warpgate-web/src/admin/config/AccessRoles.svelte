@@ -1,5 +1,6 @@
 <script lang="ts">
     import { api, type Role } from 'admin/lib/api'
+    import ManagedIcon from 'admin/lib/ManagedIcon.svelte'
     import ItemList, {
         type LoadOptions,
         type PaginatedResponse,
@@ -40,7 +41,7 @@
         <h1>roles</h1>
         <a
             class="btn btn-primary ms-auto"
-            href="/config/access-roles/create"
+            href="/manage/access-roles/create"
             class:disabled={!$adminPermissions.accessRolesCreate}
             use:link
         >
@@ -49,12 +50,10 @@
     </div>
 
     <ItemList load={getRoles} showSearch={true}>
-        {#snippet item(
-            role,
-        )}
+        {#snippet item(role)}
             <a
                 class="list-group-item list-group-item-action"
-                href="/config/access-roles/{role.id}"
+                href="/manage/access-roles/{role.id}"
                 use:link
             >
                 <div>
@@ -62,11 +61,12 @@
                         {role.name}
                     </strong>
                     {#if role.description}
-                        <small class="d-block text-muted"
-                            >{role.description}</small
-                        >
+                        <small class="d-block text-muted">
+                            {role.description}
+                        </small>
                     {/if}
                 </div>
+                <ManagedIcon provider={role.provider} class="ms-auto" />
             </a>
         {/snippet}
     </ItemList>

@@ -3,7 +3,6 @@ use std::error::Error;
 use poem::error::ResponseError;
 use poem_openapi::ApiResponse;
 use uuid::Uuid;
-use warpgate_aws::AwsError;
 use warpgate_ca::CaError;
 use warpgate_ldap::LdapError;
 use warpgate_sso::SsoError;
@@ -79,8 +78,10 @@ pub enum WarpgateError {
     NoAdminAccess,
     #[error("admin permission required: {0:?}")]
     NoAdminPermission(AdminPermission),
+    #[error("cannot modify a user with admin permissions you do not hold")]
+    TargetUserOutranksAdmin,
     #[error("AWS: {0}")]
-    Aws(AwsError),
+    Aws(Box<dyn Error + Send + Sync>),
     #[error("IP address {0} is not in the allowed range for user {1}")]
     IpAddrNotAllowed(String, String),
     #[error("could not parse IP network address: {0}")]
@@ -100,6 +101,12 @@ pub enum WarpgateError {
 /// An alternative to the poem's ResponseError that provides a simplified error reason for the client without sensitive info
 pub trait UserFacingReason {
     fn user_facing_reason(&self) -> String;
+}
+
+impl<T: UserFacingReason + ?Sized> UserFacingReason for std::sync::Arc<T> {
+    fn user_facing_reason(&self) -> String {
+        (**self).user_facing_reason()
+    }
 }
 
 pub fn io_connect_reason(error: &std::io::Error) -> &'static str {
@@ -123,6 +130,7 @@ impl UserFacingReason for WarpgateError {
             | Self::UserSessionEnded
             | Self::NoAdminAccess
             | Self::NoAdminPermission(_)
+            | Self::TargetUserOutranksAdmin
             | Self::IpAddrNotAllowed(..)
             | Self::InvalidNetworkAddress(_)
             | Self::SessionLimitReached
@@ -213,7 +221,9 @@ impl ResponseError for WarpgateError {
             | Self::IpAddrNotAllowed(..) => poem::http::StatusCode::UNAUTHORIZED,
             Self::UserAlreadyExists(_) => poem::http::StatusCode::CONFLICT,
             Self::InvalidRequest(_) => poem::http::StatusCode::BAD_REQUEST,
-            Self::NoAdminAccess | Self::NoAdminPermission(_) => poem::http::StatusCode::FORBIDDEN,
+            Self::NoAdminAccess | Self::NoAdminPermission(_) | Self::TargetUserOutranksAdmin => {
+                poem::http::StatusCode::FORBIDDEN
+            }
             Self::SessionLimitReached => poem::http::StatusCode::TOO_MANY_REQUESTS,
             Self::SessionNotApproved => poem::http::StatusCode::FORBIDDEN,
             Self::ClusterPeerUnreachable(_) => poem::http::StatusCode::BAD_GATEWAY,

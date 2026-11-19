@@ -971,6 +971,7 @@ pub(crate) async fn seed_ticket(
         ldap_server_id: Set(None),
         ldap_object_uuid: Set(None),
         allowed_ip_ranges: Set(serde_json::Value::Null),
+        ..Default::default()
     })
     .exec(db)
     .await
@@ -990,6 +991,7 @@ pub(crate) async fn seed_ticket(
         ticket_require_approval: Set(false),
         ticket_max_uses: Set(None),
         require_approval: Set(true),
+        ..Default::default()
     })
     .exec(db)
     .await
@@ -1759,6 +1761,7 @@ mod polled_gate {
             ticket_require_approval: false,
             require_approval: true,
             ticket_max_uses: None,
+            provider: None,
         }
     }
 

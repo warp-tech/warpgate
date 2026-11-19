@@ -44,6 +44,7 @@ pub async fn command(
             ldap_server_id: Set(None),
             ldap_object_uuid: Set(None),
             allowed_ip_ranges: Set(serde_json::Value::Null),
+            ..Default::default()
         };
         match values.insert(db).await {
             Ok(user) => {

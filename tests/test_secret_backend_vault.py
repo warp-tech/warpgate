@@ -825,7 +825,7 @@ class TestSecretBackendVault:
                         messages.append(parsed)
                         if parsed.get("type") == "resize":
                             got_resize = True
-                        if parsed.get("type") == "error":
+                        if parsed.get("phase") == "closed":
                             got_error = True
                     else:  # CLOSED / CLOSING / ERROR
                         break

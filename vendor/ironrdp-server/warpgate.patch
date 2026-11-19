@@ -1,7 +1,7 @@
-diff -ru ironrdp-server-0.13.0/src/encoder/mod.rs base/src/encoder/mod.rs
---- ironrdp-server-0.13.0/src/encoder/mod.rs	2026-09-18 20:36:51.130844525 +0200
-+++ base/src/encoder/mod.rs	2026-09-18 20:37:30.867676648 +0200
-@@ -569,12 +569,12 @@
+diff -ru ironrdp-server-1f4dee6b/src/encoder/mod.rs base/ironrdp-server/src/encoder/mod.rs
+--- ironrdp-server-1f4dee6b/src/encoder/mod.rs	2026-10-27 12:18:23.000000000 -0700
++++ base/ironrdp-server/src/encoder/mod.rs	2026-11-03 23:26:08.140331035 -0800
+@@ -801,7 +801,7 @@
          let len = loop {
              match self
                  .remotefx
@@ -10,26 +10,3 @@ diff -ru ironrdp-server-0.13.0/src/encoder/mod.rs base/src/encoder/mod.rs
              {
                  Err(e) => match e.kind() {
                      ironrdp_core::EncodeErrorKind::NotEnoughBytes { .. } => {
-                         buffer.resize(buffer.len() * 2, 0);
--                        debug!("encoder buffer resized to: {}", buffer.len() * 2);
-+                        debug!("encoder buffer resized to: {}", buffer.len());
-                     }
-                     _ => Err(e).context("RemoteFX encode error")?,
-                 },
-@@ -582,7 +582,15 @@
-             }
-         };
- 
--        set_surface(bitmap, self.codec_id, &buffer[..len])
-+        let fragmenter = set_surface(bitmap, self.codec_id, &buffer[..len])?;
-+        // The RFX header blocks ride the first message only, and `desktop_size` being `Some`
-+        // is what emits them. It may only be cleared once a message carrying them is built:
-+        // an encode that overruns `buffer` (any tile-padded rect that compresses larger than
-+        // its raw size) is retried, and a retry that no longer sees them leaves the stream
-+        // without a header it can never send again — every later frame is then rejected by
-+        // the client for the life of the connection.
-+        self.desktop_size = None;
-+        Ok(fragmenter)
-     }
- }
- 

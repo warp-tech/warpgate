@@ -11,7 +11,9 @@ use rand::RngCore as _;
 use tracing::{debug, error, info, trace};
 
 use super::{ConnectorError, ConnectorErrorExt as _, custom_err, general_err};
-use crate::{ConnectorResult, ConnectorResultExt as _, Sequence, State, Written, encode_send_data_request};
+use crate::{
+    ConnectorResult, ConnectorResultExt as _, MonotonicInstant, Sequence, State, Written, encode_send_data_request,
+};
 
 #[derive(Default, Debug)]
 #[non_exhaustive]
@@ -117,7 +119,12 @@ impl Sequence for LicenseExchangeSequence {
         &self.state
     }
 
-    fn step(&mut self, input: &[u8], output: &mut WriteBuf) -> ConnectorResult<Written> {
+    fn step(
+        &mut self,
+        input: &[u8],
+        _received_at: Option<MonotonicInstant>,
+        output: &mut WriteBuf,
+    ) -> ConnectorResult<Written> {
         let (written, next_state) = match mem::take(&mut self.state) {
             LicenseExchangeState::Consumed => {
                 return Err(general_err!(

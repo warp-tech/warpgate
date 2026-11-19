@@ -16,7 +16,7 @@ use warpgate_core::SessionsFilter;
 use warpgate_core::logging::{AuditEvent, format_related_ids};
 use warpgate_db_entities::{AdminRole, Role, User, UserAdminRoleAssignment, UserRoleAssignment};
 
-use super::AdminContext;
+use super::{AdminContext, guard_user_mutation};
 use crate::api::common::case_insensitive_search;
 
 #[derive(Object)]
@@ -116,6 +116,7 @@ impl ListApi {
             ldap_server_id: Set(None),
             ldap_object_uuid: Set(None),
             allowed_ip_ranges: Set(serde_json::Value::Null),
+            ..Default::default()
         };
 
         let user = values.insert(db).await.map_err(WarpgateError::from)?;
@@ -241,7 +242,12 @@ impl DetailApi {
         Ok(GetUserResponse::Ok(Json(user.try_into()?)))
     }
 
-    #[oai(path = "/users/:id", method = "put", operation_id = "update_user")]
+    #[oai(
+        path = "/users/:id",
+        method = "put",
+        operation_id = "update_user",
+        transform = "guard_user_mutation"
+    )]
     async fn api_update_user(
         &self,
         admin: AdminContext,
@@ -308,7 +314,12 @@ impl DetailApi {
         Ok(UpdateUserResponse::Ok(Json(user.try_into()?)))
     }
 
-    #[oai(path = "/users/:id", method = "delete", operation_id = "delete_user")]
+    #[oai(
+        path = "/users/:id",
+        method = "delete",
+        operation_id = "delete_user",
+        transform = "guard_user_mutation"
+    )]
     async fn api_delete_user(
         &self,
         admin: AdminContext,
@@ -352,7 +363,8 @@ impl DetailApi {
     #[oai(
         path = "/users/:id/ldap-link/unlink",
         method = "post",
-        operation_id = "unlink_user_from_ldap"
+        operation_id = "unlink_user_from_ldap",
+        transform = "guard_user_mutation"
     )]
     async fn api_unlink_user_from_ldap(
         &self,
@@ -384,7 +396,8 @@ impl DetailApi {
     #[oai(
         path = "/users/:id/ldap-link/auto-link",
         method = "post",
-        operation_id = "auto_link_user_to_ldap"
+        operation_id = "auto_link_user_to_ldap",
+        transform = "guard_user_mutation"
     )]
     async fn api_auto_link_user_to_ldap(
         &self,
@@ -645,7 +658,8 @@ impl RolesApi {
     #[oai(
         path = "/users/:id/roles/:role_id",
         method = "post",
-        operation_id = "add_user_role"
+        operation_id = "add_user_role",
+        transform = "guard_user_mutation"
     )]
     async fn api_add_user_role(
         &self,
@@ -689,7 +703,8 @@ impl RolesApi {
     #[oai(
         path = "/users/:id/roles/:role_id",
         method = "delete",
-        operation_id = "delete_user_role"
+        operation_id = "delete_user_role",
+        transform = "guard_user_mutation"
     )]
     async fn api_delete_user_role(
         &self,
@@ -746,7 +761,8 @@ impl RolesApi {
     #[oai(
         path = "/users/:id/roles/:role_id",
         method = "put",
-        operation_id = "update_user_role"
+        operation_id = "update_user_role",
+        transform = "guard_user_mutation"
     )]
     async fn api_update_user_role(
         &self,
@@ -813,7 +829,8 @@ impl RolesApi {
     #[oai(
         path = "/users/:id/admin-roles/:role_id",
         method = "post",
-        operation_id = "add_user_admin_role"
+        operation_id = "add_user_admin_role",
+        transform = "guard_user_mutation"
     )]
     async fn api_add_user_admin_role(
         &self,
@@ -869,7 +886,8 @@ impl RolesApi {
     #[oai(
         path = "/users/:id/admin-roles/:role_id",
         method = "delete",
-        operation_id = "delete_user_admin_role"
+        operation_id = "delete_user_admin_role",
+        transform = "guard_user_mutation"
     )]
     async fn api_delete_user_admin_role(
         &self,

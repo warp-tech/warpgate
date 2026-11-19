@@ -4,13 +4,13 @@
 //! so the gate can't be forgotten the way a hand-written first line can. This is the admin
 //! counterpart to the gateway's `AuthedSession`.
 
-use poem::Request;
+use poem::{Endpoint, EndpointExt, Request};
 use poem_openapi::SecurityScheme;
 use poem_openapi::auth::ApiKey;
 use warpgate_common::{AdminPermission, AdminPermissionSet, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 
-use super::common::admin_permission_set;
+use super::common::{admin_permission_set, user_admin_permission_set};
 
 /// Proof that a specific [`AdminPermission`] was checked. Minted only by
 /// [`AdminContext::require`]; take it where a permission must have been verified so
@@ -188,4 +188,29 @@ impl std::ops::Deref for ClusterOrAdminContext {
     fn deref(&self) -> &Self::Target {
         &self.access().ctx
     }
+}
+
+/// poem-openapi transform to prevent admins from editing a higher-level admin user
+///
+/// expects user ID as first path param
+pub fn guard_user_mutation(ep: impl Endpoint) -> impl Endpoint {
+    ep.before(|req| async move {
+        let Some(ctx) = req.data::<AuthenticatedRequestContext>() else {
+            return Err(WarpgateError::NoAdminAccess.into());
+        };
+        if ctx.auth.is_cluster_peer() {
+            // already checked
+            return Ok(req);
+        }
+        let user_id: uuid::Uuid = req
+            .raw_path_param("param0")
+            .and_then(|id| id.parse().ok())
+            .ok_or_else(|| WarpgateError::InvalidRequest("user id missing from path".into()))?;
+        let caller = admin_permission_set(ctx).await?;
+        let target = user_admin_permission_set(&ctx.services().db, user_id).await?;
+        if !caller.is_superset_of(target) {
+            return Err(WarpgateError::TargetUserOutranksAdmin.into());
+        }
+        Ok(req)
+    })
 }

@@ -12,7 +12,8 @@ export interface AdminPermissionDef {
     label: string
     category?: string
     deps?: AdminRolePermissionKey[]
-    dangerous?: boolean
+    /** Why the permission is dangerous to grant */
+    dangerous?: string
 }
 
 export const ADMIN_PERMISSIONS = [
@@ -112,6 +113,8 @@ export const ADMIN_PERMISSIONS = [
         key: 'configEdit' as const,
         label: 'Edit configuration',
         category: 'Configuration' as const,
+        dangerous:
+            'Includes GitOps configuration, which can change any target and access role and export credentials; use with care.',
     },
     {
         key: 'ticketRequestsManage' as const,
@@ -122,7 +125,7 @@ export const ADMIN_PERMISSIONS = [
         key: 'adminRolesManage' as const,
         label: 'Manage admin roles',
         category: 'Configuration',
-        dangerous: true,
+        dangerous: 'Grants the ability to manage admin roles; use with care.',
     } as const,
 ]
 

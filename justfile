@@ -1,4 +1,4 @@
-projects := "warpgate warpgate-admin warpgate-common warpgate-db-entities warpgate-db-migrations warpgate-database-protocols warpgate-protocol-ssh warpgate-protocol-mysql warpgate-protocol-postgres warpgate-protocol-kubernetes warpgate-protocol-http warpgate-protocol-rdp warpgate-protocol-vnc warpgate-core warpgate-sso warpgate-secrets-vault warpgate-common-cache"
+projects := "warpgate warpgate-admin warpgate-common warpgate-db-entities warpgate-db-migrations warpgate-database-protocols warpgate-protocol-ssh warpgate-protocol-mysql warpgate-protocol-postgres warpgate-protocol-kubernetes warpgate-protocol-http warpgate-protocol-rdp warpgate-protocol-vnc warpgate-core warpgate-sso warpgate-secrets-vault warpgate-common-cache warpgate-gitops"
 
 run *ARGS='run':
     RUST_BACKTRACE=1 cargo run --all-features -- --config config.yaml {{ARGS}}
@@ -44,6 +44,9 @@ openapi:
 
 config-schema:
     cargo run -p warpgate-common --bin config-schema > config-schema.json
+
+gitops-schema:
+    cargo run -p warpgate-gitops --bin gitops-schema > gitops-schema.json
 
 cleanup: (fix "--allow-dirty") (clippy "--fix" "--allow-dirty") fmt svelte-check lint
 

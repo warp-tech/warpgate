@@ -98,6 +98,27 @@ impl CredsspSequence {
         server_name: ServerName,
         server_public_key: Vec<u8>,
         kerberos_config: Option<KerberosConfig>,
+    ) -> ConnectorResult<(Self, credssp::TsRequest)> {
+        Self::init_with_mode(
+            credentials,
+            domain,
+            protocol,
+            server_name,
+            server_public_key,
+            kerberos_config,
+            false,
+        )
+    }
+
+    /// Like [`Self::init`]; `credentialless` authenticates over CredSSP but delegates no
+    /// credentials, so the server presents its own sign-in screen.
+    pub fn init_with_mode(
+        credentials: Credentials,
+        domain: Option<&str>,
+        protocol: nego::SecurityProtocol,
+        server_name: ServerName,
+        server_public_key: Vec<u8>,
+        kerberos_config: Option<KerberosConfig>,
         credentialless: bool,
     ) -> ConnectorResult<(Self, credssp::TsRequest)> {
         let credentials: sspi::Credentials = match &credentials {
@@ -267,7 +288,7 @@ fn extract_user_principal_name(cert: &Certificate) -> Option<String> {
 }
 
 fn write_credssp_request(ts_request: credssp::TsRequest, output: &mut WriteBuf) -> ConnectorResult<usize> {
-    let length = usize::from(ts_request.buffer_len());
+    let length = usize::from(ts_request.buffer_len().map_err(|e| custom_err!("TsRequest", e))?);
 
     let unfilled_buffer = output.unfilled_to(length);
 

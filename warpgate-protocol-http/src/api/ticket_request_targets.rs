@@ -83,9 +83,7 @@ impl Api {
                 id: t.id,
                 name: t.name,
                 kind: (&t.options).into(),
-                ticket_max_duration_seconds: t
-                    .ticket_max_duration_seconds
-                    .or(policy.ticket_max_duration_seconds),
+                ticket_max_duration_seconds: t.ticket_max_duration_seconds,
             })
             .collect();
 

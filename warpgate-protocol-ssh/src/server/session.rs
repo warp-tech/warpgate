@@ -982,41 +982,35 @@ impl ServerSession {
             .subscribe(|e| matches!(e, Event::MenuRedraw(_, _) | Event::ConsoleInput(_)))
             .await;
 
-        let username = self
+        let user_info = self
             .user_info
             .as_ref()
-            .map(|u| u.username.as_str())
             .ok_or(WarpgateError::InconsistentState("No username".into()))?;
+        let username = user_info.username.as_str();
 
-        let ssh_targets = {
-            self.services
-                .config_provider
-                .list_targets()
-                .await?
-                .into_iter()
-                .filter_map(|target| match target.options.clone() {
-                    TargetOptions::Ssh(options) => Some((target, options)),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-        };
+        let authorized_ids = self
+            .services
+            .config_provider
+            .authorized_target_ids(user_info.id)
+            .await?;
 
-        let mut authorized_targets = Vec::new();
-
-        for (target, mut ssh_options) in ssh_targets {
-            let is_authorized = self
-                .services
-                .config_provider
-                .authorize_target(username, &target.name)
-                .await?;
-
-            if is_authorized {
-                if ssh_options.username.is_empty() {
-                    ssh_options.username = username.to_string();
+        let mut authorized_targets = self
+            .services
+            .config_provider
+            .list_targets()
+            .await?
+            .into_iter()
+            .filter(|target| authorized_ids.contains(&target.id))
+            .filter_map(|target| match target.options.clone() {
+                TargetOptions::Ssh(mut options) => {
+                    if options.username.is_empty() {
+                        options.username = username.to_string();
+                    }
+                    Some((target, options))
                 }
-                authorized_targets.push((target, ssh_options));
-            }
-        }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
 
         authorized_targets.sort_by(|(left, _), (right, _)| left.name.cmp(&right.name));
 
@@ -2056,14 +2050,6 @@ impl ServerSession {
             return russh::server::Auth::reject();
         }
 
-        // Tickets aren't authenticated with public keys, and the eager auth path
-        // consumes a ticket use. Running it here — during the unauthenticated
-        // offer/query phase — would drain the ticket before the client actually
-        // authenticates, so reject and let auth proceed via another method.
-        if let AuthSelector::Ticket { .. } = selector {
-            return russh::server::Auth::reject();
-        }
-
         if matches!(
             self.try_validate_public_key_offer(
                 &selector,
@@ -2347,7 +2333,7 @@ impl ServerSession {
 
                 Ok(false)
             }
-            AuthSelector::Ticket { .. } => Ok(false),
+            AuthSelector::Ticket { .. } => Ok(true),
         }
     }
 

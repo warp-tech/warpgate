@@ -31,7 +31,6 @@ impl KnownHosts {
         let entries = KnownHost::Entity::find()
             .filter(KnownHost::Column::Host.eq(host))
             .filter(KnownHost::Column::Port.eq(port))
-            .filter(KnownHost::Column::KeyType.eq(key.algorithm().as_str()))
             .all(db)
             .await?;
 
