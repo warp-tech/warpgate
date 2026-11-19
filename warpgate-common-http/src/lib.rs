@@ -11,8 +11,10 @@ mod request;
 use std::time::Duration;
 
 pub use auth::{AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization};
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 pub use cluster_tls::{ClusterPeer, cluster_peer, cluster_peer_extension, is_cluster_peer_request};
+use futures::StreamExt;
+use futures::stream::BoxStream;
 pub use keepalive::{SessionKeepalive, SessionKeepaliveGuard};
 use poem::error::ReadBodyError;
 use poem::http::{HeaderMap, HeaderName, HeaderValue, header};
@@ -46,6 +48,32 @@ pub async fn read_body_limited_with_timeout(
             ReadBodyError::PayloadTooLarge => WarpgateError::RequestBodyTooLarge,
             error => WarpgateError::InvalidRequest(format!("reading request body: {error}")),
         })
+}
+
+pub enum UpstreamBody {
+    Buffered(Bytes),
+    /// Yields the whole body, starting from its first byte.
+    Streamed(BoxStream<'static, reqwest::Result<Bytes>>),
+}
+
+/// Buffers a response body of at most `limit` bytes. A longer body is returned
+/// as a stream that starts with the bytes already read, so at most `limit`
+/// bytes plus one chunk are held in memory.
+pub async fn buffer_response(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> reqwest::Result<UpstreamBody> {
+    let mut head = BytesMut::new();
+    while let Some(chunk) = response.chunk().await? {
+        if head.len().saturating_add(chunk.len()) > limit {
+            let read = futures::stream::iter([Ok(head.freeze()), Ok(chunk)]);
+            return Ok(UpstreamBody::Streamed(
+                read.chain(response.bytes_stream()).boxed(),
+            ));
+        }
+        head.extend_from_slice(&chunk);
+    }
+    Ok(UpstreamBody::Buffered(head.freeze()))
 }
 
 /// The credential from the first `Authorization` header using `scheme`
@@ -131,7 +159,65 @@ pub fn insert_security_headers(headers: &mut HeaderMap) {
 
 #[cfg(test)]
 mod tests {
+    use futures::TryStreamExt;
+
     use super::*;
+
+    /// With `ends` unset, the body stalls forever after the last chunk.
+    fn response_of(chunks: &[&'static str], ends: bool) -> reqwest::Response {
+        let chunks = futures::stream::iter(
+            chunks
+                .iter()
+                .map(|chunk| Ok::<_, std::io::Error>(Bytes::from_static(chunk.as_bytes())))
+                .collect::<Vec<_>>(),
+        );
+        poem::http::Response::new(if ends {
+            reqwest::Body::wrap_stream(chunks)
+        } else {
+            reqwest::Body::wrap_stream(chunks.chain(futures::stream::pending()))
+        })
+        .into()
+    }
+
+    #[tokio::test]
+    async fn body_within_the_limit_is_buffered() {
+        let body = buffer_response(response_of(&["ab", "cde"], true), 5)
+            .await
+            .unwrap();
+        let UpstreamBody::Buffered(body) = body else {
+            panic!("a body no longer than the limit must be buffered");
+        };
+        assert_eq!(body, "abcde");
+    }
+
+    #[tokio::test]
+    async fn body_over_the_limit_is_streamed_whole() {
+        let body = buffer_response(response_of(&["ab", "cd", "ef", "gh"], true), 5)
+            .await
+            .unwrap();
+        let UpstreamBody::Streamed(body) = body else {
+            panic!("a body longer than the limit must not be buffered");
+        };
+        let chunks: Vec<Bytes> = body.try_collect().await.unwrap();
+        assert_eq!(chunks.concat(), b"abcdefgh");
+    }
+
+    #[tokio::test]
+    async fn body_is_not_read_past_the_limit() {
+        // The body never ends, so reading on past the limit would hang.
+        let body = tokio::time::timeout(
+            Duration::from_secs(5),
+            buffer_response(response_of(&["ab", "cd", "ef"], false), 3),
+        )
+        .await
+        .expect("must hand the body over once it exceeds the limit")
+        .unwrap();
+        let UpstreamBody::Streamed(body) = body else {
+            panic!("a body longer than the limit must not be buffered");
+        };
+        let chunks: Vec<Bytes> = body.take(3).try_collect().await.unwrap();
+        assert_eq!(chunks.concat(), b"abcdef");
+    }
 
     #[test]
     fn connect_src_extension() {

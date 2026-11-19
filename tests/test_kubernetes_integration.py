@@ -941,6 +941,48 @@ class TestKubernetesIntegration:
         assert body == "request body too large"
 
     @pytest.mark.asyncio
+    async def test_response_too_large_to_buffer_arrives_whole(
+        self, processes, shared_wg: WarpgateProcess
+    ):
+        k3s, user, target_name, url = _provision_kubernetes_target(
+            processes, shared_wg, "big-list"
+        )
+        user_token = await _issue_user_token(url, user, "big-list-token")
+
+        # A ConfigMap holds 1 MiB at most. Five of them make a list over the
+        # 3 MiB buffer limit.
+        namespace = f"big-list-{uuid.uuid4().hex[:8]}"
+        payload = "x" * (800 * 1024)
+        k3s.kubectl(["create", "namespace", namespace])
+        for index in range(5):
+            k3s.kubectl(
+                ["create", "-f", "-"],
+                input=json.dumps(
+                    {
+                        "apiVersion": "v1",
+                        "kind": "ConfigMap",
+                        "metadata": {"name": f"big-{index}", "namespace": namespace},
+                        "data": {"payload": payload},
+                    }
+                ).encode(),
+            )
+
+        resp = requests.get(
+            f"https://127.0.0.1:{shared_wg.kubernetes_port}/{target_name}"
+            f"/api/v1/namespaces/{namespace}/configmaps",
+            headers={"Authorization": f"Bearer {user_token}"},
+            verify=False,
+        )
+        assert resp.status_code == 200, resp.text[:300]
+        assert len(resp.content) > 3 * 1024 * 1024
+        payloads = [
+            item["data"]["payload"]
+            for item in resp.json()["items"]
+            if item["metadata"]["name"].startswith("big-")
+        ]
+        assert payloads == [payload] * 5
+
+    @pytest.mark.asyncio
     async def test_kubectl_run(self, processes, shared_wg: WarpgateProcess):
         """Ensure that write requests such as ``kubectl run`` are proxied."""
         k3s, user, target_name, url = _provision_kubernetes_target(
