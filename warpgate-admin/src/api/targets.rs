@@ -3,10 +3,9 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use tracing::warn;
-use uuid::Uuid;
 use warpgate_common::{
-    AdminPermission, Role as RoleConfig, StoredSecrets, Target as TargetConfig, TargetId,
-    TargetOptions, TargetSSHOptions, WarpgateError,
+    AdminPermission, Role as RoleConfig, RoleId, StoredSecrets, Target as TargetConfig,
+    TargetGroupId, TargetId, TargetOptions, TargetSSHOptions, WarpgateError,
 };
 use warpgate_common_http::errors::invalid_field;
 use warpgate_core::resources::targets::{self as store, TargetDataRequest};
@@ -55,7 +54,7 @@ impl ListApi {
         &self,
         admin: AdminContext,
         search: Query<Option<String>>,
-        group_id: Query<Option<Uuid>>,
+        group_id: Query<Option<TargetGroupId>>,
     ) -> Result<GetTargetsResponse, WarpgateError> {
         let db = &admin.services().db;
 
@@ -180,7 +179,7 @@ impl DetailApi {
         admin: AdminContext,
         id: Path<TargetId>,
     ) -> Result<GetTargetResponse, WarpgateError> {
-        super::gitops::release_managed::<Target::Entity>(&admin, id.0.0).await?;
+        super::gitops::release_managed::<Target::Entity>(&admin, id.0).await?;
         self.api_get_target(admin, id).await
     }
 
@@ -362,7 +361,7 @@ impl RolesApi {
         &self,
         admin: AdminContext,
         id: Path<TargetId>,
-        role_id: Path<Uuid>,
+        role_id: Path<RoleId>,
     ) -> Result<AddTargetRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesAssign)?;
 
@@ -385,7 +384,7 @@ impl RolesApi {
         &self,
         admin: AdminContext,
         id: Path<TargetId>,
-        role_id: Path<Uuid>,
+        role_id: Path<RoleId>,
     ) -> Result<DeleteTargetRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesAssign)?;
 

@@ -3,8 +3,7 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{EntityTrait, QueryOrder};
 use tracing::warn;
-use uuid::Uuid;
-use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common::{AdminPermission, TargetGroupId, WarpgateError};
 use warpgate_common_http::errors::invalid_field;
 use warpgate_core::resources::target_groups::{self as store, TargetGroupDataRequest};
 use warpgate_core::resources::{Actor, ResourceError};
@@ -121,7 +120,7 @@ impl DetailApi {
     async fn api_get_target_group(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<TargetGroupId>,
     ) -> Result<GetTargetGroupResponse, WarpgateError> {
         let db = &admin.services().db;
         let group = TargetGroup::Entity::find_by_id(id.0).one(db).await?;
@@ -140,7 +139,7 @@ impl DetailApi {
     async fn api_release_target_group(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<TargetGroupId>,
     ) -> Result<GetTargetGroupResponse, WarpgateError> {
         super::gitops::release_managed::<TargetGroup::Entity>(&admin, id.0).await?;
         self.api_get_target_group(admin, id).await
@@ -154,7 +153,7 @@ impl DetailApi {
     async fn api_update_target_group(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<TargetGroupId>,
         body: Json<TargetGroupDataRequest>,
     ) -> Result<UpdateTargetGroupResponse, WarpgateError> {
         admin.require(AdminPermission::TargetsEdit)?;
@@ -184,7 +183,7 @@ impl DetailApi {
     async fn api_delete_target_group(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<TargetGroupId>,
     ) -> Result<DeleteTargetGroupResponse, WarpgateError> {
         admin.require(AdminPermission::TargetsDelete)?;
 

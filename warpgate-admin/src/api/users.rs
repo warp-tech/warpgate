@@ -8,7 +8,7 @@ use time::OffsetDateTime;
 use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::{
-    AdminPermission, AdminRole as AdminRoleConfig, User as UserConfig, UserId,
+    AdminPermission, AdminRole as AdminRoleConfig, RoleId, User as UserConfig, UserId,
     UserRequireCredentialsPolicy, WarpgateError,
 };
 use warpgate_common_http::errors::{bad_request, invalid_field};
@@ -472,7 +472,7 @@ impl DetailApi {
 #[derive(Object, Clone, Debug)]
 struct UserRoleAssignmentResponse {
     /// Role ID
-    id: Uuid,
+    id: RoleId,
     /// Role name
     name: String,
     /// Role description
@@ -631,7 +631,7 @@ impl RolesApi {
         &self,
         admin: AdminContext,
         id: Path<UserId>,
-        role_id: Path<Uuid>,
+        role_id: Path<RoleId>,
     ) -> Result<GetUserRoleResponse, WarpgateError> {
         let db = &admin.services().db;
 
@@ -665,7 +665,7 @@ impl RolesApi {
         &self,
         admin: AdminContext,
         id: Path<UserId>,
-        role_id: Path<Uuid>,
+        role_id: Path<RoleId>,
         body: Json<Option<AddUserRoleRequest>>,
     ) -> Result<AddUserRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesAssign)?;
@@ -710,7 +710,7 @@ impl RolesApi {
         &self,
         admin: AdminContext,
         id: Path<UserId>,
-        role_id: Path<Uuid>,
+        role_id: Path<RoleId>,
     ) -> Result<DeleteUserRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesAssign)?;
 
@@ -768,7 +768,7 @@ impl RolesApi {
         &self,
         admin: AdminContext,
         id: Path<UserId>,
-        role_id: Path<Uuid>,
+        role_id: Path<RoleId>,
         body: Json<UpdateUserRoleRequest>,
     ) -> Result<UpdateUserRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesAssign)?;

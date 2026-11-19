@@ -6,6 +6,14 @@ use poem_openapi::{NewType, Object};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// A row ID that code generic over the kind of row can erase to its UUID and
+/// rebuild. Deliberately not `From`/`Into`: sea-orm takes `impl Into<Id>`, and
+/// a blanket conversion would let any UUID pass as any kind of ID again.
+pub trait RowId: Copy {
+    fn from_uuid(id: Uuid) -> Self;
+    fn uuid(self) -> Uuid;
+}
+
 // TODO reuse for other IDs
 macro_rules! uuid_newtype {
     ($(#[$attr:meta])* $name:ident) => {
@@ -72,6 +80,16 @@ macro_rules! uuid_newtype {
             }
         }
 
+        impl RowId for $name {
+            fn from_uuid(id: Uuid) -> Self {
+                Self(id)
+            }
+
+            fn uuid(self) -> Uuid {
+                self.0
+            }
+        }
+
         impl sea_orm::TryFromU64 for $name {
             fn try_from_u64(n: u64) -> Result<Self, sea_orm::DbErr> {
                 <Uuid as sea_orm::TryFromU64>::try_from_u64(n).map(Self)
@@ -99,6 +117,18 @@ uuid_newtype!(
 uuid_newtype!(
     #[derive(NewType, Default)]
     TargetId
+);
+uuid_newtype!(
+    #[derive(NewType)]
+    RoleId
+);
+uuid_newtype!(
+    #[derive(NewType)]
+    TargetGroupId
+);
+uuid_newtype!(
+    #[derive(NewType)]
+    SshClientKeyId
 );
 uuid_newtype!(ProviderId);
 

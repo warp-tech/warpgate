@@ -5,6 +5,7 @@ use sea_orm::{
     TransactionTrait,
 };
 use uuid::Uuid;
+use warpgate_common::TargetGroupId;
 use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
 use warpgate_db_entities::{Target, TargetGroup};
 use warpgate_gitops::types::ResourceKind;
@@ -12,6 +13,7 @@ use warpgate_gitops::types::ResourceKind;
 use super::{Actor, OwnedEntity, ResourceError, check_name, name_taken};
 
 impl OwnedEntity for TargetGroup::Entity {
+    type Id = TargetGroupId;
     const KIND: ResourceKind = ResourceKind::TargetGroup;
     const ID: Self::Column = TargetGroup::Column::Id;
     const PROVIDER: Self::Column = TargetGroup::Column::Provider;
@@ -37,7 +39,7 @@ pub async fn create<C: ConnectionTrait>(
 ) -> Result<TargetGroup::Model, ResourceError> {
     check_name(&data.name)?;
     let mut model = TargetGroup::ActiveModel {
-        id: Set(Uuid::new_v4()),
+        id: Set(TargetGroupId(Uuid::new_v4())),
         provider: Set(actor.provider_id()),
         ..Default::default()
     };
@@ -48,7 +50,7 @@ pub async fn create<C: ConnectionTrait>(
 pub async fn update<C: ConnectionTrait>(
     db: &C,
     actor: Actor,
-    id: Uuid,
+    id: TargetGroupId,
     data: &TargetGroupDataRequest,
 ) -> Result<TargetGroup::Model, ResourceError> {
     check_name(&data.name)?;
@@ -66,7 +68,7 @@ pub async fn update<C: ConnectionTrait>(
 pub async fn delete<C: ConnectionTrait + TransactionTrait>(
     db: &C,
     actor: Actor,
-    id: Uuid,
+    id: TargetGroupId,
 ) -> Result<(), ResourceError> {
     let txn = db.begin().await?;
     let group = TargetGroup::Entity::find_by_id(id)

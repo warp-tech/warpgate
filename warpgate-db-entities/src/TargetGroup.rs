@@ -1,8 +1,8 @@
+use warpgate_common::TargetGroupId;
 use poem_openapi::{Enum, Object};
 use sea_orm::entity::prelude::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use warpgate_common::ProviderId;
 
 #[derive(
@@ -33,7 +33,7 @@ pub enum BootstrapThemeColor {
 #[oai(rename = "TargetGroup")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub id: Uuid,
+    pub id: TargetGroupId,
     pub name: String,
     #[sea_orm(column_type = "Text")]
     pub description: String,

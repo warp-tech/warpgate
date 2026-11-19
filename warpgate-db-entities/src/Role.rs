@@ -1,9 +1,9 @@
+use warpgate_common::RoleId;
 use warpgate_common::UserId;
 use poem_openapi::Object;
 use sea_orm::entity::prelude::*;
 use sea_orm::{ColumnTrait, QueryFilter};
 use serde::Serialize;
-use uuid::Uuid;
 use warpgate_common::{ProviderId, Role};
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Object)]
@@ -11,7 +11,7 @@ use warpgate_common::{ProviderId, Role};
 #[oai(rename = "Role")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub id: Uuid,
+    pub id: RoleId,
     pub name: String,
     #[sea_orm(column_type = "Text")]
     pub description: String,

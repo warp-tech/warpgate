@@ -6,8 +6,8 @@ use sea_orm::{
 };
 use uuid::Uuid;
 use warpgate_common::{
-    MaybeSecretRef, SecretRef, SecretResolver, StoredSecret, WarpgateError, pkcs8_pem_string,
-    public_key_line, public_key_of_pem,
+    MaybeSecretRef, SecretRef, SecretResolver, SshClientKeyId, StoredSecret, WarpgateError,
+    pkcs8_pem_string, public_key_line, public_key_of_pem,
 };
 use warpgate_db_entities::SshClientKey;
 use warpgate_gitops::types::ResourceKind;
@@ -15,6 +15,7 @@ use warpgate_gitops::types::ResourceKind;
 use super::{Actor, OwnedEntity, ResourceError, check_name, name_taken};
 
 impl OwnedEntity for SshClientKey::Entity {
+    type Id = SshClientKeyId;
     const KIND: ResourceKind = ResourceKind::SshClientKey;
     const ID: Self::Column = SshClientKey::Column::Id;
     const PROVIDER: Self::Column = SshClientKey::Column::Provider;
@@ -71,7 +72,7 @@ impl KeyMaterial {
     async fn check_unique<C: ConnectionTrait>(
         &self,
         db: &C,
-        except: Option<Uuid>,
+        except: Option<SshClientKeyId>,
     ) -> Result<(), ResourceError> {
         let mut query = SshClientKey::Entity::find()
             .filter(SshClientKey::Column::PublicKey.eq(&self.public_key));
@@ -99,7 +100,7 @@ pub async fn create<C: ConnectionTrait>(
     check_name(&data.label)?;
     material.check_unique(db, None).await?;
     let mut model = SshClientKey::ActiveModel {
-        id: Set(Uuid::new_v4()),
+        id: Set(SshClientKeyId(Uuid::new_v4())),
         label: Set(data.label.clone()),
         is_default: Set(data.is_default),
         provider: Set(actor.provider_id()),
@@ -113,7 +114,7 @@ pub async fn create<C: ConnectionTrait>(
 pub async fn update<C: ConnectionTrait>(
     db: &C,
     actor: Actor,
-    id: Uuid,
+    id: SshClientKeyId,
     data: &SshClientKeyDataRequest,
     material: Option<KeyMaterial>,
 ) -> Result<SshClientKey::Model, ResourceError> {
@@ -138,7 +139,7 @@ pub async fn update<C: ConnectionTrait>(
 pub async fn delete<C: ConnectionTrait>(
     db: &C,
     actor: Actor,
-    id: Uuid,
+    id: SshClientKeyId,
 ) -> Result<(), ResourceError> {
     let key = SshClientKey::Entity::find_by_id(id)
         .one(db)
@@ -157,7 +158,7 @@ pub async fn delete<C: ConnectionTrait>(
 /// checked.
 pub async fn refresh_public_key<C: ConnectionTrait>(
     db: &C,
-    id: Uuid,
+    id: SshClientKeyId,
     public_key: String,
 ) -> Result<(), ResourceError> {
     SshClientKey::Entity::update_many()

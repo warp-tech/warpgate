@@ -4,7 +4,7 @@ use sea_orm::{
 };
 use uuid::Uuid;
 pub use warpgate_common::TargetDataRequest;
-use warpgate_common::{ProviderId, StoredSecrets, TargetId, TargetOptions, WarpgateError};
+use warpgate_common::{ProviderId, RoleId, StoredSecrets, TargetId, TargetOptions, WarpgateError};
 use warpgate_db_entities::{
     KnownHost, Target, TargetRoleAssignment, TargetSession, Ticket, TicketRequest,
 };
@@ -14,6 +14,7 @@ use super::{Actor, AdmittedSessions, OwnedEntity, ResourceError, check_name, nam
 use crate::db::is_unique_violation;
 
 impl OwnedEntity for Target::Entity {
+    type Id = TargetId;
     const KIND: ResourceKind = ResourceKind::Target;
     const ID: Self::Column = Target::Column::Id;
     const PROVIDER: Self::Column = Target::Column::Provider;
@@ -144,7 +145,7 @@ pub async fn add_role<C: ConnectionTrait>(
     db: &C,
     actor: Actor,
     target_id: TargetId,
-    role_id: Uuid,
+    role_id: RoleId,
 ) -> Result<(), ResourceError> {
     actor.may_write(target_owner(db, target_id).await?)?;
     TargetRoleAssignment::ActiveModel {
@@ -167,7 +168,7 @@ pub async fn remove_role<C: ConnectionTrait>(
     db: &C,
     actor: Actor,
     target_id: TargetId,
-    role_id: Uuid,
+    role_id: RoleId,
 ) -> Result<(), ResourceError> {
     actor.may_write(target_owner(db, target_id).await?)?;
     let result = TargetRoleAssignment::Entity::delete_by_id((target_id, role_id))

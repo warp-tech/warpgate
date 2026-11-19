@@ -29,7 +29,7 @@ use crate::auth::CredentialKind;
 use crate::helpers::hash::hash_password;
 use crate::helpers::ipnet::WarpgateIpNet;
 use crate::helpers::otp::OtpSecretKey;
-use crate::{GlobalParams, ListenEndpoint, ProviderId, Secret, UserId};
+use crate::{GlobalParams, ListenEndpoint, ProviderId, RoleId, Secret, UserId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Union)]
 #[oai(discriminator_name = "kind", one_of)]
@@ -178,7 +178,7 @@ impl Deref for UserDetails {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Object)]
 pub struct Role {
-    pub id: Uuid,
+    pub id: RoleId,
     pub name: String,
     pub description: String,
     pub is_default: bool,

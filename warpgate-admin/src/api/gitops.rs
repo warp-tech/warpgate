@@ -4,7 +4,7 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{PaginatorTrait, QuerySelect};
 use time::OffsetDateTime;
 use uuid::Uuid;
-use warpgate_common::{AdminPermission, ProviderId, WarpgateError};
+use warpgate_common::{AdminPermission, ProviderId, RowId, WarpgateError};
 use warpgate_common_http::errors::bad_request;
 use warpgate_core::logging::AuditEvent;
 use warpgate_core::resources::sync::{
@@ -21,14 +21,14 @@ pub struct Api;
 
 pub(super) async fn release_managed<E: OwnedEntity>(
     admin: &AdminContext,
-    id: Uuid,
+    id: E::Id,
 ) -> Result<(), WarpgateError> {
     admin.require(AdminPermission::ConfigEdit)?;
     if let Some(provider) = release::<E, _>(&admin.services().db, id).await? {
         AuditEvent::ProviderResourceReleased {
             provider: provider.label(),
             kind: format!("{:?}", E::KIND),
-            id,
+            id: id.uuid(),
             actor_user_id: admin.auth.user_id(),
         }
         .emit();

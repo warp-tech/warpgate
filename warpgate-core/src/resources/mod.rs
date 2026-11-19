@@ -8,8 +8,7 @@ pub mod targets;
 
 use sea_orm::prelude::Expr;
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect};
-use uuid::Uuid;
-use warpgate_common::{ProviderId, UserSessionId, WarpgateError};
+use warpgate_common::{ProviderId, RowId, UserSessionId, WarpgateError};
 use warpgate_gitops::types::ResourceKind;
 
 use crate::db::is_unique_violation;
@@ -93,6 +92,7 @@ pub struct AdmittedSessions(pub Vec<UserSessionId>);
 
 /// A table whose rows a provider can own
 pub trait OwnedEntity: EntityTrait {
+    type Id: RowId + Into<sea_orm::Value>;
     const KIND: ResourceKind;
     const ID: Self::Column;
     const PROVIDER: Self::Column;
@@ -103,7 +103,7 @@ pub trait OwnedEntity: EntityTrait {
 /// a resource that sets `metadata.adopt_existing`.
 pub(crate) async fn set_owner<E: OwnedEntity, C: ConnectionTrait>(
     db: &C,
-    id: Uuid,
+    id: E::Id,
     owner: Option<ProviderId>,
 ) -> Result<(), ResourceError> {
     E::update_many()
@@ -118,7 +118,7 @@ pub(crate) async fn set_owner<E: OwnedEntity, C: ConnectionTrait>(
 /// Returns the previous provider, or `None` if the row is gone or had none.
 pub async fn release<E: OwnedEntity, C: ConnectionTrait>(
     db: &C,
-    id: Uuid,
+    id: E::Id,
 ) -> Result<Option<ProviderId>, ResourceError> {
     let owner: Option<Option<ProviderId>> = E::find()
         .select_only()

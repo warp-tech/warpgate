@@ -101,7 +101,7 @@ pub struct SecretReferenceUsageTarget {
 
 #[derive(Object)]
 pub struct SecretReferenceUsageSshClientKey {
-    pub id: Uuid,
+    pub id: warpgate_common::SshClientKeyId,
     pub label: String,
 }
 

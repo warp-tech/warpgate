@@ -4,7 +4,7 @@ use tracing::info;
 use uuid::Uuid;
 
 use crate::helpers::logging::format_related_ids;
-use crate::{TargetId, UserId};
+use crate::{RoleId, TargetId, UserId};
 
 #[derive(Clone)]
 pub enum CredentialChangedVia {
@@ -77,7 +77,7 @@ pub enum AuditEvent {
     AccessRoleGranted {
         grantee_id: UserId,
         grantee_username: String,
-        role_id: Uuid,
+        role_id: RoleId,
         role_name: String,
         actor_user_id: UserId,
         related_access_roles: String,
@@ -85,7 +85,7 @@ pub enum AuditEvent {
     AccessRoleRevoked {
         grantee_id: UserId,
         grantee_username: String,
-        role_id: Uuid,
+        role_id: RoleId,
         role_name: String,
         actor_user_id: UserId,
         related_access_roles: String,

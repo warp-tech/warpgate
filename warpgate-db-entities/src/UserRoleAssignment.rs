@@ -1,3 +1,4 @@
+use warpgate_common::RoleId;
 use warpgate_common::UserId;
 use poem_openapi::Object;
 use sea_orm::ActiveValue::Set;
@@ -6,7 +7,6 @@ use sea_orm::sea_query::IntoIden;
 use sea_orm::Condition;
 use serde::Serialize;
 use time::OffsetDateTime;
-use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Object)]
 #[sea_orm(table_name = "user_roles")]
@@ -15,7 +15,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub user_id: UserId,
     #[sea_orm(primary_key, auto_increment = false)]
-    pub role_id: Uuid,
+    pub role_id: RoleId,
     /// When this role assignment was granted
     pub granted_at: Option<OffsetDateTime>,
     /// When this role assignment expires (null = never)
@@ -55,7 +55,7 @@ impl Entity {
     pub async fn idempotent_grant(
         db: &DatabaseConnection,
         user_id: UserId,
-        role_id: Uuid,
+        role_id: RoleId,
         expires_at: Option<OffsetDateTime>,
     ) -> Result<Model, DbErr> {
         let existing = Self::find()

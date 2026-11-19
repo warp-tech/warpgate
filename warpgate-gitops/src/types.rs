@@ -1,8 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use uuid::Uuid;
-use warpgate_common::{MaybeSecretRef, TargetDataRequest, TargetOptions};
+use warpgate_common::{MaybeSecretRef, TargetDataRequest, TargetGroupId, TargetOptions};
 use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
 
 pub type DeserializeError = serde_path_to_error::Error<serde_json::Error>;
@@ -120,7 +119,7 @@ impl TargetSpec {
         &self,
         name: &str,
         options: TargetOptions,
-        group_id: Option<Uuid>,
+        group_id: Option<TargetGroupId>,
     ) -> TargetDataRequest {
         let Self {
             description,

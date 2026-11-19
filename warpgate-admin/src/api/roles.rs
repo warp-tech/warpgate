@@ -3,9 +3,9 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{EntityTrait, ModelTrait, QueryFilter, QueryOrder};
 use tracing::warn;
-use uuid::Uuid;
 use warpgate_common::{
-    AdminPermission, Role as RoleConfig, Target as TargetConfig, User as UserConfig, WarpgateError,
+    AdminPermission, Role as RoleConfig, RoleId, Target as TargetConfig, User as UserConfig,
+    WarpgateError,
 };
 use warpgate_common_http::errors::invalid_field;
 use warpgate_core::resources::roles::{self as store, RoleDataRequest};
@@ -135,7 +135,7 @@ impl DetailApi {
     async fn api_get_role(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<RoleId>,
     ) -> Result<GetRoleResponse, WarpgateError> {
         let db = &admin.services().db;
 
@@ -155,7 +155,7 @@ impl DetailApi {
     async fn api_release_role(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<RoleId>,
     ) -> Result<GetRoleResponse, WarpgateError> {
         super::gitops::release_managed::<Role::Entity>(&admin, id.0).await?;
         self.api_get_role(admin, id).await
@@ -166,7 +166,7 @@ impl DetailApi {
         &self,
         admin: AdminContext,
         body: Json<RoleDataRequest>,
-        id: Path<Uuid>,
+        id: Path<RoleId>,
     ) -> Result<UpdateRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesEdit)?;
 
@@ -191,7 +191,7 @@ impl DetailApi {
     async fn api_delete_role(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<RoleId>,
     ) -> Result<DeleteRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesDelete)?;
 
@@ -213,7 +213,7 @@ impl DetailApi {
     async fn api_get_role_targets(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<RoleId>,
     ) -> Result<GetRoleTargetsResponse, WarpgateError> {
         let db = &admin.services().db;
 
@@ -239,7 +239,7 @@ impl DetailApi {
     async fn api_get_role_users(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<RoleId>,
     ) -> Result<GetRoleUsersResponse, WarpgateError> {
         let db = &admin.services().db;
 
