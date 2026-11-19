@@ -10,6 +10,7 @@
     import Sidebar from 'common/Sidebar.svelte'
     import { sidebar } from 'common/sidebarState.svelte'
     import ThemeSwitcher from 'common/ThemeSwitcher.svelte'
+    import { SyncStatus } from 'gateway/lib/api'
     import { reloadServerInfo, serverInfo } from 'gateway/lib/store'
     import { get } from 'svelte/store'
     import Fa from 'svelte-fa'
@@ -178,6 +179,13 @@
                             <li>{warning}</li>
                         {/each}
                     </ul>
+                </Alert>
+            {/if}
+            {#if $serverInfo?.gitopsSync?.status === SyncStatus.Failed}
+                <Alert color="danger" fade={false} class="mb-3">
+                    <strong>GitOps sync is failing:</strong>
+                    {$serverInfo.gitopsSync.error?.split('\n')[0]}
+                    <a href="/status/gitops" use:link>Details</a>
                 </Alert>
             {/if}
             <div class="d-flex">

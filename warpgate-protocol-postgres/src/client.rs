@@ -52,10 +52,6 @@ impl Write for SaslBufferWriter<'_> {
 }
 
 impl PostgresClient {
-    pub const fn protocol_version(&self) -> ProtocolVersion {
-        self.decode_context.protocol_version
-    }
-
     pub async fn connect(
         admitted: AdmittedTarget<TargetPostgresOptions>,
         options: ConnectionOptions,
@@ -137,7 +133,7 @@ impl PostgresClient {
             warpgate_common::DatabaseTargetAuth::IamRole(_) => {
                 warpgate_aws::generate_rds_auth_token(&target.host, target.port, &target.username)
                     .await
-                    .map_err(WarpgateError::Aws)?
+                    .map_err(|e| WarpgateError::Aws(e.into()))?
             }
         };
 

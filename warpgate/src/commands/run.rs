@@ -109,6 +109,7 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
             }
         });
     }
+    services.start_gitops_sync();
 
     if console::user_attended() {
         info!("--------------------------------------------");

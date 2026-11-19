@@ -1,5 +1,6 @@
 <script lang="ts">
     import { api, type TargetGroup } from 'admin/lib/api'
+    import ManagedIcon from 'admin/lib/ManagedIcon.svelte'
     import { adminPermissions } from 'admin/lib/store'
     import EmptyState from 'common/EmptyState.svelte'
     import GroupColorIcon from 'common/GroupColorIcon.svelte'
@@ -49,6 +50,8 @@
             grow: true,
             class: 'text-truncate text-muted small',
         },
+        { id: 'spacer', spacer: true },
+        { id: 'managed', cell: managedCell },
     ]
 </script>
 
@@ -59,6 +62,9 @@
 {/snippet}
 {#snippet nameCell(group: TargetGroup)}
     <strong>{group.name}</strong>
+{/snippet}
+{#snippet managedCell(group: TargetGroup)}
+    <ManagedIcon provider={group.provider} />
 {/snippet}
 {#snippet descriptionCell(group: TargetGroup)}
     <small class="d-block text-muted">

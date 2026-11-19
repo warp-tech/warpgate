@@ -192,7 +192,7 @@
           "default": false
         },
         "user_api_token_allowed_endpoints": {
-          "description": "API endpoints allowed when using token auth. Each item is a \"<METHOD> <path>\".",
+          "description": "API endpoints allowed when using token auth. Each item is a \"<METHOD> <path>\".\n`<METHOD>` may be `*`. In `<path>`, `*` matches one segment and `**` any number.",
           "type": [
             "array",
             "null"

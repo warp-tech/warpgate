@@ -7,10 +7,9 @@ use time::OffsetDateTime;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
-use uuid::Uuid;
 use warpgate_common::auth::{AuthResult, AuthStateUserInfo, RememberApprovalBy};
 use warpgate_common::{
-    Target, TargetKubernetesOptions, TargetSessionId, UserSessionId, WarpgateError,
+    Target, TargetKubernetesOptions, TargetSessionId, UserId, UserSessionId, WarpgateError,
 };
 use warpgate_common_http::logging::get_client_ip;
 use warpgate_core::approvals::{Admission, GatedConnection, admit_target_session};
@@ -28,7 +27,7 @@ use crate::session_handle::KubernetesSessionHandle;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct CorrelationKey {
-    user_id: Uuid,
+    user_id: UserId,
     target_name: String,
     ip: Option<String>,
     credential: TransportCredential,
@@ -291,7 +290,7 @@ impl ClaimState {
     async fn load(
         services: &Services,
         db_key: &str,
-        user_id: Uuid,
+        user_id: UserId,
         max_age: Duration,
     ) -> Result<Self, WarpgateError> {
         let Some((row, parent)) = KubernetesSession::find_with_parent(&services.db, db_key).await?
@@ -326,7 +325,7 @@ async fn wait_for_claim(
     services: &Services,
     db_key: &str,
     claimant: UserSessionId,
-    user_id: Uuid,
+    user_id: UserId,
     max_age: Duration,
 ) -> poem::Result<()> {
     let mut delay = CLAIM_POLL_INITIAL;
@@ -827,6 +826,8 @@ impl RequestCorrelator {
 
 #[cfg(test)]
 mod tests {
+    use uuid::Uuid;
+
     use super::*;
 
     #[test]
@@ -847,7 +848,7 @@ mod tests {
 
     #[test]
     fn keys_separate_credentials_of_one_user() {
-        let user_id = Uuid::new_v4();
+        let user_id = UserId(Uuid::new_v4());
         let key = |credential| CorrelationKey {
             user_id,
             target_name: "k8s".into(),

@@ -10,14 +10,13 @@ use time::OffsetDateTime;
 use tokio::sync::broadcast;
 use tracing::{debug, info};
 use url::Url;
-use uuid::Uuid;
 
 use super::{
     ApprovalKind, AuthCredential, CredentialKind, CredentialPolicy, CredentialPolicyResponse,
     StoredCredential, ValidCredential,
 };
 use crate::helpers::logging::format_related_ids;
-use crate::{Protocol, User, UserSessionId, WarpgateError};
+use crate::{Protocol, User, UserId, UserSessionId, WarpgateError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthResult {
@@ -79,7 +78,7 @@ impl SubmitOutcome {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthStateUserInfo {
-    pub id: Uuid,
+    pub id: UserId,
     pub username: String,
 }
 
@@ -538,6 +537,8 @@ impl AuthState {
 
 #[cfg(test)]
 mod tests {
+    use uuid::Uuid;
+
     use super::*;
     use crate::Secret;
     use crate::auth::{StoredCredentialFingerprint, StoredCredentialKind};
@@ -651,7 +652,7 @@ mod tests {
             UserSessionId(Uuid::new_v4()),
             None,
             AuthStateUserInfo {
-                id: Uuid::new_v4(),
+                id: UserId(Uuid::new_v4()),
                 username: "alice".into(),
             },
             Protocol::Ssh,

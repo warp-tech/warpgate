@@ -399,6 +399,7 @@ impl SessionStorage for SharedSessionStorage {
 mod tests {
     use sea_orm::Database;
     use uuid::Uuid;
+    use warpgate_common::UserId;
 
     use super::*;
 
@@ -434,7 +435,7 @@ mod tests {
         UserSession::Entity::insert(UserSession::ActiveModel {
             id: Set(id),
             username: Set(Some("alice".into())),
-            user_id: Set(Some(Uuid::new_v4())),
+            user_id: Set(Some(UserId(Uuid::new_v4()))),
             remote_address: Set("127.0.0.1:443".into()),
             started: Set(OffsetDateTime::now_utc()),
             ended: Set(None),
