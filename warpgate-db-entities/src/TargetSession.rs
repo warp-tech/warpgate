@@ -184,6 +184,21 @@ pub async fn open_user_sessions_admitted_by_tickets<C: ConnectionTrait>(
         .await?)
 }
 
+pub async fn open_user_sessions_for_target<C: ConnectionTrait>(
+    db: &C,
+    target_id: Uuid,
+) -> Result<Vec<UserSessionId>, WarpgateError> {
+    Ok(Entity::find()
+        .filter(Column::Ended.is_null())
+        .filter(Column::TargetId.eq(target_id))
+        .select_only()
+        .column(Column::UserSessionId)
+        .distinct()
+        .into_tuple()
+        .all(db)
+        .await?)
+}
+
 pub fn emit_ended_audit_event(session: &TargetSession::Model, user_id: Uuid, username: &str) {
     let Some(target_name) = serde_json::from_str::<serde_json::Value>(&session.target_snapshot)
         .ok()
