@@ -11,7 +11,7 @@ use tracing::{error, info};
 use uuid::Uuid;
 use warpgate_common::{TargetSSHOptions, TargetSessionId, UserSessionId};
 use warpgate_core::WarpgateServerHandle;
-use warpgate_core::recordings::{SessionRecordings, TerminalRecorder};
+use warpgate_core::recordings::{self, SessionRecordings, TerminalRecorder};
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_protocol_ssh::{
     ChannelAudit, ChannelOperation, PtyRequest, RCCommand, RCCommandReply, SshClientError,
@@ -99,13 +99,11 @@ impl WebSshSession {
     async fn start_recording(
         &self,
         target_session_id: &TargetSessionId,
-        channel_id: Uuid,
-    ) -> Option<TerminalRecorder> {
+    ) -> recordings::Result<Option<TerminalRecorder>> {
         let channel_number = self
             .channel_counter
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        match self
-            .recordings
+        self.recordings
             .start::<TerminalRecorder, _>(
                 target_session_id,
                 None,
@@ -114,11 +112,33 @@ impl WebSshSession {
                 },
             )
             .await
-        {
-            Ok(recorder) => recorder,
-            Err(e) => {
-                error!(%channel_id, ?e, "Failed to start terminal recording");
-                None
+    }
+
+    /// A recorded session must not continue unrecorded
+    async fn fail_on_recording_error(&self, channel_id: Uuid, error: recordings::Error) {
+        error!(session=%self.id(), channel=%channel_id, ?error, "Session recording failed, closing the session");
+        self.push(ServerMessage::Error {
+            message: "Session recording failed".into(),
+        })
+        .await;
+        self.abort();
+    }
+
+    /// `false` if the recording failed and the session is ending
+    async fn audit(
+        &self,
+        channel_id: Uuid,
+        record: impl AsyncFnOnce(&mut ChannelAudit) -> recordings::Result<()>,
+    ) -> bool {
+        let result = match self.channel_audits.lock().await.get_mut(&channel_id) {
+            Some(audit) => record(audit).await,
+            None => Ok(()),
+        };
+        match result {
+            Ok(()) => true,
+            Err(error) => {
+                self.fail_on_recording_error(channel_id, error).await;
+                false
             }
         }
     }
@@ -147,11 +167,17 @@ impl WebSshSession {
         let mut audit = ChannelAudit::new(channel_id);
         let (cols, rows) = pty_request.screen_size();
         audit.start_command_detection(cols, rows);
-        if let Some(recorder) = self.start_recording(target_session_id, channel_id).await {
-            audit.set_recorder(recorder);
+        let started = async {
+            let recorder = self.start_recording(target_session_id).await?;
+            audit.set_recorder(recorder).await?;
+            // seeds the recording with the initial screen size
+            audit.on_resize(&pty_request).await
         }
-        // seeds the recording with the initial screen size
-        audit.on_resize(&pty_request).await;
+        .await;
+        if let Err(error) = started {
+            self.fail_on_recording_error(channel_id, error).await;
+            return None;
+        }
         self.channel_audits.lock().await.insert(channel_id, audit);
 
         self.command(RCCommand::Channel(channel_id, ChannelOperation::OpenShell));
@@ -167,27 +193,33 @@ impl WebSshSession {
     }
 
     pub async fn send_input(&self, channel_id: Uuid, data: Bytes) {
-        if let Some(audit) = self.channel_audits.lock().await.get_mut(&channel_id) {
-            audit.on_input(&data).await;
+        if self
+            .audit(channel_id, async |audit| audit.on_input(&data).await)
+            .await
+        {
+            self.command(RCCommand::Channel(channel_id, ChannelOperation::Data(data)));
         }
-        self.command(RCCommand::Channel(channel_id, ChannelOperation::Data(data)));
     }
 
-    pub async fn on_output(&self, channel_id: Uuid, data: &[u8]) {
-        if let Some(audit) = self.channel_audits.lock().await.get_mut(&channel_id) {
-            audit.on_output(data).await;
-        }
+    /// `false` if the output could not be recorded. It must not be shown
+    pub async fn on_output(&self, channel_id: Uuid, data: &[u8]) -> bool {
+        self.audit(channel_id, async |audit| audit.on_output(data).await)
+            .await
     }
 
     pub async fn resize_channel(&self, channel_id: Uuid, cols: u32, rows: u32) {
         let pty_request = make_pty_request(cols, rows);
-        if let Some(audit) = self.channel_audits.lock().await.get_mut(&channel_id) {
-            audit.on_resize(&pty_request).await;
+        if self
+            .audit(channel_id, async |audit| {
+                audit.on_resize(&pty_request).await
+            })
+            .await
+        {
+            self.command(RCCommand::Channel(
+                channel_id,
+                ChannelOperation::ResizePty(pty_request),
+            ));
         }
-        self.command(RCCommand::Channel(
-            channel_id,
-            ChannelOperation::ResizePty(pty_request),
-        ));
     }
 
     pub fn close_channel(&self, channel_id: Uuid) {

@@ -202,3 +202,16 @@ def psql_held(processes: ProcessManager, gateway_postgres_port, user, target):
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
     )
+
+
+def wait_for_recording(url, username, kind):
+    with admin_client(url) as api:
+        for _ in range(20):
+            for session in api.get_sessions().items:
+                if session.username != username:
+                    continue
+                for rec in api.get_session_recordings(session.id):
+                    if rec.kind == kind:
+                        return rec
+            time.sleep(0.25)
+    raise AssertionError(f"no {kind.value} recording for {username}")
