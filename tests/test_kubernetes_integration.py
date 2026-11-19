@@ -6,6 +6,8 @@ import json
 import os
 import re
 import secrets
+import socket
+import ssl
 import subprocess
 import time
 import uuid
@@ -1420,6 +1422,180 @@ class TestKubernetesIntegration:
         # No assertion on ports: the websocket port-forward protocol negotiates
         # them per stream and sends no query, so the event carries none. Only
         # the SPDY variant puts them in the URL.
+
+    @pytest.mark.asyncio
+    async def test_kubelet_run_audit_event(self, processes, shared_wg: WarpgateProcess):
+        """A command run through the kubelet's ``/run`` is audited as an exec.
+
+        ``nodes/{node}/proxy`` forwards a plain request to the kubelet. Its
+        ``/run`` endpoint executes a command and returns the output without a
+        pod subresource or a websocket.
+        """
+        k3s, user, target_name, url = _provision_kubernetes_target(
+            processes, shared_wg, "run-audit"
+        )
+        user_token = await _issue_user_token(url, user, "run-audit-token")
+        auth = {"Authorization": f"Bearer {user_token}"}
+
+        pod_name = f"run-audit-{uuid.uuid4().hex[:8]}"
+        _create_running_pod(k3s, pod_name)
+        node = k3s.kubectl(
+            ["get", "nodes", "-o", "jsonpath={.items[0].metadata.name}"]
+        ).stdout.decode()
+        proxy_path = f"/{target_name}/api/v1/nodes/{node}/proxy"
+        proxy = f"https://127.0.0.1:{shared_wg.kubernetes_port}{proxy_path}"
+
+        def exec_event(command):
+            return _wait_for_audit_event(
+                url,
+                user.username,
+                "KubernetesExecStarted1",
+                command=json.dumps(command, separators=(",", ":")),
+            )
+
+        resp = requests.post(
+            f"{proxy}/run/default/{pod_name}/alpine?cmd=echo+via-run",
+            headers=auth,
+            verify=False,
+        )
+        assert resp.status_code == 200, resp.text[:300]
+        assert resp.text == "via-run\n"
+        entry = exec_event(["echo", "via-run"])
+        assert _log_value(entry, "namespace") == "default"
+        assert _log_value(entry, "pod") == pod_name
+        assert _log_value(entry, "container") == "alpine"
+        assert _log_value(entry, "target_name") == target_name
+
+        # The API server resolves `..` after decoding the path, so this is the
+        # same endpoint.
+        resp = requests.post(
+            f"{proxy}/logs%2F..%2Frun/default/{pod_name}/alpine?cmd=echo+dot-dot",
+            headers=auth,
+            verify=False,
+        )
+        assert resp.status_code == 200, resp.text[:300]
+        assert resp.text == "dot-dot\n"
+        exec_event(["echo", "dot-dot"])
+
+        # A refused request gets a rejection event, not an exec event.
+        resp = requests.post(
+            f"{proxy}/run/default/{pod_name}-missing/alpine?cmd=id",
+            headers=auth,
+            verify=False,
+        )
+        assert resp.status_code == 404, resp.text[:300]
+        entry = _wait_for_audit_event(
+            url, user.username, "KubernetesStreamRejected1", pod=f"{pod_name}-missing"
+        )
+        assert _log_value(entry, "status") == "404"
+
+        # The client disconnects while its command is running. The command is
+        # still audited.
+        tls = ssl.create_default_context()
+        tls.check_hostname = False
+        tls.verify_mode = ssl.CERT_NONE
+        with socket.create_connection(("127.0.0.1", shared_wg.kubernetes_port)) as tcp:
+            with tls.wrap_socket(tcp) as conn:
+                conn.sendall(
+                    (
+                        f"POST {proxy_path}/run/default/{pod_name}/alpine?cmd=sleep+31 HTTP/1.1\r\n"
+                        f"Host: 127.0.0.1\r\n"
+                        f"Authorization: Bearer {user_token}\r\n"
+                        f"Content-Length: 0\r\n\r\n"
+                    ).encode()
+                )
+                deadline = time.time() + 60
+                while k3s.kubectl(
+                    ["exec", "-n", "default", pod_name, "--", "pgrep", "-f", "sleep 31"],
+                    check=False,
+                ).returncode:
+                    assert time.time() < deadline, "the command never started"
+                    time.sleep(0.5)
+        exec_event(["sleep", "31"])
+
+        # The kubelet's streaming endpoints are not audited because they cannot
+        # work through the node proxy: the API server drops the query when it
+        # forwards an upgrade, so the kubelet gets no command and no streams.
+        # If a cluster ever runs this command, they need classifying too.
+        # Warpgate reports the refusal as a failed handshake or by closing the
+        # websocket at once.
+        received = b""
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.ws_connect(
+                    f"{proxy}/exec/default/{pod_name}/alpine"
+                    "?command=echo&command=kubelet-exec&output=1",
+                    headers=auth,
+                    protocols=["v4.channel.k8s.io"],
+                    ssl=False,
+                ) as ws:
+                    async for message in ws:
+                        if message.type == aiohttp.WSMsgType.BINARY:
+                            received += message.data
+            except aiohttp.WSServerHandshakeError as refused:
+                assert refused.status == 400
+        assert b"kubelet-exec" not in received
+
+    @pytest.mark.asyncio
+    async def test_exec_audit_names_the_container_that_ran(
+        self, processes, shared_wg: WarpgateProcess
+    ):
+        """The audit event has the container the command actually ran in.
+
+        The API server uses the first of a repeated ``container`` parameter and
+        ignores the rest.
+        """
+        k3s, user, target_name, url = _provision_kubernetes_target(
+            processes, shared_wg, "container-audit"
+        )
+        user_token = await _issue_user_token(url, user, "container-audit-token")
+
+        # The containers run different commands, so PID 1's command line shows
+        # which one the exec ran in.
+        pod_name = f"container-audit-{uuid.uuid4().hex[:8]}"
+        k3s.kubectl(
+            ["apply", "-f", "-"],
+            input=(
+                f"apiVersion: v1\n"
+                f"kind: Pod\n"
+                f"metadata:\n"
+                f"  name: {pod_name}\n"
+                f"  namespace: default\n"
+                f"spec:\n"
+                f"  containers:\n"
+                f"  - name: first\n"
+                f"    image: alpine:3\n"
+                f"    command: ['sleep', '1111']\n"
+                f"  - name: second\n"
+                f"    image: alpine:3\n"
+                f"    command: ['sleep', '2222']\n"
+            ).encode(),
+        )
+        k3s.kubectl(
+            ["wait", "--for=condition=Ready", f"pod/{pod_name}", "-n", "default", "--timeout=120s"]
+        )
+
+        output = b""
+        async with aiohttp.ClientSession() as session:
+            async with session.ws_connect(
+                f"https://127.0.0.1:{shared_wg.kubernetes_port}/{target_name}"
+                f"/api/v1/namespaces/default/pods/{pod_name}/exec"
+                "?command=cat&command=/proc/1/cmdline&stdout=1"
+                "&container=first&container=second",
+                headers={"Authorization": f"Bearer {user_token}"},
+                protocols=["v4.channel.k8s.io"],
+                ssl=False,
+            ) as ws:
+                async for message in ws:
+                    # Channel 1 is stdout.
+                    if message.type == aiohttp.WSMsgType.BINARY and message.data[:1] == b"\x01":
+                        output += message.data[1:]
+        assert output == b"sleep\x001111\x00"
+
+        entry = _wait_for_audit_event(
+            url, user.username, "KubernetesExecStarted1", pod=pod_name
+        )
+        assert _log_value(entry, "container") == "first"
 
     # -- OIDC Bearer authentication ----------------------------------------
 
