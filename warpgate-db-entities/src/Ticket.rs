@@ -1,4 +1,5 @@
 use sea_orm::entity::prelude::*;
+use sea_orm::sea_query::ExprTrait;
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::helpers::hash::hash_secret;

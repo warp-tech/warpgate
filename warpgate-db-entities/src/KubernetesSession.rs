@@ -1,5 +1,5 @@
 use sea_orm::entity::prelude::*;
-use sea_orm::sea_query::{OnConflict, Query};
+use sea_orm::sea_query::{ExprTrait, OnConflict, Query};
 use sea_orm::{Condition, Set};
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -95,7 +95,7 @@ pub async fn claim(
         created: Set(created),
         target_session_id: Set(None),
     })
-    .do_nothing()
+    .try_insert()
     .exec_without_returning(db)
     .await?;
 

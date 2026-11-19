@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use sea_orm::sea_query::Expr;
+use sea_orm::sea_query::{Expr, ExprTrait};
 use sea_orm::{
     ColumnTrait, ConnectOptions, Database, DatabaseConnection, DbErr, EntityOrSelect, EntityTrait,
     QueryFilter, QuerySelect, SqlErr,

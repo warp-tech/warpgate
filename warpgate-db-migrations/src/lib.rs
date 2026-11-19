@@ -230,7 +230,7 @@ async fn run_locked<
         DatabaseBackend::Postgres => {
             let lock = connection.begin().await?;
             // lock is tx scoped
-            lock.execute(Statement::from_string(
+            lock.execute_raw(Statement::from_string(
                 DatabaseBackend::Postgres,
                 format!("SELECT pg_advisory_xact_lock({key})"),
             ))
@@ -242,14 +242,14 @@ async fn run_locked<
         DatabaseBackend::MySql => {
             let lock = connection.begin().await?;
             // lock is session scoped
-            lock.execute(Statement::from_string(
+            lock.execute_raw(Statement::from_string(
                 DatabaseBackend::MySql,
                 format!("SELECT GET_LOCK('warpgate_migration_{key}', -1)"),
             ))
             .await?;
             let result = f().await;
             let release = lock
-                .execute(Statement::from_string(
+                .execute_raw(Statement::from_string(
                     DatabaseBackend::MySql,
                     format!("SELECT RELEASE_LOCK('warpgate_migration_{key}')"),
                 ))
@@ -259,6 +259,9 @@ async fn run_locked<
             result
         }
         DatabaseBackend::Sqlite => f().await,
+        backend => Err(DbErr::Migration(format!(
+            "unsupported database backend: {backend:?}"
+        ))),
     }
 }
 

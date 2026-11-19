@@ -94,7 +94,7 @@ pub async fn lock_for_update(
     id: UserSessionId,
 ) -> Result<Option<Model>, WarpgateError> {
     Entity::update_many()
-        .col_expr(Column::Started, Expr::col(Column::Started).into())
+        .col_expr(Column::Started, Expr::col(Column::Started))
         .filter(Column::Id.eq(id))
         .exec(transaction)
         .await?;

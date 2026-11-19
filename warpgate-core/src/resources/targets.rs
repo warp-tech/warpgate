@@ -1,6 +1,6 @@
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, ModelTrait, QueryFilter, Set,
-    TransactionTrait,
+    TransactionSession, TransactionTrait,
 };
 use uuid::Uuid;
 pub use warpgate_common::TargetDataRequest;

@@ -42,7 +42,6 @@ pub struct Migration;
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let db = manager.get_connection();
-        let backend = db.get_database_backend();
 
         let sessions = Alias::new("sessions");
         let id_col = Alias::new("id");
@@ -64,7 +63,7 @@ impl MigrationTrait for Migration {
                 select.and_where(Expr::col(id_col.clone()).gt(last_id));
             }
 
-            let rows = db.query_all(backend.build(&select)).await?;
+            let rows = db.query_all(&select).await?;
             let done = (rows.len() as u64) < BATCH;
 
             for row in &rows {
@@ -78,7 +77,7 @@ impl MigrationTrait for Migration {
                         .value(snapshot_col.clone(), redacted)
                         .and_where(Expr::col(id_col.clone()).eq(id))
                         .to_owned();
-                    db.execute(backend.build(&update)).await?;
+                    db.execute(&update).await?;
                 }
             }
 

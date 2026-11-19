@@ -1,7 +1,7 @@
 use poem_openapi::Object;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, ModelTrait, QueryFilter, Set,
-    TransactionTrait,
+    TransactionSession, TransactionTrait,
 };
 use uuid::Uuid;
 use warpgate_db_entities::{Role, TargetRoleAssignment, UserRoleAssignment};

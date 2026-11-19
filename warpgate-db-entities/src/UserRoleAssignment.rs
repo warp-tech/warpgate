@@ -1,7 +1,7 @@
 use poem_openapi::Object;
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
-use sea_orm::sea_query::IntoIden;
+use sea_orm::sea_query::{ExprTrait, IntoIden};
 use sea_orm::Condition;
 use serde::Serialize;
 use time::OffsetDateTime;

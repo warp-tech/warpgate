@@ -2,7 +2,7 @@ use std::ops::Deref;
 
 use poem_openapi::Enum;
 use sea_orm::entity::prelude::*;
-use sea_orm::sea_query::{IntoCondition, SimpleExpr};
+use sea_orm::sea_query::{ExprTrait, IntoCondition, SimpleExpr};
 use sea_orm::{Condition, NotSet, QueryFilter, Set, SqlErr};
 use serde::Serialize;
 use time::OffsetDateTime;
@@ -218,9 +218,9 @@ impl Key {
     }
 }
 
-impl IntoCondition for Key {
-    fn into_condition(self) -> Condition {
-        self.0
+impl From<Key> for Condition {
+    fn from(key: Key) -> Self {
+        key.0
     }
 }
 
@@ -259,6 +259,7 @@ async fn try_refresh_pending(db: &DatabaseConnection, row: &ActiveModel) -> Resu
         ..row.clone()
     };
     match Entity::update(refresh)
+        .validate()?
         .filter(Column::Status.eq(ApprovalRequestStatus::Pending))
         .exec(db)
         .await
@@ -310,6 +311,7 @@ async fn try_reopen_unanswered(
         ..row.clone()
     };
     let result = match Entity::update(reopened)
+        .validate()?
         .filter(Column::Status.is_in(ApprovalRequestStatus::UNANSWERED))
         .exec(db)
         .await

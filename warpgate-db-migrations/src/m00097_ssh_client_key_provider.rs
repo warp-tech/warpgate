@@ -58,13 +58,13 @@ mod tests {
             )
         };
         for label in ["deploy", "deploy", "ci"] {
-            db.execute(insert(label)).await.unwrap();
+            db.execute_raw(insert(label)).await.unwrap();
         }
 
         Migrator::up(&db, None).await.unwrap();
 
         let rows = db
-            .query_all(Statement::from_string(
+            .query_all_raw(Statement::from_string(
                 backend,
                 "SELECT label, provider FROM ssh_client_keys ORDER BY label",
             ))
@@ -80,7 +80,7 @@ mod tests {
             assert_eq!(provider, None);
         }
 
-        db.execute(insert("ci"))
+        db.execute_raw(insert("ci"))
             .await
             .expect_err("the unique index must reject a duplicate label");
     }

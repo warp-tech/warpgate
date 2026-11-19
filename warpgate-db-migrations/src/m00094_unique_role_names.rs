@@ -45,13 +45,13 @@ mod tests {
             )
         };
         for name in ["dba", "dba", "ops"] {
-            db.execute(insert(name)).await.unwrap();
+            db.execute_raw(insert(name)).await.unwrap();
         }
 
         Migrator::up(&db, None).await.unwrap();
 
         let names: Vec<String> = db
-            .query_all(Statement::from_string(
+            .query_all_raw(Statement::from_string(
                 backend,
                 "SELECT name FROM roles ORDER BY name",
             ))
@@ -62,7 +62,7 @@ mod tests {
             .collect();
         assert_eq!(names, ["dba", "dba (2)", "ops"]);
 
-        db.execute(insert("ops"))
+        db.execute_raw(insert("ops"))
             .await
             .expect_err("the unique index must reject a duplicate role name");
     }
