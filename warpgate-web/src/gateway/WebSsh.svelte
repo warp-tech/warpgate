@@ -15,6 +15,7 @@
         ModalBody,
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
+    import { autosave } from 'common/autosave'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import { stringifyError } from 'common/errors'
     import { handleReauthError } from 'common/reauth'
@@ -90,29 +91,19 @@
     const FONT_SIZE_MIN = 8
     const FONT_SIZE_MAX = 32
     const FONT_SIZE_STEP = 1
-    let fontSize = $state(
-        parseInt(localStorage.warpgateWebSSHFontSize ?? '14', 10),
-    )
-
-    $effect(() => {
-        localStorage.warpgateWebSSHFontSize = String(fontSize)
-    })
+    let fontSize = autosave('web-ssh:font-size', 14)[0]
 
     // Optional user-chosen font (e.g. a locally installed Nerd Font), tried
     // before the bundled fallback. Stored per browser, like the font size.
-    let fontFamily = $state(localStorage.warpgateWebSSHFontFamily ?? '')
+    let fontFamily = autosave('web-ssh:font-family', '')[0]
     let fontFamilyDraft = $state('')
     let showFontSettings = $state(false)
 
-    $effect(() => {
-        localStorage.warpgateWebSSHFontFamily = fontFamily
-    })
-
     function zoomIn() {
-        fontSize = Math.min(FONT_SIZE_MAX, fontSize + FONT_SIZE_STEP)
+        fontSize.set(Math.min(FONT_SIZE_MAX, $fontSize + FONT_SIZE_STEP))
     }
     function zoomOut() {
-        fontSize = Math.max(FONT_SIZE_MIN, fontSize - FONT_SIZE_STEP)
+        fontSize.set(Math.max(FONT_SIZE_MIN, $fontSize - FONT_SIZE_STEP))
     }
 
     let menuOpen = $state(false)
@@ -338,8 +329,8 @@
                 <SshTerminalTab
                     bind:this={tabs[id]}
                     active={id === activeChannelId}
-                    {fontSize}
-                    {fontFamily}
+                    fontSize={$fontSize}
+                    fontFamily={$fontFamily}
                     readOnly={!connected}
                     onInput={data =>
                         send({
@@ -429,7 +420,7 @@
                     <button
                         type="button"
                         class="btn btn-sm btn-secondary"
-                        disabled={fontSize <= FONT_SIZE_MIN}
+                        disabled={$fontSize <= FONT_SIZE_MIN}
                         onclick={() => {
                             zoomOut()
                             menuOpen = true
@@ -444,7 +435,7 @@
                     <button
                         type="button"
                         class="btn btn-sm btn-secondary"
-                        disabled={fontSize >= FONT_SIZE_MAX}
+                        disabled={$fontSize >= FONT_SIZE_MAX}
                         onclick={() => {
                             zoomIn()
                             menuOpen = true
@@ -454,17 +445,20 @@
                         <Fa icon={faPlus} />
                     </button>
                 </div>
-                <DropdownItem
-                    onclick={() => {
-                        fontFamilyDraft = fontFamily
-                        showFontSettings = true
-                        menuOpen = false
-                    }}
-                >
-                    Terminal font
-                </DropdownItem>
                 {#if sessionInfo}
                     <DropdownItem divider />
+                    <DropdownItem
+                        onclick={() => {
+                            fontFamilyDraft = $fontFamily
+                            showFontSettings = true
+                            menuOpen = false
+                        }}
+                    >
+                        <div>
+                            <div>Terminal font</div>
+                            <div class="small">{$fontFamily}</div>
+                        </div>
+                    </DropdownItem>
                     <DropdownItem
                         onclick={() => {
                             showInstructions = true
@@ -483,7 +477,7 @@
     <form
         onsubmit={e => {
             e.preventDefault()
-            fontFamily = fontFamilyDraft.trim()
+            fontFamily.set(fontFamilyDraft.trim())
             showFontSettings = false
         }}
     >
