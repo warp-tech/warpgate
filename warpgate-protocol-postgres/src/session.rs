@@ -1,11 +1,9 @@
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use bytes::Bytes;
 use pgwire::error::ErrorInfo;
-use pgwire::messages::startup::SecretKey;
+use pgwire::messages::cancel::CancelRequest;
 use pgwire::messages::{
     DecodeContext, PgWireBackendMessage, PgWireFrontendMessage, ProtocolVersion,
 };
@@ -26,6 +24,7 @@ use warpgate_core::{
 };
 use warpgate_tls::ServerTlsStream;
 
+use crate::cancel::{CancelKeyGuard, CancelRegistry, CancelTarget};
 use crate::client::{ConnectionOptions, PostgresClient};
 use crate::error::PostgresError;
 use crate::stream::{
@@ -43,12 +42,11 @@ pub struct PostgresSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
     services: Services,
     remote_address: SocketAddr,
     decode_context: DecodeContext,
-    /// Used to remap cancel keys when the target uses protocol 3.2
-    /// but the client only supports 3.0
-    cancel_key_downgrade_map: HashMap<SecretKey, SecretKey>,
-    /// Used to remap cancel keys when the target uses protocol 3.0
-    /// but the client already supports 3.2
-    cancel_key_upgrade_map: HashMap<SecretKey, SecretKey>,
+    cancel_registry: CancelRegistry,
+    /// Target used for cancel requests once the session is connected
+    cancel_target_options: Option<TargetPostgresOptions>,
+    /// Cancel key issued to the client, unregistered when the session ends
+    cancel_key: Option<CancelKeyGuard>,
 }
 
 impl<S: AsyncRead + AsyncWrite + Send + Unpin> DbAuthTransport for PostgresSession<S> {
@@ -165,6 +163,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         stream: S,
         tls_config: ServerConfig,
         remote_address: SocketAddr,
+        cancel_registry: CancelRegistry,
     ) -> Self {
         let id = server_handle.lock().await.user_session_id();
 
@@ -178,8 +177,9 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
             id,
             remote_address,
             decode_context: DecodeContext::new(pgwire::messages::ProtocolVersion::PROTOCOL3_2),
-            cancel_key_downgrade_map: HashMap::new(),
-            cancel_key_upgrade_map: HashMap::new(),
+            cancel_registry,
+            cancel_target_options: None,
+            cancel_key: None,
         }
     }
 
@@ -228,6 +228,11 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                     tls_established = true;
                     debug!("TLS setup complete");
                 }
+                PgWireStartupOrSslRequest::CancelRequest(request) => {
+                    Self::forward_cancel_request(self.cancel_registry.clone(), request).await;
+                    // The server never answers a cancel request, it just closes
+                    return Ok(());
+                }
                 PgWireStartupOrSslRequest::Startup(startup) => {
                     if !tls_established {
                         self.send_error_response(
@@ -271,6 +276,22 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
 
         self.run_authorization(startup, &username.unwrap_or_else(|| "".into()))
             .await
+    }
+
+    /// Cancel requests carry no credentials, only the key the client got in
+    /// BackendKeyData, so unknown keys are dropped silently like Postgres does.
+    async fn forward_cancel_request(registry: CancelRegistry, request: CancelRequest) {
+        let Some(target) = registry.lookup(request.pid, &request.secret_key) else {
+            debug!("Ignoring cancel request with an unknown key");
+            return;
+        };
+        info!(pid = target.pid, "Forwarding cancel request to target");
+        if let Err(error) =
+            PostgresClient::send_cancel_request(&target.options, target.pid, target.secret_key)
+                .await
+        {
+            warn!(%error, "Failed to forward cancel request to target");
+        }
     }
 
     pub async fn run_authorization(
@@ -392,6 +413,8 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
             }
         };
 
+        self.cancel_target_options = Some(options.clone());
+
         let mut last_activity = std::time::Instant::now();
         let check_interval = Duration::from_secs(5); // Check idle timeout every 5 seconds
 
@@ -426,10 +449,9 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
             tokio::select! {
                 c_to_s = time::timeout(select_timeout, self.stream.recv::<PgWireGenericFrontendMessage>(&self.decode_context)) => {
                     match c_to_s {
-                        Ok(Ok(Some(mut msg))) => {
+                        Ok(Ok(Some(msg))) => {
                             last_activity = std::time::Instant::now(); // Update activity on client message
                             Self::maybe_log_client_msg(&msg.0);
-                            msg = self.maybe_transform_client_msg(msg, &client);
                             client.send(msg).await?;
                         }
                         Ok(Ok(None)) => {
@@ -468,60 +490,26 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         Ok(())
     }
 
-    /// Needed to downgrade cancel key handling from 3.2 to 3.0 protocol
-    fn maybe_transform_client_msg(
-        &mut self,
-        mut msg: PgWireGenericFrontendMessage,
-        client: &PostgresClient,
-    ) -> PgWireGenericFrontendMessage {
-        if let PgWireFrontendMessage::CancelRequest(cancel_request) = &mut msg.0 {
-            // Transform cancel keys back to 3.2 format if needed
-            if let SecretKey::I32(_) = cancel_request.secret_key
-                && let Some(upgraded_key) = self
-                    .cancel_key_downgrade_map
-                    .remove(&cancel_request.secret_key)
-            {
-                cancel_request.secret_key = upgraded_key;
-            }
-            if client.protocol_version() == ProtocolVersion::PROTOCOL3_0 {
-                // Transform cancel keys to 3.0 format if needed
-                if let SecretKey::Bytes(_) = cancel_request.secret_key
-                    && let Some(downgraded_key) = self
-                        .cancel_key_upgrade_map
-                        .remove(&cancel_request.secret_key)
-                {
-                    cancel_request.secret_key = downgraded_key;
-                }
-            }
-        }
-        msg
-    }
-
+    /// Replaces the target's cancel key with one issued by Warpgate, in the
+    /// format of the client's protocol version, so that cancel requests can
+    /// be routed back to this target.
     fn maybe_transform_server_msg(
         &mut self,
         mut msg: PgWireGenericBackendMessage,
     ) -> PgWireGenericBackendMessage {
-        if let PgWireBackendMessage::BackendKeyData(key_data) = &mut msg.0 {
-            // Locally issue a 3.0 protocol key in older format and store mapping
-            if self.decode_context.protocol_version == ProtocolVersion::PROTOCOL3_0 {
-                // Locally issue a random key in older format and store mapping
-                if let SecretKey::Bytes(bytes) = &key_data.secret_key {
-                    let downgraded_key = SecretKey::I32(rand::random::<i32>());
-                    self.cancel_key_downgrade_map
-                        .insert(downgraded_key.clone(), SecretKey::Bytes(bytes.clone()));
-                    key_data.secret_key = downgraded_key;
-                }
-            }
-            if self.decode_context.protocol_version == ProtocolVersion::PROTOCOL3_2 {
-                // Locally issue a 3.2 protocol key in newer format and store mapping
-                if let SecretKey::I32(_) = key_data.secret_key {
-                    let value = rand::random::<[u8; 32]>();
-                    let upgraded_key = SecretKey::Bytes(Bytes::from_owner(value));
-                    self.cancel_key_upgrade_map
-                        .insert(upgraded_key.clone(), key_data.secret_key.clone());
-                    key_data.secret_key = upgraded_key;
-                }
-            }
+        if let PgWireBackendMessage::BackendKeyData(key_data) = &mut msg.0
+            && let Some(options) = self.cancel_target_options.clone()
+        {
+            let guard = self.cancel_registry.issue(
+                self.decode_context.protocol_version,
+                CancelTarget {
+                    options,
+                    pid: key_data.pid,
+                    secret_key: key_data.secret_key.clone(),
+                },
+            );
+            key_data.secret_key = guard.secret_key.clone();
+            self.cancel_key = Some(guard);
         }
         msg
     }

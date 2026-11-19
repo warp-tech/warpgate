@@ -32,11 +32,12 @@ pub enum PgWireStartupOrSslRequest {
     Startup(pgwire::messages::startup::Startup),
     SslRequest(pgwire::messages::startup::SslRequest),
     GssEncRequest(pgwire::messages::startup::GssEncRequest),
+    CancelRequest(pgwire::messages::cancel::CancelRequest),
 }
 
 impl PostgresDecode for PgWireStartupOrSslRequest {
     fn decode(buf: &mut BytesMut, ctx: &DecodeContext) -> PgWireResult<Option<Self>> {
-        // All three are distinguished by the magic number in their 8-byte header;
+        // All four are distinguished by the magic number in their 8-byte header;
         // a shorter buffer isn't decodable as any of them yet.
         if pgwire::messages::startup::SslRequest::is_ssl_request_packet(buf) {
             return pgwire::messages::startup::SslRequest::decode(buf, ctx)
@@ -45,6 +46,12 @@ impl PostgresDecode for PgWireStartupOrSslRequest {
         if pgwire::messages::startup::GssEncRequest::is_gss_enc_request_packet(buf) {
             return pgwire::messages::startup::GssEncRequest::decode(buf, ctx)
                 .map(|x| x.map(Self::GssEncRequest));
+        }
+        // A cancel request arrives on its own connection instead of a startup
+        // message, either in plaintext (libpq < 17) or after an SslRequest.
+        if pgwire::messages::cancel::CancelRequest::is_cancel_request_packet(buf) {
+            return pgwire::messages::cancel::CancelRequest::decode(buf, ctx)
+                .map(|x| x.map(Self::CancelRequest));
         }
         pgwire::messages::startup::Startup::decode(buf, ctx).map(|x| x.map(Self::Startup))
     }
