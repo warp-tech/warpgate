@@ -26,7 +26,7 @@ use warpgate_core::logging::KubernetesAuditSubject;
 use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
 use warpgate_core::{Services, WarpgateServerHandle};
 
-use crate::audit::{StreamOperation, classify_mutating, classify_stream};
+use crate::audit::{StreamOperation, classify_pod_write, classify_stream};
 use crate::correlator::{AdmittedSession, RequestCorrelator, correlated_authorization};
 use crate::recording::{start_recording_api, start_recording_exec};
 use crate::server::UpstreamClientCache;
@@ -434,18 +434,34 @@ async fn _handle_normal_request_inner(
     // the client learns whether it was applied and an audited one keeps its
     // event. A close before dispatch still refuses it.
     let is_write = !req.method().is_safe();
-    let response = if is_write {
+    let sent = if is_write {
         if closed.is_cancelled() {
             return Err(WarpgateError::UserSessionEnded);
         }
-        request_builder.send().await?
+        request_builder.send().await
     } else {
         closed
             .run_until_cancelled(request_builder.send())
             .await
-            .ok_or(WarpgateError::UserSessionEnded)??
+            .ok_or(WarpgateError::UserSessionEnded)?
     };
 
+    // Audit before a response read error aborts this task.
+    if let Some(write) = classify_pod_write(method, api_path, req.uri().query()) {
+        let content_type = req
+            .headers()
+            .get(http::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok());
+        let status = sent.as_ref().ok().map(|r| r.status().as_u16());
+        for event in write
+            .read(content_type, &body_bytes)
+            .audit_events(audit_subject, status)
+        {
+            event.emit();
+        }
+    }
+
+    let response = sent?;
     let status = response.status();
     let response_headers = response.headers().clone();
 
@@ -453,15 +469,6 @@ async fn _handle_normal_request_inner(
     // build a fresh one for the next request.
     if status == http::StatusCode::UNAUTHORIZED {
         upstream_clients.remove(&target_id);
-    }
-
-    // Emitted after the response so a refused `kubectl debug` is audited as
-    // clearly as an accepted one, and before the body is consumed so a failure
-    // to read it cannot lose the event.
-    if let Some(operation) = classify_mutating(method, api_path, req.uri().query(), &body_bytes) {
-        for event in operation.audit_events(audit_subject, status.as_u16()) {
-            event.emit();
-        }
     }
 
     debug!(
