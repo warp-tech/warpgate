@@ -9,6 +9,8 @@
 //! `container=` landed on, say), and inventing that would put unverified names
 //! into an audit log, so unspecified stays unspecified.
 
+use std::borrow::Cow;
+
 use serde::Deserialize;
 use warpgate_core::logging::{AuditEvent, KubernetesAuditSubject};
 
@@ -32,7 +34,7 @@ pub struct PodRef {
     pub pod: String,
 }
 
-/// A pod subresource that upgrades to a stream.
+/// An exec, attach or port forward against a pod.
 #[derive(Debug)]
 pub struct StreamOperation {
     pub pod: PodRef,
@@ -129,7 +131,7 @@ pub struct PodSummary {
 // ---------- URL classification ----------
 
 /// The parts of `/api/v1/namespaces/{ns}/pods[/{name}[/{subresource}]]`, the
-/// only path shape any audited operation takes.
+/// path of every audited operation except a kubelet `/run`.
 ///
 /// Classification reads the request path rather than the upstream URL, so a
 /// target whose cluster URL carries a path prefix is audited like any other.
@@ -170,12 +172,73 @@ fn parse_pods_path(api_path: &str) -> Option<PodsPath> {
     })
 }
 
-/// Matches Go's `strconv.ParseBool`, which is how the API server reads these.
-pub(crate) fn parse_bool(value: &str) -> bool {
-    matches!(value, "1" | "t" | "T" | "TRUE" | "true" | "True")
+/// The kubelet path segments of `/api/v1/nodes/{node}/proxy/{kubelet path}`.
+/// `{node}` can also be `{node}:{port}` or `{scheme}:{node}:{port}`, so it is
+/// not parsed.
+///
+/// `.` and `..` are resolved after percent-decoding. The API server joins the
+/// decoded path onto the kubelet address with Go's `path.Join`, so
+/// `logs%2F..%2Frun` reaches the kubelet as `/run`.
+fn parse_node_proxy_path(api_path: &str) -> Option<Vec<String>> {
+    let api_path = percent_encoding::percent_decode_str(api_path).decode_utf8_lossy();
+    let mut segments = api_path.split('/').filter(|s| !s.is_empty());
+
+    if segments.next()? != "api" || segments.next()? != "v1" || segments.next()? != "nodes" {
+        return None;
+    }
+    segments.next()?;
+    if segments.next()? != "proxy" {
+        return None;
+    }
+
+    let mut kubelet_path = Vec::new();
+    for segment in segments {
+        match segment {
+            "." => {}
+            ".." => {
+                kubelet_path.pop();
+            }
+            _ => kubelet_path.push(segment.to_owned()),
+        }
+    }
+    Some(kubelet_path)
 }
 
-#[derive(Default)]
+/// Parses a boolean query parameter like the API server does. `0` and `false`
+/// are false. Every other value is true, including the empty one.
+///
+/// The API server matches `false` with Go's `strings.EqualFold`, which also
+/// accepts `ſ` for `s`. `to_uppercase` folds the same way.
+pub(crate) fn parse_bool(value: &str) -> bool {
+    value != "0" && value.to_uppercase() != "FALSE"
+}
+
+/// Parses one query pair like Go's `url.ParseQuery`. `None` if Go drops it: a
+/// pair containing `;` or an invalid percent escape. `form_urlencoded` alone
+/// keeps both, which would report a parameter the cluster never saw.
+fn query_pair(pair: &str) -> Option<(Cow<'_, str>, Cow<'_, str>)> {
+    let bytes = pair.as_bytes();
+    let escapes_are_valid = bytes.iter().enumerate().all(|(index, byte)| {
+        *byte != b'%'
+            || bytes
+                .get(index + 1..index + 3)
+                .is_some_and(|digits| digits.iter().all(u8::is_ascii_hexdigit))
+    });
+    if pair.contains(';') || !escapes_are_valid {
+        return None;
+    }
+    url::form_urlencoded::parse(bytes).next()
+}
+
+/// The query's pairs as the API server and the kubelet parse them, with Go's
+/// `url.ParseQuery`.
+///
+/// Recent Go rejects a whole query of more than 10000 pairs. This still
+/// returns its pairs, so the audit can show more than the cluster saw.
+pub fn query_pairs(raw: Option<&str>) -> impl Iterator<Item = (Cow<'_, str>, Cow<'_, str>)> {
+    raw.unwrap_or_default().split('&').filter_map(query_pair)
+}
+
 struct StreamQuery {
     command: Vec<String>,
     container: Option<String>,
@@ -185,20 +248,32 @@ struct StreamQuery {
 }
 
 fn parse_stream_query(raw: Option<&str>) -> StreamQuery {
-    let mut query = StreamQuery::default();
-    for (key, value) in url::form_urlencoded::parse(raw.unwrap_or_default().as_bytes()) {
-        match key.as_ref() {
-            // kubectl sends one `command=` per argv element, so every value
-            // matters; a map keyed by name would keep exactly one of them.
-            "command" => query.command.push(value.into_owned()),
-            "ports" => query.ports.push(value.into_owned()),
-            "container" => query.container = Some(value.into_owned()),
-            "tty" => query.tty = parse_bool(&value),
-            "stdin" => query.stdin = parse_bool(&value),
-            _ => {}
-        }
+    // kubectl sends one `command=` per argv element, so a list parameter keeps
+    // every value.
+    let all = |name: &str| {
+        query_pairs(raw)
+            .filter(|(key, _)| key == name)
+            .map(|(_, value)| value.into_owned())
+            .collect()
+    };
+    // The API server uses the first value of a repeated scalar parameter and
+    // ignores the rest.
+    let first = |name: &str| {
+        query_pairs(raw)
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value)
+    };
+
+    StreamQuery {
+        command: all("command"),
+        ports: all("ports"),
+        // The API server treats an empty `container` like a missing one.
+        container: first("container")
+            .filter(|name| !name.is_empty())
+            .map(Cow::into_owned),
+        tty: first("tty").is_some_and(|value| parse_bool(&value)),
+        stdin: first("stdin").is_some_and(|value| parse_bool(&value)),
     }
-    query
 }
 
 /// A server-side dry run runs admission and answers with the object exactly as
@@ -248,6 +323,51 @@ pub fn classify_stream(api_path: &str, query: Option<&str>) -> Option<StreamOper
             pod: name,
         },
         kind,
+    })
+}
+
+/// Classifies a kubelet `/run` sent through the node proxy. It is audited as
+/// an exec because it is the same act as `pods/{name}/exec`.
+///
+/// The kubelet's `/exec`, `/attach` and `/portForward` are not classified
+/// because they cannot work through the node proxy. They need an upgrade, and
+/// Warpgate forwards only websocket upgrades, whose parameters are in the
+/// query. The API server drops the query when it forwards an upgrade, so the
+/// kubelet refuses the request.
+pub fn classify_node_run(
+    method: &str,
+    api_path: &str,
+    query: Option<&str>,
+) -> Option<StreamOperation> {
+    if method != "POST" {
+        return None;
+    }
+    let path = parse_node_proxy_path(api_path)?;
+    // `run/{namespace}/{pod}/{container}`, optionally with `{uid}` before
+    // `{container}`. The kubelet looks the pod up by name in both forms.
+    let (namespace, pod, container) = match path.as_slice() {
+        [run, namespace, pod, container] | [run, namespace, pod, _, container] if run == "run" => {
+            (namespace, pod, container)
+        }
+        _ => return None,
+    };
+    // The kubelet runs the first `cmd`, split on single spaces with no quoting.
+    let cmd = query_pairs(query)
+        .find(|(key, _)| key == "cmd")
+        .map(|(_, value)| value)
+        .unwrap_or_default();
+
+    Some(StreamOperation {
+        pod: PodRef {
+            namespace: namespace.clone(),
+            pod: pod.clone(),
+        },
+        kind: StreamKind::Exec {
+            container: Some(container.clone()),
+            command: cmd.split(' ').map(ToOwned::to_owned).collect(),
+            tty: false,
+            stdin: false,
+        },
     })
 }
 
@@ -575,7 +695,7 @@ impl StreamOperation {
         }
     }
 
-    /// The event for a stream the cluster refused.
+    /// The event for an operation the cluster refused.
     pub fn rejection_event(&self, subject: &KubernetesAuditSubject, status: u16) -> AuditEvent {
         AuditEvent::KubernetesStreamRejected {
             subject: subject.clone(),
@@ -584,6 +704,48 @@ impl StreamOperation {
             subresource: self.kind.subresource().to_owned(),
             status,
         }
+    }
+}
+
+/// Emits the audit event for a kubelet `/run` when dropped.
+///
+/// A client that disconnects mid-command cancels the handler, but the command
+/// has already started. Emitting on drop covers that case.
+///
+/// Only a 4xx is reported as rejected, because the cluster sends it before
+/// running anything. The kubelet answers 500 for a command that ran and
+/// failed, and a missing answer does not prove the command did not run.
+pub struct PendingRun {
+    run: StreamOperation,
+    subject: KubernetesAuditSubject,
+    status: Option<u16>,
+}
+
+impl PendingRun {
+    pub fn new(run: StreamOperation, subject: &KubernetesAuditSubject) -> Self {
+        Self {
+            run,
+            subject: subject.clone(),
+            status: None,
+        }
+    }
+
+    /// Records the cluster's answer and emits the event.
+    pub fn answered(mut self, status: u16) {
+        self.status = Some(status);
+    }
+
+    fn event(&self) -> AuditEvent {
+        match self.status {
+            Some(status @ 400..=499) => self.run.rejection_event(&self.subject, status),
+            _ => self.run.audit_event(&self.subject),
+        }
+    }
+}
+
+impl Drop for PendingRun {
+    fn drop(&mut self) {
+        self.event().emit();
     }
 }
 
@@ -683,6 +845,21 @@ mod tests {
         }
     }
 
+    fn node_run(suffix: &str) -> Option<StreamOperation> {
+        let full = format!("/api/v1/nodes/worker-1/proxy{suffix}");
+        full.split_once('?').map_or_else(
+            || classify_node_run("POST", &full, None),
+            |(path, query)| classify_node_run("POST", path, Some(query)),
+        )
+    }
+
+    fn run_command(suffix: &str) -> Vec<String> {
+        let StreamKind::Exec { command, .. } = node_run(suffix).unwrap().kind else {
+            panic!("expected an exec");
+        };
+        command
+    }
+
     #[test]
     fn exec_keeps_every_command_argument() {
         // `kubectl exec pod -- ls -la` sends one `command=` per argv element.
@@ -758,8 +935,61 @@ mod tests {
             panic!("expected an attach");
         };
         assert_eq!(container.as_deref(), Some("api"));
-        // The API server parses these with Go's ParseBool, so "1" is true.
         assert!(tty);
+    }
+
+    #[test]
+    fn repeated_scalars_are_read_as_the_api_server_reads_them() {
+        // The API server uses the first of each: `api`, no terminal, stdin.
+        let operation = stream(
+            "/api-7f9/exec?container=api&container=decoy&tty=0&tty=1&stdin=1&stdin=0&command=id",
+        )
+        .unwrap();
+        let StreamKind::Exec {
+            container,
+            tty,
+            stdin,
+            ..
+        } = operation.kind
+        else {
+            panic!("expected an exec");
+        };
+        assert_eq!(container.as_deref(), Some("api"));
+        assert!(!tty);
+        assert!(stdin);
+
+        // Go drops the `;` pair, so `api` is the first container.
+        let operation = stream("/api-7f9/attach?container=decoy;&container=api").unwrap();
+        let StreamKind::Attach { container, .. } = operation.kind else {
+            panic!("expected an attach");
+        };
+        assert_eq!(container.as_deref(), Some("api"));
+
+        // An empty first `container` counts as none. The second is ignored.
+        let operation = stream("/api-7f9/exec?container=&container=decoy&command=id").unwrap();
+        let StreamKind::Exec { container, .. } = operation.kind else {
+            panic!("expected an exec");
+        };
+        assert_eq!(container, None);
+    }
+
+    #[test]
+    fn booleans_are_read_as_the_api_server_reads_them() {
+        for value in ["0", "false", "False", "FALSE", "falſe"] {
+            assert!(!parse_bool(value), "{value:?}");
+        }
+        for value in ["1", "true", "", "yes", "no", "f", "00", " false"] {
+            assert!(parse_bool(value), "{value:?}");
+        }
+
+        // Absent is false; present but empty is true.
+        let tty = |suffix| match stream(suffix).unwrap().kind {
+            StreamKind::Attach { tty, .. } => tty,
+            kind => panic!("expected an attach, got {kind:?}"),
+        };
+        assert!(!tty("/api-7f9/attach"));
+        assert!(tty("/api-7f9/attach?tty"));
+        assert!(tty("/api-7f9/attach?tty="));
     }
 
     #[test]
@@ -782,6 +1012,138 @@ mod tests {
             classify_stream("/api/v1/namespaces/prod/pods%2Fapi-7f9/attach", None).unwrap();
         assert!(matches!(operation.kind, StreamKind::Attach { .. }));
         assert!(stream("/api-7f9/exec?command=sh").is_some());
+    }
+
+    #[test]
+    fn kubelet_run_is_classified_as_an_exec() {
+        let operation = node_run("/run/prod/api-7f9/api?cmd=cat%20/etc/shadow").unwrap();
+
+        assert_eq!(operation.pod.namespace, "prod");
+        assert_eq!(operation.pod.pod, "api-7f9");
+        let StreamKind::Exec {
+            container,
+            command,
+            tty,
+            stdin,
+        } = &operation.kind
+        else {
+            panic!("expected an exec, got {:?}", operation.kind);
+        };
+        assert_eq!(container.as_deref(), Some("api"));
+        assert_eq!(command, &vec!["cat".to_owned(), "/etc/shadow".to_owned()]);
+        assert!(!tty);
+        assert!(!stdin);
+        assert!(matches!(
+            operation.audit_event(&subject()),
+            AuditEvent::KubernetesExecStarted { .. }
+        ));
+    }
+
+    #[test]
+    fn kubelet_run_command_is_the_argv_the_kubelet_runs() {
+        // Only the first `cmd` counts. It is split on every single space.
+        assert_eq!(
+            run_command("/run/prod/api-7f9/api?cmd=echo+a++b&cmd=id"),
+            vec!["echo", "a", "", "b"]
+        );
+        // Go drops a pair containing `;`, so the kubelet never sees the decoy.
+        assert_eq!(
+            run_command("/run/prod/api-7f9/api?cmd=true;&cmd=id"),
+            vec!["id"]
+        );
+        // With no `cmd` the kubelet tries to run an empty command and fails.
+        assert_eq!(run_command("/run/prod/api-7f9/api"), vec![""]);
+    }
+
+    #[test]
+    fn kubelet_run_path_is_read_as_the_api_server_relays_it() {
+        for suffix in [
+            // The pod's UID can precede the container.
+            "/run/prod/api-7f9/2f6c1c0e/api",
+            "/%72un//prod/api-7f9/api/",
+            // The API server resolves these `..` after decoding. The handler's
+            // `Url::parse` normalisation does not see them.
+            "/logs%2F..%2Frun/prod/api-7f9/api",
+            "/run/prod/api-7f9/other%2F..%2Fapi",
+            // `..` cannot go above the kubelet's root.
+            "/../../run/prod/api-7f9/api",
+        ] {
+            let operation = node_run(suffix).unwrap_or_else(|| panic!("{suffix} is a run"));
+            assert_eq!(operation.pod.namespace, "prod", "{suffix}");
+            assert_eq!(operation.pod.pod, "api-7f9", "{suffix}");
+            let StreamKind::Exec { container, .. } = operation.kind else {
+                panic!("expected an exec");
+            };
+            assert_eq!(container.as_deref(), Some("api"), "{suffix}");
+        }
+
+        // `{scheme}:{node}:{port}` addresses the same kubelet.
+        assert!(
+            classify_node_run(
+                "POST",
+                "/api/v1/nodes/https:worker-1:10250/proxy/run/prod/api-7f9/api",
+                None
+            )
+            .is_some()
+        );
+    }
+
+    #[test]
+    fn other_node_proxy_requests_are_not_runs() {
+        // The kubelet only serves `/run` for `POST`.
+        assert!(
+            classify_node_run("GET", "/api/v1/nodes/worker-1/proxy/run/prod/api/api", None)
+                .is_none()
+        );
+        assert!(node_run("/exec/prod/api-7f9/api?command=id").is_none());
+        assert!(node_run("/RUN/prod/api-7f9/api").is_none());
+        assert!(node_run("/logs/run/prod/api-7f9/api").is_none());
+        assert!(node_run("/run/prod/api-7f9").is_none());
+        assert!(node_run("/run/prod/api-7f9/uid/api/extra").is_none());
+        assert!(node_run("/run/prod/api-7f9/api/..").is_none());
+        assert!(node_run("").is_none());
+        for path in [
+            "/api/v1/nodes/worker-1/run/prod/api-7f9/api",
+            "/api/v1/namespaces/prod/pods/api-7f9/proxy/run/prod/api-7f9/api",
+            "/apis/v1/nodes/worker-1/proxy/run/prod/api-7f9/api",
+        ] {
+            assert!(classify_node_run("POST", path, None).is_none(), "{path}");
+        }
+    }
+
+    #[test]
+    fn pending_run_is_rejected_only_when_the_cluster_refused_it() {
+        let event_for = |status| {
+            let mut pending = PendingRun::new(
+                node_run("/run/prod/api-7f9/api?cmd=id").unwrap(),
+                &subject(),
+            );
+            pending.status = status;
+            pending.event()
+        };
+
+        assert!(matches!(
+            event_for(Some(200)),
+            AuditEvent::KubernetesExecStarted { .. }
+        ));
+        // The kubelet answers 500 for a command that ran and exited non-zero.
+        assert!(matches!(
+            event_for(Some(500)),
+            AuditEvent::KubernetesExecStarted { .. }
+        ));
+        // The handler ended before an answer arrived.
+        assert!(matches!(
+            event_for(None),
+            AuditEvent::KubernetesExecStarted { .. }
+        ));
+        assert!(matches!(
+            event_for(Some(403)),
+            AuditEvent::KubernetesStreamRejected { status: 403, .. }
+        ));
+        assert!(matches!(
+            event_for(Some(404)),
+            AuditEvent::KubernetesStreamRejected { status: 404, .. }
+        ));
     }
 
     #[test]

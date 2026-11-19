@@ -142,7 +142,8 @@ pub enum AuditEvent {
         key_id: String,
         success: bool,
     },
-    /// `kubectl exec` — a command run inside an existing container.
+    /// A command run inside an existing container: `kubectl exec`, or a kubelet
+    /// `/run` through the node proxy.
     KubernetesExecStarted {
         subject: KubernetesAuditSubject,
         namespace: String,
@@ -175,9 +176,10 @@ pub enum AuditEvent {
         /// and an empty list would read as "no ports", which is not the same.
         ports: Option<String>,
     },
-    /// The cluster refused a streaming request — typically RBAC. Recorded
-    /// separately because a denied attempt is exactly as interesting as a
-    /// successful one, and the `...Started` event alone cannot say which it was.
+    /// The cluster refused a streaming request or a kubelet `/run` — typically
+    /// RBAC. Recorded separately because a denied attempt is exactly as
+    /// interesting as a successful one, and the `...Started` event alone cannot
+    /// say which it was.
     KubernetesStreamRejected {
         subject: KubernetesAuditSubject,
         namespace: String,

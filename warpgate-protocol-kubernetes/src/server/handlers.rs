@@ -25,7 +25,9 @@ use warpgate_core::logging::KubernetesAuditSubject;
 use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
 use warpgate_core::{Services, WarpgateServerHandle};
 
-use crate::audit::{StreamOperation, classify_pod_write, classify_stream};
+use crate::audit::{
+    PendingRun, StreamOperation, classify_node_run, classify_pod_write, classify_stream,
+};
 use crate::correlator::{AdmittedSession, RequestCorrelator, correlated_authorization};
 use crate::recording::{start_recording_api, start_recording_exec};
 use crate::server::UpstreamClientCache;
@@ -416,10 +418,16 @@ async fn _handle_normal_request_inner(
     // the client learns whether it was applied and an audited one keeps its
     // event. A close before dispatch still refuses it.
     let is_write = !req.method().is_safe();
+    if is_write && closed.is_cancelled() {
+        return Err(WarpgateError::UserSessionEnded);
+    }
+
+    // A kubelet `/run` must be audited once it is sent, even if no answer
+    // arrives, so the guard is created before the send.
+    let pending_run = classify_node_run(method, api_path, req.uri().query())
+        .map(|run| PendingRun::new(run, audit_subject));
+
     let sent = if is_write {
-        if closed.is_cancelled() {
-            return Err(WarpgateError::UserSessionEnded);
-        }
         request_builder.send().await
     } else {
         closed
@@ -446,6 +454,10 @@ async fn _handle_normal_request_inner(
     let response = sent?;
     let status = response.status();
     let response_headers = response.headers().clone();
+
+    if let Some(run) = pending_run {
+        run.answered(status.as_u16());
+    }
 
     // The cached client's credential may have been rotated or expired upstream;
     // build a fresh one for the next request.
