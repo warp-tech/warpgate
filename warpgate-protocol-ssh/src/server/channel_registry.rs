@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 use warpgate_core::recordings::ConnectionRecorder;
 
+use super::session::TrafficRecorderKey;
 use crate::RCEvent;
 use crate::channel_audit::ChannelAudit;
 use crate::common::{PtyRequest, ServerChannelId};
@@ -48,6 +49,10 @@ pub struct Channel {
     pub audit: ChannelAudit,
     pub pty_size: Option<PtyRequest>,
     pub traffic_recorder: Option<ConnectionRecorder>,
+    /// The session-wide traffic recording this channel writes to. Kept even
+    /// if `traffic_recorder` is dropped after a write error, so the recording
+    /// is released no earlier than the channel closes.
+    pub traffic_recorder_key: Option<TrafficRecorderKey>,
 }
 
 impl Channel {
@@ -58,6 +63,7 @@ impl Channel {
             audit: ChannelAudit::new(id),
             pty_size: None,
             traffic_recorder: None,
+            traffic_recorder_key: None,
         }
     }
 
@@ -166,9 +172,9 @@ impl ChannelRegistry {
     /// recorders (their background writers flush on drop, as they do at session
     /// end) and discards any still-deferred events, whose open will never
     /// resolve. Idempotent — the SSH close handshake reaches here from both the
-    /// client and the target side.
-    pub fn close(&mut self, id: Uuid) {
-        self.channels.remove(&id);
+    /// client and the target side; only the first call returns the channel.
+    pub fn close(&mut self, id: Uuid) -> Option<Channel> {
+        self.channels.remove(&id)
     }
 
     pub fn get(&self, id: &Uuid) -> Option<&Channel> {

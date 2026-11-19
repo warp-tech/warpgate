@@ -1,5 +1,6 @@
 from uuid import uuid4
 import http.server
+import json
 import os
 import paramiko
 import requests
@@ -295,6 +296,110 @@ class Test:
             ssh_client.kill()
             server.shutdown()
             server.server_close()
+
+    # https://github.com/warp-tech/warpgate/issues/2680
+    def test_direct_tcpip_recording_ends_with_its_last_channel(
+        self,
+        processes: ProcessManager,
+        wg_c_ed25519_pubkey,
+        shared_wg: WarpgateProcess,
+        timeout,
+    ):
+        # Each forwarded host:port is recorded through a recorder that holds an
+        # open file. Channels open at the same time share it, but once the last
+        # of them closes it must be released: kept for the whole SSH session, a
+        # client that keeps forwarding to new ports (VS Code) runs the process
+        # out of file descriptors.
+        class Echo(socketserver.BaseRequestHandler):
+            def handle(self):
+                while data := self.request.recv(4096):
+                    self.request.sendall(data)
+
+        servers = []
+        for _ in range(3):
+            # All interfaces: the target container reaches the runner through
+            # the Docker host gateway, not through loopback.
+            server = socketserver.ThreadingTCPServer(("0.0.0.0", 0), Echo)
+            server.daemon_threads = True
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            servers.append(server)
+        shared_port, *other_ports = [s.server_address[1] for s in servers]
+
+        user, ssh_target = setup_user_and_target(
+            processes, shared_wg, wg_c_ed25519_pubkey
+        )
+
+        def open_forward(port):
+            channel = transport.open_channel(
+                "direct-tcpip",
+                ("host.docker.internal", port),
+                ("127.0.0.1", 0),
+                timeout=timeout,
+            )
+            channel.settimeout(timeout)
+            channel.sendall(b"ping")
+            echoed = b""
+            while len(echoed) < 4:
+                chunk = channel.recv(4 - len(echoed))
+                assert chunk, f"forward to {port} closed before echoing"
+                echoed += chunk
+            assert echoed == b"ping"
+            return channel
+
+        def recordings_by_port(api):
+            [session] = api.get_sessions(username=user.username).items
+            by_port = {}
+            for recording in api.get_session_recordings(session.id):
+                if recording.kind != sdk.RecordingKind.TRAFFIC:
+                    continue
+                port = json.loads(recording.metadata)["port"]
+                by_port.setdefault(port, []).append(recording)
+            return by_port
+
+        def wait_for_recordings(api, condition, what):
+            deadline = time.monotonic() + timeout
+            while True:
+                by_port = recordings_by_port(api)
+                if condition(by_port):
+                    return by_port
+                if time.monotonic() > deadline:
+                    raise AssertionError(f"{what}: {by_port}")
+                time.sleep(0.5)
+
+        def ended(by_port, port):
+            return [r.ended is not None for r in by_port.get(port, [])] == [True]
+
+        transport = paramiko.Transport(("localhost", shared_wg.ssh_port))
+        try:
+            transport.connect(
+                username=f"{user.username}:{ssh_target.name}", password="123"
+            )
+            first = open_forward(shared_port)
+            second = open_forward(shared_port)
+            for port in other_ports:
+                open_forward(port).close()
+            first.close()
+
+            with admin_client(f"https://localhost:{shared_wg.http_port}") as api:
+                by_port = wait_for_recordings(
+                    api,
+                    lambda by_port: all(ended(by_port, p) for p in other_ports),
+                    "recordings of closed forwards did not end",
+                )
+                [shared] = by_port[shared_port]
+                assert shared.ended is None, "recording ended while a channel still uses it"
+
+                second.close()
+                wait_for_recordings(
+                    api,
+                    lambda by_port: ended(by_port, shared_port),
+                    "recording did not end with its last channel",
+                )
+        finally:
+            transport.close()
+            for server in servers:
+                server.shutdown()
+                server.server_close()
 
     # https://github.com/warp-tech/warpgate/issues/2328
     def test_direct_tcpip_server_speaks_first(
