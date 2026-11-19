@@ -19,7 +19,7 @@ use warpgate_common::http_headers::may_forward_header;
 use warpgate_common::{TargetKubernetesOptions, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::{
-    get_client_ip, log_request_error, log_request_result, span_for_request,
+    SpanIdentity, get_client_ip, log_request_error, log_request_result, span_for_request,
 };
 use warpgate_core::logging::KubernetesAuditSubject;
 use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
@@ -152,7 +152,7 @@ pub async fn handle_api_request(
         let handle = handle.lock().await;
         (
             handle.user_session_id(),
-            span_for_request(req, ctx.services(), Some(&*handle)).await?,
+            span_for_request(req, ctx.services(), Some(&*handle), SpanIdentity::default()).await?,
         )
     };
 
