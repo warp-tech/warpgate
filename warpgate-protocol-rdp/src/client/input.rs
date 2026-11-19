@@ -1,7 +1,54 @@
 //! Translation of normalised desktop input into IronRDP input operations.
 
+use std::time::Duration;
+
 use ironrdp_input::{MouseButton, MousePosition, Operation, Scancode, WheelRotations};
+use tokio::time::{Instant, sleep_until};
 use warpgate_core::DesktopInput;
+
+use crate::clipboard::OfferAcks;
+
+/// inputs queued while waiting for clipboard ack from target to avoid races between clipboard sets and pasting
+pub struct InputHold {
+    acks: OfferAcks,
+    timeout: Duration,
+    ops: Vec<Operation>,
+    deadline: Option<Instant>,
+}
+
+impl InputHold {
+    pub const fn new(acks: OfferAcks, timeout: Duration) -> Self {
+        Self {
+            acks,
+            timeout,
+            ops: Vec::new(),
+            deadline: None,
+        }
+    }
+
+    /// return or queues ops
+    pub fn admit(&mut self, ops: Vec<Operation>) -> Option<Vec<Operation>> {
+        if self.deadline.is_none() && !self.acks.pending() {
+            return Some(ops);
+        }
+        self.ops.extend(ops);
+        self.deadline
+            .get_or_insert_with(|| Instant::now() + self.timeout);
+        None
+    }
+
+    pub async fn released(&mut self) -> Vec<Operation> {
+        let Some(deadline) = self.deadline else {
+            return std::future::pending().await;
+        };
+        if self.acks.pending() {
+            sleep_until(deadline).await;
+            self.acks.abandon();
+        }
+        self.deadline = None;
+        std::mem::take(&mut self.ops)
+    }
+}
 
 /// RDP expresses wheel movement in rotation units; one notch is 120 of them.
 const WHEEL_UNITS_PER_NOTCH: i16 = 120;
@@ -207,5 +254,66 @@ mod tests {
     #[test]
     fn key_without_either_representation_is_dropped() {
         assert!(translate_key(None, None).is_empty());
+    }
+
+    const TIMEOUT: Duration = Duration::from_secs(1);
+
+    fn moves(xs: &[u16]) -> Vec<Operation> {
+        xs.iter()
+            .map(|&x| Operation::MouseMove(MousePosition { x, y: 0 }))
+            .collect()
+    }
+
+    fn xs(ops: &[Operation]) -> Vec<u16> {
+        ops.iter()
+            .map(|op| match op {
+                Operation::MouseMove(position) => position.x,
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn input_passes_straight_through_with_nothing_to_acknowledge() {
+        let mut hold = InputHold::new(OfferAcks::default(), TIMEOUT);
+        assert_eq!(xs(&hold.admit(moves(&[1])).unwrap()), [1]);
+        assert!(
+            tokio::time::timeout(TIMEOUT * 2, hold.released())
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn input_waits_for_the_acknowledgement_and_keeps_its_order() {
+        let acks = OfferAcks::default();
+        let mut hold = InputHold::new(acks.clone(), TIMEOUT);
+
+        acks.announced();
+        assert!(hold.admit(moves(&[1])).is_none());
+        assert!(
+            tokio::time::timeout(TIMEOUT / 2, hold.released())
+                .await
+                .is_err()
+        );
+
+        // Acknowledged, but what arrives now still goes behind what is waiting.
+        acks.acknowledged();
+        assert!(hold.admit(moves(&[2])).is_none());
+        assert_eq!(xs(&hold.released().await), [1, 2]);
+        assert_eq!(xs(&hold.admit(moves(&[3])).unwrap()), [3]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_silent_target_only_holds_input_for_the_timeout() {
+        let acks = OfferAcks::default();
+        let mut hold = InputHold::new(acks.clone(), TIMEOUT);
+
+        acks.announced();
+        assert!(hold.admit(moves(&[1])).is_none());
+        let started = Instant::now();
+        assert_eq!(xs(&hold.released().await), [1]);
+        assert_eq!(started.elapsed(), TIMEOUT);
+        assert_eq!(xs(&hold.admit(moves(&[2])).unwrap()), [2]);
     }
 }

@@ -1,0 +1,16 @@
+apiVersion: warpgate/v2
+kind: Role
+metadata:
+  name: a
+spec: {}
+---
+apiVersion: warpgate/v1
+kind: User
+metadata:
+  name: b
+spec: {}
+---
+apiVersion: warpgate/v1
+metadata:
+  name: c
+spec: {}

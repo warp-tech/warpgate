@@ -8,7 +8,7 @@ use poem_openapi::param::Query;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::prelude::Expr;
-use sea_orm::sea_query::Func;
+use sea_orm::sea_query::{ExprTrait, Func};
 use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect,
@@ -234,6 +234,7 @@ mod tests {
     use sea_orm::{ActiveModelTrait, Database};
     use time::OffsetDateTime;
     use uuid::Uuid;
+    use warpgate_common::{TargetId, UserId};
     use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
     use warpgate_db_migrations::migrate_database;
 
@@ -249,7 +250,7 @@ mod tests {
         let parent = UserSession::ActiveModel {
             id: Set(parent_id),
             username: Set(Some("alice".into())),
-            user_id: Set(Some(Uuid::new_v4())),
+            user_id: Set(Some(UserId(Uuid::new_v4()))),
             remote_address: Set("127.0.0.1:22".into()),
             started: Set(OffsetDateTime::now_utc()),
             ended: Set(None),
@@ -266,7 +267,7 @@ mod tests {
                 id: Set(warpgate_common::TargetSessionId(Uuid::new_v4())),
                 user_session_id: Set(parent_id),
                 target_snapshot: Set(r#"{"name":"web"}"#.into()),
-                target_id: Set(Uuid::new_v4()),
+                target_id: Set(TargetId(Uuid::new_v4())),
                 started: Set(parent.started),
                 ended: Set(None),
                 ticket_id: Set(None),

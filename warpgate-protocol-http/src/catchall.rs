@@ -6,9 +6,9 @@ use poem::web::{Data, FromRequest, Redirect};
 use poem::{Body, IntoResponse, Request, Response, handler};
 use serde::Deserialize;
 use tokio::sync::Mutex;
-use tracing::{Instrument, debug, info_span};
+use tracing::{Instrument, debug, info_span, warn};
 use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_common::{TargetHTTPOptions, WarpgateError};
+use warpgate_common::{Target, TargetHTTPOptions, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization, SessionKeepalive,
@@ -49,7 +49,11 @@ pub async fn catchall_endpoint(
         return Ok(target_select_redirect());
     };
 
-    session.set_target_name(authorization.target().name.clone());
+    // A host-bound target is selected by its host. A remembered name would
+    // only be refused on other hosts.
+    if bound_host(authorization.target()).is_none() {
+        session.set_target_name(authorization.target().name.clone());
+    }
 
     let RequestAuthorization::Session(_) = &ctx.auth else {
         return Err(poem::Error::from_status(
@@ -119,6 +123,29 @@ pub async fn catchall_endpoint(
     })
 }
 
+fn bound_host(target: &Target) -> Option<&str> {
+    target
+        .options
+        .external_host()
+        .filter(|host| !host.is_empty())
+}
+
+/// Whether `target` may be served on the request host.
+///
+/// A host-bound target relies on the same-origin policy for isolation. Its
+/// content must not be served on another host, and its host must not serve
+/// another target. `host_owner` is the target bound to the request host.
+fn target_belongs_on_host(
+    target: &Target,
+    request_host: Option<&str>,
+    host_owner: Option<&Target>,
+) -> bool {
+    match bound_host(target) {
+        Some(bound) => request_host.is_some_and(|host| host.eq_ignore_ascii_case(bound)),
+        None => host_owner.is_none(),
+    }
+}
+
 fn is_http_authorization(
     authorization: TargetAuthorization,
 ) -> Option<TargetAuthorization<TargetHTTPOptions>> {
@@ -154,6 +181,16 @@ async fn get_target_for_request(
             .into());
         }
 
+        let request_host = ctx.trusted_hostname(req);
+        let host_owner = match (&request_host, bound_host(&target)) {
+            (Some(host), None) => config_provider.get_target_by_hostname(host).await?,
+            _ => None,
+        };
+        if !target_belongs_on_host(&target, request_host.as_deref(), host_owner.as_ref()) {
+            debug!(target=%target.name, host=?request_host, "Ticket target refused on this host");
+            return Ok(None);
+        }
+
         return Ok(is_http_authorization(
             TargetAuthorization::for_ticket_session(
                 AuthStateUserInfo {
@@ -176,7 +213,7 @@ async fn get_target_for_request(
 
     let request_host = ctx.trusted_hostname(req);
 
-    let host_based_target = if let Some(host) = request_host {
+    let host_based_target = if let Some(host) = &request_host {
         let found = config_provider
             .get_target_by_hostname(host.as_str())
             .await?;
@@ -201,6 +238,7 @@ async fn get_target_for_request(
     };
 
     let domain_rebinding_configured = host_based_target.is_some();
+    let host_owner = host_based_target.clone();
     let final_target_name = selected_target_name
         .or_else(|| host_based_target.as_ref().map(|target| target.name.clone()));
 
@@ -221,6 +259,15 @@ async fn get_target_for_request(
         };
         let identity = full.identity(crate::common::PROTOCOL_NAME);
 
+        let target = target.filter(|target| {
+            let belongs =
+                target_belongs_on_host(target, request_host.as_deref(), host_owner.as_ref());
+            if !belongs {
+                warn!(target=%target.name, host=?request_host, "Target refused on this host");
+            }
+            belongs
+        });
+
         if let Some(target) = target
             && let Some(authorization) =
                 authorize_for_target(config_provider, &identity, target).await?
@@ -237,4 +284,70 @@ async fn get_target_for_request(
     }
 
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use warpgate_common::{TargetOptions, Tls};
+
+    use super::*;
+
+    fn target(external_host: Option<&str>) -> Target {
+        Target {
+            id: warpgate_common::TargetId(uuid::Uuid::new_v4()),
+            name: "t".into(),
+            description: String::new(),
+            allow_roles: vec![],
+            options: TargetOptions::Http(TargetHTTPOptions {
+                url: "http://127.0.0.1".into(),
+                tls: Tls::default(),
+                headers: Default::default(),
+                external_host: external_host.map(Into::into),
+            }),
+            rate_limit_bytes_per_second: None,
+            group_id: None,
+            ticket_max_duration_seconds: None,
+            ticket_requests_disabled: false,
+            ticket_require_approval: false,
+            require_approval: false,
+            ticket_max_uses: None,
+            provider: None,
+        }
+    }
+
+    #[test]
+    fn bound_target_is_served_only_on_its_host() {
+        let bound = target(Some("app.example.com"));
+        assert!(target_belongs_on_host(
+            &bound,
+            Some("APP.example.com"),
+            Some(&bound)
+        ));
+        // the control plane, another target's host, no host at all
+        assert!(!target_belongs_on_host(&bound, Some("example.com"), None));
+        assert!(!target_belongs_on_host(
+            &bound,
+            Some("other.example.com"),
+            Some(&target(Some("other.example.com")))
+        ));
+        assert!(!target_belongs_on_host(&bound, None, None));
+    }
+
+    #[test]
+    fn unbound_target_is_not_served_on_a_bound_host() {
+        let unbound = target(None);
+        assert!(target_belongs_on_host(&unbound, Some("example.com"), None));
+        assert!(target_belongs_on_host(&unbound, None, None));
+        assert!(!target_belongs_on_host(
+            &unbound,
+            Some("app.example.com"),
+            Some(&target(Some("app.example.com")))
+        ));
+        // an empty `external_host` counts as unbound
+        assert!(target_belongs_on_host(
+            &target(Some("")),
+            Some("example.com"),
+            None
+        ));
+    }
 }

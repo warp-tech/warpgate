@@ -375,9 +375,7 @@ where
                 }
                 let mut text = vec![0u8; len];
                 reader.read_exact(&mut text).await?;
-                let _ = events.send(ClientEvent::Clipboard(
-                    String::from_utf8_lossy(&text).into_owned(),
-                ));
+                let _ = events.send(ClientEvent::Clipboard(String::from_utf8_lossy_owned(text)));
             }
             150 => {
                 // EnableContinuousUpdates: enable + x + y + w + h.

@@ -1,3 +1,4 @@
+use warpgate_common::UserId;
 use std::str::FromStr;
 
 use ipnet::IpNet;
@@ -7,7 +8,7 @@ use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::{Func, IntoCondition};
 use serde::Serialize;
 use uuid::Uuid;
-use warpgate_common::{User, UserDetails, WarpgateError};
+use warpgate_common::{ProviderId, User, UserDetails, WarpgateError};
 
 use crate::{
     CertificateCredential, OtpCredential, PasswordCredential, PublicKeyCredential, Role,
@@ -19,7 +20,7 @@ use crate::{
 #[oai(rename = "User")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub id: Uuid,
+    pub id: UserId,
     #[sea_orm(unique)]
     pub username: String,
     pub credential_policy: serde_json::Value,
@@ -31,6 +32,7 @@ pub struct Model {
     pub ldap_object_uuid: Option<Uuid>,
     #[sea_orm(column_type = "Text", nullable)]
     pub allowed_ip_ranges: serde_json::Value,
+    pub provider: Option<ProviderId>,
 }
 
 impl Related<super::Role::Entity> for Entity {
@@ -147,6 +149,8 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl Entity {
     pub fn username_eq_ci(username: &str) -> impl IntoCondition {
+        // Imported here because `ExprTrait::is_null` shadows `serde_json::Value::is_null`.
+        use sea_orm::sea_query::ExprTrait;
         Expr::expr(Func::lower(Expr::col(Column::Username))).eq(username.to_lowercase())
     }
 }

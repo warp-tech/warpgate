@@ -7,7 +7,7 @@ use sea_orm::{
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
-use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common::{AdminPermission, UserId, WarpgateError};
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_db_entities::{CertificateCredential, CertificateRevocation, User};
 
@@ -92,7 +92,7 @@ impl ListApi {
     async fn api_get_all(
         &self,
         admin: AdminContext,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
     ) -> Result<GetCertificateCredentialsResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
 
@@ -118,7 +118,7 @@ impl ListApi {
         &self,
         admin: AdminContext,
         body: Json<IssueCertificateCredentialRequest>,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
     ) -> Result<IssueCertificateCredentialResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
 
@@ -131,8 +131,12 @@ impl ListApi {
         };
 
         let public_key_pem = body.public_key_pem.trim();
-        let client_cert =
-            warpgate_ca::issue_client_certificate(&ca, &user.username, public_key_pem, *user_id)?;
+        let client_cert = warpgate_ca::issue_client_certificate(
+            &ca,
+            &user.username,
+            public_key_pem,
+            user_id.0.0,
+        )?;
 
         let client_cert_pem = warpgate_ca::certificate_to_pem(&client_cert)?;
 
@@ -190,7 +194,7 @@ impl DetailApi {
         &self,
         admin: AdminContext,
         body: Json<UpdateCertificateCredential>,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
         id: Path<Uuid>,
     ) -> Result<UpdateCertificateCredentialResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
@@ -223,7 +227,7 @@ impl DetailApi {
     async fn api_delete(
         &self,
         admin: AdminContext,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
         id: Path<Uuid>,
     ) -> Result<RevokeCertificateCredentialResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;

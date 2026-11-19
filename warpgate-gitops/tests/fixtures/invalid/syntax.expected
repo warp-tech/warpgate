@@ -1,0 +1,1 @@
+tests/fixtures/invalid/syntax.yaml:5:1: while parsing a flow sequence, expected ',' or ']'

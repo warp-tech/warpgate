@@ -69,7 +69,6 @@ feature-depth = 1
 ignore = [
     "RUSTSEC-2023-0071", # Marvin Attack: potential key recovery through timing sidechannels
     "RUSTSEC-2025-0134", # rustls-pemfile is deprecated but poem is still using it
-    "RUSTSEC-2026-0173", # proc-macro-error2 is unmaintained - waiting for a sea-orm update
     "RUSTSEC-2026-0195", # quick-xml memory exhaustion - we don't parse untrusted XML
     "RUSTSEC-2026-0194", # quick-xml quadratic time - see above
     "RUSTSEC-2021-0141", # dotenv is unmaintaned - only used for dev
@@ -112,9 +111,11 @@ allow = [
 ]
 # List of crates to deny
 deny = [
-    { crate = "openssl-sys", wrappers = ["openssl", "tokio-openssl"], reason = "RDP legacy TLS compatibility uses vendored OpenSSL for older Windows Schannel targets" },
-    { crate = "webpki-roots@0.26", wrappers = ["sqlx-core"], reason = "Outbound TLS must verify against the OS certificate store, not a bundled root list. sqlx is the only exception: its native-roots feature forces the ring crypto provider for the database handshake" },
-    { crate = "webpki-roots@1", wrappers = ["webpki-roots"], reason = "Only reachable through the 0.26 compatibility shim that sqlx-core uses (see above)" },
+    { crate = "openssl-sys", wrappers = [
+        "openssl",
+        "tokio-openssl",
+    ], reason = "RDP legacy TLS compatibility uses vendored OpenSSL for older Windows Schannel targets" },
+    { crate = "webpki-roots", reason = "Outbound TLS must verify against the OS certificate store, not a bundled root list" },
     #"ansi_term@0.11.0",
     #{ crate = "ansi_term@0.11.0", reason = "you can specify a reason it is banned" },
     # Wrapper crates can optionally be specified to allow the crate when it
@@ -147,16 +148,16 @@ deny = [
 
 # Certain crates/versions that will be skipped when doing duplicate detection.
 # skip = [
-    #"ansi_term@0.11.0",
-    #{ crate = "ansi_term@0.11.0", reason = "you can specify a reason why it can't be updated/removed" },
+#"ansi_term@0.11.0",
+#{ crate = "ansi_term@0.11.0", reason = "you can specify a reason why it can't be updated/removed" },
 # ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite.
 # skip-tree = [
-    #"ansi_term@0.11.0", # will be skipped along with _all_ of its direct and transitive dependencies
-    #{ crate = "ansi_term@0.11.0", depth = 20 },
+#"ansi_term@0.11.0", # will be skipped along with _all_ of its direct and transitive dependencies
+#{ crate = "ansi_term@0.11.0", depth = 20 },
 # ]
 
 # This section is considered when running `cargo deny check sources`.
@@ -173,8 +174,7 @@ unknown-git = "deny"
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
-allow-git = [
-]
+allow-git = []
 
 [sources.allow-org]
 # github.com organizations to allow git sources for
@@ -198,7 +198,6 @@ allow = [
     "WTFPL",
     "CC0-1.0",
     "MPL-2.0",
-    "CDLA-Permissive-2.0",
     "Unlicense",
     "IJG",
 ]
@@ -206,13 +205,9 @@ allow = [
 [[licenses.clarify]]
 crate = "ring"
 expression = "OpenSSL"
-license-files = [
-    { path = "LICENSE", hash = 0xbd0eed23 },
-]
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 
 [[licenses.clarify]]
 crate = "webpki"
 expression = "ISC"
-license-files = [
-    { path = "LICENSE", hash = 0x001c7e6c },
-]
+license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]

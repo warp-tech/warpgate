@@ -4,9 +4,8 @@ use std::sync::Arc;
 use sea_orm::{DatabaseConnection, EntityTrait};
 use tokio::sync::Mutex;
 use tracing::debug;
-use uuid::Uuid;
 use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_common::{Target as TargetConfig, WarpgateError};
+use warpgate_common::{Target as TargetConfig, TargetId, UserId, WarpgateError};
 use warpgate_db_entities::{Parameters, Target, User};
 
 use super::shared_limiter::SharedWarpgateRateLimiter;
@@ -16,8 +15,8 @@ use crate::{State, UserSessionState};
 pub struct RateLimiterRegistry {
     db: DatabaseConnection,
     global_rate_limiter: SharedWarpgateRateLimiter,
-    user_rate_limiters: HashMap<Uuid, SharedWarpgateRateLimiter>,
-    target_rate_limiters: HashMap<Uuid, SharedWarpgateRateLimiter>,
+    user_rate_limiters: HashMap<UserId, SharedWarpgateRateLimiter>,
+    target_rate_limiters: HashMap<TargetId, SharedWarpgateRateLimiter>,
 }
 
 impl RateLimiterRegistry {
@@ -58,7 +57,7 @@ impl RateLimiterRegistry {
 
     pub async fn user(
         &mut self,
-        user_id: &Uuid,
+        user_id: &UserId,
     ) -> Result<SharedWarpgateRateLimiter, WarpgateError> {
         if !self.user_rate_limiters.contains_key(user_id) {
             let quota = self.quota_for_user(user_id).await?;
@@ -69,7 +68,7 @@ impl RateLimiterRegistry {
         Ok(self.user_rate_limiters.get(user_id).unwrap().clone())
     }
 
-    async fn quota_for_user(&self, user_id: &Uuid) -> Result<Option<u32>, WarpgateError> {
+    async fn quota_for_user(&self, user_id: &UserId) -> Result<Option<u32>, WarpgateError> {
         let db = &self.db;
         let user = User::Entity::find_by_id(*user_id).one(db).await?;
         Ok(user
@@ -79,7 +78,7 @@ impl RateLimiterRegistry {
 
     pub async fn target(
         &mut self,
-        target_id: &Uuid,
+        target_id: &TargetId,
     ) -> Result<SharedWarpgateRateLimiter, WarpgateError> {
         if !self.target_rate_limiters.contains_key(target_id) {
             let quota = self.quota_for_target(target_id).await?;
@@ -90,7 +89,7 @@ impl RateLimiterRegistry {
         Ok(self.target_rate_limiters.get(target_id).unwrap().clone())
     }
 
-    async fn quota_for_target(&self, target_id: &Uuid) -> Result<Option<u32>, WarpgateError> {
+    async fn quota_for_target(&self, target_id: &TargetId) -> Result<Option<u32>, WarpgateError> {
         let db = &self.db;
         let target = Target::Entity::find_by_id(*target_id).one(db).await?;
         Ok(target

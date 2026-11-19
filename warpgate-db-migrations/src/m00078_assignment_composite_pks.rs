@@ -282,8 +282,7 @@ async fn swap_in(db: &DatabaseTransaction, table: &str) -> Result<(), DbErr> {
 
 /// Runs one sea-query statement on the migration's own connection.
 async fn exec<S: StatementBuilder>(db: &DatabaseTransaction, stmt: &S) -> Result<(), DbErr> {
-    let statement = db.get_database_backend().build(stmt);
-    db.execute(statement).await?;
+    db.execute(stmt).await?;
     Ok(())
 }
 

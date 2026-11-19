@@ -13,10 +13,10 @@ use sea_orm::{
 use tracing::{error, info};
 use uuid::Uuid;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
-use warpgate_common::version::warpgate_version;
+use warpgate_common::version::{repository_file_url, warpgate_version};
 use warpgate_common::{
     GlobalParams, HttpConfig, KubernetesConfig, ListenEndpoint, MySqlConfig, PostgresConfig,
-    RdpConfig, Secret, SshConfig, SshHostKeyVerificationMode, VncConfig, WarpgateConfig,
+    RdpConfig, RoleId, Secret, SshConfig, SshHostKeyVerificationMode, VncConfig, WarpgateConfig,
     WarpgateConfigStore,
 };
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
@@ -210,7 +210,7 @@ impl Answers {
     fn config(&self, db_path: &Path) -> WarpgateConfigStore {
         let database_url = self.database_url.clone().unwrap_or_else(|| {
             let db_path = db_path.to_string_lossy();
-            format!("sqlite:{}", db_path.strip_suffix("./").unwrap_or(&db_path))
+            format!("sqlite:{}", db_path.trim_suffix("./"))
         });
         let mut store = WarpgateConfigStore {
             database_url: Secret::new(database_url),
@@ -401,10 +401,11 @@ async fn bootstrap_database(
         Some(role) => role,
         None => {
             Role::ActiveModel {
-                id: Set(Uuid::new_v4()),
+                id: Set(RoleId(Uuid::new_v4())),
                 name: Set(BUILTIN_ADMIN_USERNAME.to_string()),
                 description: Set("".to_string()),
                 is_default: Set(false),
+                ..Default::default()
             }
             .insert(db)
             .await?
@@ -532,8 +533,9 @@ pub async fn command(
     println!("{yaml}");
 
     let yaml = format!(
-        "# Config generated in version {version}\n# yaml-language-server: $schema=https://raw.githubusercontent.com/warp-tech/warpgate/refs/heads/main/config-schema.json\n\n{yaml}",
-        version = warpgate_version()
+        "# Config generated in version {version}\n# yaml-language-server: $schema={schema}\n\n{yaml}",
+        version = warpgate_version(),
+        schema = repository_file_url("config-schema.json"),
     );
 
     File::create(config_path)?.write_all(yaml.as_bytes())?;

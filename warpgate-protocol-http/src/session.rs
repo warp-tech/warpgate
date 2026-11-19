@@ -8,8 +8,7 @@ use poem::{FromRequest, Request};
 use sea_orm::{DatabaseConnection, EntityTrait};
 use tokio::sync::{Mutex, broadcast, mpsc};
 use tracing::{error, info};
-use uuid::Uuid;
-use warpgate_common::{UserSessionId, WarpgateError};
+use warpgate_common::{UserId, UserSessionId, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::{SessionAuthorization, SessionKeepalive};
 use warpgate_core::{State, UserSessionStateInit, WarpgateServerHandle};
@@ -67,7 +66,7 @@ impl std::ops::Deref for UserBoundHandle {
 }
 
 /// The user the request's browser session is authorized as, if any.
-fn request_auth_user_id(session: &Session) -> Option<Uuid> {
+fn request_auth_user_id(session: &Session) -> Option<UserId> {
     match session.get_auth() {
         Some(SessionAuthorization::User { user_id, .. })
         | Some(SessionAuthorization::Ticket { user_id, .. }) => Some(user_id),

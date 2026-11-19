@@ -1,0 +1,27 @@
+apiVersion: warpgate/v1
+kind: Target
+metadata: {name: a}
+spec:
+  options:
+    ssh: {host: h, jump_host: b}
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata: {name: b}
+spec:
+  options:
+    ssh: {host: h, jump_host: a}
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata: {name: through-http}
+spec:
+  options:
+    ssh: {host: h, jump_host: web}
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata: {name: web}
+spec:
+  options:
+    http: {url: "https://web"}

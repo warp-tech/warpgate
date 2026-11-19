@@ -4,8 +4,8 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, Set};
 use uuid::Uuid;
 use warpgate_common::{
-    AdminPermission, PasswordPolicyViolation, Secret, UserPasswordCredential, WarpgateError,
-    validate_password,
+    AdminPermission, PasswordPolicyViolation, Secret, UserId, UserPasswordCredential,
+    WarpgateError, validate_password,
 };
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_db_entities::{PasswordCredential, User};
@@ -56,7 +56,7 @@ impl ListApi {
     async fn api_get_all(
         &self,
         admin: AdminContext,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
     ) -> Result<GetPasswordCredentialsResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
 
@@ -82,7 +82,7 @@ impl ListApi {
         &self,
         admin: AdminContext,
         body: Json<NewPasswordCredential>,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
     ) -> Result<CreatePasswordCredentialResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
 
@@ -149,7 +149,7 @@ impl DetailApi {
     async fn api_delete(
         &self,
         admin: AdminContext,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
         id: Path<Uuid>,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;

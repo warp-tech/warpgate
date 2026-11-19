@@ -19,14 +19,14 @@ pub struct Api;
 
 #[derive(Debug, Serialize, Clone, Object)]
 pub struct GroupInfo {
-    pub id: uuid::Uuid,
+    pub id: warpgate_common::TargetGroupId,
     pub name: String,
     pub color: Option<BootstrapThemeColor>,
 }
 
 #[derive(Debug, Serialize, Clone, Object)]
 pub struct TargetSnapshot {
-    pub id: Uuid,
+    pub id: warpgate_common::TargetId,
     pub name: String,
     pub description: String,
     pub kind: Target::TargetKind,
@@ -58,7 +58,7 @@ impl Api {
             TargetGroup::Entity::find().all(db).await
         }?;
 
-        let group_map: HashMap<uuid::Uuid, &TargetGroup::Model> =
+        let group_map: HashMap<warpgate_common::TargetGroupId, &TargetGroup::Model> =
             groups.iter().map(|g| (g.id, g)).collect();
 
         let all_targets: Vec<TargetConfig> = services.config_provider.list_targets().await?;
