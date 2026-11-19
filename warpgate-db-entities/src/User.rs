@@ -149,6 +149,8 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl Entity {
     pub fn username_eq_ci(username: &str) -> impl IntoCondition {
+        // Imported here because `ExprTrait::is_null` shadows `serde_json::Value::is_null`.
+        use sea_orm::sea_query::ExprTrait;
         Expr::expr(Func::lower(Expr::col(Column::Username))).eq(username.to_lowercase())
     }
 }

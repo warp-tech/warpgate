@@ -5,8 +5,8 @@ use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QuerySelect, Set,
-    TransactionTrait,
+    ActiveModelTrait, ColumnTrait, EntityTrait, ExprTrait, ModelTrait, QueryFilter, QuerySelect,
+    Set, TransactionTrait,
 };
 use time::OffsetDateTime;
 use uuid::Uuid;

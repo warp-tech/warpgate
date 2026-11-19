@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use data_encoding::BASE64;
-use sea_orm::sea_query::{Expr, Func, IntoIden, Query};
+use sea_orm::sea_query::{Expr, ExprTrait, Func, IntoIden, Query};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection,
     EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
@@ -61,10 +61,7 @@ trait SelectExists {
 impl SelectExists for sea_orm::sea_query::SelectStatement {
     async fn exists(&mut self, db: &DatabaseConnection) -> Result<bool, WarpgateError> {
         self.expr(Expr::val(1)).limit(1);
-        Ok(db
-            .query_one(db.get_database_backend().build(&*self))
-            .await?
-            .is_some())
+        Ok(db.query_one(&*self).await?.is_some())
     }
 }
 
@@ -387,6 +384,12 @@ impl ConfigProvider for DatabaseConfigProvider {
             }
             DatabaseBackend::Postgres => Expr::cust(r"options->'http'->>'external_host'"),
             DatabaseBackend::Sqlite => Expr::cust(r"json_extract(options, '$.http.external_host')"),
+            backend => {
+                return Err(sea_orm::DbErr::Custom(format!(
+                    "unsupported database backend: {backend:?}"
+                ))
+                .into());
+            }
         };
 
         let target = entities::Target::Entity::find()
@@ -810,7 +813,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             .to_owned();
 
         self.db
-            .query_all(self.db.get_database_backend().build(&query))
+            .query_all(&query)
             .await?
             .iter()
             .map(|row| row.try_get_by_index(0))

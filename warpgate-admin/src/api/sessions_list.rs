@@ -8,7 +8,7 @@ use poem_openapi::param::Query;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::prelude::Expr;
-use sea_orm::sea_query::Func;
+use sea_orm::sea_query::{ExprTrait, Func};
 use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect,

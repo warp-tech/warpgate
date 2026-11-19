@@ -113,7 +113,7 @@ pub async fn open_or_lookup(
     };
 
     insert_unless_already_open(model)
-        .do_nothing()
+        .try_insert()
         .exec_without_returning(&transaction)
         .await?;
     let row = Entity::find()

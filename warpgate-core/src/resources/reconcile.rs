@@ -1,6 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, TransactionTrait};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, TransactionSession,
+    TransactionTrait,
+};
 use uuid::Uuid;
 use warpgate_common::{
     MaybeSecretRef, ProviderId, RoleId, RowId, SSHTargetAuth, SecretResolver, SshClientKeyId,

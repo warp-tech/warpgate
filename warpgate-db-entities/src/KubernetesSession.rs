@@ -1,6 +1,6 @@
 use warpgate_common::{TargetId, UserId};
 use sea_orm::entity::prelude::*;
-use sea_orm::sea_query::{OnConflict, Query};
+use sea_orm::sea_query::{ExprTrait, OnConflict, Query};
 use sea_orm::{Condition, Set};
 use time::OffsetDateTime;
 use warpgate_common::{TargetSessionId, UserSessionId, WarpgateError};
@@ -95,7 +95,7 @@ pub async fn claim(
         created: Set(created),
         target_session_id: Set(None),
     })
-    .do_nothing()
+    .try_insert()
     .exec_without_returning(db)
     .await?;
 

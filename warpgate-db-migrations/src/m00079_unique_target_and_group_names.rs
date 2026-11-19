@@ -59,7 +59,7 @@ async fn deduplicate_names(
     };
 
     let mut taken: HashSet<String> = HashSet::new();
-    for row in db.query_all(backend.build(&select)).await? {
+    for row in db.query_all(&select).await? {
         let id: Uuid = row.try_get("", "id")?;
         let name: String = row.try_get("", column)?;
         if taken.insert(key(&name)) {
@@ -72,7 +72,7 @@ async fn deduplicate_names(
             .value(name_col.clone(), renamed.clone())
             .and_where(Expr::col(id_col.clone()).eq(id))
             .to_owned();
-        db.execute(backend.build(&update)).await?;
+        db.execute(&update).await?;
         taken.insert(key(&renamed));
     }
 

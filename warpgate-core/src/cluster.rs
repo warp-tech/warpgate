@@ -8,7 +8,7 @@ use futures::{SinkExt, StreamExt};
 use poem::IntoResponse;
 use poem::web::websocket::{Message, WebSocket};
 use sea_orm::ActiveValue::Set;
-use sea_orm::sea_query::{Expr, IntoCondition, OnConflict};
+use sea_orm::sea_query::{Expr, ExprTrait, IntoCondition, OnConflict};
 use sea_orm::{ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;

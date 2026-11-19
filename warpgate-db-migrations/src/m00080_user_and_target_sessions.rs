@@ -36,7 +36,6 @@ fn recover_target_id(snapshot: &str, targets_by_name: &HashMap<String, Uuid>) ->
 /// NULL tightening after it) can key on `target_snapshot` alone.
 async fn backfill_target_ids(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     let db = manager.get_connection();
-    let backend = db.get_database_backend();
 
     let sessions = Alias::new("sessions");
     let id_col = Alias::new("id");
@@ -50,7 +49,7 @@ async fn backfill_target_ids(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
             .from(Alias::new("targets"))
             .to_owned();
         let mut map = HashMap::new();
-        for row in db.query_all(backend.build(&select)).await? {
+        for row in db.query_all(&select).await? {
             map.insert(
                 row.try_get::<String>("", "name")?,
                 row.try_get::<Uuid>("", "id")?,
@@ -76,7 +75,7 @@ async fn backfill_target_ids(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
             select.and_where(Expr::col(id_col.clone()).gt(last_id));
         }
 
-        let rows = db.query_all(backend.build(&select)).await?;
+        let rows = db.query_all(&select).await?;
         let done = (rows.len() as u64) < BACKFILL_BATCH;
 
         for row in &rows {
@@ -92,7 +91,7 @@ async fn backfill_target_ids(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
                 )
                 .and_where(Expr::col(id_col.clone()).eq(id))
                 .to_owned();
-            db.execute(backend.build(&update)).await?;
+            db.execute(&update).await?;
         }
 
         if done {

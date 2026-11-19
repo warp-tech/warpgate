@@ -1,5 +1,5 @@
 use sea_orm::prelude::Expr;
-use sea_orm::sea_query::{Alias, Func, IntoCondition, SimpleExpr};
+use sea_orm::sea_query::{Alias, ExprTrait, Func, IntoCondition, SimpleExpr};
 use sea_orm::{ColumnTrait, Condition, DbBackend, EntityTrait, ModelTrait};
 use warpgate_common::{AdminPermission, AdminPermissionSet, WarpgateError};
 pub use warpgate_common_http::RequestAuthorization;
@@ -82,7 +82,7 @@ where
     C: ColumnTrait,
     I: IntoIterator<Item = C>,
 {
-    case_insensitive_search_expr(search, columns.into_iter().map(|c| Expr::col(c).into()))
+    case_insensitive_search_expr(search, columns.into_iter().map(Expr::col))
 }
 
 /// [`case_insensitive_search`] over arbitrary expressions, for columns that need
@@ -108,6 +108,6 @@ where
 pub fn json_as_text<C: ColumnTrait>(backend: DbBackend, column: C) -> SimpleExpr {
     Expr::col(column).cast_as(match backend {
         DbBackend::MySql => Alias::new("char"),
-        DbBackend::Postgres | DbBackend::Sqlite => Alias::new("text"),
+        _ => Alias::new("text"),
     })
 }
