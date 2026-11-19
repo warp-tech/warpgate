@@ -1,37 +1,38 @@
 projects := "warpgate warpgate-admin warpgate-common warpgate-db-entities warpgate-db-migrations warpgate-database-protocols warpgate-protocol-ssh warpgate-protocol-mysql warpgate-protocol-postgres warpgate-protocol-kubernetes warpgate-protocol-http warpgate-protocol-rdp warpgate-protocol-vnc warpgate-core warpgate-sso warpgate-secrets-vault warpgate-common-cache"
 
 run *ARGS='run':
-    RUST_BACKTRACE=1 cargo run --all-features -- --config config.yaml {{ARGS}}
+    RUST_BACKTRACE=1 cargo run --all-features -- --config config.yaml {{ ARGS }}
 
 run-release *ARGS='run':
-    RUST_BACKTRACE=1 cargo run --all-features --release -- --config config.yaml {{ARGS}}
+    RUST_BACKTRACE=1 cargo run --all-features --release -- --config config.yaml {{ ARGS }}
 
 fmt:
-    for p in {{projects}}; do cargo fmt -p $p -v; done
+    cargo fmt-toml
+    for p in {{ projects }}; do cargo +nightly fmt -p $p -v; done
 
 fix *ARGS:
-    for p in {{projects}}; do cargo fix --all-features -p $p {{ARGS}}; done
+    for p in {{ projects }}; do cargo fix --all-features -p $p {{ ARGS }}; done
 
 clippy *ARGS:
-    cargo cranky --workspace --all-features {{ARGS}}
+    cargo cranky --workspace --all-features {{ ARGS }}
 
 bless *ARGS:
-    for p in {{projects}}; do cargo bless --manifest-path $p/Cargo.toml {{ARGS}}; done
+    for p in {{ projects }}; do cargo bless --manifest-path $p/Cargo.toml {{ ARGS }}; done
 
 test:
-    for p in {{projects}}; do cargo test --all-features -p $p; done
+    for p in {{ projects }}; do cargo test --all-features -p $p; done
 
 npm *ARGS:
-    cd warpgate-web && npm {{ARGS}}
+    cd warpgate-web && npm {{ ARGS }}
 
 npx *ARGS:
-    cd warpgate-web && npx {{ARGS}}
+    cd warpgate-web && npx {{ ARGS }}
 
 migrate *ARGS:
-    cargo run --all-features -p warpgate-db-migrations -- {{ARGS}}
+    cargo run --all-features -p warpgate-db-migrations -- {{ ARGS }}
 
 lint *ARGS:
-    cd warpgate-web && npm run lint {{ARGS}}
+    cd warpgate-web && npm run lint {{ ARGS }}
 
 svelte-check:
     cd warpgate-web && npm run check

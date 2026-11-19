@@ -38,7 +38,8 @@ use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
 use warpgate_common_http::{
-    WARPGATE_PLAYGROUND_CSP, cluster_peer_extension, warpgate_csp_with_connect_src,
+    HTTP2_MAX_CONCURRENT_STREAMS_PER_CONN, WARPGATE_PLAYGROUND_CSP, cluster_peer_extension,
+    warpgate_csp_with_connect_src,
 };
 use warpgate_core::{ProtocolServer, Services};
 use warpgate_db_entities::Parameters::RecordingsStorageConfig;
@@ -52,7 +53,9 @@ use warpgate_web_ssh::api::ws_handler as ssh_web_client_ws_handler;
 use crate::api::common::forward_ws_to_session_owner;
 use crate::client_cache::HttpClientCache;
 use crate::common::{endpoint_auth, page_auth};
-use crate::middleware::{CookieHostMiddleware, SecurityHeadersMiddleware, TicketMiddleware};
+use crate::middleware::{
+    CookieHostMiddleware, SecurityHeadersMiddleware, TicketMiddleware, limit_request_body,
+};
 use crate::session::SessionStore;
 use crate::session_handle::warpgate_server_handle_for_request;
 use crate::session_storage::SharedSessionStorage;
@@ -243,6 +246,7 @@ impl ProtocolServer for HTTPProtocolServer {
                     EmbeddedFileEndpoint::<Assets>::new("src/gateway/index.html")
                         .with(cache_bust()),
                 )
+                .around(limit_request_body)
                 .around({
                     let services = services;
                     move |ep, req| {
@@ -347,7 +351,10 @@ impl ProtocolServer for HTTPProtocolServer {
         );
 
         Ok(async move {
-            Server::new_with_acceptor(acceptor).run(app).await?;
+            Server::new_with_acceptor(acceptor)
+                .http2_max_concurrent_streams(HTTP2_MAX_CONCURRENT_STREAMS_PER_CONN)
+                .run(app)
+                .await?;
             Ok(())
         }
         .boxed())

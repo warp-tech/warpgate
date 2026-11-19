@@ -20,6 +20,7 @@ use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
+use warpgate_common_http::read_body_limited_with_timeout;
 use warpgate_core::logging::KubernetesAuditSubject;
 use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
 use warpgate_core::{Services, WarpgateServerHandle};
@@ -31,6 +32,11 @@ use crate::server::UpstreamClientCache;
 use crate::server::auth::{
     KubernetesIdentity, authenticate_kubernetes_user, create_authenticated_client, unauthorized,
 };
+
+/// The kube-apiserver's hardcoded cap on a write request body (twice etcd's
+/// 1.5 MiB request limit). The apiserver does not apply it to `.../proxy`
+/// subresources; this does.
+const MAX_REQUEST_BODY_BYTES: usize = 3 * 1024 * 1024;
 
 /// A client-supplied impersonation header (`Impersonate-User`,
 /// `Impersonate-Group`, `Impersonate-Uid`, `Impersonate-Extra-*`). These let a
@@ -343,10 +349,13 @@ async fn _handle_normal_request_inner(
 
     // Cancel slow uploads when the session closes.
     let body_bytes = closed
-        .run_until_cancelled(body.into_bytes())
+        .run_until_cancelled(read_body_limited_with_timeout(
+            req.headers(),
+            body,
+            MAX_REQUEST_BODY_BYTES,
+        ))
         .await
-        .ok_or(WarpgateError::UserSessionEnded)?
-        .context("reading request body")?;
+        .ok_or(WarpgateError::UserSessionEnded)??;
 
     let mut recorder_opt = match start_recording_api(&admitted.id(), &services.recordings).await {
         Ok(recorder) => recorder,
@@ -391,7 +400,7 @@ async fn _handle_normal_request_inner(
     );
 
     if !body_bytes.is_empty() {
-        request_builder = request_builder.body(body_bytes.to_vec());
+        request_builder = request_builder.body(body_bytes.clone());
     }
 
     // Debug logging for upstream request
