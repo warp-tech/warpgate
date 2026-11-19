@@ -52,10 +52,6 @@ impl Write for SaslBufferWriter<'_> {
 }
 
 impl PostgresClient {
-    pub const fn protocol_version(&self) -> ProtocolVersion {
-        self.decode_context.protocol_version
-    }
-
     pub async fn connect(
         admitted: AdmittedTarget<TargetPostgresOptions>,
         options: ConnectionOptions,

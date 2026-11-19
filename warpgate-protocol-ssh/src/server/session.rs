@@ -71,6 +71,13 @@ const DISCONNECT_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 /// disconnect. A client that reads both in one batch acts on the disconnect
 /// and exits without printing the message.
 const DISCONNECT_NOTICE_GAP: Duration = Duration::from_secs(1);
+/// How long the client has to answer a channel open requested by the target.
+/// Output deferred on an unanswered open keeps outbound slots from the other
+/// channels
+const SERVER_CHANNEL_OPEN_TIMEOUT: Duration = Duration::from_secs(60);
+/// Target-requested channel opens that may await the client at once. More are
+/// refused
+const MAX_PENDING_SERVER_CHANNEL_OPENS: usize = 64;
 
 #[allow(clippy::large_enum_variant)]
 enum TargetSelection {
@@ -628,10 +635,18 @@ impl ServerSession {
         + Send
         + 'static,
     ) {
+        if self.channels.opening_count() >= MAX_PENDING_SERVER_CHANNEL_OPENS {
+            warn!(channel=%id, "Too many channel opens awaiting the client, refusing");
+            let _ = self.send_command(RCCommand::Channel(id, ChannelOperation::Close));
+            return;
+        }
         self.channels.begin_server_open(id);
         let sender = self.event_sender.clone();
         tokio::spawn(async move {
-            let result = open.await.map(|channel| ServerChannelId(channel.id()));
+            let result = match tokio::time::timeout(SERVER_CHANNEL_OPEN_TIMEOUT, open).await {
+                Ok(result) => result.map(|channel| ServerChannelId(channel.id())),
+                Err(elapsed) => Err(elapsed.into()),
+            };
             let _ = sender
                 .send_once(Event::ServerChannelOpenResult(id, result))
                 .await;
@@ -940,7 +955,7 @@ impl ServerSession {
                     let e = if let Some(ch) = e.channel()
                         && let Some(channel) = self.channels.get_mut(&ch)
                     {
-                        match channel.try_defer(e) {
+                        match channel.try_defer(e, || self.intake.take_slot()) {
                             Ok(()) => {
                                 debug!(channel=%ch, "Deferring event until the channel open resolves");
                                 return Ok(());
@@ -1094,7 +1109,10 @@ impl ServerSession {
     /// open was in flight. Events whose channel is still opening are deferred
     /// again by [`Self::handle_event`], so overlapping opens replay safely.
     async fn confirm_channel_open(&mut self, channel: Uuid) -> Result<(), WarpgateError> {
-        for event in self.channels.confirm(channel).unwrap_or_default() {
+        for (event, slot) in self.channels.confirm(channel).unwrap_or_default() {
+            if let Some(slot) = slot {
+                self.intake.restore_slot(slot);
+            }
             self.handle_event(Event::Client(event)).await?;
         }
         self.replay_deferred_server_events().await

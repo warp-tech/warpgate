@@ -361,7 +361,7 @@ impl DesktopRecorder {
                 let rect: RecordingRect = (*rect).into();
                 // Composite into the framebuffer (best-effort) so keyframes stay accurate;
                 // pass the already-compressed JPEG through to the stream unchanged.
-                if let Some((_, _, rgb)) = decode_jpeg_rgb(data) {
+                if let Some(rgb) = decode_jpeg_rgb(data, rect.width, rect.height) {
                     st.fb.blit_rgb(
                         u32::from(rect.x),
                         u32::from(rect.y),
