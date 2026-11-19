@@ -45,13 +45,15 @@ pub async fn catchall_endpoint(
     http_client_cache: Data<&HttpClientCache>,
     session_store: Data<&Arc<Mutex<SessionStore>>>,
 ) -> poem::Result<Response> {
-    let Some(authorization) = get_target_for_request(req, &ctx).await? else {
+    let Some(RequestTarget {
+        authorization,
+        remember,
+    }) = get_target_for_request(req, &ctx).await?
+    else {
         return Ok(target_select_redirect());
     };
 
-    // A host-bound target is selected by its host. A remembered name would
-    // only be refused on other hosts.
-    if bound_host(authorization.target()).is_none() {
+    if remember {
         session.set_target_name(authorization.target().name.clone());
     }
 
@@ -152,10 +154,19 @@ fn is_http_authorization(
     authorization.narrow().ok()
 }
 
+struct RequestTarget {
+    authorization: TargetAuthorization<TargetHTTPOptions>,
+    /// Whether later requests that name no target should get this one. False
+    /// when something other than the user's choice fixes the target on every
+    /// request (its bound domain, or a ticket): remembering it would make the
+    /// main host proxy to it instead of showing the target list.
+    remember: bool,
+}
+
 async fn get_target_for_request(
     req: &Request,
     ctx: &AuthenticatedRequestContext,
-) -> poem::Result<Option<TargetAuthorization<TargetHTTPOptions>>> {
+) -> poem::Result<Option<RequestTarget>> {
     let config_provider = ctx.services().config_provider.as_ref();
 
     // A ticket is bound to one target row, and it was authorized against that row
@@ -191,8 +202,8 @@ async fn get_target_for_request(
             return Ok(None);
         }
 
-        return Ok(is_http_authorization(
-            TargetAuthorization::for_ticket_session(
+        return Ok(
+            is_http_authorization(TargetAuthorization::for_ticket_session(
                 AuthStateUserInfo {
                     id: *user_id,
                     username: username.clone(),
@@ -200,8 +211,12 @@ async fn get_target_for_request(
                 target,
                 *ticket_id,
                 crate::common::PROTOCOL_NAME,
-            )?,
-        ));
+            )?)
+            .map(|authorization| RequestTarget {
+                authorization,
+                remember: false,
+            }),
+        );
     }
 
     let RequestAuthorization::Session(SessionAuthorization::User { .. }) = &ctx.auth else {
@@ -243,14 +258,16 @@ async fn get_target_for_request(
         .or_else(|| host_based_target.as_ref().map(|target| target.name.clone()));
 
     if let Some(target_name) = final_target_name {
-        let target =
-            if let Some(target) = host_based_target.filter(|target| target.name == target_name) {
-                Some(target)
-            } else {
+        let host_based_target = host_based_target.filter(|target| target.name == target_name);
+        let remember = host_based_target.is_none();
+        let target = match host_based_target {
+            Some(target) => Some(target),
+            None => {
                 config_provider
                     .get_target_by_name(target_name.as_str())
                     .await?
-            };
+            }
+        };
 
         // Reached only for a `SessionAuthorization::User` (ticket sessions are
         // handled separately above), so the session is the prior-auth evidence.
@@ -273,7 +290,10 @@ async fn get_target_for_request(
                 authorize_for_target(config_provider, &identity, target).await?
             && let Some(authorization) = is_http_authorization(authorization)
         {
-            return Ok(Some(authorization));
+            return Ok(Some(RequestTarget {
+                authorization,
+                remember,
+            }));
         }
     }
 
