@@ -9,8 +9,8 @@ use warpgate_common::{
 };
 use warpgate_common_http::errors::invalid_field;
 use warpgate_core::logging::AuditEvent;
-use warpgate_core::resources::ResourceError;
 use warpgate_core::resources::roles::{self as store, RoleDataRequest};
+use warpgate_core::resources::{Actor, ResourceError};
 use warpgate_db_entities::{Role, Target, User};
 
 use super::AdminContext;
@@ -68,7 +68,7 @@ impl ListApi {
     ) -> Result<CreateRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesCreate)?;
 
-        match store::create(&admin.services().db, &body).await {
+        match store::create(&admin.services().db, Actor::Admin, &body).await {
             Ok(role) => {
                 AuditEvent::RoleCreated {
                     role_id: role.id,
@@ -114,6 +114,8 @@ enum UpdateRoleResponse {
 enum DeleteRoleResponse {
     #[oai(status = 204)]
     Deleted,
+    #[oai(status = 409)]
+    Conflict(Json<String>),
     #[oai(status = 404)]
     NotFound,
 }
@@ -154,6 +156,20 @@ impl DetailApi {
         })
     }
 
+    #[oai(
+        path = "/role/:id/release",
+        method = "post",
+        operation_id = "release_role"
+    )]
+    async fn api_release_role(
+        &self,
+        admin: AdminContext,
+        id: Path<Uuid>,
+    ) -> Result<GetRoleResponse, WarpgateError> {
+        super::gitops::release_managed::<Role::Entity>(&admin, id.0).await?;
+        self.api_get_role(admin, id).await
+    }
+
     #[oai(path = "/role/:id", method = "put", operation_id = "update_role")]
     async fn api_update_role(
         &self,
@@ -163,7 +179,7 @@ impl DetailApi {
     ) -> Result<UpdateRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesEdit)?;
 
-        match store::update(&admin.services().db, id.0, &body).await {
+        match store::update(&admin.services().db, Actor::Admin, id.0, &body).await {
             Ok(role) => {
                 AuditEvent::RoleUpdated {
                     role_id: role.id,
@@ -181,6 +197,9 @@ impl DetailApi {
                 "Name already exists".into(),
             ))),
             Err(ResourceError::NotFound) => Ok(UpdateRoleResponse::NotFound),
+            Err(err @ ResourceError::OwnedBy(_)) => {
+                Ok(UpdateRoleResponse::Conflict(Json(err.to_string())))
+            }
             Err(err) => Err(err.into()),
         }
     }
@@ -201,7 +220,7 @@ impl DetailApi {
             .map(|r| r.name)
             .unwrap_or_default();
 
-        match store::delete(db, id.0).await {
+        match store::delete(db, Actor::Admin, id.0).await {
             Ok(()) => {
                 AuditEvent::RoleDeleted {
                     role_id: id.0,
@@ -212,6 +231,9 @@ impl DetailApi {
                 Ok(DeleteRoleResponse::Deleted)
             }
             Err(ResourceError::NotFound) => Ok(DeleteRoleResponse::NotFound),
+            Err(err @ ResourceError::OwnedBy(_)) => {
+                Ok(DeleteRoleResponse::Conflict(Json(err.to_string())))
+            }
             Err(err) => Err(err.into()),
         }
     }

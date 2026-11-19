@@ -230,6 +230,7 @@
         {/if}
         <Button
             id="SecretRefInput-value-{id}"
+            type="button"
             color="secondary"
             class="secret-ref-button d-flex align-items-center gap-2 mb-3"
             {disabled}
@@ -244,6 +245,7 @@
             </Tooltip>
             <Button
                 id="SecretRefInput-enterDirectlyButton-{id}"
+                type="button"
                 color="link"
                 class="px-1 text-nowrap mb-3 align-self-stretch"
                 {disabled}
@@ -267,6 +269,7 @@
                 <Tooltip target="useSecretButton">Use secret backend</Tooltip>
                 <Button
                     id="useSecretButton"
+                    type="button"
                     color="link"
                     class="px-0 mb-3 text-nowrap"
                     {disabled}
@@ -321,9 +324,9 @@
                 {#each sharedWith as usage, i}
                     {i ? ', ' : ''}
                     {#if usage.kind === 'Target'}
-                        <a href="#/config/targets/{usage.id}">{usage.name}</a>
+                        <a href="#/manage/targets/{usage.id}">{usage.name}</a>
                     {:else}
-                        <a href="#/config/ssh">SSH client key {usage.label}</a>
+                        <a href="#/manage/ssh">SSH client key {usage.label}</a>
                     {/if}
                 {/each}
             </div>
@@ -342,6 +345,7 @@
     </ModalBody>
     <ModalFooter>
         <Button
+            type="button"
             color="primary"
             class="modal-button"
             disabled={!complete}
@@ -350,6 +354,7 @@
             Save
         </Button>
         <Button
+            type="button"
             color="danger"
             class="modal-button"
             onclick={() => (modalOpen = false)}

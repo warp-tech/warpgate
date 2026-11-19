@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-common"
-version = "0.30.2"
+version = "0.30.3"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -28,7 +28,6 @@ humantime-serde = { version = "1.1", default-features = false }
 ipnet.workspace = true
 nix = { version = "0.31", features = ["user"] }
 nucleo-matcher = "0.3.1"
-password-hash.workspace = true
 poem.workspace = true
 poem-openapi.workspace = true
 ppp.workspace = true
@@ -60,7 +59,6 @@ tracing.workspace = true
 tracing-core = { version = "0.1", default-features = false }
 url.workspace = true
 uuid.workspace = true
-warpgate-aws = { path = "../warpgate-aws" }
 warpgate-ca = { path = "../warpgate-ca" }
 warpgate-ldap = { path = "../warpgate-ldap" }
 warpgate-sso = { path = "../warpgate-sso" }

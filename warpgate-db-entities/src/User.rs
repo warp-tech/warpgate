@@ -7,7 +7,7 @@ use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::{Func, IntoCondition};
 use serde::Serialize;
 use uuid::Uuid;
-use warpgate_common::{User, UserDetails, WarpgateError};
+use warpgate_common::{ProviderId, User, UserDetails, WarpgateError};
 
 use crate::{
     CertificateCredential, OtpCredential, PasswordCredential, PublicKeyCredential, Role,
@@ -31,6 +31,7 @@ pub struct Model {
     pub ldap_object_uuid: Option<Uuid>,
     #[sea_orm(column_type = "Text", nullable)]
     pub allowed_ip_ranges: serde_json::Value,
+    pub provider: Option<ProviderId>,
 }
 
 impl Related<super::Role::Entity> for Entity {

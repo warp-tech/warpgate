@@ -4,7 +4,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::anyhow;
 use bytes::Bytes;
 use futures::stream::{FuturesOrdered, StreamExt};
 use tokio_util::sync::CancellationToken;
@@ -12,7 +11,8 @@ use tracing::{Instrument, debug, info_span, warn};
 use warpgate_common::{TargetOptions, UserSessionId, WarpgateError};
 use warpgate_core::recordings::{DesktopRecorder, DesktopRecordingMetadata};
 use warpgate_core::{
-    AdmittedTarget, DesktopClientHandles, DesktopEvent, Services, TargetAuthorization,
+    AdmittedTarget, DesktopClientHandles, DesktopConnectionError, DesktopEvent, Services,
+    TargetAuthorization,
 };
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_web_clients_common::{
@@ -110,12 +110,10 @@ async fn run_session(
         authorization,
         remote_address,
         |admitted| async {
-            match connect(&session, &services, admitted, size).await {
-                Ok((handles, recorder, encode_jpeg)) => {
-                    relay_events(&session, handles, recorder, encode_jpeg).await
-                }
-                Err(e) => Err(e),
-            }
+            let (handles, recorder, encode_jpeg) = connect(&session, &services, admitted, size)
+                .await
+                .map_err(|e| Arc::new(DesktopConnectionError::from(e)))?;
+            relay_events(&session, handles, recorder, encode_jpeg).await
         },
     )
     .await;
@@ -193,7 +191,7 @@ async fn emit(
     recorder: Option<&DesktopRecorder>,
     event: DesktopEvent,
     raw: Option<&Bytes>,
-) -> Result<(), WarpgateError> {
+) -> Result<(), Arc<DesktopConnectionError>> {
     if let Some(recorder) = recorder {
         let result = match (&event, raw) {
             (DesktopEvent::JpegImage { rect, data }, Some(raw)) => {
@@ -212,14 +210,7 @@ async fn emit(
             }
             Ok(())
         }
-        DesktopEvent::Error(message) => {
-            session
-                .push(ServerMessage::Error {
-                    message: message.clone(),
-                })
-                .await;
-            Err(anyhow!(message).into())
-        }
+        DesktopEvent::Error(error) => Err(error),
         event => {
             if let Some(msg) = ServerMessage::from_event(event) {
                 session.push(msg).await;
@@ -253,7 +244,7 @@ async fn relay_events(
     handles: DesktopClientHandles,
     recorder: Option<Arc<DesktopRecorder>>,
     encode_jpeg: bool,
-) -> Result<(), WarpgateError> {
+) -> Result<(), Arc<DesktopConnectionError>> {
     let DesktopClientHandles {
         mut event_rx,
         abort_tx,
@@ -266,7 +257,7 @@ async fn relay_events(
     // concurrently, emitted strictly in arrival order.
     let mut pipeline: FuturesOrdered<_> = FuturesOrdered::new();
     let mut backend_done = false;
-    let mut final_result: Result<(), WarpgateError> = Ok(());
+    let mut final_result: Result<(), Arc<DesktopConnectionError>> = Ok(());
     loop {
         if backend_done && pipeline.is_empty() {
             break;

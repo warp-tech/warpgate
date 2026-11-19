@@ -13,7 +13,7 @@ use sea_orm::{
 use tracing::{error, info};
 use uuid::Uuid;
 use warpgate_common::helpers::fs::{secure_directory, secure_file};
-use warpgate_common::version::warpgate_version;
+use warpgate_common::version::{repository_file_url, warpgate_version};
 use warpgate_common::{
     GlobalParams, HttpConfig, KubernetesConfig, ListenEndpoint, MySqlConfig, PostgresConfig,
     RdpConfig, Secret, SshConfig, SshHostKeyVerificationMode, VncConfig, WarpgateConfig,
@@ -405,6 +405,7 @@ async fn bootstrap_database(
                 name: Set(BUILTIN_ADMIN_USERNAME.to_string()),
                 description: Set("".to_string()),
                 is_default: Set(false),
+                ..Default::default()
             }
             .insert(db)
             .await?
@@ -532,8 +533,9 @@ pub async fn command(
     println!("{yaml}");
 
     let yaml = format!(
-        "# Config generated in version {version}\n# yaml-language-server: $schema=https://raw.githubusercontent.com/warp-tech/warpgate/refs/heads/main/config-schema.json\n\n{yaml}",
-        version = warpgate_version()
+        "# Config generated in version {version}\n# yaml-language-server: $schema={schema}\n\n{yaml}",
+        version = warpgate_version(),
+        schema = repository_file_url("config-schema.json"),
     );
 
     File::create(config_path)?.write_all(yaml.as_bytes())?;

@@ -6,8 +6,8 @@ use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::errors::invalid_field;
-use warpgate_core::resources::ResourceError;
 use warpgate_core::resources::target_groups::{self as store, TargetGroupDataRequest};
+use warpgate_core::resources::{Actor, ResourceError};
 use warpgate_db_entities::TargetGroup;
 
 use super::AdminContext;
@@ -64,7 +64,7 @@ impl ListApi {
     ) -> Result<CreateTargetGroupResponse, WarpgateError> {
         admin.require(AdminPermission::TargetsCreate)?;
 
-        match store::create(&admin.services().db, &body).await {
+        match store::create(&admin.services().db, Actor::Admin, &body).await {
             Ok(group) => Ok(CreateTargetGroupResponse::Created(Json(group))),
             Err(ResourceError::EmptyName) => Ok(CreateTargetGroupResponse::BadRequest(
                 invalid_field("name", "target group name is empty"),
@@ -102,6 +102,9 @@ enum DeleteTargetGroupResponse {
     #[oai(status = 204)]
     Deleted,
 
+    #[oai(status = 409)]
+    Conflict(Json<String>),
+
     #[oai(status = 404)]
     NotFound,
 }
@@ -130,6 +133,20 @@ impl DetailApi {
     }
 
     #[oai(
+        path = "/target-groups/:id/release",
+        method = "post",
+        operation_id = "release_target_group"
+    )]
+    async fn api_release_target_group(
+        &self,
+        admin: AdminContext,
+        id: Path<Uuid>,
+    ) -> Result<GetTargetGroupResponse, WarpgateError> {
+        super::gitops::release_managed::<TargetGroup::Entity>(&admin, id.0).await?;
+        self.api_get_target_group(admin, id).await
+    }
+
+    #[oai(
         path = "/target-groups/:id",
         method = "put",
         operation_id = "update_target_group"
@@ -142,7 +159,7 @@ impl DetailApi {
     ) -> Result<UpdateTargetGroupResponse, WarpgateError> {
         admin.require(AdminPermission::TargetsEdit)?;
 
-        match store::update(&admin.services().db, id.0, &body).await {
+        match store::update(&admin.services().db, Actor::Admin, id.0, &body).await {
             Ok(group) => Ok(UpdateTargetGroupResponse::Ok(Json(group))),
             Err(ResourceError::EmptyName) => {
                 warn!("Rejecting request: target group name is empty");
@@ -152,6 +169,9 @@ impl DetailApi {
                 "Name already exists".into(),
             ))),
             Err(ResourceError::NotFound) => Ok(UpdateTargetGroupResponse::NotFound),
+            Err(err @ ResourceError::OwnedBy(_)) => {
+                Ok(UpdateTargetGroupResponse::Conflict(Json(err.to_string())))
+            }
             Err(err) => Err(err.into()),
         }
     }
@@ -168,9 +188,12 @@ impl DetailApi {
     ) -> Result<DeleteTargetGroupResponse, WarpgateError> {
         admin.require(AdminPermission::TargetsDelete)?;
 
-        match store::delete(&admin.services().db, id.0).await {
+        match store::delete(&admin.services().db, Actor::Admin, id.0).await {
             Ok(()) => Ok(DeleteTargetGroupResponse::Deleted),
             Err(ResourceError::NotFound) => Ok(DeleteTargetGroupResponse::NotFound),
+            Err(err @ ResourceError::OwnedBy(_)) => {
+                Ok(DeleteTargetGroupResponse::Conflict(Json(err.to_string())))
+            }
             Err(err) => Err(err.into()),
         }
     }

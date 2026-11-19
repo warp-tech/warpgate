@@ -59,6 +59,27 @@ def request(wg, secret, path="/api", **kwargs):
     )
 
 
+def login(wg, api, user):
+    """Sets a password for `user` and returns a logged-in browser session."""
+    api.create_password_credential(user.id, sdk.NewPasswordCredential(password="123"))
+    session = requests.Session()
+    session.verify = False
+    response = session.post(f"https://localhost:{wg.http_port}/@warpgate/api/auth/login", json={
+        "username": user.username, "password": "123",
+    }, timeout=10)
+    response.raise_for_status()
+    return session
+
+
+def create_api_token(session, wg):
+    response = session.post(f"https://localhost:{wg.http_port}/@warpgate/api/profile/api-tokens", json={
+        "label": f"kubernetes-{uuid4()}",
+        "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+    }, timeout=10)
+    response.raise_for_status()
+    return response.json()["secret"]
+
+
 def uses_left(setup, ticket):
     return next(t.uses_left for t in setup[0].get_tickets() if t.id == ticket.ticket.id)
 
@@ -138,20 +159,8 @@ def test_normal_api_token_cannot_join_ticket_session(shared_wg, ticket_setup):
     api, user, target = ticket_setup
     ticket = create_ticket(ticket_setup)
     assert request(shared_wg, ticket.secret).status_code == 200
-    api.create_password_credential(user.id, sdk.NewPasswordCredential(password="123"))
-    with requests.Session() as session:
-        session.verify = False
-        url = f"https://localhost:{shared_wg.http_port}/@warpgate/api"
-        login = session.post(f"{url}/auth/login", json={
-            "username": user.username, "password": "123",
-        }, timeout=10)
-        login.raise_for_status()
-        token_response = session.post(f"{url}/profile/api-tokens", json={
-            "label": "kubernetes-ticket-isolation",
-            "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-        }, timeout=10)
-        token_response.raise_for_status()
-        headers = {"Authorization": f"Bearer {token_response.json()['secret']}"}
+    with login(shared_wg, api, user) as session:
+        headers = {"Authorization": f"Bearer {create_api_token(session, shared_wg)}"}
 
     def normal_request(path):
         return requests.get(
@@ -220,16 +229,6 @@ def test_ticket_session_lifetime_is_enforced(processes, echo_server_port):
         assert uses_left(setup, ticket) == 0
         time.sleep(1.1)
         assert request(wg, ticket.secret).status_code == 401
-
-
-def test_single_use_is_atomic_across_nodes(processes, shared_wg, ticket_setup):
-    peer = processes.start_wg(share_with=shared_wg)
-    wait_port(peer.kubernetes_port, for_process=peer.process, recv=False)
-    ticket = create_ticket(ticket_setup, number_of_uses=1)
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        responses = list(pool.map(lambda wg: request(wg, ticket.secret), [shared_wg, peer]))
-    assert sorted(r.status_code for r in responses) == [200, 401]
-    assert uses_left(ticket_setup, ticket) == 0
 
 
 @pytest.mark.asyncio

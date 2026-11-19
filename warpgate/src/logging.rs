@@ -72,6 +72,7 @@ pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) -> Result<
             let env_filter = env_filter.clone();
             || {
                 tracing_subscriber::fmt::layer()
+                    .with_writer(std::io::stderr)
                     .with_ansi(enable_colors)
                     .with_timer(OffsetTime::new(
                         offset,
@@ -90,6 +91,7 @@ pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) -> Result<
     let text_layer_interactive =
         (log_format == LogFormat::Text && console::user_attended()).then(|| {
             tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
                 .compact()
                 .with_ansi(enable_colors)
                 .with_target(false)

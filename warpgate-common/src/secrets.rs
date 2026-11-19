@@ -257,6 +257,13 @@ impl MaybeSecretRef {
         matches!(self, Self::Inline(_))
     }
 
+    pub const fn as_inline(&self) -> Option<&StoredSecret> {
+        match self {
+            Self::Inline(v) => Some(v),
+            Self::Reference(_) | Self::Malformed(_) => None,
+        }
+    }
+
     pub const fn inline_mut(&mut self) -> Option<&mut StoredSecret> {
         match self {
             Self::Inline(v) => Some(v),
@@ -379,6 +386,19 @@ impl<'de> Deserialize<'de> for MaybeSecretRef {
 impl Serialize for MaybeSecretRef {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         self.as_string().serialize(s)
+    }
+}
+
+impl schemars::JsonSchema for MaybeSecretRef {
+    fn schema_name() -> Cow<'static, str> {
+        "MaybeSecretRef".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "description": "A literal value, or a reference to one: secret://backend/mount/path#field",
+        })
     }
 }
 

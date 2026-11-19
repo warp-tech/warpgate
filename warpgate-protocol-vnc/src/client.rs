@@ -139,7 +139,8 @@ fn spawn_client(
             )
             .await
             {
-                let _ = event_tx.send(DesktopEvent::backend_error(&error)).await;
+                let error = Arc::new(error);
+                let _ = event_tx.send(DesktopEvent::Error(error.clone())).await;
                 error!(
                     "VNC backend client failed: {:#}",
                     anyhow::Error::from(error)
@@ -302,7 +303,9 @@ fn map_event(event: VncEvent) -> Option<DesktopEvent> {
         VncEvent::Bell => DesktopEvent::Bell,
         VncEvent::Error(message) => {
             error!(%message, "VNC backend reported an error");
-            DesktopEvent::backend_error(&DesktopConnectionError::Session(anyhow::anyhow!(message)))
+            DesktopEvent::Error(Arc::new(DesktopConnectionError::Session(anyhow::anyhow!(
+                message
+            ))))
         }
         // Everything else (including the server's pixel-format echo — we fix our own)
         // is not surfaced.
@@ -313,6 +316,7 @@ fn map_event(event: VncEvent) -> Option<DesktopEvent> {
 #[cfg(test)]
 mod tests {
     use vnc::VncEvent;
+    use warpgate_common::UserFacingReason;
     use warpgate_core::DesktopEvent;
 
     use super::map_event;
@@ -322,9 +326,9 @@ mod tests {
         let shown = match map_event(VncEvent::Error(
             "Connection reset by peer (os error 54)".into(),
         )) {
-            Some(DesktopEvent::Error(message)) => message,
+            Some(DesktopEvent::Error(error)) => error.user_facing_reason(),
             other => format!("{other:?}"),
         };
-        assert_eq!(shown, "Target connection failed: The target session failed");
+        assert_eq!(shown, "The target session failed");
     }
 }

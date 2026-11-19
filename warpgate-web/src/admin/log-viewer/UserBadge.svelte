@@ -10,7 +10,7 @@
 
 <Badge
     href={$adminPermissions.usersEdit && id
-        ? `#/config/users/${id}`
+        ? `#/manage/users/${id}`
         : undefined}
     color="success"
     class="d-flex align-items-center"

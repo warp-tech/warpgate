@@ -29,7 +29,7 @@ use crate::auth::CredentialKind;
 use crate::helpers::hash::hash_password;
 use crate::helpers::ipnet::WarpgateIpNet;
 use crate::helpers::otp::OtpSecretKey;
-use crate::{GlobalParams, ListenEndpoint, Secret};
+use crate::{GlobalParams, ListenEndpoint, ProviderId, Secret};
 
 #[derive(Debug, Clone, PartialEq, Eq, Union)]
 #[oai(discriminator_name = "kind", one_of)]
@@ -182,6 +182,7 @@ pub struct Role {
     pub name: String,
     pub description: String,
     pub is_default: bool,
+    pub provider: Option<ProviderId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Object)]
@@ -325,6 +326,12 @@ impl AdminPermissionSet {
         self.0 & perm.bit() != 0
     }
 
+    /// Every permission in `other` is also in `self`.
+    #[must_use]
+    pub const fn is_superset_of(self, other: Self) -> bool {
+        other.0 & !self.0 == 0
+    }
+
     /// Holding any permission at all makes the principal an administrator.
     #[must_use]
     pub const fn is_admin(self) -> bool {
@@ -393,6 +400,20 @@ mod admin_permission_set_tests {
         for perm in AdminPermission::iter() {
             assert!(all.contains(perm), "missing {perm:?}");
         }
+    }
+
+    #[test]
+    fn superset_requires_every_permission() {
+        let mut narrow = empty_role();
+        narrow.users_edit = true;
+        let mut broad = narrow.clone();
+        broad.config_edit = true;
+        let narrow = AdminPermissionSet::from_roles([narrow]);
+        let broad = AdminPermissionSet::from_roles([broad]);
+        assert!(broad.is_superset_of(narrow));
+        assert!(!narrow.is_superset_of(broad));
+        assert!(narrow.is_superset_of(narrow));
+        assert!(narrow.is_superset_of(AdminPermissionSet::none()));
     }
 
     #[test]
@@ -548,6 +569,11 @@ pub struct HttpConfig {
 
     #[serde(default)]
     pub sni_certificates: Vec<SniCertificateConfig>,
+
+    /// API endpoints allowed when using token auth. Each item is a "<METHOD> <path>".
+    /// `<METHOD>` may be `*`. In `<path>`, `*` matches one segment and `**` any number.
+    #[serde(default)]
+    pub user_api_token_allowed_endpoints: Option<Vec<String>>,
 }
 
 impl Default for HttpConfig {
@@ -563,6 +589,7 @@ impl Default for HttpConfig {
             session_max_age: _default_session_max_age(),
             cookie_max_age: _default_cookie_max_age(),
             sni_certificates: vec![],
+            user_api_token_allowed_endpoints: None,
         }
     }
 }

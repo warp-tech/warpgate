@@ -13,7 +13,8 @@ use warpgate_aws::EksClusterInfo;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
 use warpgate_common::auth::{AuthResult, AuthState, AuthStateUserInfo, CredentialKind};
 use warpgate_common::{
-    Protocol, Secret, TargetKubernetesOptions, User, UserSessionId, WarpgateError,
+    Protocol, Secret, Target, TargetKubernetesOptions, TargetOptions, User, UserSessionId,
+    WarpgateError,
 };
 use warpgate_common_http::authorization_token;
 use warpgate_common_http::logging::get_client_ip_addr;
@@ -26,23 +27,53 @@ use warpgate_db_entities::{CertificateCredential, CertificateRevocation, Paramet
 
 use crate::server::client_certs::RequestCertificateExt;
 
+// used to key correlator entries to prevent cross-token/ticket approvals
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum TransportCredential {
+    Ticket(Uuid),
+    ApiToken(Uuid),
+    /// ID tokens are reissued every few minutes, so the stable issuer-side
+    /// identity is the credential, not the token bytes.
+    OidcToken {
+        provider: String,
+        subject: String,
+    },
+    ClientCertificate(Uuid),
+}
+
+impl TransportCredential {
+    /// Stable text form for the cross-node session key. The free-text OIDC
+    /// fields go last so they cannot be mistaken for a leading segment.
+    pub fn key_segment(&self) -> String {
+        match self {
+            Self::Ticket(id) => format!("ticket:{id}"),
+            Self::ApiToken(id) => format!("token:{id}"),
+            Self::OidcToken { provider, subject } => format!("oidc:{provider}:{subject}"),
+            Self::ClientCertificate(id) => format!("cert:{id}"),
+        }
+    }
+}
+
 pub enum KubernetesIdentity {
-    User(User),
+    User {
+        user: User,
+        credential: TransportCredential,
+    },
     Ticket(ValidatedTicket),
 }
 
 impl KubernetesIdentity {
     pub fn user_info(&self) -> AuthStateUserInfo {
         match self {
-            Self::User(user) => user.into(),
+            Self::User { user, .. } => user.into(),
             Self::Ticket(ticket) => ticket.user_info().clone(),
         }
     }
 
-    pub fn ticket_id(&self) -> Option<Uuid> {
+    pub fn credential(&self) -> TransportCredential {
         match self {
-            Self::User(_) => None,
-            Self::Ticket(ticket) => Some(ticket.id()),
+            Self::User { credential, .. } => credential.clone(),
+            Self::Ticket(ticket) => TransportCredential::Ticket(ticket.id()),
         }
     }
 }
@@ -120,9 +151,7 @@ pub async fn authenticate_kubernetes_user(
         .await?
         .map(KubernetesIdentity::Ticket)
     } else {
-        authenticate(req, services)
-            .await?
-            .map(KubernetesIdentity::User)
+        authenticate(req, services).await?
     };
 
     let Some(identity) = identity else {
@@ -146,7 +175,7 @@ pub async fn authenticate_kubernetes_user(
 
     // Account lockout and the user's IP allow-list, both fail-closed. A ticket's
     // bearer is vetted the same way inside `validate_ticket`.
-    if let KubernetesIdentity::User(user) = &identity
+    if let KubernetesIdentity::User { user, .. } = &identity
         && !vet_credential_bearer(&services.login_protection, user, client_ip).await?
     {
         return Err(unauthorized());
@@ -175,7 +204,7 @@ pub async fn authenticate_kubernetes_user(
 pub async fn authorize_kubernetes_target(
     req: &Request,
     user: &User,
-    target_name: &str,
+    target: Target,
     session_id: UserSessionId,
     services: &Services,
 ) -> poem::Result<TargetAuthorization<TargetKubernetesOptions>> {
@@ -184,8 +213,39 @@ pub async fn authorize_kubernetes_target(
     // When the user has a Kubernetes credential policy, enforce its web-approval
     // factor on top of the transport identity; otherwise use the identity directly.
     let identity =
-        authorize_kubernetes_identity(services, user, client_ip, target_name, session_id).await?;
-    lookup_authorized_k8s_target(services.config_provider.as_ref(), target_name, &identity).await
+        authorize_kubernetes_identity(services, user, client_ip, &target.name, session_id).await?;
+    authorize_k8s_target(services.config_provider.as_ref(), target, &identity).await
+}
+
+/// For joining a session another node admitted. Re-checks roles but skips the
+/// credential policy, which the opener already satisfied.
+pub async fn authorize_kubernetes_join(
+    user: &User,
+    target: Target,
+    services: &Services,
+) -> poem::Result<TargetAuthorization<TargetKubernetesOptions>> {
+    let identity = AuthorizedIdentity::for_authenticated_session(user.into(), crate::PROTOCOL_NAME);
+    authorize_k8s_target(services.config_provider.as_ref(), target, &identity).await
+}
+
+fn target_not_found(target_name: &str) -> poem::Error {
+    poem::Error::from_string(
+        format!("Kubernetes target not found: {target_name}"),
+        poem::http::StatusCode::NOT_FOUND,
+    )
+}
+
+pub async fn resolve_kubernetes_target(
+    services: &Services,
+    target_name: &str,
+) -> poem::Result<Target> {
+    services
+        .config_provider
+        .get_target_by_name(target_name)
+        .await
+        .context("looking up target")?
+        .filter(|target| matches!(target.options, TargetOptions::Kubernetes(_)))
+        .ok_or_else(|| target_not_found(target_name))
 }
 
 /// Turn a validated Kubernetes identity into an [`AuthorizedIdentity`], applying
@@ -292,11 +352,17 @@ async fn await_kubernetes_web_approval(
 /// web approval on top). Returns `None` if no presented credential validated;
 /// genuine lookup/verification errors propagate rather than being treated as a
 /// failure.
-async fn authenticate(req: &Request, services: &Services) -> poem::Result<Option<User>> {
+async fn authenticate(
+    req: &Request,
+    services: &Services,
+) -> poem::Result<Option<KubernetesIdentity>> {
     // Bearer token authentication (API tokens, then OIDC ID tokens).
     if let Some(token) = authorization_token(req, "Bearer") {
-        if let Ok(Some(user)) = services.config_provider.validate_api_token(token).await {
-            return Ok(Some(user));
+        if let Ok(Some(token)) = services.config_provider.validate_api_token(token).await {
+            return Ok(Some(KubernetesIdentity::User {
+                user: token.user,
+                credential: TransportCredential::ApiToken(token.id),
+            }));
         }
 
         // API token did not match — try OIDC ID token validation against any SSO
@@ -356,7 +422,13 @@ async fn authenticate(req: &Request, services: &Services) -> poem::Result<Option
             // the stored-SSO-linkage `validate_credential` arm, which would deny
             // legitimately-authenticated users resolved via preferred-username or
             // role mapping.
-            return Ok(Some(user_for_username(services, &username).await?));
+            return Ok(Some(KubernetesIdentity::User {
+                user: user_for_username(services, &username).await?,
+                credential: TransportCredential::OidcToken {
+                    provider: provider_config.name.clone(),
+                    subject: response.subject,
+                },
+            }));
         }
     }
 
@@ -366,7 +438,7 @@ async fn authenticate(req: &Request, services: &Services) -> poem::Result<Option
         debug!("Found client certificate from middleware, validating against database");
 
         match validate_client_certificate(&client_cert.der_bytes, services).await {
-            Ok(Some(user)) => return Ok(Some(user)),
+            Ok(Some(identity)) => return Ok(Some(identity)),
             Ok(None) => debug!("Client certificate provided but not found in database"),
             // A rejected certificate returns `Ok(None)`; an `Err` is a fault in the
             // certificate store (DB) or an unparseable cert, not a credential
@@ -386,25 +458,13 @@ async fn authenticate(req: &Request, services: &Services) -> poem::Result<Option
     Ok(None)
 }
 
-/// Look up a Kubernetes target by name and prove the user is authorized for it.
-/// Shared by the API-token, OIDC and client-certificate auth paths.
-async fn lookup_authorized_k8s_target<C: ConfigProvider + Send>(
+/// Checks the identity's roles against a resolved Kubernetes target.
+async fn authorize_k8s_target<C: ConfigProvider + Send>(
     config_provider: &C,
-    target_name: &str,
+    target: Target,
     identity: &AuthorizedIdentity,
 ) -> poem::Result<TargetAuthorization<TargetKubernetesOptions>> {
-    let not_found = || {
-        poem::Error::from_string(
-            format!("Kubernetes target not found: {target_name}"),
-            poem::http::StatusCode::NOT_FOUND,
-        )
-    };
-    let target = config_provider
-        .get_target_by_name(target_name)
-        .await
-        .context("looking up target")?
-        .ok_or_else(not_found)?;
-
+    let target_name = target.name.clone();
     authorize_for_target(config_provider, identity, target)
         .await?
         .ok_or_else(|| {
@@ -414,7 +474,7 @@ async fn lookup_authorized_k8s_target<C: ConfigProvider + Send>(
             )
         })?
         .narrow()
-        .map_err(|_| not_found())
+        .map_err(|_| target_not_found(&target_name))
 }
 
 /// Load a resolved SSO user by username.
@@ -572,7 +632,7 @@ fn cert_is_currently_valid(not_before: SystemTime, not_after: SystemTime, now: S
 pub async fn validate_client_certificate(
     cert_der: &[u8],
     services: &Services,
-) -> anyhow::Result<Option<User>> {
+) -> anyhow::Result<Option<KubernetesIdentity>> {
     // Convert DER to PEM format for comparison
     let cert_pem = der_to_pem(cert_der);
 
@@ -622,6 +682,7 @@ pub async fn validate_client_certificate(
                     "Client certificate validated for user"
                 );
 
+                let credential_id = cert_credential.id;
                 // Update last_used timestamp
                 let mut active_model: CertificateCredential::ActiveModel = cert_credential.into();
                 active_model.last_used = Set(Some(OffsetDateTime::now_utc()));
@@ -629,7 +690,10 @@ pub async fn validate_client_certificate(
                     warn!("Failed to update certificate last_used timestamp: {}", e);
                 }
 
-                return Ok(Some(User::try_from(user)?));
+                return Ok(Some(KubernetesIdentity::User {
+                    user: User::try_from(user)?,
+                    credential: TransportCredential::ClientCertificate(credential_id),
+                }));
             }
         }
     }

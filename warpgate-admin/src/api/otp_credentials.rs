@@ -7,7 +7,7 @@ use warpgate_common::{AdminPermission, UserTotpCredential, WarpgateError};
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_db_entities::{OtpCredential, User};
 
-use super::AdminContext;
+use super::{AdminContext, guard_user_mutation};
 
 #[derive(Object)]
 struct ExistingOtpCredential {
@@ -78,7 +78,8 @@ impl ListApi {
     #[oai(
         path = "/users/:user_id/credentials/otp",
         method = "post",
-        operation_id = "create_otp_credential"
+        operation_id = "create_otp_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_create(
         &self,
@@ -134,7 +135,8 @@ impl DetailApi {
     #[oai(
         path = "/users/:user_id/credentials/otp/:id",
         method = "delete",
-        operation_id = "delete_otp_credential"
+        operation_id = "delete_otp_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_delete(
         &self,

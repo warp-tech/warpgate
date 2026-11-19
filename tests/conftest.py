@@ -419,10 +419,18 @@ class ProcessManager:
         )
         return port
 
-    def start_mysql_server(self):
+    def start_mysql_server(self, *mysqld_args):
         port = alloc_port()
         self.start(
-            ["docker", "run", "--rm", "-p", f"{port}:3306", "warpgate-e2e-mysql-server"]
+            [
+                "docker",
+                "run",
+                "--rm",
+                "-p",
+                f"{port}:3306",
+                "warpgate-e2e-mysql-server",
+                *mysqld_args,
+            ]
         )
         return port
 
@@ -463,9 +471,14 @@ class ProcessManager:
         )
         return port
 
-    def start_postgres_server(self):
+    def start_postgres_server(self, host_auth_method=None):
         port = alloc_port()
         container_name = f"warpgate-e2e-postgres-server-{uuid.uuid4()}"
+        env = (
+            ["-e", f"POSTGRES_HOST_AUTH_METHOD={host_auth_method}"]
+            if host_auth_method
+            else []
+        )
         self.start(
             [
                 "docker",
@@ -475,6 +488,7 @@ class ProcessManager:
                 container_name,
                 "-p",
                 f"{port}:5432",
+                *env,
                 "warpgate-e2e-postgres-server",
             ]
         )

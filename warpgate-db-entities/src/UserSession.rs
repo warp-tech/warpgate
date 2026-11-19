@@ -168,10 +168,11 @@ pub async fn revoke(db: &DatabaseConnection, id: UserSessionId) -> Result<(), Wa
     Ok(())
 }
 
+/// Returns the ids it ended.
 pub async fn revoke_open_matching(
     db: &DatabaseConnection,
     filter: impl IntoCondition,
-) -> Result<(), WarpgateError> {
+) -> Result<Vec<UserSessionId>, WarpgateError> {
     let open: Vec<Uuid> = Entity::find()
         .filter(Column::Ended.is_null())
         .filter(filter)
@@ -180,9 +181,10 @@ pub async fn revoke_open_matching(
         .into_tuple()
         .all(db)
         .await?;
-    for id in open {
+    let open: Vec<UserSessionId> = open.into_iter().map(UserSessionId).collect();
+    for id in &open {
         // one at a time to emit audit events
-        revoke(db, UserSessionId(id)).await?;
+        revoke(db, *id).await?;
     }
-    Ok(())
+    Ok(open)
 }

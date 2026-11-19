@@ -1,0 +1,13 @@
+# Not reported: names and references are only checked once every document
+# is valid
+apiVersion: warpgate/v1
+kind: Role
+metadata:
+  name: ops
+spec: {}
+---
+apiVersion: warpgate/v1
+kind: Role
+metadata:
+  name: ops
+spec: {}
