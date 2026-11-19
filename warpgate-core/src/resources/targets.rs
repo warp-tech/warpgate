@@ -4,7 +4,7 @@ use sea_orm::{
 };
 use uuid::Uuid;
 pub use warpgate_common::TargetDataRequest;
-use warpgate_common::{ProviderId, StoredSecrets, TargetOptions, WarpgateError};
+use warpgate_common::{ProviderId, StoredSecrets, TargetId, TargetOptions, WarpgateError};
 use warpgate_db_entities::{
     KnownHost, Target, TargetRoleAssignment, TargetSession, Ticket, TicketRequest,
 };
@@ -50,7 +50,7 @@ pub async fn create<C: ConnectionTrait>(
 ) -> Result<Target::Model, ResourceError> {
     check_name(&data.name)?;
     let mut model = Target::ActiveModel {
-        id: Set(Uuid::new_v4()),
+        id: Set(TargetId(Uuid::new_v4())),
         kind: Set((&data.options).into()),
         provider: Set(actor.provider_id()),
         ..Default::default()
@@ -62,7 +62,7 @@ pub async fn create<C: ConnectionTrait>(
 pub async fn update<C: ConnectionTrait>(
     db: &C,
     actor: Actor,
-    id: Uuid,
+    id: TargetId,
     data: &TargetDataRequest,
 ) -> Result<Target::Model, ResourceError> {
     check_name(&data.name)?;
@@ -83,7 +83,7 @@ pub async fn update<C: ConnectionTrait>(
 pub async fn delete<C: ConnectionTrait + TransactionTrait>(
     db: &C,
     actor: Actor,
-    id: Uuid,
+    id: TargetId,
 ) -> Result<AdmittedSessions, ResourceError> {
     let txn = db.begin().await?;
     let target = Target::Entity::find_by_id(id)
@@ -131,7 +131,7 @@ pub async fn delete<C: ConnectionTrait + TransactionTrait>(
 /// change them.
 async fn target_owner<C: ConnectionTrait>(
     db: &C,
-    target_id: Uuid,
+    target_id: TargetId,
 ) -> Result<Option<ProviderId>, ResourceError> {
     Ok(Target::Entity::find_by_id(target_id)
         .one(db)
@@ -143,7 +143,7 @@ async fn target_owner<C: ConnectionTrait>(
 pub async fn add_role<C: ConnectionTrait>(
     db: &C,
     actor: Actor,
-    target_id: Uuid,
+    target_id: TargetId,
     role_id: Uuid,
 ) -> Result<(), ResourceError> {
     actor.may_write(target_owner(db, target_id).await?)?;
@@ -166,7 +166,7 @@ pub async fn add_role<C: ConnectionTrait>(
 pub async fn remove_role<C: ConnectionTrait>(
     db: &C,
     actor: Actor,
-    target_id: Uuid,
+    target_id: TargetId,
     role_id: Uuid,
 ) -> Result<(), ResourceError> {
     actor.may_write(target_owner(db, target_id).await?)?;

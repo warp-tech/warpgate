@@ -12,7 +12,7 @@ use super::defaults::{
     _default_ssh_ca_mount, _default_ssh_port, _default_username, _default_vnc_port,
 };
 use crate::secrets::{MaybeSecretRef, SecretRef, StoredSecrets};
-use crate::{Protocol, ProviderId, Secret, StoredSecret};
+use crate::{Protocol, ProviderId, Secret, StoredSecret, TargetId};
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
 pub struct KubernetesTargetCertificateAuth {
@@ -45,7 +45,7 @@ pub struct TargetSSHOptions {
     pub auth: SSHTargetAuth,
     #[serde(default)]
     #[schemars(with = "Option<String>")]
-    pub jump_host: Option<Uuid>,
+    pub jump_host: Option<TargetId>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union, JsonSchema)]
@@ -419,7 +419,7 @@ impl Default for KubernetesTargetAuth {
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object)]
 pub struct Target {
     #[serde(default)]
-    pub id: Uuid,
+    pub id: TargetId,
     pub name: String,
     pub description: String,
     #[serde(default = "_default_empty_vec")]

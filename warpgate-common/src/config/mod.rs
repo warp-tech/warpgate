@@ -29,7 +29,7 @@ use crate::auth::CredentialKind;
 use crate::helpers::hash::hash_password;
 use crate::helpers::ipnet::WarpgateIpNet;
 use crate::helpers::otp::OtpSecretKey;
-use crate::{GlobalParams, ListenEndpoint, ProviderId, Secret};
+use crate::{GlobalParams, ListenEndpoint, ProviderId, Secret, UserId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Union)]
 #[oai(discriminator_name = "kind", one_of)]
@@ -152,7 +152,7 @@ impl UserRequireCredentialsPolicy {
 
 #[derive(Debug, Clone, Object)]
 pub struct User {
-    pub id: Uuid,
+    pub id: UserId,
     pub username: String,
     pub description: String,
     pub credential_policy: Option<UserRequireCredentialsPolicy>,

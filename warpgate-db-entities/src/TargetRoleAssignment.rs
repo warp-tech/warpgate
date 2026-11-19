@@ -1,3 +1,4 @@
+use warpgate_common::TargetId;
 use poem_openapi::Object;
 use sea_orm::entity::prelude::*;
 use serde::Serialize;
@@ -8,7 +9,7 @@ use uuid::Uuid;
 #[oai(rename = "TargetRoleAssignment")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub target_id: Uuid,
+    pub target_id: TargetId,
     #[sea_orm(primary_key, auto_increment = false)]
     pub role_id: Uuid,
 }

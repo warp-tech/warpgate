@@ -17,7 +17,7 @@ use warpgate_common::auth::{
 use warpgate_common::helpers::hash::{hash_secret, verify_password_hash};
 use warpgate_common::helpers::otp::verify_totp;
 use warpgate_common::{
-    Protocol, Target, User, UserAuthCredential, UserPublicKeyCredential,
+    Protocol, Target, TargetId, User, UserAuthCredential, UserId, UserPublicKeyCredential,
     UserRequireCredentialsPolicy, UserSsoCredential, WarpgateError,
 };
 use warpgate_db_entities as entities;
@@ -78,7 +78,7 @@ struct SshKeySync {
 /// LDAP keys need reconcillation because key IDs are used for approval bypass matching
 async fn reconcile_ldap_ssh_keys(
     db: &DatabaseConnection,
-    user_id: Uuid,
+    user_id: UserId,
     desired: HashSet<String>,
 ) -> Result<SshKeySync, WarpgateError> {
     let existing = entities::PublicKeyCredential::Entity::find()
@@ -136,7 +136,7 @@ impl DatabaseConfigProvider {
     async fn sync_ldap_ssh_keys(
         &self,
         db: &DatabaseConnection,
-        user_id: Uuid,
+        user_id: UserId,
         ldap_server_id: Uuid,
         ldap_object_uuid: &Uuid,
     ) -> Result<(), WarpgateError> {
@@ -275,7 +275,7 @@ impl DatabaseConfigProvider {
         };
 
         let user = entities::User::ActiveModel {
-            id: Set(Uuid::new_v4()),
+            id: Set(UserId(Uuid::new_v4())),
             username: Set(preferred_username.clone()),
             description: Set("".into()),
             credential_policy: Set(default_credential_policy),
@@ -366,7 +366,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             .map_err(Into::into)
     }
 
-    async fn get_target_by_id(&self, id: Uuid) -> Result<Option<Target>, WarpgateError> {
+    async fn get_target_by_id(&self, id: TargetId) -> Result<Option<Target>, WarpgateError> {
         entities::Target::Entity::find_by_id(id)
             .one(&self.db)
             .await?
@@ -768,8 +768,8 @@ impl ConfigProvider for DatabaseConfigProvider {
 
     async fn authorize_target_by_id(
         &self,
-        user_id: Uuid,
-        target_id: Uuid,
+        user_id: UserId,
+        target_id: TargetId,
     ) -> Result<bool, WarpgateError> {
         active_role_assignment_query()
             .and_where(
@@ -790,7 +790,10 @@ impl ConfigProvider for DatabaseConfigProvider {
             .await
     }
 
-    async fn authorized_target_ids(&self, user_id: Uuid) -> Result<HashSet<Uuid>, WarpgateError> {
+    async fn authorized_target_ids(
+        &self,
+        user_id: UserId,
+    ) -> Result<HashSet<TargetId>, WarpgateError> {
         let query = active_role_assignment_query()
             .column((
                 entities::TargetRoleAssignment::Entity,
@@ -811,7 +814,7 @@ impl ConfigProvider for DatabaseConfigProvider {
             .await?
             .iter()
             .map(|row| row.try_get_by_index(0))
-            .collect::<Result<HashSet<Uuid>, _>>()
+            .collect::<Result<HashSet<TargetId>, _>>()
             .map_err(Into::into)
     }
 
@@ -1040,7 +1043,7 @@ mod tests {
 
     async fn user_with_password(db: &DatabaseConnection, username: &str, password: &str) {
         let user = entities::User::ActiveModel {
-            id: Set(Uuid::new_v4()),
+            id: Set(UserId(Uuid::new_v4())),
             username: Set(username.to_owned()),
             description: Set(String::new()),
             credential_policy: Set(serde_json::json!(null)),
@@ -1060,9 +1063,9 @@ mod tests {
         .unwrap();
     }
 
-    async fn user_with_key(db: &DatabaseConnection, key: &str) -> (Uuid, Uuid) {
+    async fn user_with_key(db: &DatabaseConnection, key: &str) -> (UserId, Uuid) {
         let user = entities::User::ActiveModel {
-            id: Set(Uuid::new_v4()),
+            id: Set(UserId(Uuid::new_v4())),
             username: Set("ldap-user".to_owned()),
             description: Set(String::new()),
             credential_policy: Set(serde_json::json!(null)),
@@ -1147,9 +1150,9 @@ mod tests {
         );
     }
 
-    async fn user_named(db: &DatabaseConnection, username: &str) -> Uuid {
+    async fn user_named(db: &DatabaseConnection, username: &str) -> UserId {
         entities::User::ActiveModel {
-            id: Set(Uuid::new_v4()),
+            id: Set(UserId(Uuid::new_v4())),
             username: Set(username.to_owned()),
             description: Set(String::new()),
             credential_policy: Set(serde_json::json!(null)),
@@ -1161,7 +1164,7 @@ mod tests {
         .id
     }
 
-    async fn add_key(db: &DatabaseConnection, user_id: Uuid, key: &str) -> Uuid {
+    async fn add_key(db: &DatabaseConnection, user_id: UserId, key: &str) -> Uuid {
         entities::PublicKeyCredential::ActiveModel {
             id: Set(Uuid::new_v4()),
             user_id: Set(user_id),

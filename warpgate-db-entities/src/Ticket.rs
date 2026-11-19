@@ -1,3 +1,4 @@
+use warpgate_common::{TargetId, UserId};
 use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -10,10 +11,10 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub secret_hash: String,
-    pub user_id: Uuid,
+    pub user_id: UserId,
     #[sea_orm(column_type = "Text")]
     pub description: String,
-    pub target_id: Uuid,
+    pub target_id: TargetId,
     pub uses_left: Option<i16>,
     pub self_service: bool,
     pub expiry: Option<OffsetDateTime>,

@@ -1,3 +1,4 @@
+use warpgate_common::UserId;
 use std::str::FromStr;
 
 use ipnet::IpNet;
@@ -19,7 +20,7 @@ use crate::{
 #[oai(rename = "User")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub id: Uuid,
+    pub id: UserId,
     #[sea_orm(unique)]
     pub username: String,
     pub credential_policy: serde_json::Value,

@@ -154,7 +154,7 @@ pub(crate) mod tests {
     use sea_orm::{Database, DatabaseConnection, EntityTrait};
     use serde_json::json;
     use uuid::Uuid;
-    use warpgate_common::ProviderId;
+    use warpgate_common::{ProviderId, TargetId};
     use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
     use warpgate_db_entities::{Target, TargetRoleAssignment};
     use warpgate_db_migrations::migrate_database;
@@ -221,7 +221,8 @@ pub(crate) mod tests {
         let http = target("web", json!({"http": {"url": "https://web"}}));
         let result = targets::update(&db, Actor::Admin, web.id, &http).await;
         assert!(matches!(result, Err(ResourceError::ProtocolChange)));
-        let result = targets::update(&db, Actor::Admin, Uuid::new_v4(), &ssh("other")).await;
+        let result =
+            targets::update(&db, Actor::Admin, TargetId(Uuid::new_v4()), &ssh("other")).await;
         assert!(matches!(result, Err(ResourceError::NotFound)));
 
         let dba = roles::create(&db, Actor::Admin, &role("dba", None))

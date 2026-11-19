@@ -2,7 +2,7 @@ use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use uuid::Uuid;
-use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common::{AdminPermission, UserId, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
 use warpgate_core::ticket_requests::{approve_ticket_request, deny_ticket_request};
 
@@ -11,9 +11,9 @@ use crate::api::ticket_request_details::{
     TicketRequestDetails, batch_resolve_ticket_request_names,
 };
 
-const fn admin_user_id(ctx: &AuthenticatedRequestContext) -> Option<Uuid> {
+const fn admin_user_id(ctx: &AuthenticatedRequestContext) -> Option<UserId> {
     let id = ctx.auth.user_id();
-    if id.is_nil() { None } else { Some(id) }
+    if id.0.is_nil() { None } else { Some(id) }
 }
 
 pub struct Api;

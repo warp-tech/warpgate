@@ -5,7 +5,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
 use uuid::Uuid;
-use warpgate_common::{AdminPermission, Secret, WarpgateError};
+use warpgate_common::{AdminPermission, Secret, UserId, WarpgateError};
 use warpgate_common_http::errors::bad_request;
 use warpgate_db_entities::{LdapServer, Parameters};
 use warpgate_ldap::LdapUsernameAttribute;
@@ -69,7 +69,7 @@ impl ImportApi {
                     .await?;
                 if existing.is_none() {
                     let values = warpgate_db_entities::User::ActiveModel {
-                        id: Set(Uuid::new_v4()),
+                        id: Set(UserId(Uuid::new_v4())),
                         username: Set(user.username.clone()),
                         credential_policy: Set(serde_json::to_value(
                             parameters.default_credential_policy()?,

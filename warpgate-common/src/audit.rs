@@ -4,6 +4,7 @@ use tracing::info;
 use uuid::Uuid;
 
 use crate::helpers::logging::format_related_ids;
+use crate::{TargetId, UserId};
 
 #[derive(Clone)]
 pub enum CredentialChangedVia {
@@ -25,9 +26,9 @@ impl Display for CredentialChangedVia {
 #[derive(Clone)]
 pub struct KubernetesAuditSubject {
     pub session_id: Uuid,
-    pub user_id: Uuid,
+    pub user_id: UserId,
     pub username: String,
-    pub target_id: Uuid,
+    pub target_id: TargetId,
     pub target_name: String,
 }
 
@@ -37,80 +38,80 @@ pub enum AuditEvent {
         credential_type: String,
         credential_name: Option<String>,
         via: CredentialChangedVia,
-        user_id: Uuid,
+        user_id: UserId,
         username: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     CredentialDeleted {
         credential_type: String,
         credential_name: Option<String>,
         via: CredentialChangedVia,
-        user_id: Uuid,
+        user_id: UserId,
         username: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     UserCreated {
-        user_id: Uuid,
+        user_id: UserId,
         username: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     UserDeleted {
-        user_id: Uuid,
+        user_id: UserId,
         username: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     TargetSessionStarted {
         session_id: Uuid,
         target_name: String,
-        target_id: Uuid,
-        user_id: Uuid,
+        target_id: TargetId,
+        user_id: UserId,
         username: String,
     },
     TargetSessionEnded {
         session_id: Uuid,
         target_name: String,
-        target_id: Uuid,
-        user_id: Uuid,
+        target_id: TargetId,
+        user_id: UserId,
         username: String,
     },
     AccessRoleGranted {
-        grantee_id: Uuid,
+        grantee_id: UserId,
         grantee_username: String,
         role_id: Uuid,
         role_name: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
         related_access_roles: String,
     },
     AccessRoleRevoked {
-        grantee_id: Uuid,
+        grantee_id: UserId,
         grantee_username: String,
         role_id: Uuid,
         role_name: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
         related_access_roles: String,
     },
     AdminRoleGranted {
-        grantee_id: Uuid,
+        grantee_id: UserId,
         grantee_username: String,
         admin_role_id: Uuid,
         admin_role_name: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
         related_admin_roles: String,
     },
     AdminRoleRevoked {
-        grantee_id: Uuid,
+        grantee_id: UserId,
         grantee_username: String,
         admin_role_id: Uuid,
         admin_role_name: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
         related_admin_roles: String,
     },
     // currently used for RDP logon PDU
     TargetLogon {
         session_id: Uuid,
         target_name: String,
-        target_id: Uuid,
-        user_id: Uuid,
+        target_id: TargetId,
+        user_id: UserId,
         username: String,
         /// for RPD, DOMAIN\user
         target_account: Option<String>,
@@ -118,17 +119,17 @@ pub enum AuditEvent {
     },
     TicketCreated {
         ticket_id: Uuid,
-        user_id: Uuid,
+        user_id: UserId,
         username: String,
         target: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     TicketDeleted {
         ticket_id: Uuid,
-        user_id: Uuid,
+        user_id: UserId,
         username: String,
         target: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     SecretResolved {
         backend: String,
@@ -245,7 +246,7 @@ pub enum AuditEvent {
         source: String,
         revision: Option<String>,
         /// The admin who requested the sync
-        actor_user_id: Option<Uuid>,
+        actor_user_id: Option<UserId>,
     },
     /// A resource that a provider sync created, changed or deleted
     ManagedResourceChanged {
@@ -258,17 +259,17 @@ pub enum AuditEvent {
         name: String,
         /// The changed fields as a JSON array, without credential values
         fields: Option<String>,
-        actor_user_id: Option<Uuid>,
+        actor_user_id: Option<UserId>,
     },
     /// An admin made a provider's resource editable by hand again
     ProviderResourceReleased {
         provider: String,
         kind: String,
         id: Uuid,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     UnmanagedResourcesExported {
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
 }
 

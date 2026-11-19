@@ -838,9 +838,9 @@ mod tests {
     fn subject() -> KubernetesAuditSubject {
         KubernetesAuditSubject {
             session_id: uuid::Uuid::nil(),
-            user_id: uuid::Uuid::nil(),
+            user_id: warpgate_common::UserId(uuid::Uuid::nil()),
             username: "alice".to_owned(),
-            target_id: uuid::Uuid::nil(),
+            target_id: warpgate_common::TargetId(uuid::Uuid::nil()),
             target_name: "cluster".to_owned(),
         }
     }

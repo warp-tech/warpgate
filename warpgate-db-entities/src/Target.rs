@@ -1,3 +1,4 @@
+use warpgate_common::TargetId;
 use std::collections::HashMap;
 
 use poem_openapi::{Enum, Object};
@@ -47,7 +48,7 @@ impl From<&TargetOptions> for TargetKind {
 #[oai(rename = "Target")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub id: Uuid,
+    pub id: TargetId,
     pub name: String,
     #[sea_orm(column_type = "Text")]
     pub description: String,

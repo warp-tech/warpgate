@@ -10,6 +10,7 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::{ConnectionTrait, Database, IntoActiveModel};
 use tokio::io::AsyncReadExt;
 use warpgate_aws::{S3Credentials, S3Storage, S3StorageConfig, StaticCredentials};
+use warpgate_common::TargetId;
 use warpgate_db_entities::Parameters::{
     self, ConfigMigrationValues, RecordingsStorageConfig, set_config_migration_values,
 };
@@ -200,7 +201,7 @@ impl Harness {
             id: Set(session_id),
             user_session_id: Set(warpgate_common::UserSessionId(Uuid::new_v4())),
             target_snapshot: Set("{}".into()),
-            target_id: Set(Uuid::new_v4()),
+            target_id: Set(TargetId(Uuid::new_v4())),
             started: Set(OffsetDateTime::now_utc()),
             ..Default::default()
         }

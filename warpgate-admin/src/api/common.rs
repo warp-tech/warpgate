@@ -27,7 +27,7 @@ pub async fn admin_permission_set(
 
 pub async fn user_admin_permission_set(
     db: &sea_orm::DatabaseConnection,
-    user_id: uuid::Uuid,
+    user_id: warpgate_common::UserId,
 ) -> Result<AdminPermissionSet, WarpgateError> {
     let Some(user_model) = User::Entity::find_by_id(user_id).one(db).await? else {
         return Ok(AdminPermissionSet::none());

@@ -2,10 +2,9 @@
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, DbErr, EntityTrait,
-    PrimaryKeyTrait, QueryFilter, QuerySelect, Set, TransactionTrait,
+    PrimaryKeyTrait, QueryFilter, QuerySelect, Set, TransactionTrait, TryGetableMany,
 };
 use tracing::{error, info, warn};
-use uuid::Uuid;
 use warpgate_common::encryption::{Keyring, env_keyring};
 use warpgate_common::{
     SshHostKeyKind, StoredSecrets, TargetOptions, WarpgateError, emit_runtime_warning,
@@ -248,10 +247,15 @@ fn report_undecryptable(undecryptable: &[String], ring: &Keyring) {
     });
 }
 
+type RowId<E> = <<E as EntityTrait>::PrimaryKey as PrimaryKeyTrait>::ValueType;
+
 async fn row_ids<E: EntityTrait>(
     db: &DatabaseConnection,
     id: E::Column,
-) -> Result<Vec<Uuid>, DbErr> {
+) -> Result<Vec<RowId<E>>, DbErr>
+where
+    RowId<E>: TryGetableMany,
+{
     E::find()
         .select_only()
         .column(id)
@@ -266,11 +270,10 @@ async fn row_ids<E: EntityTrait>(
 /// GitOps apply made during the pass.
 async fn lock_row<E>(
     db: &DatabaseConnection,
-    id: Uuid,
+    id: RowId<E>,
 ) -> Result<Option<(DatabaseTransaction, E::Model)>, DbErr>
 where
     E: EntityTrait,
-    E::PrimaryKey: PrimaryKeyTrait<ValueType = Uuid>,
 {
     let txn = db.begin().await?;
     let row = E::find_by_id(id).lock_exclusive().one(&txn).await?;

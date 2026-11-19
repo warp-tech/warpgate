@@ -1,3 +1,4 @@
+use warpgate_common::UserId;
 use poem_openapi::Object;
 use sea_orm::entity::prelude::*;
 use sea_orm::{ColumnTrait, QueryFilter};
@@ -60,7 +61,7 @@ impl Entity {
 
     pub async fn grant_default_roles(
         db: &DatabaseConnection,
-        user_id: Uuid,
+        user_id: UserId,
     ) -> Result<Vec<Model>, DbErr> {
         let roles = Self::get_default_roles(db).await?;
 

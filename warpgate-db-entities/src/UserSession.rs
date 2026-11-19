@@ -1,3 +1,4 @@
+use warpgate_common::UserId;
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::{Expr, IntoCondition};
 use sea_orm::{DatabaseTransaction, QuerySelect, TransactionTrait};
@@ -16,7 +17,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: UserSessionId,
     pub username: Option<String>,
-    pub user_id: Option<Uuid>,
+    pub user_id: Option<UserId>,
     pub remote_address: String,
     pub started: OffsetDateTime,
     pub ended: Option<OffsetDateTime>,
@@ -56,7 +57,7 @@ impl ActiveModelBehavior for ActiveModel {}
 pub struct EndedTargetSessions {
     id: UserSessionId,
     children: Vec<TargetSession::Model>,
-    user_id: Option<Uuid>,
+    user_id: Option<UserId>,
     username: Option<String>,
 }
 

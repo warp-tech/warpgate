@@ -266,6 +266,7 @@ mod tests {
     use sea_orm_migration::prelude::*;
     use time::OffsetDateTime;
     use uuid::Uuid;
+    use warpgate_common::TargetId;
     use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
     use warpgate_db_entities::{Recording, TargetSession, UserSession};
 
@@ -346,14 +347,14 @@ mod tests {
         assert_eq!(parent.remote_address, "127.0.0.1:22");
         assert_eq!(parent.protocol, "SSH");
         assert_eq!(child.user_session_id.0, id);
-        assert_eq!(child.target_id, target_id);
+        assert_eq!(child.target_id.0, target_id);
 
         let second_id = Uuid::new_v4();
         TargetSession::Entity::insert(TargetSession::ActiveModel {
             id: Set(warpgate_common::TargetSessionId(second_id)),
             user_session_id: Set(warpgate_common::UserSessionId(id)),
             target_snapshot: Set(r#"{"name":"web"}"#.into()),
-            target_id: Set(Uuid::new_v4()),
+            target_id: Set(TargetId(Uuid::new_v4())),
             started: Set(OffsetDateTime::now_utc()),
             ended: Set(None),
             ticket_id: Set(None),
@@ -404,7 +405,7 @@ mod tests {
 
         let target_id = Uuid::new_v4();
         warpgate_db_entities::Target::Entity::insert(warpgate_db_entities::Target::ActiveModel {
-            id: Set(target_id),
+            id: Set(TargetId(target_id)),
             name: Set("web".into()),
             description: Set(String::new()),
             kind: Set(warpgate_db_entities::Target::TargetKind::Http),
@@ -462,13 +463,13 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap();
-        assert_eq!(child.target_id, target_id);
+        assert_eq!(child.target_id.0, target_id);
         let child = TargetSession::Entity::find_by_id(warpgate_common::TargetSessionId(renamed_id))
             .one(&db)
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(child.target_id, embedded);
+        assert_eq!(child.target_id.0, embedded);
         assert_eq!(
             Recording::Entity::find()
                 .filter(Recording::Column::SessionId.eq(resolved_id))

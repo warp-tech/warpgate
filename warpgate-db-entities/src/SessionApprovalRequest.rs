@@ -1,3 +1,4 @@
+use warpgate_common::UserId;
 use std::ops::Deref;
 
 use poem_openapi::Enum;
@@ -63,7 +64,7 @@ pub struct Model {
     pub node_id: NodeId,
     pub protocol: String,
     pub username: String,
-    pub user_id: Uuid,
+    pub user_id: UserId,
     #[sea_orm(primary_key, auto_increment = false)]
     pub target: String,
     pub remote_address: Option<String>,
@@ -77,7 +78,7 @@ pub struct Model {
     pub scope: Option<ApprovalScope>,
     pub resolved_by_username: Option<String>,
     /// None when resolver isn't a user (e.g. API token)
-    pub resolved_by_user_id: Option<Uuid>,
+    pub resolved_by_user_id: Option<UserId>,
     pub resolved_at: Option<OffsetDateTime>,
     /// when the session has acknowledged the decision
     pub consumed_at: Option<OffsetDateTime>,
@@ -156,7 +157,7 @@ pub struct NewRequest {
     pub node_id: NodeId,
     pub protocol: String,
     pub username: String,
-    pub user_id: Uuid,
+    pub user_id: UserId,
     pub remote_address: Option<String>,
     pub match_digest: Option<String>,
     pub started: OffsetDateTime,
@@ -428,7 +429,7 @@ pub async fn close_request(
 pub struct ApprovalActor {
     /// None if not a user (admin API token)
     pub username: Option<String>,
-    pub user_id: Uuid,
+    pub user_id: UserId,
 }
 
 pub async fn settle_request(

@@ -264,6 +264,7 @@ mod tests {
     use sea_orm::ActiveValue::Set;
     use sea_orm::{Database, EntityTrait, PaginatorTrait};
     use uuid::Uuid;
+    use warpgate_common::UserId;
     use warpgate_db_entities::HttpSession;
     use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
     use warpgate_db_migrations::migrate_database;
@@ -271,13 +272,13 @@ mod tests {
     use super::*;
 
     async fn open_session(db: &DatabaseConnection, node_id: Option<Uuid>) -> Uuid {
-        open_session_for_user(db, node_id, Uuid::new_v4()).await
+        open_session_for_user(db, node_id, UserId(Uuid::new_v4())).await
     }
 
     async fn open_session_for_user(
         db: &DatabaseConnection,
         node_id: Option<Uuid>,
-        user_id: Uuid,
+        user_id: UserId,
     ) -> Uuid {
         let id = Uuid::new_v4();
         UserSession::Entity::insert(UserSession::ActiveModel {

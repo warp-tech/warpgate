@@ -14,7 +14,7 @@ pub struct Api;
 
 #[derive(Debug, Serialize, Clone, Object)]
 struct TicketRequestTarget {
-    pub id: uuid::Uuid,
+    pub id: warpgate_common::TargetId,
     pub name: String,
     pub kind: Target::TargetKind,
     pub ticket_max_duration_seconds: Option<i64>,

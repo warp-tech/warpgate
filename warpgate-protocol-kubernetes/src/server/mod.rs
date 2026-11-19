@@ -8,7 +8,7 @@ use poem::{EndpointExt, Route, Server};
 use rustls::ServerConfig;
 use tracing::info;
 use warpgate_common::helpers::proxy_protocol::MaybeProxyProtocolAcceptor;
-use warpgate_common::{ListenEndpoint, TargetKubernetesOptions};
+use warpgate_common::{ListenEndpoint, TargetId, TargetKubernetesOptions};
 use warpgate_common_http::HTTP2_MAX_CONCURRENT_STREAMS_PER_CONN;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_core::Services;
@@ -31,7 +31,7 @@ const UPSTREAM_CLIENT_MAX_AGE: Duration = Duration::from_mins(5);
 
 /// Key = target ID
 type UpstreamClientCache =
-    warpgate_common_cache::Cache<uuid::Uuid, TargetKubernetesOptions, reqwest::Client>;
+    warpgate_common_cache::Cache<TargetId, TargetKubernetesOptions, reqwest::Client>;
 
 pub async fn bind_server(
     services: Services,

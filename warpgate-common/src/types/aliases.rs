@@ -92,6 +92,14 @@ uuid_newtype!(
     #[derive(NewType)]
     NodeId
 );
+uuid_newtype!(
+    #[derive(NewType)]
+    UserId
+);
+uuid_newtype!(
+    #[derive(NewType, Default)]
+    TargetId
+);
 uuid_newtype!(ProviderId);
 
 impl ProviderId {

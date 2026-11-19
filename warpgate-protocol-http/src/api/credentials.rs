@@ -559,7 +559,7 @@ impl Api {
             warpgate_ca::deserialize_ca(&params.ca_certificate_pem, &params.ca_private_key_pem)?;
         let public_key_pem = body.public_key_pem.trim();
         let client_cert =
-            warpgate_ca::issue_client_certificate(&ca, &user.username, public_key_pem, user.id)?;
+            warpgate_ca::issue_client_certificate(&ca, &user.username, public_key_pem, user.id.0)?;
         let client_cert_pem = warpgate_ca::certificate_to_pem(&client_cert)?;
 
         let object = CertificateCredential::ActiveModel {

@@ -5,8 +5,8 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::{
-    AdminPermission, Role as RoleConfig, StoredSecrets, Target as TargetConfig, TargetOptions,
-    TargetSSHOptions, WarpgateError,
+    AdminPermission, Role as RoleConfig, StoredSecrets, Target as TargetConfig, TargetId,
+    TargetOptions, TargetSSHOptions, WarpgateError,
 };
 use warpgate_common_http::errors::invalid_field;
 use warpgate_core::resources::targets::{self as store, TargetDataRequest};
@@ -157,7 +157,7 @@ impl DetailApi {
     async fn api_get_target(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<TargetId>,
     ) -> Result<GetTargetResponse, WarpgateError> {
         let db = &admin.services().db;
 
@@ -178,9 +178,9 @@ impl DetailApi {
     async fn api_release_target(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<TargetId>,
     ) -> Result<GetTargetResponse, WarpgateError> {
-        super::gitops::release_managed::<Target::Entity>(&admin, id.0).await?;
+        super::gitops::release_managed::<Target::Entity>(&admin, id.0.0).await?;
         self.api_get_target(admin, id).await
     }
 
@@ -189,7 +189,7 @@ impl DetailApi {
         &self,
         admin: AdminContext,
         body: Json<TargetDataRequest>,
-        id: Path<Uuid>,
+        id: Path<TargetId>,
     ) -> Result<UpdateTargetResponse, WarpgateError> {
         admin.require(AdminPermission::TargetsEdit)?;
 
@@ -235,7 +235,7 @@ impl DetailApi {
     async fn api_delete_target(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<TargetId>,
     ) -> Result<DeleteTargetResponse, WarpgateError> {
         admin.require(AdminPermission::TargetsDelete)?;
 
@@ -261,7 +261,7 @@ impl DetailApi {
     async fn get_ssh_target_known_ssh_host_keys(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<TargetId>,
     ) -> Result<TargetKnownSshHostKeysResponse, WarpgateError> {
         admin.require(AdminPermission::TargetsEdit)?;
 
@@ -334,7 +334,7 @@ impl RolesApi {
     async fn api_get_target_roles(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<TargetId>,
     ) -> Result<GetTargetRolesResponse, WarpgateError> {
         let db = &admin.services().db;
 
@@ -361,7 +361,7 @@ impl RolesApi {
     async fn api_add_target_role(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<TargetId>,
         role_id: Path<Uuid>,
     ) -> Result<AddTargetRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesAssign)?;
@@ -384,7 +384,7 @@ impl RolesApi {
     async fn api_delete_target_role(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<TargetId>,
         role_id: Path<Uuid>,
     ) -> Result<DeleteTargetRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesAssign)?;

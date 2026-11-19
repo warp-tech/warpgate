@@ -4,7 +4,7 @@ use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, Tra
 use uuid::Uuid;
 use warpgate_common::{
     MaybeSecretRef, ProviderId, SSHTargetAuth, SecretResolver, StoredSecret,
-    Target as TargetConfig, TargetOptions, TargetSecrets, WarpgateError,
+    Target as TargetConfig, TargetId, TargetOptions, TargetSecrets, WarpgateError,
 };
 use warpgate_db_entities::{Role, SshClientKey, Target, TargetGroup, TargetRoleAssignment};
 use warpgate_gitops::plan::{Change, Current, Plan, References, Row, plan};
@@ -28,7 +28,7 @@ pub async fn load_current<C: ConnectionTrait>(db: &C) -> Result<Current, Warpgat
     let group_names: HashMap<Uuid, &str> = groups.iter().map(|g| (g.id, g.name.as_str())).collect();
     let role_names: HashMap<Uuid, &str> = roles.iter().map(|r| (r.id, r.name.as_str())).collect();
 
-    let mut target_roles: HashMap<Uuid, Vec<String>> = HashMap::new();
+    let mut target_roles: HashMap<TargetId, Vec<String>> = HashMap::new();
     for assignment in TargetRoleAssignment::Entity::find().all(db).await? {
         if let Some(name) = role_names.get(&assignment.role_id) {
             target_roles
@@ -41,7 +41,7 @@ pub async fn load_current<C: ConnectionTrait>(db: &C) -> Result<Current, Warpgat
     let keys = SshClientKey::Entity::find().all(db).await?;
     let key_names: HashMap<Uuid, String> = keys.iter().map(|k| (k.id, k.label.clone())).collect();
     let models = Target::Entity::find().all(db).await?;
-    let target_names: HashMap<Uuid, String> =
+    let target_names: HashMap<TargetId, String> =
         models.iter().map(|t| (t.id, t.name.clone())).collect();
     let mut targets = Vec::new();
     for model in models {
@@ -67,7 +67,7 @@ pub async fn load_current<C: ConnectionTrait>(db: &C) -> Result<Current, Warpgat
             reveal_inline(slot)?;
         }
         targets.push(Row {
-            id: target.id,
+            id: target.id.0,
             name: target.name,
             provider: target.provider,
             live: TargetSpec {
@@ -261,7 +261,7 @@ pub async fn apply<'p, C: ConnectionTrait + TransactionTrait>(
             continue;
         };
         let result = match kind {
-            ResourceKind::Target => targets::delete(&txn, actor, *id)
+            ResourceKind::Target => targets::delete(&txn, actor, TargetId(*id))
                 .await
                 .map(|sessions| admitted.extend(sessions.0)),
             ResourceKind::SshClientKey => ssh_client_keys::delete(&txn, actor, *id).await,
@@ -347,7 +347,29 @@ store!(
     TargetGroupDataRequest
 );
 store!(RoleSpec, roles, Role, RoleDataRequest);
-store!(TargetSpec, targets, Target, TargetDataRequest);
+
+impl Store for TargetSpec {
+    type Entity = Target::Entity;
+    type Data = TargetDataRequest;
+
+    async fn create<C: ConnectionTrait>(
+        db: &C,
+        actor: Actor,
+        data: Self::Data,
+    ) -> Result<Uuid, ResourceError> {
+        Ok(targets::create(db, actor, &data).await?.id.0)
+    }
+
+    async fn update<C: ConnectionTrait>(
+        db: &C,
+        actor: Actor,
+        id: Uuid,
+        data: Self::Data,
+    ) -> Result<(), ResourceError> {
+        targets::update(db, actor, TargetId(id), &data).await?;
+        Ok(())
+    }
+}
 
 impl Store for SshClientKeySpec {
     type Entity = SshClientKey::Entity;
@@ -442,7 +464,8 @@ impl<C: ConnectionTrait> Write<'_, C> {
             ssh.jump_host = jump_host
                 .as_deref()
                 .map(|name| ids.find(ResourceKind::Target, name))
-                .transpose()?;
+                .transpose()?
+                .map(TargetId);
             if let SSHTargetAuth::PublicKey(auth) = &mut ssh.auth {
                 auth.key_id = client_key
                     .as_deref()
@@ -456,7 +479,7 @@ impl<C: ConnectionTrait> Write<'_, C> {
             .map(|group| ids.find(ResourceKind::TargetGroup, group))
             .transpose()?;
         let data = spec.data_request(&manifest.metadata.name, options, group_id);
-        let id = self.save::<TargetSpec>(data).await?;
+        let id = TargetId(self.save::<TargetSpec>(data).await?);
 
         let wanted = spec
             .roles
@@ -476,7 +499,7 @@ impl<C: ConnectionTrait> Write<'_, C> {
         for role in assigned.difference(&wanted) {
             targets::remove_role(self.db, self.actor, id, *role).await?;
         }
-        Ok(id)
+        Ok(id.0)
     }
 }
 

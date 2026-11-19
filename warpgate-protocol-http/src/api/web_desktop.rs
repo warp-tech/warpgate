@@ -6,8 +6,7 @@ use poem::web::{Data, RemoteAddr};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{Object, OpenApi};
-use uuid::Uuid;
-use warpgate_common::UserSessionId;
+use warpgate_common::{TargetId, UserSessionId};
 use warpgate_web_desktop::WebDesktopClientManager;
 
 use crate::api::auth_scheme::AuthedSession;
@@ -20,7 +19,7 @@ pub struct Api;
 
 #[derive(Object)]
 struct CreateWebDesktopSessionBody {
-    target_id: Uuid,
+    target_id: TargetId,
     /// Initial desktop resolution to request from the target, measured by the browser.
     /// Both must be present to take effect; otherwise a default is used.
     width: Option<u16>,

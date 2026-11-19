@@ -1,3 +1,4 @@
+use warpgate_common::UserId;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, OnceLock};
@@ -51,7 +52,7 @@ impl WebSshSession {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: UserSessionId,
-        user_id: Uuid,
+        user_id: UserId,
         target_name: String,
         target_kind: TargetKind,
         server_handle: Arc<Mutex<WarpgateServerHandle>>,
@@ -206,7 +207,7 @@ impl ManagedSession for WebSshSession {
         self.core.id()
     }
 
-    fn user_id(&self) -> Uuid {
+    fn user_id(&self) -> UserId {
         self.core.user_id()
     }
 
