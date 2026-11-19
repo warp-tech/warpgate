@@ -85,11 +85,16 @@
                 url.hostname = target.externalHost
             }
             // Keep the configured path on the portal origin, even if it starts with //.
-            const [path = '/', query] = (target.httpLandingPath ?? '/').split(
-                /\?(.*)/s,
+            const defaultHttpPath = target.defaultHttpPath ?? '/'
+            const parsedDefaultHttpPath = new URL(
+                defaultHttpPath.startsWith('//')
+                    ? `.${defaultHttpPath}`
+                    : defaultHttpPath,
+                location.origin,
             )
-            url.pathname = path
-            url.search = query ?? ''
+            url.pathname = parsedDefaultHttpPath.pathname
+            url.search = parsedDefaultHttpPath.search
+            url.hash = parsedDefaultHttpPath.hash
             if (!target.externalHost) {
                 url.searchParams.set('warpgate-target', target.name)
             }

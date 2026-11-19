@@ -32,7 +32,7 @@ pub struct TargetSnapshot {
     pub kind: Target::TargetKind,
     pub external_host: Option<String>,
     /// Initial HTTP path and query, omitted for the root path without a query.
-    pub http_landing_path: Option<String>,
+    pub default_http_path: Option<String>,
     pub group: Option<GroupInfo>,
     pub default_database_name: Option<String>,
 }
@@ -99,8 +99,8 @@ impl Api {
                     description: t.description.clone(),
                     kind: (&t.options).into(),
                     external_host: t.options.external_host().map(ToString::to_string),
-                    http_landing_path: match &t.options {
-                        TargetOptions::Http(options) => http_landing_path(&options.url),
+                    default_http_path: match &t.options {
+                        TargetOptions::Http(options) => default_http_path(&options.url),
                         _ => None,
                     },
                     default_database_name: t
@@ -116,9 +116,9 @@ impl Api {
     }
 }
 
-fn http_landing_path(url: &str) -> Option<String> {
+fn default_http_path(url: &str) -> Option<String> {
     let url = url::Url::parse(url).ok()?;
-    let path = &url[url::Position::BeforePath..url::Position::AfterQuery];
+    let path = &url[url::Position::BeforePath..url::Position::AfterFragment];
     if path.is_empty() || path == "/" {
         None
     } else {
@@ -128,7 +128,7 @@ fn http_landing_path(url: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::http_landing_path;
+    use super::default_http_path;
 
     #[test]
     fn extracts_http_landing_path() {
@@ -150,7 +150,7 @@ mod tests {
             ),
             ("https://cluster.example.com/#section", None),
         ] {
-            assert_eq!(http_landing_path(url).as_deref(), expected, "{url}");
+            assert_eq!(default_http_path(url).as_deref(), expected, "{url}");
         }
     }
 }
