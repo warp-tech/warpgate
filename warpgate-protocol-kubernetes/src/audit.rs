@@ -10,17 +10,20 @@
 //! into an audit log, so unspecified stays unspecified.
 
 use serde::Deserialize;
-use tracing::warn;
 use warpgate_core::logging::{AuditEvent, KubernetesAuditSubject};
 
 use crate::recording::SessionRecordingMetadata;
 
-/// A client controls argv and the container list, so bound what a single
-/// request can push into one log row.
+/// A client controls argv, the container list, the path and the headers, so
+/// bound what a single request can push into one log field.
 const MAX_LIST_ELEMENTS: usize = 64;
-const MAX_LIST_BYTES: usize = 4096;
-/// Appended to a list that hit either cap above.
+const MAX_FIELD_BYTES: usize = 4096;
+/// Appended to a field that hit either cap above.
 const TRUNCATION_MARKER: &str = "<truncated>";
+
+/// Go rejects a query of more than 10000 pairs whole, and the API server then
+/// sees no `dryRun`. Real writes have a handful of pairs.
+const MAX_DRY_RUN_QUERY_PAIRS: usize = 64;
 
 /// A pod addressed by a request path.
 #[derive(Debug)]
@@ -53,20 +56,55 @@ pub enum StreamKind {
     },
 }
 
-/// A request whose audit-worthy detail lives in its body rather than its URL.
+#[derive(Debug)]
+pub struct PodWrite {
+    method: String,
+    path: String,
+    namespace: String,
+    target: PodWriteTarget,
+}
+
+#[derive(Debug)]
+enum PodWriteTarget {
+    /// `POST` to the pod collection. `kubectl debug node/...` and `kubectl
+    /// debug --copy-to` create their debug pod this way.
+    Collection,
+    /// `PATCH` or `PUT` of a pod, e.g. `kubectl apply --server-side`. A
+    /// server-side apply creates the pod if it is missing and answers 201.
+    Pod(String),
+    /// `PATCH` or `PUT` of `ephemeralcontainers`, e.g. `kubectl debug` against
+    /// a running pod.
+    EphemeralContainers(String),
+}
+
+/// The parsed body of a [`PodWrite`].
 #[derive(Debug)]
 pub enum MutatingOperation {
-    /// `kubectl debug` against a running pod.
+    /// `containers` is empty if the body adds none, and no event is emitted.
     EphemeralContainersUpdated {
         pod: PodRef,
         containers: Vec<EphemeralContainerSummary>,
     },
-    /// A direct `Pod` creation — how `kubectl debug node/...` and `kubectl
-    /// debug --copy-to` land their debug workload.
     PodCreated {
         namespace: String,
         summary: PodSummary,
     },
+    PodWritten {
+        namespace: String,
+        summary: PodSummary,
+    },
+    Unclassifiable(UnclassifiableRequest),
+}
+
+#[derive(Debug)]
+pub struct UnclassifiableRequest {
+    pub method: String,
+    pub path: String,
+    pub namespace: String,
+    pub pod: Option<String>,
+    pub content_type: Option<String>,
+    pub body_length: usize,
+    pub reason: &'static str,
 }
 
 #[derive(Debug)]
@@ -165,9 +203,20 @@ fn parse_stream_query(raw: Option<&str>) -> StreamQuery {
 
 /// A server-side dry run runs admission and answers with the object exactly as
 /// a real write would, yet persists nothing, so it must not be audited as one.
+///
+/// A dry run is not audited, so this must never be true for a real write. Go
+/// drops a query pair containing `;` or a bad percent escape. This parser
+/// keeps such a pair with the junk in its key or value, so requiring exactly
+/// `All` excludes it. Go also rejects an oversized query whole.
 fn is_dry_run(query: Option<&str>) -> bool {
-    url::form_urlencoded::parse(query.unwrap_or_default().as_bytes())
-        .any(|(key, value)| key == "dryRun" && !value.is_empty())
+    let query = query.unwrap_or_default();
+    let mut values = url::form_urlencoded::parse(query.as_bytes())
+        .filter(|(key, _)| key == "dryRun")
+        .map(|(_, value)| value)
+        .peekable();
+    query.split('&').count() <= MAX_DRY_RUN_QUERY_PAIRS
+        && values.peek().is_some()
+        && values.all(|value| value == "All")
 }
 
 /// The streaming operation this websocket-upgrading request performs, if it is
@@ -229,6 +278,7 @@ struct PodMetadataBody {
 struct PodSpecBody {
     ephemeral_containers: Option<Vec<ContainerBody>>,
     containers: Option<Vec<ContainerBody>>,
+    init_containers: Option<Vec<ContainerBody>>,
     node_name: Option<String>,
     // Not `camelCase`: Kubernetes keeps the acronym uppercase, so the derived
     // `hostPid` would never match and the flag would always read as false.
@@ -280,8 +330,15 @@ impl ContainerBody {
 }
 
 impl PodBody {
+    /// Includes init containers, which can be privileged too.
+    fn containers(&self) -> impl Iterator<Item = &ContainerBody> {
+        self.spec
+            .iter()
+            .flat_map(|s| s.init_containers.iter().chain(&s.containers))
+            .flatten()
+    }
+
     fn summarise(&self) -> PodSummary {
-        let containers = self.spec.as_ref().and_then(|s| s.containers.as_ref());
         let metadata = self.metadata.as_ref();
         PodSummary {
             // A pod created with `generateName` has no name yet; the prefix is
@@ -289,11 +346,7 @@ impl PodBody {
             name: metadata
                 .and_then(|m| m.name.clone().or_else(|| m.generate_name.clone()))
                 .unwrap_or_default(),
-            images: containers
-                .into_iter()
-                .flatten()
-                .filter_map(|c| c.image.clone())
-                .collect(),
+            images: self.containers().filter_map(|c| c.image.clone()).collect(),
             node_name: self.spec.as_ref().and_then(|s| s.node_name.clone()),
             host_pid: self
                 .spec
@@ -305,7 +358,7 @@ impl PodBody {
                 .as_ref()
                 .and_then(|s| s.host_network)
                 .unwrap_or_default(),
-            privileged: containers.into_iter().flatten().any(|c| {
+            privileged: self.containers().any(|c| {
                 c.security_context
                     .as_ref()
                     .and_then(|s| s.privileged)
@@ -315,63 +368,104 @@ impl PodBody {
     }
 }
 
-/// The body-carrying operation this request performs, if it is one Warpgate
-/// audits.
+/// The error is a fixed string because serde's message would quote the body.
 ///
-/// Only JSON bodies are understood, which is what `kubectl` sends. A body of an
-/// audited shape that does not parse — YAML, protobuf, a JSON Patch array — is
-/// logged as unclassifiable rather than passed over in silence, since a request
-/// this classifier cannot read is a request the audit trail does not cover.
-pub fn classify_mutating(
-    method: &str,
-    api_path: &str,
-    query: Option<&str>,
-    body: &[u8],
-) -> Option<MutatingOperation> {
-    let path = parse_pods_path(api_path)?;
+/// The `{` check is needed because a derived struct also deserialises from an
+/// array, field by field, so a JSON Patch would parse as an empty pod. Nested
+/// arrays are not checked: the API server rejects those requests. A duplicate
+/// key is an error here, while the API server takes the last one.
+fn parse_pod_body(body: &[u8]) -> Result<PodBody, &'static str> {
+    if !body.trim_ascii_start().starts_with(b"{") {
+        return Err("body is not a JSON object");
+    }
+    serde_json::from_slice(body).map_err(|_| "body is not a Pod object")
+}
+
+/// `None` if this is not a pod write Warpgate audits. The decision uses only
+/// the request line, never the body.
+pub fn classify_pod_write(method: &str, api_path: &str, query: Option<&str>) -> Option<PodWrite> {
+    let PodsPath {
+        namespace,
+        name,
+        subresource,
+    } = parse_pods_path(api_path)?;
     if is_dry_run(query) {
         return None;
     }
 
-    let parse = || {
-        serde_json::from_slice::<PodBody>(body)
-            .inspect_err(|error| {
-                warn!(method, api_path, %error, "Unparseable Kubernetes request body; not audited");
-            })
-            .ok()
-    };
-
-    match (method, path.name, path.subresource.as_deref()) {
-        // `kubectl` since 1.23 sends a strategic merge PATCH whose body holds
-        // only the newly added container. The older fallback PUTs the whole
-        // pod, so its body also repeats containers that were already there and
-        // those are audited again — over-reporting a debug container beats
-        // missing one.
-        ("PATCH" | "PUT", Some(name), Some("ephemeralcontainers")) => {
-            let containers: Vec<_> = parse()?
-                .spec
-                .as_ref()
-                .and_then(|s| s.ephemeral_containers.as_ref())
-                .into_iter()
-                .flatten()
-                .map(ContainerBody::summarise_ephemeral)
-                .collect();
-            if containers.is_empty() {
-                return None;
-            }
-            Some(MutatingOperation::EphemeralContainersUpdated {
-                pod: PodRef {
-                    namespace: path.namespace,
-                    pod: name,
-                },
-                containers,
-            })
+    let target = match (method, name, subresource.as_deref()) {
+        ("POST", None, None) => PodWriteTarget::Collection,
+        ("PATCH" | "PUT", Some(pod), None) => PodWriteTarget::Pod(pod),
+        ("PATCH" | "PUT", Some(pod), Some("ephemeralcontainers")) => {
+            PodWriteTarget::EphemeralContainers(pod)
         }
-        ("POST", None, None) => Some(MutatingOperation::PodCreated {
-            namespace: path.namespace,
-            summary: parse()?.summarise(),
-        }),
-        _ => None,
+        _ => return None,
+    };
+    Some(PodWrite {
+        method: method.to_owned(),
+        path: api_path.to_owned(),
+        namespace,
+        target,
+    })
+}
+
+impl PodWrite {
+    /// Only JSON object bodies are parsed. `kubectl` sends those, including
+    /// for a server-side apply with its YAML content type. Any other body
+    /// returns [`MutatingOperation::Unclassifiable`].
+    pub fn read(self, content_type: Option<&str>, body: &[u8]) -> MutatingOperation {
+        let parsed = match parse_pod_body(body) {
+            Ok(parsed) => parsed,
+            Err(reason) => {
+                return MutatingOperation::Unclassifiable(UnclassifiableRequest {
+                    method: self.method,
+                    path: self.path,
+                    namespace: self.namespace,
+                    pod: match self.target {
+                        PodWriteTarget::Collection => None,
+                        PodWriteTarget::Pod(pod) | PodWriteTarget::EphemeralContainers(pod) => {
+                            Some(pod)
+                        }
+                    },
+                    content_type: content_type.map(ToOwned::to_owned),
+                    body_length: body.len(),
+                    reason,
+                });
+            }
+        };
+
+        let namespace = self.namespace;
+        match self.target {
+            PodWriteTarget::Collection => MutatingOperation::PodCreated {
+                namespace,
+                summary: parsed.summarise(),
+            },
+            PodWriteTarget::Pod(name) => MutatingOperation::PodWritten {
+                namespace,
+                // A patch body may omit the name. The API server uses the one
+                // in the path.
+                summary: PodSummary {
+                    name,
+                    ..parsed.summarise()
+                },
+            },
+            // `kubectl` since 1.23 sends a strategic merge PATCH whose body
+            // holds only the newly added container. The older fallback PUTs
+            // the whole pod, so its body also repeats containers that were
+            // already there and those are audited again — over-reporting a
+            // debug container beats missing one.
+            PodWriteTarget::EphemeralContainers(pod) => {
+                MutatingOperation::EphemeralContainersUpdated {
+                    pod: PodRef { namespace, pod },
+                    containers: parsed
+                        .spec
+                        .iter()
+                        .flat_map(|s| s.ephemeral_containers.iter().flatten())
+                        .map(ContainerBody::summarise_ephemeral)
+                        .collect(),
+                }
+            }
+        }
     }
 }
 
@@ -381,7 +475,7 @@ pub fn classify_mutating(
 /// cannot make a log row arbitrarily large.
 fn json_array(values: &[String]) -> String {
     let mut kept: Vec<&str> = Vec::new();
-    let mut budget = MAX_LIST_BYTES;
+    let mut budget = MAX_FIELD_BYTES;
     let mut truncated = values.len() > MAX_LIST_ELEMENTS;
 
     for value in values.iter().take(MAX_LIST_ELEMENTS) {
@@ -397,6 +491,15 @@ fn json_array(values: &[String]) -> String {
     }
 
     serde_json::to_string(&kept).unwrap_or_else(|_| "[]".to_owned())
+}
+
+/// Truncates a client-controlled string to [`MAX_FIELD_BYTES`].
+fn bounded(value: &str) -> String {
+    if value.len() <= MAX_FIELD_BYTES {
+        return value.to_owned();
+    }
+    let (kept, _) = value.split_at(value.floor_char_boundary(MAX_FIELD_BYTES));
+    format!("{kept}{TRUNCATION_MARKER}")
 }
 
 impl StreamKind {
@@ -486,10 +589,13 @@ impl StreamOperation {
 
 impl MutatingOperation {
     /// One event per debug container, so each is searchable on its own.
+    ///
+    /// `response_status` is `None` if the cluster sent no response. Events are
+    /// still returned because the write may have been applied.
     pub fn audit_events(
         &self,
         subject: &KubernetesAuditSubject,
-        response_status: u16,
+        response_status: Option<u16>,
     ) -> Vec<AuditEvent> {
         match self {
             Self::EphemeralContainersUpdated { pod, containers } => containers
@@ -506,15 +612,32 @@ impl MutatingOperation {
                     response_status,
                 })
                 .collect(),
-            Self::PodCreated { namespace, summary } => vec![AuditEvent::KubernetesPodCreated {
+            Self::PodCreated { namespace, summary } | Self::PodWritten { namespace, summary } => {
+                vec![AuditEvent::KubernetesPodWritten {
+                    subject: subject.clone(),
+                    // A PATCH or PUT created the pod only if the cluster
+                    // answered 201, e.g. a server-side apply of a missing pod.
+                    created: matches!(self, Self::PodCreated { .. })
+                        || response_status == Some(201),
+                    namespace: namespace.clone(),
+                    pod: summary.name.clone(),
+                    images: json_array(&summary.images),
+                    node_name: summary.node_name.clone(),
+                    host_pid: summary.host_pid,
+                    host_network: summary.host_network,
+                    privileged: summary.privileged,
+                    response_status,
+                }]
+            }
+            Self::Unclassifiable(request) => vec![AuditEvent::KubernetesUnknownRequest {
                 subject: subject.clone(),
-                namespace: namespace.clone(),
-                pod: summary.name.clone(),
-                images: json_array(&summary.images),
-                node_name: summary.node_name.clone(),
-                host_pid: summary.host_pid,
-                host_network: summary.host_network,
-                privileged: summary.privileged,
+                method: request.method.clone(),
+                path: bounded(&request.path),
+                namespace: bounded(&request.namespace),
+                pod: request.pod.as_deref().map(bounded),
+                content_type: request.content_type.as_deref().map(bounded),
+                body_length: request.body_length,
+                reason: request.reason,
                 response_status,
             }],
         }
@@ -540,7 +663,24 @@ mod tests {
     }
 
     fn mutating(method: &str, suffix: &str, body: &[u8]) -> Option<MutatingOperation> {
-        classify_mutating(method, &pods_path(suffix), None, body)
+        classify_pod_write(method, &pods_path(suffix), None).map(|write| write.read(None, body))
+    }
+
+    fn unclassifiable(operation: Option<MutatingOperation>) -> UnclassifiableRequest {
+        match operation {
+            Some(MutatingOperation::Unclassifiable(request)) => request,
+            other => panic!("expected an unclassifiable request, got {other:?}"),
+        }
+    }
+
+    fn subject() -> KubernetesAuditSubject {
+        KubernetesAuditSubject {
+            session_id: uuid::Uuid::nil(),
+            user_id: uuid::Uuid::nil(),
+            username: "alice".to_owned(),
+            target_id: uuid::Uuid::nil(),
+            target_name: "cluster".to_owned(),
+        }
     }
 
     #[test]
@@ -760,12 +900,33 @@ mod tests {
     fn dry_runs_are_not_audited() {
         // `kubectl apply --dry-run=server` gets a 201 and the object back
         // without anything being created.
-        let body = br#"{"metadata":{"name":"x"},"spec":{"containers":[]}}"#;
-        assert!(classify_mutating("POST", &pods_path(""), Some("dryRun=All"), body).is_none());
-        assert!(classify_mutating("POST", &pods_path(""), Some("dryRun="), body).is_some());
-        assert!(
-            classify_mutating("POST", &pods_path(""), Some("fieldManager=kubectl"), body).is_some()
-        );
+        let audited =
+            |query: &str| classify_pod_write("POST", &pods_path(""), Some(query)).is_some();
+        assert!(!audited("dryRun=All"));
+        assert!(!audited(
+            "dryRun=All&fieldManager=kubectl&fieldValidation=Strict"
+        ));
+        assert!(!audited("dryRun=%41ll"));
+        assert!(audited("fieldManager=kubectl"));
+        // The API server rejects these values, so they are audited.
+        assert!(audited("dryRun="));
+        assert!(audited("dryRun=all"));
+        assert!(audited("dryRun=All&dryRun="));
+    }
+
+    #[test]
+    fn dry_run_the_api_server_would_not_see_is_audited() {
+        // Go drops a pair containing `;` or a bad escape, and rejects a query
+        // of more than 10000 pairs whole. Each of these is a real write.
+        let audited =
+            |query: &str| classify_pod_write("POST", &pods_path(""), Some(query)).is_some();
+        assert!(audited("dryRun=All;"));
+        assert!(audited("dryRun=All;foo"));
+        assert!(audited("dryRun=All%zz"));
+        assert!(audited("dryRun=All%4"));
+        assert!(audited("dry%zzRun=All"));
+        assert!(audited(&format!("dryRun=All{}", "&a=1".repeat(10_000))));
+        assert!(audited(&format!("dryRun=All{}", "&".repeat(10_000))));
     }
 
     #[test]
@@ -773,9 +934,213 @@ mod tests {
         assert!(mutating("GET", "", b"").is_none());
         assert!(mutating("POST", "/api-7f9/exec", b"{}").is_none());
         // A patch that adds no ephemeral container has nothing to report.
-        assert!(mutating("PATCH", "/api-7f9/ephemeralcontainers", b"{}").is_none());
-        // An unparseable body must not be reported as an empty operation.
-        assert!(mutating("POST", "", b"not json").is_none());
+        let operation = mutating("PATCH", "/api-7f9/ephemeralcontainers", b"{}").unwrap();
+        assert!(operation.audit_events(&subject(), Some(200)).is_empty());
+        // These are not audited, so the body is never parsed.
+        assert!(mutating("PATCH", "/api-7f9/status", b"not json").is_none());
+        assert!(mutating("DELETE", "/api-7f9", b"not json").is_none());
+    }
+
+    #[test]
+    fn unreadable_body_on_an_audited_path_is_unclassifiable() {
+        // An unparseable body must be reported, and not as an empty operation.
+        let request = unclassifiable(mutating("POST", "", b"not json"));
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.path, pods_path(""));
+        assert_eq!(request.namespace, "prod");
+        assert_eq!(request.pod, None);
+        assert_eq!(request.body_length, 8);
+        assert_eq!(request.reason, "body is not a JSON object");
+
+        // The API server also accepts YAML bodies.
+        let yaml = b"spec:\n  ephemeralContainers:\n  - name: d\n    image: busybox\n";
+        let request = unclassifiable(
+            classify_pod_write("PATCH", &pods_path("/api-7f9/ephemeralcontainers"), None)
+                .map(|write| write.read(Some("application/yaml"), yaml)),
+        );
+        assert_eq!(request.pod.as_deref(), Some("api-7f9"));
+        assert_eq!(request.content_type.as_deref(), Some("application/yaml"));
+        assert_eq!(request.reason, "body is not a JSON object");
+
+        let events = MutatingOperation::Unclassifiable(request).audit_events(&subject(), Some(200));
+        assert!(matches!(
+            events.as_slice(),
+            [AuditEvent::KubernetesUnknownRequest {
+                response_status: Some(200),
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn unclassified_fields_are_bounded() {
+        // The client controls the path and the content type.
+        let long = "a".repeat(MAX_FIELD_BYTES * 4);
+        let operation =
+            classify_pod_write("POST", &format!("/api/v1/namespaces/{long}/pods"), None)
+                .unwrap()
+                .read(Some(&long), b"not json");
+        let events = operation.audit_events(&subject(), Some(400));
+        let [
+            AuditEvent::KubernetesUnknownRequest {
+                path,
+                namespace,
+                content_type,
+                ..
+            },
+        ] = events.as_slice()
+        else {
+            panic!("expected one unclassified request");
+        };
+        let cap = MAX_FIELD_BYTES + TRUNCATION_MARKER.len();
+        assert_eq!(path.len(), cap);
+        assert_eq!(namespace.len(), cap);
+        assert_eq!(content_type.as_ref().unwrap().len(), cap);
+        assert!(path.ends_with(TRUNCATION_MARKER));
+
+        // Truncation never splits a character.
+        assert!(bounded(&"é".repeat(MAX_FIELD_BYTES)).ends_with(TRUNCATION_MARKER));
+    }
+
+    #[test]
+    fn json_patch_array_is_unclassifiable() {
+        // serde fills a derived struct from an array field by field, so a JSON
+        // Patch of one or two operations would parse as an empty pod.
+        let add = r#"{"op":"add","path":"/spec/ephemeralContainers/-",
+            "value":{"name":"d","image":"busybox"}}"#;
+        for body in [
+            "[]".to_owned(),
+            format!("[{add}]"),
+            format!("[{add},{add}]"),
+            format!("[{add},{add},{add}]"),
+        ] {
+            let request = unclassifiable(mutating(
+                "PATCH",
+                "/api-7f9/ephemeralcontainers",
+                body.as_bytes(),
+            ));
+            assert_eq!(request.reason, "body is not a JSON object", "{body}");
+        }
+        assert_eq!(
+            unclassifiable(mutating("PATCH", "/api-7f9", b" []")).reason,
+            "body is not a JSON object"
+        );
+        assert_eq!(
+            unclassifiable(mutating("POST", "", br#"{"spec":"nope"}"#)).reason,
+            "body is not a Pod object"
+        );
+    }
+
+    #[test]
+    fn duplicate_keys_are_unclassifiable() {
+        // The API server takes the last `spec`. Warpgate does not guess and
+        // treats the body as unreadable.
+        let body = br#"{"spec":{"ephemeralContainers":[]},
+            "spec":{"ephemeralContainers":[{"name":"d","image":"busybox"}]}}"#;
+        let request = unclassifiable(mutating("PATCH", "/api-7f9/ephemeralcontainers", body));
+        assert_eq!(request.reason, "body is not a Pod object");
+    }
+
+    #[test]
+    fn server_side_apply_is_classified() {
+        // `kubectl apply --server-side` PATCHes the named pod with a JSON body
+        // under a YAML content type.
+        let body = br#"{"apiVersion":"v1","kind":"Pod",
+            "metadata":{"name":"api-7f9","namespace":"prod"},
+            "spec":{"hostPID":true,"containers":[{"name":"api","image":"api:1.5",
+            "securityContext":{"privileged":true}}]}}"#;
+        let operation = classify_pod_write(
+            "PATCH",
+            &pods_path("/api-7f9"),
+            Some("fieldManager=kubectl"),
+        )
+        .unwrap()
+        .read(Some("application/apply-patch+yaml"), body);
+        let MutatingOperation::PodWritten { namespace, summary } = &operation else {
+            panic!("expected a pod write, got {operation:?}");
+        };
+        assert_eq!(namespace, "prod");
+        assert_eq!(summary.name, "api-7f9");
+        assert_eq!(summary.images, vec!["api:1.5".to_owned()]);
+
+        // The apply created the pod only if the status is 201.
+        assert!(matches!(
+            operation.audit_events(&subject(), Some(201)).as_slice(),
+            [AuditEvent::KubernetesPodWritten { created: true, .. }]
+        ));
+        assert!(matches!(
+            operation.audit_events(&subject(), Some(200)).as_slice(),
+            [AuditEvent::KubernetesPodWritten { created: false, .. }]
+        ));
+        // A refused apply is logged with the same fields as a refused creation.
+        assert!(matches!(
+            operation.audit_events(&subject(), Some(403)).as_slice(),
+            [AuditEvent::KubernetesPodWritten {
+                created: false,
+                privileged: true,
+                host_pid: true,
+                response_status: Some(403),
+                ..
+            }]
+        ));
+        // A refused POST is still logged as a creation.
+        let created = mutating("POST", "", body).unwrap();
+        assert!(matches!(
+            created.audit_events(&subject(), Some(403)).as_slice(),
+            [AuditEvent::KubernetesPodWritten { created: true, .. }]
+        ));
+    }
+
+    #[test]
+    fn write_without_an_answer_is_still_reported() {
+        // The upstream connection failed after the request went out, so the
+        // cluster may have applied it.
+        let body = br#"{"spec":{"ephemeralContainers":[{"name":"d","image":"busybox"}]}}"#;
+        let debug = mutating("PATCH", "/api-7f9/ephemeralcontainers", body).unwrap();
+        assert!(matches!(
+            debug.audit_events(&subject(), None).as_slice(),
+            [AuditEvent::KubernetesDebugContainerCreated {
+                response_status: None,
+                ..
+            }]
+        ));
+        let unreadable = mutating("POST", "", b"not json").unwrap();
+        assert!(matches!(
+            unreadable.audit_events(&subject(), None).as_slice(),
+            [AuditEvent::KubernetesUnknownRequest {
+                response_status: None,
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn pod_write_takes_its_name_from_the_path() {
+        // `kubectl set image` sends a patch without the pod name.
+        let body = br#"{"spec":{"containers":[{"name":"api","image":"evil:1"}]}}"#;
+        let operation = mutating("PATCH", "/api-7f9", body).unwrap();
+        let MutatingOperation::PodWritten { summary, .. } = operation else {
+            panic!("expected a pod write, got {operation:?}");
+        };
+        assert_eq!(summary.name, "api-7f9");
+        assert_eq!(summary.images, vec!["evil:1".to_owned()]);
+    }
+
+    #[test]
+    fn init_containers_count_towards_the_summary() {
+        let body = br#"{"metadata":{"name":"x"},"spec":{
+            "initContainers":[{"name":"setup","image":"setup:1",
+            "securityContext":{"privileged":true}}],
+            "containers":[{"name":"api","image":"api:1.4"}]}}"#;
+        let operation = mutating("POST", "", body).unwrap();
+        let MutatingOperation::PodCreated { summary, .. } = operation else {
+            panic!("expected a pod creation, got {operation:?}");
+        };
+        assert!(summary.privileged);
+        assert_eq!(
+            summary.images,
+            vec!["setup:1".to_owned(), "api:1.4".to_owned()]
+        );
     }
 
     #[test]
@@ -792,7 +1157,7 @@ mod tests {
         let many: Vec<String> = (0..=MAX_LIST_ELEMENTS).map(|i| i.to_string()).collect();
         assert!(json_array(&many).contains(TRUNCATION_MARKER));
 
-        let huge = vec!["x".repeat(MAX_LIST_BYTES + 1)];
+        let huge = vec!["x".repeat(MAX_FIELD_BYTES + 1)];
         assert_eq!(json_array(&huge), format!("[\"{TRUNCATION_MARKER}\"]"));
     }
 }
