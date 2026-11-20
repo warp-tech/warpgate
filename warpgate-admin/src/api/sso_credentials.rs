@@ -164,6 +164,10 @@ impl DetailApi {
 
         let db = &admin.services().db;
 
+        let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
+            return Ok(UpdateSsoCredentialResponse::NotFound);
+        };
+
         let updated = SsoCredential::Entity::update_many()
             .set(SsoCredential::ActiveModel::from(UserSsoCredential::from(
                 &*body,
@@ -177,9 +181,6 @@ impl DetailApi {
             return Ok(UpdateSsoCredentialResponse::NotFound);
         }
         let Some(model) = SsoCredential::Entity::find_by_id(id.0).one(db).await? else {
-            return Ok(UpdateSsoCredentialResponse::NotFound);
-        };
-        let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
             return Ok(UpdateSsoCredentialResponse::NotFound);
         };
 

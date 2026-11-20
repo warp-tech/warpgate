@@ -236,6 +236,7 @@
         grantee_username: string
         role_id: string
         role_name: string
+        expires_at?: string
     }
 
     interface AccessRoleRevoked1 {
@@ -291,17 +292,8 @@
         client_ip?: string
     }
 
-    interface CredentialCreated1 {
-        _type: 'CredentialCreated1'
-        credential_type: string
-        credential_name?: string
-        via: 'admin' | 'self-service'
-        user_id: string
-        username: string
-    }
-
-    interface CredentialDeleted1 {
-        _type: 'CredentialDeleted1'
+    interface CredentialChanged1 {
+        _type: keyof typeof credentialChangeWording
         credential_type: string
         credential_name?: string
         via: 'admin' | 'self-service'
@@ -440,8 +432,7 @@
         | UserAuthenticationFailed1
         | TargetSessionStarted1
         | TargetSessionEnded1
-        | CredentialCreated1
-        | CredentialDeleted1
+        | CredentialChanged1
         | TicketCreated1
         | TicketDeleted1
         | WebApprovalBypassed1
@@ -470,6 +461,7 @@
         'TargetSessionStarted1',
         'TargetSessionEnded1',
         'CredentialCreated1',
+        'CredentialUpdated1',
         'CredentialDeleted1',
         'TicketCreated1',
         'TicketDeleted1',
@@ -481,6 +473,18 @@
         'KubernetesPodCreated1',
         'KubernetesPodUpdated1',
         'KubernetesUnknownRequest1',
+    ])
+
+    const credentialChangeWording = {
+        CredentialCreated1: ['Added', 'for'],
+        CredentialUpdated1: ['Updated', 'of'],
+        CredentialDeleted1: ['Removed', 'from'],
+    } as const
+
+    // Generic rows hide `username`, which is the subject in these
+    const userSubjectLogTypes: ReadonlySet<string> = new Set([
+        'UserUpdated1',
+        'UserLdapLinkChanged1',
     ])
 
     function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
@@ -627,6 +631,12 @@
                                             id={richEntry.grantee_id}
                                             name={richEntry.grantee_username}
                                         />
+                                        {#if richEntry.expires_at}
+                                            until
+                                            {stringifyDate(
+                                                new Date(richEntry.expires_at),
+                                            )}
+                                        {/if}
                                     </div>
                                 {:else if richEntry?._type ===
                                     'AccessRoleRevoked1'}
@@ -769,9 +779,15 @@
                                         />
                                     </div>
                                 {:else if richEntry?._type ===
-                                    'CredentialCreated1'}
+                                    'CredentialCreated1' ||
+                                    richEntry?._type === 'CredentialUpdated1' ||
+                                    richEntry?._type === 'CredentialDeleted1'}
+                                    {@const [verb, preposition] =
+                                        credentialChangeWording[
+                                            richEntry._type
+                                        ]}
                                     <div class="rich-entry">
-                                        Added
+                                        {verb}
                                         {richEntry.credential_type}
                                         credential
                                         {#if richEntry.credential_name}
@@ -779,29 +795,7 @@
                                                 >{richEntry.credential_name}</strong
                                             >
                                         {/if}
-                                        for
-                                        <UserBadge
-                                            id={richEntry.user_id}
-                                            name={richEntry.username}
-                                        />
-                                        {#if richEntry.via === 'self-service'}
-                                            <span class="badge bg-secondary">
-                                                self-service
-                                            </span>
-                                        {/if}
-                                    </div>
-                                {:else if richEntry?._type ===
-                                    'CredentialDeleted1'}
-                                    <div class="rich-entry">
-                                        Removed
-                                        {richEntry.credential_type}
-                                        credential
-                                        {#if richEntry.credential_name}
-                                            <strong
-                                                >{richEntry.credential_name}</strong
-                                            >
-                                        {/if}
-                                        from
+                                        {preposition}
                                         <UserBadge
                                             id={richEntry.user_id}
                                             name={richEntry.username}
@@ -1047,6 +1041,14 @@
                                     <span class="text">
                                         {item.text}
                                     </span>
+                                    {#if userSubjectLogTypes.has(
+                                        richLogType(item),
+                                    )}
+                                        <UserBadge
+                                            id={String(item.values?.user_id)}
+                                            name={String(item.values?.username)}
+                                        />
+                                    {/if}
                                     {#each genericValues(
                                         item,
                                     ) as pair (pair[0])}

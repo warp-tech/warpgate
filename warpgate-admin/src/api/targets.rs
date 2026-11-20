@@ -255,18 +255,11 @@ impl DetailApi {
         admin.require(AdminPermission::TargetsDelete)?;
 
         let services = admin.services();
-        // Read before the delete so the audit entry can name the target
-        let target_name = Target::Entity::find_by_id(id.0)
-            .one(&services.db)
-            .await?
-            .map(|t| t.name)
-            .unwrap_or_default();
-
         match store::delete(&services.db, Actor::Admin, id.0).await {
-            Ok(admitted) => {
+            Ok((target, admitted)) => {
                 AuditEvent::TargetDeleted {
-                    target_id: id.0,
-                    target_name,
+                    target_id: target.id,
+                    target_name: target.name,
                     actor_user_id: admin.auth.user_id(),
                 }
                 .emit();
@@ -395,9 +388,12 @@ impl RolesApi {
         admin.require(AdminPermission::AccessRolesAssign)?;
 
         let db = &admin.services().db;
+        let Some((target_name, role_name)) = target_and_role_names(db, id.0, role_id.0).await?
+        else {
+            return Ok(AddTargetRoleResponse::NotFound);
+        };
         match store::add_role(db, Actor::Admin, id.0, role_id.0).await {
             Ok(()) => {
-                let (target_name, role_name) = target_and_role_names(db, id.0, role_id.0).await?;
                 AuditEvent::TargetRoleAdded {
                     target_id: id.0,
                     target_name,
@@ -430,9 +426,12 @@ impl RolesApi {
         admin.require(AdminPermission::AccessRolesAssign)?;
 
         let db = &admin.services().db;
+        let Some((target_name, role_name)) = target_and_role_names(db, id.0, role_id.0).await?
+        else {
+            return Ok(DeleteTargetRoleResponse::NotFound);
+        };
         match store::remove_role(db, Actor::Admin, id.0, role_id.0).await {
             Ok(()) => {
-                let (target_name, role_name) = target_and_role_names(db, id.0, role_id.0).await?;
                 AuditEvent::TargetRoleRemoved {
                     target_id: id.0,
                     target_name,
@@ -452,21 +451,15 @@ impl RolesApi {
     }
 }
 
-/// Names are best-effort: the assignment row is the authoritative part
+/// `None` if either row is missing
 async fn target_and_role_names(
     db: &DatabaseConnection,
     target_id: TargetId,
     role_id: RoleId,
-) -> Result<(String, String), WarpgateError> {
-    let target_name = Target::Entity::find_by_id(target_id)
-        .one(db)
-        .await?
-        .map(|t| t.name)
-        .unwrap_or_default();
-    let role_name = Role::Entity::find_by_id(role_id)
-        .one(db)
-        .await?
-        .map(|r| r.name)
-        .unwrap_or_default();
-    Ok((target_name, role_name))
+) -> Result<Option<(String, String)>, WarpgateError> {
+    let target = Target::Entity::find_by_id(target_id).one(db).await?;
+    let role = Role::Entity::find_by_id(role_id).one(db).await?;
+    Ok(target
+        .zip(role)
+        .map(|(target, role)| (target.name, role.name)))
 }

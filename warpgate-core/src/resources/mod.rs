@@ -234,7 +234,7 @@ pub(crate) mod tests {
         let result = targets::add_role(&db, Actor::Admin, web.id, dba.id).await;
         assert!(matches!(result, Err(ResourceError::RoleAlreadyAssigned)));
 
-        let admitted = targets::delete(&db, Actor::Admin, web.id).await.unwrap();
+        let (_, admitted) = targets::delete(&db, Actor::Admin, web.id).await.unwrap();
         assert!(admitted.0.is_empty());
         assert_eq!(assignments(&db).await, 0);
         let result = targets::delete(&db, Actor::Admin, web.id).await;
@@ -346,7 +346,7 @@ pub(crate) mod tests {
         targets::update(&db, gitops, web.id, &ssh("web2"))
             .await
             .unwrap();
-        let admitted = targets::delete(&db, gitops, web.id).await.unwrap();
+        let (_, admitted) = targets::delete(&db, gitops, web.id).await.unwrap();
         assert!(admitted.0.is_empty());
 
         // A row created by hand is never a provider's to change

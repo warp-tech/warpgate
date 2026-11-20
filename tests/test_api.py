@@ -7,6 +7,7 @@ import base64
 import contextlib
 import hashlib
 import hmac
+import json
 import os
 import time
 import subprocess
@@ -1401,18 +1402,34 @@ def test_provider_cannot_be_set_by_clients(pg_wg):
         assert updated.json()["provider"] is None, update
 
 
-def _audited(admin_client: sdk.DefaultApi, count: int, **values: str) -> list[dict]:
-    """Audit entries carrying `values`, waiting up to 10 s for `count` of them."""
+def _poll_logs(
+    admin_client: sdk.DefaultApi,
+    request: sdk.GetLogsRequest,
+    collect: Callable,
+    done: Callable,
+):
+    """`collect(entries)` of the log, re-read for up to 10 s until `done`
+    accepts it. Log entries reach the database asynchronously."""
     deadline = time.monotonic() + 10
     while True:
-        entries = [
-            entry.values or {}
-            for entry in admin_client.get_logs(sdk.GetLogsRequest(limit=500))
-            if values.items() <= (entry.values or {}).items()
-        ]
-        if len(entries) >= count or time.monotonic() > deadline:
-            return entries
+        found = collect(admin_client.get_logs(request))
+        if done(found) or time.monotonic() > deadline:
+            return found
         time.sleep(0.5)
+
+
+def _audited(admin_client: sdk.DefaultApi, count: int, **values: str) -> list[dict]:
+    """Audit entries carrying `values`, waiting up to 10 s for `count` of them."""
+    return _poll_logs(
+        admin_client,
+        sdk.GetLogsRequest(limit=500),
+        lambda entries: [
+            entry.values or {}
+            for entry in entries
+            if values.items() <= (entry.values or {}).items()
+        ],
+        lambda found: len(found) >= count,
+    )
 
 
 def _config(wg, *args: str) -> subprocess.CompletedProcess:
@@ -1808,8 +1825,8 @@ def test_update_target_rejects_empty_name(admin_client: sdk.DefaultApi):
 
 
 def _logged_in_full_admin(url: str, admin_client: sdk.DefaultApi):
-    """Audit entries are only stored for requests made in a user session, so
-    the audited changes are made by a logged-in admin rather than via a token.
+    """Logs in as a new full admin, so the audit entries name an actor: an
+    admin token request has none.
     Returns the admin and a `call(method, path, json)` helper bound to it."""
     full_admin = {
         k: True if isinstance(v, bool) else v
@@ -1842,17 +1859,14 @@ def _wait_for_audit_entries(
 ):
     """Polls the log for entries mentioning `tag` until one exists for each
     `key(values)` in `expected`. Returns them as {key: entry}."""
-    # log entries are written to the DB asynchronously
-    deadline = time.monotonic() + 10
-    while True:
-        entries = {
-            key(e.values): e
-            for e in admin_client.get_logs(sdk.GetLogsRequest(search=tag, limit=100))
-            if key(e.values or {}) in expected
-        }
-        if expected <= entries.keys() or time.monotonic() > deadline:
-            return entries
-        time.sleep(0.2)
+    return _poll_logs(
+        admin_client,
+        sdk.GetLogsRequest(search=tag, limit=100),
+        lambda entries: {
+            key(e.values): e for e in entries if key(e.values or {}) in expected
+        },
+        lambda found: expected <= found.keys(),
+    )
 
 
 def test_admin_changes_to_roles_and_targets_are_audited(
@@ -1872,7 +1886,12 @@ def test_admin_changes_to_roles_and_targets_are_audited(
     user = admin_client.create_user(sdk.CreateUserRequest(username=f"audit-user-{tag}"))
     admin_client.add_user_role(user.id, role["id"])
     admin_client.delete_user_role(user.id, role["id"])
-    call("PUT", f"/admin/api/users/{user.id}/roles/{role['id']}", {"expires_at": None})
+    expiry = datetime.now(timezone.utc) + timedelta(hours=1)
+    call(
+        "PUT",
+        f"/admin/api/users/{user.id}/roles/{role['id']}",
+        {"expires_at": expiry.isoformat()},
+    )
 
     call("DELETE", f"/admin/api/targets/{target['id']}")
     call("DELETE", f"/admin/api/role/{role['id']}")
@@ -1894,7 +1913,9 @@ def test_admin_changes_to_roles_and_targets_are_audited(
     assert all(e.username == actor.username for e in entries.values())
     added = entries["TargetRoleAdded1"].values
     assert (added["target_name"], added["role_name"]) == (target["name"], role["name"])
-    assert entries["AccessRoleExpiryChanged1"].values["revocation_cleared"] in (True, "true")
+    expiry_changed = entries["AccessRoleExpiryChanged1"].values
+    assert expiry_changed["revocation_cleared"] in (True, "true")
+    assert expiry_changed["expires_at"].startswith(expiry.isoformat(timespec="seconds")[:19])
 
 
 def test_admin_changes_to_admin_roles_users_and_tokens_are_audited(
@@ -1975,7 +1996,7 @@ def test_admin_changes_to_admin_roles_users_and_tokens_are_audited(
 
     assert entries.keys() == expected
     assert all(e.username == actor.username for e in entries.values())
-    assert "UsersEdit" in entries[("AdminRoleUpdated1", None)].values["permissions"]
+    assert "users_edit" in json.loads(entries[("AdminRoleUpdated1", None)].values["permissions"])
     assert "10.0.0.0/8" in entries[("UserUpdated1", None)].values["allowed_ip_ranges"]
     assert (
         entries[("CredentialUpdated1", "certificate")].values["credential_name"]

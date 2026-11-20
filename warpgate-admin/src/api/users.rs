@@ -400,6 +400,7 @@ impl DetailApi {
         model.ldap_server_id = Set(None);
         model.ldap_object_uuid = Set(None);
         let user = model.update(db).await?;
+        audit_ldap_link(&admin, &user);
 
         Ok(UnlinkUserFromLdapResponse::Ok(Json(user.try_into()?)))
     }
@@ -472,9 +473,20 @@ impl DetailApi {
         model.ldap_server_id = Set(ldap_server_id);
         model.ldap_object_uuid = Set(ldap_object_uuid);
         let user = model.update(db).await?;
+        audit_ldap_link(&admin, &user);
 
         Ok(AutoLinkUserToLdapResponse::Ok(Json(user.try_into()?)))
     }
+}
+
+fn audit_ldap_link(admin: &AdminContext, user: &User::Model) {
+    AuditEvent::UserLdapLinkChanged {
+        user_id: user.id,
+        username: user.username.clone(),
+        ldap_server_id: user.ldap_server_id,
+        actor_user_id: admin.auth.user_id(),
+    }
+    .emit();
 }
 
 // ========== User Role Assignment DTOs ==========

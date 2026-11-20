@@ -85,7 +85,7 @@ pub async fn delete<C: ConnectionTrait + TransactionTrait>(
     db: &C,
     actor: Actor,
     id: TargetId,
-) -> Result<AdmittedSessions, ResourceError> {
+) -> Result<(Target::Model, AdmittedSessions), ResourceError> {
     let txn = db.begin().await?;
     let target = Target::Entity::find_by_id(id)
         .one(&txn)
@@ -123,9 +123,9 @@ pub async fn delete<C: ConnectionTrait + TransactionTrait>(
             .await?;
     }
 
-    target.delete(&txn).await?;
+    target.clone().delete(&txn).await?;
     txn.commit().await?;
-    Ok(AdmittedSessions(admitted))
+    Ok((target, AdmittedSessions(admitted)))
 }
 
 /// Role assignments have no owner column. The target's owner decides who may

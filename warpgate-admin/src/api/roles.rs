@@ -212,19 +212,11 @@ impl DetailApi {
     ) -> Result<DeleteRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesDelete)?;
 
-        let db = &admin.services().db;
-        // Read before the delete so the audit entry can name the role
-        let role_name = Role::Entity::find_by_id(id.0)
-            .one(db)
-            .await?
-            .map(|r| r.name)
-            .unwrap_or_default();
-
-        match store::delete(db, Actor::Admin, id.0).await {
-            Ok(()) => {
+        match store::delete(&admin.services().db, Actor::Admin, id.0).await {
+            Ok(role) => {
                 AuditEvent::RoleDeleted {
-                    role_id: id.0,
-                    role_name,
+                    role_id: role.id,
+                    role_name: role.name,
                     actor_user_id: admin.auth.user_id(),
                 }
                 .emit();

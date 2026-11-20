@@ -71,7 +71,7 @@ pub async fn delete<C: ConnectionTrait + TransactionTrait>(
     db: &C,
     actor: Actor,
     id: RoleId,
-) -> Result<(), ResourceError> {
+) -> Result<Role::Model, ResourceError> {
     let txn = db.begin().await?;
     let role = Role::Entity::find_by_id(id)
         .one(&txn)
@@ -89,7 +89,7 @@ pub async fn delete<C: ConnectionTrait + TransactionTrait>(
         .exec(&txn)
         .await?;
 
-    role.delete(&txn).await?;
+    role.clone().delete(&txn).await?;
     txn.commit().await?;
-    Ok(())
+    Ok(role)
 }

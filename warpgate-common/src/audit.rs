@@ -1,6 +1,7 @@
 use std::fmt::Display;
 
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use tracing::info;
 use uuid::Uuid;
 
@@ -74,6 +75,13 @@ pub enum AuditEvent {
     UserDeleted {
         user_id: UserId,
         username: String,
+        actor_user_id: UserId,
+    },
+    UserLdapLinkChanged {
+        user_id: UserId,
+        username: String,
+        /// `None` once unlinked
+        ldap_server_id: Option<Uuid>,
         actor_user_id: UserId,
     },
     TargetSessionStarted {
@@ -362,6 +370,15 @@ pub enum AuditEvent {
     },
 }
 
+/// Absent for `None`, so a permanent grant has no `expires_at` at all
+fn rfc3339(time: Option<OffsetDateTime>) -> Option<String> {
+    time.map(|time| time.format(&Rfc3339).unwrap_or_else(|_| time.to_string()))
+}
+
+fn json_list<T: serde::Serialize>(items: &[T]) -> String {
+    serde_json::to_string(items).unwrap_or_else(|_| "[]".to_owned())
+}
+
 impl AuditEvent {
     pub fn emit(&self) {
         match self {
@@ -497,6 +514,22 @@ impl AuditEvent {
                     "Deleted user"
                 );
             }
+            Self::UserLdapLinkChanged {
+                user_id,
+                username,
+                ldap_server_id,
+                actor_user_id,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "UserLdapLinkChanged1",
+                    user_id = %user_id,
+                    username = %username,
+                    ldap_server_id = ldap_server_id.map(|id| id.to_string()),
+                    related_users = %format_related_ids(&[*user_id, *actor_user_id]),
+                    "Changed user LDAP link"
+                );
+            }
             Self::AccessRoleGranted {
                 grantee_id,
                 grantee_username,
@@ -513,7 +546,7 @@ impl AuditEvent {
                     grantee_username = %grantee_username,
                     role_id = %role_id,
                     role_name = %role_name,
-                    ?expires_at,
+                    expires_at = rfc3339(*expires_at),
                         related_users = %format_related_ids(&[*grantee_id, *actor_user_id]),
                     ?related_access_roles,
                     "Granted access role"
@@ -595,7 +628,7 @@ impl AuditEvent {
                     grantee_username = %grantee_username,
                     role_id = %role_id,
                     role_name = %role_name,
-                    ?expires_at,
+                    expires_at = rfc3339(*expires_at),
                     revocation_cleared,
                     related_users = %format_related_ids(&[*grantee_id, *actor_user_id]),
                     related_access_roles = %format_related_ids(&[*role_id]),
@@ -613,7 +646,7 @@ impl AuditEvent {
                     _type = "AdminRoleCreated1",
                     admin_role_id = %admin_role_id,
                     admin_role_name = %admin_role_name,
-                    ?permissions,
+                    permissions = %json_list(permissions),
                     related_users = %format_related_ids(&[*actor_user_id]),
                     related_admin_roles = %format_related_ids(&[*admin_role_id]),
                     "Created admin role"
@@ -630,7 +663,7 @@ impl AuditEvent {
                     _type = "AdminRoleUpdated1",
                     admin_role_id = %admin_role_id,
                     admin_role_name = %admin_role_name,
-                    ?permissions,
+                    permissions = %json_list(permissions),
                     related_users = %format_related_ids(&[*actor_user_id]),
                     related_admin_roles = %format_related_ids(&[*admin_role_id]),
                     "Updated admin role"

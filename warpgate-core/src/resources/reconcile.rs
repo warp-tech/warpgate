@@ -271,11 +271,11 @@ pub async fn apply<'p, C: ConnectionTrait + TransactionTrait>(
         let result = match kind {
             ResourceKind::Target => targets::delete(&txn, actor, TargetId(*id))
                 .await
-                .map(|sessions| admitted.extend(sessions.0)),
+                .map(|(_, sessions)| admitted.extend(sessions.0)),
             ResourceKind::SshClientKey => {
                 ssh_client_keys::delete(&txn, actor, SshClientKeyId(*id)).await
             }
-            ResourceKind::Role => roles::delete(&txn, actor, RoleId(*id)).await,
+            ResourceKind::Role => roles::delete(&txn, actor, RoleId(*id)).await.map(drop),
             ResourceKind::TargetGroup => {
                 target_groups::delete(&txn, actor, TargetGroupId(*id)).await
             }
