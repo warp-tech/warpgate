@@ -537,6 +537,7 @@ pub struct HttpConfig {
     pub listen: ListenEndpoint,
 
     /// Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.
+    /// Other cluster nodes connect directly and are exempt
     #[serde(default)]
     pub proxy_protocol: bool,
 

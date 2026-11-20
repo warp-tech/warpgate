@@ -173,7 +173,7 @@
           "default": "[::]:8888"
         },
         "proxy_protocol": {
-          "description": "Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.",
+          "description": "Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.\nOther cluster nodes connect directly and are exempt",
           "type": "boolean",
           "default": false
         },
