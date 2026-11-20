@@ -4,16 +4,18 @@ use sea_orm::{
     TransactionSession, TransactionTrait,
 };
 use uuid::Uuid;
-use warpgate_common::RoleId;
+use warpgate_common::{RoleId, RowId, WarpgateError};
 use warpgate_db_entities::{Role, TargetRoleAssignment, UserRoleAssignment, begin_write};
-use warpgate_gitops::types::ResourceKind;
+use warpgate_resources::{Comparable, ComparableValues, ResourceKind, RoleSpec, Row};
 
+use super::audit::{Audited, Subject, Unaudited};
 use super::{Actor, OwnedEntity, ResourceError, check_name, name_taken};
 
 impl OwnedEntity for Role::Entity {
     type Id = RoleId;
     const KIND: ResourceKind = ResourceKind::Role;
     const ID: Self::Column = Role::Column::Id;
+    const NAME: Self::Column = Role::Column::Name;
     const PROVIDER: Self::Column = Role::Column::Provider;
 }
 
@@ -32,11 +34,40 @@ fn set_data(model: &mut Role::ActiveModel, data: &RoleDataRequest) {
     }
 }
 
+pub(super) fn row(role: Role::Model) -> Row<RoleSpec> {
+    Row {
+        id: role.id.uuid(),
+        name: role.name,
+        provider: role.provider,
+        live: RoleSpec {
+            description: role.description,
+            is_default: role.is_default,
+        },
+    }
+}
+
+impl Audited for Role::Model {
+    fn subject(&self) -> Subject {
+        Subject::of::<Role::Entity>(self.id)
+    }
+
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    async fn compared<C: ConnectionTrait>(
+        &self,
+        _db: &C,
+    ) -> Result<ComparableValues, WarpgateError> {
+        Ok(row(self.clone()).live.compared())
+    }
+}
+
 pub async fn create<C: ConnectionTrait>(
     db: &C,
     actor: Actor,
     data: &RoleDataRequest,
-) -> Result<Role::Model, ResourceError> {
+) -> Result<Unaudited<Role::Model>, ResourceError> {
     check_name(&data.name)?;
     let mut model = Role::ActiveModel {
         id: Set(RoleId(Uuid::new_v4())),
@@ -45,7 +76,8 @@ pub async fn create<C: ConnectionTrait>(
         ..Default::default()
     };
     set_data(&mut model, data);
-    model.insert(db).await.map_err(name_taken)
+    let role = model.insert(db).await.map_err(name_taken)?;
+    Ok(Unaudited::created(role))
 }
 
 pub async fn update<C: ConnectionTrait>(
@@ -53,17 +85,18 @@ pub async fn update<C: ConnectionTrait>(
     actor: Actor,
     id: RoleId,
     data: &RoleDataRequest,
-) -> Result<Role::Model, ResourceError> {
+) -> Result<Unaudited<Role::Model>, ResourceError> {
     check_name(&data.name)?;
-    let role = Role::Entity::find_by_id(id)
+    let before = Role::Entity::find_by_id(id)
         .one(db)
         .await?
         .ok_or(ResourceError::NotFound)?;
-    actor.may_write(role.provider)?;
+    actor.may_write(before.provider)?;
 
-    let mut model: Role::ActiveModel = role.into();
+    let mut model: Role::ActiveModel = before.clone().into();
     set_data(&mut model, data);
-    model.update(db).await.map_err(name_taken)
+    let after = model.update(db).await.map_err(name_taken)?;
+    Ok(Unaudited::updated(before, after))
 }
 
 /// Also removes every assignment of the role, including revoked ones
@@ -71,7 +104,7 @@ pub async fn delete<C: ConnectionTrait + TransactionTrait>(
     db: &C,
     actor: Actor,
     id: RoleId,
-) -> Result<(), ResourceError> {
+) -> Result<Unaudited<Role::Model>, ResourceError> {
     let txn = begin_write(db).await?;
     let role = Role::Entity::find_by_id(id)
         .one(&txn)
@@ -89,7 +122,7 @@ pub async fn delete<C: ConnectionTrait + TransactionTrait>(
         .exec(&txn)
         .await?;
 
-    role.delete(&txn).await?;
+    role.clone().delete(&txn).await?;
     txn.commit().await?;
-    Ok(())
+    Ok(Unaudited::deleted(role))
 }

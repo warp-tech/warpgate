@@ -13,6 +13,7 @@ members = [
     "warpgate-core",
     "warpgate-desktop-auth",
     "warpgate-gitops",
+    "warpgate-resources",
     "warpgate-db-migrations",
     "warpgate-db-entities",
     "warpgate-database-protocols",

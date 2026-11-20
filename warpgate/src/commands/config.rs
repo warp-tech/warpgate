@@ -231,7 +231,7 @@ async fn apply_command(params: &GlobalParams, paths: &[PathBuf], yes: bool) -> R
     let secrets = SecretBackendRegistry::new(db.clone());
     match apply(&db, ProviderId::GITOPS, &resources, &plan, &secrets).await {
         Ok(applied) => {
-            let recorded = if applied.changes.is_empty() {
+            let recorded = if applied.entries.is_empty() {
                 Ok(())
             } else {
                 record_cli_apply(&db, &files, &plan, &applied).await

@@ -7,9 +7,10 @@ use sea_orm::{
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, UserId, UserPublicKeyCredential, WarpgateError};
-use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
+use warpgate_core::logging::CredentialChange;
 use warpgate_db_entities::{PublicKeyCredential, User};
 
+use super::common::audit_credential;
 use super::{AdminContext, guard_user_mutation};
 
 async fn check_user_ldap_linked(
@@ -170,15 +171,13 @@ impl ListApi {
         .map_err(WarpgateError::from)?;
 
         let credential_name = body.label.clone();
-        AuditEvent::CredentialCreated {
-            credential_type: "public_key".to_string(),
-            credential_name: Some(credential_name),
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username: user.username.clone(),
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        audit_credential(
+            &admin,
+            CredentialChange::Created,
+            "public_key",
+            Some(&credential_name),
+            &user,
+        );
 
         Ok(CreatePublicKeyCredentialResponse::Created(Json(
             object.into(),
@@ -218,7 +217,7 @@ impl DetailApi {
         let db = &admin.services().db;
 
         // Ensure user exists and is not LDAP-linked
-        let Some(_) = User::Entity::find_by_id(*user_id).one(db).await? else {
+        let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
             return Ok(UpdatePublicKeyCredentialResponse::NotFound);
         };
 
@@ -246,6 +245,14 @@ impl DetailApi {
         else {
             return Ok(UpdatePublicKeyCredentialResponse::NotFound);
         };
+
+        audit_credential(
+            &admin,
+            CredentialChange::Updated,
+            "public_key",
+            Some(&model.label),
+            &user,
+        );
 
         Ok(UpdatePublicKeyCredentialResponse::Updated(Json(
             model.into(),
@@ -287,15 +294,13 @@ impl DetailApi {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
-        AuditEvent::CredentialDeleted {
-            credential_type: "public_key".to_string(),
-            credential_name: Some(credential_name.clone()),
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username: user.username,
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        audit_credential(
+            &admin,
+            CredentialChange::Deleted,
+            "public_key",
+            Some(&credential_name),
+            &user,
+        );
 
         Ok(DeleteCredentialResponse::Deleted)
     }

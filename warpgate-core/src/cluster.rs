@@ -385,7 +385,7 @@ async fn end_connection_bound_sessions(
     db: &DatabaseConnection,
     node_filter: impl IntoCondition,
 ) -> Result<Vec<UserSessionId>, WarpgateError> {
-    UserSession::revoke_open_matching(
+    crate::user_sessions::revoke_open_matching(
         db,
         Condition::all()
             .add(node_filter.into_condition())
@@ -400,7 +400,7 @@ async fn end_sessions_without_cookie(
     db: &DatabaseConnection,
 ) -> Result<Vec<UserSessionId>, WarpgateError> {
     let grace_cutoff = OffsetDateTime::now_utc() - SHARED_SESSION_ORPHAN_GRACE;
-    UserSession::revoke_open_matching(
+    crate::user_sessions::revoke_open_matching(
         db,
         Condition::all()
             .add(UserSession::Column::Protocol.eq(Protocol::Http.name()))
@@ -807,7 +807,7 @@ mod tests {
         target_session(&db, password, None).await;
         let ended = user_session_started(&db, None, Protocol::Ssh, now).await;
         admitted_by(&db, target_session(&db, ended, None).await, expired).await;
-        UserSession::revoke(&db, UserSessionId(ended))
+        crate::user_sessions::revoke(&db, UserSessionId(ended))
             .await
             .unwrap();
 

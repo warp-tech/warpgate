@@ -10753,6 +10753,7 @@ dependencies = [
  "warpgate-db-migrations",
  "warpgate-gitops",
  "warpgate-ldap",
+ "warpgate-resources",
  "warpgate-secrets-vault",
  "warpgate-sso",
  "warpgate-tls",
@@ -10857,13 +10858,13 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "sha2 0.11.1",
- "strum",
  "tempfile",
  "thiserror 2.0.21",
  "uuid",
  "walkdir",
  "warpgate-common",
  "warpgate-db-entities",
+ "warpgate-resources",
 ]
 
 [[package]]
@@ -11135,6 +11136,18 @@ dependencies = [
  "warpgate-desktop-auth",
  "warpgate-desktop-ui",
  "warpgate-tls",
+]
+
+[[package]]
+name = "warpgate-resources"
+version = "0.31.0-beta.1"
+dependencies = [
+ "schemars 1.2.3",
+ "serde",
+ "serde_json",
+ "uuid",
+ "warpgate-common",
+ "warpgate-db-entities",
 ]
 
 [[package]]

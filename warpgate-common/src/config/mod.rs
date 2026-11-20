@@ -221,7 +221,7 @@ pub struct AdminRole {
     pub ticket_requests_manage: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, JsonSchema, strum::EnumIter)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema, strum::EnumIter)]
 #[serde(rename_all = "snake_case")]
 pub enum AdminPermission {
     TargetsCreate,

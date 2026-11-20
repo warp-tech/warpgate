@@ -14,7 +14,7 @@ use warpgate_db_entities::{Role, Target, User};
 
 use super::AdminContext;
 use super::targets::maybe_redacted_target;
-use crate::api::common::case_insensitive_search;
+use crate::api::common::{audited, case_insensitive_search};
 
 #[derive(ApiResponse)]
 enum GetRolesResponse {
@@ -65,7 +65,9 @@ impl ListApi {
         admin.require(AdminPermission::AccessRolesCreate)?;
 
         match store::create(&admin.services().db, Actor::Admin, &body).await {
-            Ok(role) => Ok(CreateRoleResponse::Created(Json(role.into()))),
+            Ok(role) => Ok(CreateRoleResponse::Created(Json(
+                audited(&admin, role).await.into(),
+            ))),
             Err(ResourceError::EmptyName) => Ok(CreateRoleResponse::BadRequest(invalid_field(
                 "name",
                 "role name is empty",
@@ -165,7 +167,9 @@ impl DetailApi {
         admin.require(AdminPermission::AccessRolesEdit)?;
 
         match store::update(&admin.services().db, Actor::Admin, id.0, &body).await {
-            Ok(role) => Ok(UpdateRoleResponse::Ok(Json(role.into()))),
+            Ok(role) => Ok(UpdateRoleResponse::Ok(Json(
+                audited(&admin, role).await.into(),
+            ))),
             Err(ResourceError::EmptyName) => {
                 warn!("Rejecting request: role name is empty");
                 Ok(UpdateRoleResponse::BadRequest)
@@ -187,7 +191,10 @@ impl DetailApi {
         admin.require(AdminPermission::AccessRolesDelete)?;
 
         match store::delete(&admin.services().db, Actor::Admin, id.0).await {
-            Ok(()) => Ok(DeleteRoleResponse::Deleted),
+            Ok(role) => {
+                audited(&admin, role).await;
+                Ok(DeleteRoleResponse::Deleted)
+            }
             Err(ResourceError::NotFound) => Ok(DeleteRoleResponse::NotFound),
             Err(err @ ResourceError::OwnedBy(_)) => {
                 Ok(DeleteRoleResponse::Conflict(Json(err.to_string())))

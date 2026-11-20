@@ -354,7 +354,7 @@ mod tests {
                 serde_json::json!({"ssh": {"host": format!("h{i}")}}),
             );
             let target = targets::create(&db, Actor::Admin, &data).await.unwrap();
-            ids.push(target.id);
+            ids.push(target.skip_audit().id);
         }
 
         let deletes = ids.into_iter().map(|id| {
@@ -362,7 +362,7 @@ mod tests {
             tokio::spawn(async move { targets::delete(&db, Actor::Admin, id).await })
         });
         for result in futures::future::join_all(deletes).await {
-            result.unwrap().unwrap();
+            let _ = result.unwrap().unwrap();
         }
     }
 }

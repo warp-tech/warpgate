@@ -4,7 +4,36 @@ use sea_orm::{ColumnTrait, Condition, DbBackend, EntityTrait, ModelTrait};
 use warpgate_common::{AdminPermission, AdminPermissionSet, WarpgateError};
 pub use warpgate_common_http::RequestAuthorization;
 pub use warpgate_core::db::is_unique_violation;
+use warpgate_core::logging::{AuditEvent, CredentialChange, CredentialChangedVia};
+use warpgate_core::resources::audit::{Audited, Unaudited};
 use warpgate_db_entities::{AdminRole, User};
+
+use super::AdminContext;
+
+pub async fn audited<M: Audited>(admin: &AdminContext, write: Unaudited<M>) -> M {
+    write
+        .audited(&admin.services().db, admin.changed_by())
+        .await
+}
+
+pub fn audit_credential(
+    admin: &AdminContext,
+    change: CredentialChange,
+    credential_type: &str,
+    credential_name: Option<&str>,
+    user: &User::Model,
+) {
+    AuditEvent::CredentialChanged {
+        change,
+        credential_type: credential_type.to_owned(),
+        credential_name: credential_name.map(str::to_owned),
+        via: CredentialChangedVia::Admin,
+        user_id: user.id,
+        username: user.username.clone(),
+        actor_user_id: admin.auth.user_id(),
+    }
+    .emit();
+}
 
 /// The admin permissions the request's principal holds — the single place that resolves the
 /// permission model from the DB. `has_admin_permission`, `is_user_admin` and the `/info` UI

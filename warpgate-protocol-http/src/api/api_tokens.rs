@@ -7,9 +7,11 @@ use uuid::Uuid;
 use warpgate_common::WarpgateError;
 use warpgate_common::helpers::hash::{generate_ticket_secret, hash_secret};
 use warpgate_common_http::errors::bad_request;
+use warpgate_core::logging::CredentialChange;
 use warpgate_db_entities::ApiToken;
 
 use crate::api::auth_scheme::{FullUser, WebSessionUser};
+use crate::api::common::audit_own_credential;
 
 pub struct Api;
 
@@ -123,6 +125,14 @@ impl Api {
         .await
         .map_err(WarpgateError::from)?;
 
+        audit_own_credential(
+            CredentialChange::Created,
+            "api_token",
+            Some(&object.label),
+            user_model.id,
+            &user_model.username,
+        );
+
         Ok(CreateApiTokenResponse::Created(Json(TokenAndSecret {
             token: object.into(),
             secret: secret.expose_secret().clone(),
@@ -151,7 +161,17 @@ impl Api {
             return Ok(DeleteApiTokenResponse::NotFound);
         };
 
+        let credential_name = model.label.clone();
         model.delete(db).await?;
+
+        audit_own_credential(
+            CredentialChange::Deleted,
+            "api_token",
+            Some(&credential_name),
+            user_model.id,
+            &user_model.username,
+        );
+
         Ok(DeleteApiTokenResponse::Deleted)
     }
 }
