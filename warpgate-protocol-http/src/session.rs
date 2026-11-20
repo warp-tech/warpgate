@@ -3,13 +3,13 @@ use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use poem::session::Session;
-use poem::web::RemoteAddr;
 use poem::{FromRequest, Request};
 use sea_orm::{DatabaseConnection, EntityTrait};
 use tokio::sync::{Mutex, broadcast, mpsc};
 use tracing::{error, info};
 use warpgate_common::{UserId, UserSessionId, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
+use warpgate_common_http::logging::get_client_socket_addr;
 use warpgate_common_http::{SessionAuthorization, SessionKeepalive};
 use warpgate_core::{State, UserSessionStateInit, WarpgateServerHandle};
 use warpgate_db_entities::{HttpSession, UserSession};
@@ -185,7 +185,7 @@ impl SessionStore {
         let session = <&Session>::from_request_without_body(req).await?;
 
         let (session_handle, session_handle_rx) = HttpSessionHandle::new();
-        let init = Self::state_init_for(req, session_handle).await?;
+        let init = Self::state_init_for(req, ctx, session_handle).await;
         // A header-ticket session is held open by this node's entry alone: it
         // has no stored browser session, so the orphan sweep would end it
         // while it is still serving. Its lifetime is this node's, and it
@@ -246,7 +246,7 @@ impl SessionStore {
             &ctx.services().state,
             id,
             PROTOCOL_NAME,
-            Self::state_init_for(req, session_handle).await?,
+            Self::state_init_for(req, ctx, session_handle).await,
         )
         .await;
         self.install_entry(req, ctx, id, server_handle.clone(), session_handle_rx)?;
@@ -255,13 +255,13 @@ impl SessionStore {
 
     async fn state_init_for(
         req: &Request,
+        ctx: &UnauthenticatedRequestContext,
         session_handle: HttpSessionHandle,
-    ) -> poem::Result<UserSessionStateInit> {
-        let remote_address = <&RemoteAddr>::from_request_without_body(req).await?;
-        Ok(UserSessionStateInit {
-            remote_address: remote_address.0.as_socket_addr().copied(),
+    ) -> UserSessionStateInit {
+        UserSessionStateInit {
+            remote_address: get_client_socket_addr(req, ctx.services()).await,
             handle: Box::new(session_handle),
-        })
+        }
     }
 
     fn install_entry(
