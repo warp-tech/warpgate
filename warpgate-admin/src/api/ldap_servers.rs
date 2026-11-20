@@ -502,8 +502,37 @@ enum GetLdapServerResponse {
     NotFound,
 }
 
+/// Saving runs base DN discovery, which binds to the server with the stored
+/// password
+fn bind_destination_changed(server: &LdapServer::Model, body: &UpdateLdapServerRequest) -> bool {
+    // Every field is listed so that a new one does not compile until it is
+    // either compared or ignored here
+    let LdapServer::Model {
+        host,
+        port,
+        bind_dn,
+        tls_mode,
+        tls_verify,
+        id: _,
+        name: _,
+        bind_password: _,
+        user_filter: _,
+        base_dns: _,
+        enabled: _,
+        auto_link_sso_users: _,
+        description: _,
+        username_attribute: _,
+        ssh_key_attribute: _,
+        uuid_attribute: _,
+    } = server;
+    *host != body.host
+        || *port != body.port
+        || *bind_dn != body.bind_dn
+        || body.tls_mode < TlsMode::from(tls_mode.as_str())
+        || (*tls_verify && !body.tls_verify)
+}
+
 #[derive(ApiResponse)]
-#[allow(dead_code)]
 enum UpdateLdapServerResponse {
     #[oai(status = 200)]
     Ok(Json<LdapServerResponse>),
@@ -567,6 +596,12 @@ impl DetailApi {
         let Some(server) = LdapServer::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(UpdateLdapServerResponse::NotFound);
         };
+
+        if body.bind_password.is_none() && bind_destination_changed(&server, &body) {
+            return Ok(UpdateLdapServerResponse::BadRequest(bad_request(
+                "The bind password is required when changing the host, port or bind DN, or weakening TLS",
+            )));
+        }
 
         let mut model: LdapServer::ActiveModel = server.clone().into();
 
