@@ -25,8 +25,8 @@ pub enum WarpgateError {
     Other(Box<dyn Error + Send + Sync>),
     #[error("user {0} not found")]
     UserNotFound(String),
-    #[error("user {0} already exists")]
-    UserAlreadyExists(String),
+    #[error("name already exists")]
+    NameTaken,
     #[error("role {0} not found")]
     RoleNotFound(String),
     #[error("failed to parse URL: {0}")]
@@ -119,7 +119,7 @@ impl UserFacingReason for WarpgateError {
             | Self::InvalidTarget
             | Self::InvalidCredentialType
             | Self::UserNotFound(_)
-            | Self::UserAlreadyExists(_)
+            | Self::NameTaken
             | Self::SessionNotApproved
             | Self::UserSessionAlreadyAttributed
             | Self::UserSessionEnded
@@ -214,7 +214,7 @@ impl ResponseError for WarpgateError {
             | Self::UserNotFound(_)
             | Self::RoleNotFound(_)
             | Self::IpAddrNotAllowed(..) => poem::http::StatusCode::UNAUTHORIZED,
-            Self::UserAlreadyExists(_) => poem::http::StatusCode::CONFLICT,
+            Self::NameTaken => poem::http::StatusCode::CONFLICT,
             Self::InvalidRequest(_) => poem::http::StatusCode::BAD_REQUEST,
             Self::NoAdminAccess | Self::NoAdminPermission(_) | Self::TargetUserOutranksAdmin => {
                 poem::http::StatusCode::FORBIDDEN

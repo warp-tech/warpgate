@@ -30,9 +30,7 @@
 
     async function init() {
         role = await api.getAdminRole({ id: params.id })
-        disabled =
-            role.name === 'warpgate:admin' ||
-            !$adminPermissions.adminRolesManage
+        disabled = role.builtin || !$adminPermissions.adminRolesManage
         return role
     }
 

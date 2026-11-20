@@ -161,8 +161,23 @@ mod tests {
                 "warpgate:admin (2)"
             ]
         );
-        assert!(names.contains(&(builtin, "warpgate:admin".into())));
+        assert!(names.contains(&(builtin.clone(), "warpgate:admin".into())));
         assert!(names.contains(&(impostor.to_string(), "warpgate:admin (2)".into())));
+
+        let flagged: Vec<Uuid> = db
+            .query_all(Statement::from_string(
+                backend,
+                "SELECT id FROM admin_roles WHERE builtin",
+            ))
+            .await
+            .unwrap()
+            .iter()
+            .map(|row| row.try_get("", "id").unwrap())
+            .collect();
+        assert_eq!(
+            flagged.iter().map(Uuid::to_string).collect::<Vec<_>>(),
+            [builtin]
+        );
 
         db.execute(insert(Uuid::new_v4(), "dev"))
             .await

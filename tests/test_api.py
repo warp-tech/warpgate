@@ -1373,6 +1373,13 @@ def test_admin_role_names_must_be_unique_and_non_empty(admin_client: sdk.Default
     # Saving a role under the name it already has is not a conflict.
     assert admin_client.update_admin_role(second.id, request(second.name)).name == second.name
 
+    [builtin] = [r for r in admin_client.get_admin_roles() if r.builtin]
+    assert builtin.name == "warpgate:admin"
+    with pytest.raises(sdk.ApiException) as err:
+        admin_client.update_admin_role(builtin.id, request(f"renamed-{uuid4()}"))
+    assert err.value.status == 403
+    assert admin_client.get_admin_role(builtin.id).name == "warpgate:admin"
+
 
 HTTP_HEADER_SECRET = "Bearer s3cr3t-upstream"
 HTTP_URL_PASSWORD = "p4ss"

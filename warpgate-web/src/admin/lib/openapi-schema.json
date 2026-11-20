@@ -327,16 +327,6 @@
               }
             }
           },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
           "400": {
             "description": "",
             "content": {
@@ -436,16 +426,6 @@
           },
           "400": {
             "description": ""
-          },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
           },
           "404": {
             "description": ""
@@ -652,16 +632,6 @@
                 }
               }
             }
-          },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
           }
         },
         "security": [
@@ -760,15 +730,8 @@
               }
             }
           },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
+          "403": {
+            "description": ""
           },
           "404": {
             "description": ""
@@ -1596,16 +1559,6 @@
               }
             }
           },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
           "400": {
             "description": "",
             "content": {
@@ -1705,16 +1658,6 @@
           },
           "400": {
             "description": ""
-          },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
           },
           "404": {
             "description": ""
@@ -1991,16 +1934,6 @@
               }
             }
           },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
           "400": {
             "description": "",
             "content": {
@@ -2100,16 +2033,6 @@
           },
           "400": {
             "description": ""
-          },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
           },
           "404": {
             "description": ""
@@ -3640,16 +3563,6 @@
               }
             }
           },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
           "400": {
             "description": "",
             "content": {
@@ -5078,6 +4991,7 @@
           "id",
           "name",
           "description",
+          "builtin",
           "targets_create",
           "targets_edit",
           "targets_delete",
@@ -5108,6 +5022,9 @@
           },
           "description": {
             "type": "string"
+          },
+          "builtin": {
+            "type": "boolean"
           },
           "targets_create": {
             "type": "boolean"

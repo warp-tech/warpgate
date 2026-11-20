@@ -39,9 +39,6 @@ enum CreateTargetResponse {
     #[oai(status = 201)]
     Created(Json<TargetConfig>),
 
-    #[oai(status = 409)]
-    Conflict(Json<String>),
-
     #[oai(status = 400)]
     BadRequest(Json<String>),
 }
@@ -95,9 +92,6 @@ impl ListApi {
                 "name",
                 "target name is empty",
             ))),
-            Err(ResourceError::NameTaken) => Ok(CreateTargetResponse::Conflict(Json(
-                "Name already exists".into(),
-            ))),
             Err(err) => Err(err.into()),
         }
     }
@@ -119,8 +113,6 @@ enum UpdateTargetResponse {
     Ok(Json<TargetConfig>),
     #[oai(status = 400)]
     BadRequest,
-    #[oai(status = 409)]
-    Conflict(Json<String>),
     #[oai(status = 404)]
     NotFound,
 }
@@ -186,11 +178,6 @@ impl DetailApi {
             Err(ResourceError::ProtocolChange) => {
                 warn!("Rejecting request: a target's protocol cannot be changed after creation");
                 return Ok(UpdateTargetResponse::BadRequest);
-            }
-            Err(ResourceError::NameTaken) => {
-                return Ok(UpdateTargetResponse::Conflict(Json(
-                    "Name already exists".into(),
-                )));
             }
             Err(ResourceError::NotFound) => return Ok(UpdateTargetResponse::NotFound),
             Err(err) => return Err(err.into()),

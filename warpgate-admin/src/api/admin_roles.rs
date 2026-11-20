@@ -5,13 +5,10 @@ use sea_orm::{ActiveModelTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, AdminRole as AdminRoleConfig, WarpgateError};
 use warpgate_common_http::errors::invalid_field;
-use warpgate_core::consts::BUILTIN_ADMIN_ROLE_NAME;
 use warpgate_db_entities::{AdminRole, User};
 
 use super::AdminContext;
 use crate::api::common::{case_insensitive_search, is_unique_violation};
-
-const NAME_TAKEN: &str = "Name already exists";
 
 #[derive(Object)]
 struct AdminRoleDataRequest {
@@ -59,8 +56,6 @@ enum CreateAdminRoleResponse {
     Created(Json<AdminRoleConfig>),
     #[oai(status = 400)]
     BadRequest(Json<String>),
-    #[oai(status = 409)]
-    Conflict(Json<String>),
 }
 
 #[derive(ApiResponse)]
@@ -77,8 +72,8 @@ enum UpdateAdminRoleResponse {
     Ok(Json<AdminRoleConfig>),
     #[oai(status = 400)]
     BadRequest(Json<String>),
-    #[oai(status = 409)]
-    Conflict(Json<String>),
+    #[oai(status = 403)]
+    Forbidden,
     #[oai(status = 404)]
     NotFound,
 }
@@ -153,6 +148,7 @@ impl ListApi {
             id: Set(Uuid::new_v4()),
             name: Set(body.name.clone()),
             description: Set(body.description.clone().unwrap_or_default()),
+            builtin: Set(false),
             targets_create: Set(body.targets_create),
             targets_edit: Set(body.targets_edit),
             targets_delete: Set(body.targets_delete),
@@ -176,9 +172,7 @@ impl ListApi {
 
         match values.insert(db).await {
             Ok(role) => Ok(CreateAdminRoleResponse::Created(Json(role.into()))),
-            Err(err) if is_unique_violation(&err) => {
-                Ok(CreateAdminRoleResponse::Conflict(Json(NAME_TAKEN.into())))
-            }
+            Err(err) if is_unique_violation(&err) => Err(WarpgateError::NameTaken),
             Err(err) => Err(err.into()),
         }
     }
@@ -231,6 +225,11 @@ impl DetailApi {
             return Ok(UpdateAdminRoleResponse::NotFound);
         };
 
+        // `create-user --role` and SSO admin role mappings find it by name.
+        if role.builtin && body.name != role.name {
+            return Ok(UpdateAdminRoleResponse::Forbidden);
+        }
+
         let mut model: AdminRole::ActiveModel = role.into();
         model.name = Set(body.name.clone());
         model.description = Set(body.description.clone().unwrap_or_default());
@@ -255,9 +254,7 @@ impl DetailApi {
         model.ticket_requests_manage = Set(body.ticket_requests_manage);
         match model.update(db).await {
             Ok(role) => Ok(UpdateAdminRoleResponse::Ok(Json(role.into()))),
-            Err(err) if is_unique_violation(&err) => {
-                Ok(UpdateAdminRoleResponse::Conflict(Json(NAME_TAKEN.into())))
-            }
+            Err(err) if is_unique_violation(&err) => Err(WarpgateError::NameTaken),
             Err(err) => Err(err.into()),
         }
     }
@@ -279,8 +276,7 @@ impl DetailApi {
             return Ok(DeleteAdminRoleResponse::NotFound);
         };
 
-        // don't allow deleting builtin admin role
-        if role.name == BUILTIN_ADMIN_ROLE_NAME {
+        if role.builtin {
             return Ok(DeleteAdminRoleResponse::Forbidden);
         }
 

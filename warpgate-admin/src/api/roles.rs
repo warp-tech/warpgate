@@ -26,9 +26,6 @@ enum CreateRoleResponse {
     #[oai(status = 201)]
     Created(Json<RoleConfig>),
 
-    #[oai(status = 409)]
-    Conflict(Json<String>),
-
     #[oai(status = 400)]
     BadRequest(Json<String>),
 }
@@ -73,9 +70,6 @@ impl ListApi {
                 "name",
                 "role name is empty",
             ))),
-            Err(ResourceError::NameTaken) => Ok(CreateRoleResponse::Conflict(Json(
-                "Name already exists".into(),
-            ))),
             Err(err) => Err(err.into()),
         }
     }
@@ -95,8 +89,6 @@ enum UpdateRoleResponse {
     Ok(Json<RoleConfig>),
     #[oai(status = 400)]
     BadRequest,
-    #[oai(status = 409)]
-    Conflict(Json<String>),
     #[oai(status = 404)]
     NotFound,
 }
@@ -160,9 +152,6 @@ impl DetailApi {
                 warn!("Rejecting request: role name is empty");
                 Ok(UpdateRoleResponse::BadRequest)
             }
-            Err(ResourceError::NameTaken) => Ok(UpdateRoleResponse::Conflict(Json(
-                "Name already exists".into(),
-            ))),
             Err(ResourceError::NotFound) => Ok(UpdateRoleResponse::NotFound),
             Err(err) => Err(err.into()),
         }
