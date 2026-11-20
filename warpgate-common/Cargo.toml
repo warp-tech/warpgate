@@ -49,7 +49,7 @@ sha2.workspace = true
 socket2 = "0.6"
 strum = { version = "0.28", features = ["derive"] }
 thiserror.workspace = true
-time = { workspace = true, features = ["formatting"] }
+time.workspace = true
 tokio.workspace = true
 tokio-rustls.workspace = true
 tokio-stream.workspace = true

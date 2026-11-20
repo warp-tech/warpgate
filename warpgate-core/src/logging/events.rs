@@ -4,9 +4,8 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tracing::info;
 use uuid::Uuid;
-
-use crate::helpers::logging::format_related_ids;
-use crate::{RoleId, TargetId, UserId};
+use warpgate_common::helpers::logging::format_related_ids;
+use warpgate_common::{RoleId, TargetId, UserId};
 
 #[derive(Clone, Copy)]
 pub enum CredentialChange {

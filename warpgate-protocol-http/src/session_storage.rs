@@ -236,7 +236,7 @@ impl SharedSessionStorage {
 
         transaction.commit().await?;
         if let Some(ended) = ended {
-            ended.settle(&self.db).await;
+            warpgate_core::user_sessions::settle(ended, &self.db).await;
         }
         Ok(())
     }

@@ -4,9 +4,9 @@
 //! sees, and which the recording must not keep.
 
 use tracing::debug;
-use warpgate_common::audit::AuditEvent;
 use warpgate_common::{TargetId, TargetSessionId, UserId};
 use warpgate_core::LogonState;
+use warpgate_core::logging::AuditEvent;
 
 pub(crate) struct LogonWatcher {
     pub target_session_id: TargetSessionId,
