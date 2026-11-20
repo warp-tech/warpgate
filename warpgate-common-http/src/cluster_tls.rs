@@ -7,7 +7,7 @@
 //! never see a certificate request.
 //!
 //! The acceptor marks an authenticated peer connection in its `RemoteAddr`
-//! (see [`crate::tls_acceptor`]), and [`cluster_peer_extension`] turns that
+//! (see [`crate::mtls_acceptor`]), and [`cluster_peer_extension`] turns that
 //! into a [`ClusterPeer`] request extension that the auth code reads through
 //! [`cluster_peer`].
 
@@ -18,7 +18,6 @@ use poem::Request;
 use poem::listener::Acceptor;
 use poem::web::RemoteAddr;
 use rustls::ServerConfig;
-use tokio_rustls::server::TlsStream;
 use tracing::warn;
 use uuid::Uuid;
 use warpgate_ca::{CLUSTER_TLS_SNI_NAME, ClusterTlsIdentity, certificate_der_spki_sha256_hex};
@@ -26,12 +25,13 @@ use warpgate_common::NodeId;
 use warpgate_common::helpers::concurrent_acceptor::ConcurrentAcceptor;
 use warpgate_core::cluster::Cluster;
 use warpgate_tls::{
-    PossessionOnlyClientCertVerifier, RustlsSetupError, SniCertResolver,
+    PossessionOnlyClientCertVerifier, RustlsSetupError, ServerTlsStream, SniCertResolver,
     TlsCertificateAndPrivateKey, cluster_identity_certified_key,
 };
 
 use crate::mtls_acceptor::{
-    RemoteAddrExtension, annotate_remote_addr, extracting_mtls_acceptor, remote_addr_annotation,
+    RemoteAddrExtension, Verified, annotate_remote_addr, extracting_mtls_acceptor,
+    remote_addr_annotation,
 };
 
 /// A request from another cluster node, authenticated by its pinned TLS
@@ -97,17 +97,22 @@ impl ClusterTlsConfigs {
 /// for the cluster SNI name, requires a client certificate pinned by a live
 /// node. A peer that proves a key nobody has pinned is dropped before poem
 /// ever sees a request from it.
+///
+/// Nodes connect to each other directly, so a pinned peer may omit the PROXY
+/// header
 pub fn cluster_aware_tls_acceptor<A, R>(
     inner: A,
+    proxy_protocol: bool,
     configs: ClusterTlsConfigs,
     registry: Arc<R>,
-) -> ConcurrentAcceptor<TlsStream<A::Io>>
+) -> ConcurrentAcceptor<ServerTlsStream<A::Io>>
 where
     A: Acceptor + 'static,
     R: PeerRegistry,
 {
     extracting_mtls_acceptor(
         inner,
+        proxy_protocol,
         move |client_hello| {
             if client_hello.server_name() == Some(CLUSTER_TLS_SNI_NAME) {
                 configs.cluster.clone()
@@ -120,18 +125,18 @@ where
             let registry = registry.clone();
             async move {
                 let Some(certificate) = certificate else {
-                    return Ok(remote_addr);
+                    return Ok(Verified::Ordinary(remote_addr));
                 };
                 let spki = certificate_der_spki_sha256_hex(certificate.as_ref())?;
                 let node_id = registry
                     .node_for_pin(spki)
                     .await
                     .context("unknown cluster peer certificate")?;
-                Ok(annotate_remote_addr(
+                Ok(Verified::HeaderExempt(annotate_remote_addr(
                     &remote_addr,
                     CLUSTER_PEER_ADDR_SCHEME,
                     &format!("{CLUSTER_PEER_PAYLOAD_PREFIX}{node_id}"),
-                ))
+                )))
             }
         },
     )
@@ -195,7 +200,7 @@ mod tests {
 
     struct Rig {
         address: std::net::SocketAddr,
-        acceptor: ConcurrentAcceptor<TlsStream<TcpStream>>,
+        acceptor: ConcurrentAcceptor<ServerTlsStream<TcpStream>>,
         ca_cert: String,
         ca_key: String,
         peer: ClusterTlsIdentity,
@@ -204,6 +209,10 @@ mod tests {
     }
 
     async fn rig() -> Rig {
+        rig_with_proxy_protocol(false).await
+    }
+
+    async fn rig_with_proxy_protocol(proxy_protocol: bool) -> Rig {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let (ca_cert, ca_key) = warpgate_ca::issue_ca_root_certificate().unwrap();
         let own = ClusterTlsIdentity::issue(&ca_cert, &ca_key).unwrap();
@@ -231,7 +240,7 @@ mod tests {
             .unwrap();
         Rig {
             address,
-            acceptor: cluster_aware_tls_acceptor(tcp, configs, registry),
+            acceptor: cluster_aware_tls_acceptor(tcp, proxy_protocol, configs, registry),
             ca_cert,
             ca_key,
             peer,
@@ -264,14 +273,24 @@ mod tests {
         rig: &mut Rig,
         sni: &'static str,
         identity: Option<&ClusterTlsIdentity>,
-    ) -> (
-        Option<(TlsStream<TcpStream>, RemoteAddr)>,
-        Result<tokio_rustls::client::TlsStream<TcpStream>, std::io::Error>,
-    ) {
+    ) -> (Option<Kept>, ClientResult) {
+        connect_after(rig, b"", sni, identity).await
+    }
+
+    type Kept = (ServerTlsStream<TcpStream>, RemoteAddr);
+    type ClientResult = Result<tokio_rustls::client::TlsStream<TcpStream>, std::io::Error>;
+
+    async fn connect_after(
+        rig: &mut Rig,
+        preamble: &'static [u8],
+        sni: &'static str,
+        identity: Option<&ClusterTlsIdentity>,
+    ) -> (Option<Kept>, ClientResult) {
         let connector = TlsConnector::from(Arc::new(client_config(identity)));
-        let tcp = TcpStream::connect(rig.address).await.unwrap();
+        let mut tcp = TcpStream::connect(rig.address).await.unwrap();
         let server_name = ServerName::try_from(sni).unwrap();
         let client = async move {
+            tcp.write_all(preamble).await?;
             let mut stream = connector.connect(server_name, tcp).await?;
             // The server only learns whether it keeps the connection after the
             // handshake, so a dropped connection shows up on the first read.
@@ -339,6 +358,73 @@ mod tests {
         let (_io, remote_addr) = accepted.expect("connection kept");
         assert!(peer_from_remote_addr(&remote_addr).is_none());
         assert!(remote_addr.0.as_socket_addr().is_some());
+    }
+
+    const PROXY_HEADER: &[u8] = b"PROXY TCP4 203.0.113.10 10.0.0.2 42300 443\r\n";
+    // PROXY over TCP4, 203.0.113.10:42300 to 10.0.0.2:443
+    const PROXY_V2_HEADER: &[u8] = b"\r\n\r\n\0\r\nQUIT\n\x21\x11\x00\x0c\
+        \xcb\x00\x71\x0a\x0a\x00\x00\x02\xa5\x3c\x01\xbb";
+
+    #[tokio::test]
+    async fn pinned_peer_needs_no_proxy_header() {
+        let mut rig = rig_with_proxy_protocol(true).await;
+        let peer = rig.peer.clone();
+        let (accepted, client) = connect(&mut rig, CLUSTER_TLS_SNI_NAME, Some(&peer)).await;
+        client.expect("pinned peer handshake");
+        let (_io, remote_addr) = accepted.expect("connection kept");
+        assert_eq!(
+            peer_from_remote_addr(&remote_addr).unwrap().node_id,
+            rig.peer_node
+        );
+    }
+
+    #[tokio::test]
+    async fn pinned_peer_behind_a_proxy_header_keeps_both_address_and_marker() {
+        let mut rig = rig_with_proxy_protocol(true).await;
+        let peer = rig.peer.clone();
+        let (accepted, client) =
+            connect_after(&mut rig, PROXY_HEADER, CLUSTER_TLS_SNI_NAME, Some(&peer)).await;
+        client.expect("pinned peer handshake");
+        let (_io, remote_addr) = accepted.expect("connection kept");
+        assert_eq!(
+            peer_from_remote_addr(&remote_addr).unwrap().node_id,
+            rig.peer_node
+        );
+        assert!(remote_addr.to_string().contains("203.0.113.10:42300"));
+    }
+
+    #[tokio::test]
+    async fn public_client_without_a_proxy_header_is_dropped() {
+        let mut rig = rig_with_proxy_protocol(true).await;
+        let (accepted, client) = connect(&mut rig, "localhost", None).await;
+        assert!(
+            accepted.is_none(),
+            "a header-less client must not reach poem"
+        );
+        assert!(client.is_err());
+    }
+
+    #[tokio::test]
+    async fn unpinned_certificate_without_a_proxy_header_is_dropped() {
+        let mut rig = rig_with_proxy_protocol(true).await;
+        let rogue = ClusterTlsIdentity::issue(&rig.ca_cert, &rig.ca_key).unwrap();
+        let (accepted, client) = connect(&mut rig, CLUSTER_TLS_SNI_NAME, Some(&rogue)).await;
+        assert!(accepted.is_none());
+        assert!(client.is_err());
+    }
+
+    #[tokio::test]
+    async fn public_client_address_comes_from_the_proxy_header() {
+        for header in [PROXY_HEADER, PROXY_V2_HEADER] {
+            let mut rig = rig_with_proxy_protocol(true).await;
+            let (accepted, client) = connect_after(&mut rig, header, "localhost", None).await;
+            client.expect("public handshake");
+            let (_io, remote_addr) = accepted.expect("connection kept");
+            assert_eq!(
+                remote_addr.0.as_socket_addr(),
+                Some(&"203.0.113.10:42300".parse().unwrap())
+            );
+        }
     }
 
     #[test]
