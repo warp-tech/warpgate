@@ -1,3 +1,3 @@
 tests/fixtures/invalid/unknown-fields.yaml:5:3 metadata.label: unknown field `label`, expected one of `adopt_existing`, `name`
-tests/fixtures/invalid/unknown-fields.yaml:10:7 spec.options.ssh.usrname: unknown field `usrname`, expected one of `allow_insecure_algos`, `auth`, `host`, `jump_host`, `port`, `username`
+tests/fixtures/invalid/unknown-fields.yaml:10:7 spec.options.ssh.usrname: unknown field `usrname`, expected one of `allow_insecure_algos`, `auth`, `host`, `jump_host`, `port`, `port_knocking`, `username`
 tests/fixtures/invalid/unknown-fields.yaml:14:9 spec.options.ssh.auth.passwrod: unknown field `passwrod`, expected one of `kind`, `password`

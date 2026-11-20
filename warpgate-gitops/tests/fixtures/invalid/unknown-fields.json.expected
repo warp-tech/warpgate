@@ -12,7 +12,7 @@
     "file": "tests/fixtures/invalid/unknown-fields.yaml",
     "level": "error",
     "line": 10,
-    "message": "unknown field `usrname`, expected one of `allow_insecure_algos`, `auth`, `host`, `jump_host`, `port`, `username`",
+    "message": "unknown field `usrname`, expected one of `allow_insecure_algos`, `auth`, `host`, `jump_host`, `port`, `port_knocking`, `username`",
     "path": "spec.options.ssh.usrname"
   },
   {
