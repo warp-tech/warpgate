@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 
+use tokio::sync::OwnedSemaphorePermit;
 use uuid::Uuid;
 use warpgate_core::recordings::ConnectionRecorder;
 
@@ -23,7 +24,11 @@ enum ChannelState {
     /// can be written to the client before `CHANNEL_OPEN_CONFIRMATION` (#2328).
     /// Server-initiated channels (forwarded-tcpip, forwarded-streamlocal) also
     /// accumulate resources here while the client's confirmation is in flight.
-    Opening { deferred: Vec<RCEvent> },
+    ///
+    /// Each event keeps its outbound slot. The client controls when the open
+    /// resolves and the target controls how much it sends until then, so the
+    /// slots are the only bound on this queue
+    Opening { deferred: Vec<DeferredEvent> },
     /// Confirmed open on both sides. `pty` marks channels that had a PTY
     /// allocated — those receive service output and drive the interactive
     /// target-selection menu.
@@ -35,6 +40,9 @@ impl Default for ChannelState {
         Self::Opening { deferred: vec![] }
     }
 }
+
+/// A deferred target-side event and its outbound slot
+pub type DeferredEvent = (RCEvent, Option<OwnedSemaphorePermit>);
 
 /// All per-channel resources. Living in one struct per channel (rather than
 /// parallel per-resource maps) means they can't fall out of sync as channels
@@ -61,6 +69,22 @@ impl Channel {
         }
     }
 
+    pub async fn record_input(&mut self, data: &[u8]) -> anyhow::Result<()> {
+        self.audit.on_input(data).await?;
+        if let Some(recorder) = self.traffic_recorder.as_mut() {
+            recorder.write_tx(data).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn record_output(&mut self, data: &[u8]) -> anyhow::Result<()> {
+        self.audit.on_output(data).await?;
+        if let Some(recorder) = self.traffic_recorder.as_mut() {
+            recorder.write_rx(data).await?;
+        }
+        Ok(())
+    }
+
     pub const fn server_id(&self) -> Option<ServerChannelId> {
         self.server_id
     }
@@ -79,10 +103,15 @@ impl Channel {
 
     /// Queue `event` until the open is confirmed, or hand it back if the
     /// channel is already open and the event should be handled normally.
-    pub fn try_defer(&mut self, event: RCEvent) -> Result<(), RCEvent> {
+    /// `slot` is not called if the event is handed back.
+    pub fn try_defer(
+        &mut self,
+        event: RCEvent,
+        slot: impl FnOnce() -> Option<OwnedSemaphorePermit>,
+    ) -> Result<(), RCEvent> {
         match &mut self.state {
             ChannelState::Opening { deferred } => {
-                deferred.push(event);
+                deferred.push((event, slot()));
                 Ok(())
             }
             ChannelState::Open { .. } => Err(event),
@@ -98,7 +127,7 @@ impl Channel {
         }
     }
 
-    fn confirm_open(&mut self) -> Vec<RCEvent> {
+    fn confirm_open(&mut self) -> Vec<DeferredEvent> {
         match &mut self.state {
             ChannelState::Opening { deferred } => {
                 let deferred = std::mem::take(deferred);
@@ -158,7 +187,7 @@ impl ChannelRegistry {
     /// while the open was in flight is left absent — inserting here would
     /// resurrect a zombie entry with no client mapping.
     #[must_use]
-    pub fn confirm(&mut self, id: Uuid) -> Option<Vec<RCEvent>> {
+    pub fn confirm(&mut self, id: Uuid) -> Option<Vec<DeferredEvent>> {
         self.channels.get_mut(&id).map(Channel::confirm_open)
     }
 
@@ -194,5 +223,51 @@ impl ChannelRegistry {
 
     pub fn has_opening(&self) -> bool {
         self.channels.values().any(Channel::is_opening)
+    }
+
+    pub fn opening_count(&self) -> usize {
+        self.channels.values().filter(|c| c.is_opening()).count()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use tokio::sync::Semaphore;
+
+    use super::*;
+
+    #[test]
+    fn deferred_events_hold_their_slots_until_the_open_resolves() {
+        let slots = Arc::new(Semaphore::new(2));
+        let take = || slots.clone().try_acquire_owned().ok();
+        let mut channels = ChannelRegistry::new();
+
+        // Confirming returns the slots with the events
+        let id = Uuid::new_v4();
+        channels.begin_server_open(id);
+        let channel = channels.get_mut(&id).unwrap();
+        assert!(channel.try_defer(RCEvent::Eof(id), take).is_ok());
+        assert!(channel.try_defer(RCEvent::Eof(id), take).is_ok());
+        assert_eq!(slots.available_permits(), 0);
+        let deferred = channels.confirm(id).unwrap();
+        assert!(deferred.iter().all(|(_, slot)| slot.is_some()));
+        assert_eq!(slots.available_permits(), 0);
+        drop(deferred);
+
+        // An open channel takes no slot
+        let channel = channels.get_mut(&id).unwrap();
+        assert!(channel.try_defer(RCEvent::Eof(id), take).is_err());
+        assert_eq!(slots.available_permits(), 2);
+
+        // Closing an unconfirmed channel frees its slots
+        let id = Uuid::new_v4();
+        channels.begin_server_open(id);
+        let channel = channels.get_mut(&id).unwrap();
+        assert!(channel.try_defer(RCEvent::Eof(id), take).is_ok());
+        assert_eq!(slots.available_permits(), 1);
+        channels.close(id);
+        assert_eq!(slots.available_permits(), 2);
     }
 }

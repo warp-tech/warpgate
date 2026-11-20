@@ -1,5 +1,8 @@
 from pathlib import Path
+import base64
+import json
 import os
+import socket
 import subprocess
 import tempfile
 import time
@@ -9,8 +12,9 @@ import pytest
 
 from .api_client import admin_client, sdk
 from .conftest import ProcessManager, WarpgateProcess
-from .approval_util import wait_for_pending_approval
-from .util import wait_port
+from .approval_util import wait_for_pending_approval, wait_for_recording
+from .test_recordings_index import _get
+from .util import alloc_port, wait_port
 
 
 class Test:
@@ -164,19 +168,134 @@ class Test:
                 )
         assert b"gate-marker" in client.communicate(timeout=timeout)[0]
 
+        wait_for_recording(url, user.username, sdk.RecordingKind.TERMINAL)
+
+    def test_a_port_forward_opened_before_approval_is_recorded(
+        self,
+        processes: ProcessManager,
+        wg_c_ed25519_pubkey: Path,
+        timeout,
+        shared_wg: WarpgateProcess,
+    ):
+        # With `-N` the forward is the only channel. It opens the approval
+        # gate, so it exists before the target session does
+        url, user, target = _held_ssh_target(processes, wg_c_ed25519_pubkey, shared_wg)
+        local_port = alloc_port()
+        client = _connect_held(
+            processes,
+            shared_wg,
+            user,
+            target,
+            options=["-N", "-L", f"{local_port}:localhost:22"],
+        )
+        try:
+            wait_port(local_port, recv=False)
+            with socket.create_connection(("localhost", local_port), timeout=timeout) as s:
+                with admin_client(url) as api:
+                    approval = wait_for_pending_approval(api, target.name, user.username)
+                    api.approve_session(
+                        approval.id,
+                        sdk.ApproveSessionRequest(
+                            scope=sdk.ApprovalScope.ONCE, target=approval.target
+                        ),
+                    )
+                # The forward goes to the target container's sshd, which
+                # sends its banner first
+                assert s.recv(4).startswith(b"SSH-")
+
+            wait_for_recording(url, user.username, sdk.RecordingKind.TRAFFIC)
+        finally:
+            client.kill()
+
+    def test_a_session_that_cannot_be_recorded_is_refused(
+        self,
+        processes: ProcessManager,
+        wg_c_ed25519_pubkey: Path,
+        timeout,
+    ):
+        wg = processes.start_wg()
+        wait_port(wg.http_port, recv=False)
+        wait_port(wg.ssh_port)
+        url, user, target = _held_ssh_target(
+            processes, wg_c_ed25519_pubkey, wg, require_approval=False
+        )
+        client = _connect_held(processes, wg, user, target, "echo", "gate-marker")
+        assert b"gate-marker" in client.communicate(timeout=timeout)[0]
+
+        with tempfile.NamedTemporaryFile() as blocker, admin_client(url) as api:
+            # A directory cannot be created below a regular file, so every
+            # recording fails to start
+            api.update_parameters(
+                sdk.ParameterUpdate(
+                    recordings_enable=True,
+                    recordings_storage=sdk.RecordingsStorageConfig(
+                        sdk.RecordingsStorageConfigRecordingsDiskConfig(
+                            kind="Disk", path=f"{blocker.name}/recordings"
+                        )
+                    ),
+                )
+            )
+            client = _connect_held(processes, wg, user, target, "echo", "gate-marker")
+            assert b"gate-marker" not in client.communicate(timeout=timeout)[0]
+            assert client.returncode != 0
+
+            local_port = alloc_port()
+            client = _connect_held(
+                processes,
+                wg,
+                user,
+                target,
+                options=["-N", "-L", f"{local_port}:localhost:22"],
+            )
+            try:
+                wait_port(local_port, recv=False)
+                with socket.create_connection(("localhost", local_port), timeout=timeout) as s:
+                    try:
+                        assert s.recv(4) == b"", "an unrecorded forward carried data"
+                    except ConnectionResetError:
+                        pass
+            finally:
+                client.kill()
+
+    def test_input_sent_before_approval_is_recorded(
+        self,
+        processes: ProcessManager,
+        wg_c_ed25519_pubkey: Path,
+        timeout,
+        shared_wg: WarpgateProcess,
+    ):
+        # ssh sends stdin right after the exec request is acknowledged,
+        # before the approval. The script prints nothing, so the marker can
+        # only be recorded as input
+        url, user, target = _held_ssh_target(processes, wg_c_ed25519_pubkey, shared_wg)
+        marker = uuid4().hex
+        client = _connect_held(processes, shared_wg, user, target, "sh")
+        client.stdin.write(f"true {marker}\n".encode())
+        client.stdin.close()
+
         with admin_client(url) as api:
-            for _ in range(20):
-                recordings = [
-                    rec
-                    for session in api.get_sessions().items
-                    if session.username == user.username
-                    for rec in api.get_session_recordings(session.id)
-                    if rec.kind == sdk.RecordingKind.TERMINAL
-                ]
-                if recordings:
-                    return
-                time.sleep(0.25)
-        raise AssertionError("the exec session was never recorded")
+            approval = wait_for_pending_approval(api, target.name, user.username)
+            time.sleep(1)
+            api.approve_session(
+                approval.id,
+                sdk.ApproveSessionRequest(scope=sdk.ApprovalScope.ONCE, target=approval.target),
+            )
+        assert client.wait(timeout=timeout) == 0
+
+        recording = wait_for_recording(url, user.username, sdk.RecordingKind.TERMINAL)
+        for _ in range(20):
+            recorded_input = b"".join(
+                base64.b64decode(item["data"])
+                for item in map(
+                    json.loads,
+                    _get(url, f"/recordings/{recording.id}/data").text.splitlines(),
+                )
+                if item.get("stream") == "Input"
+            )
+            if marker.encode() in recorded_input:
+                return
+            time.sleep(0.25)
+        raise AssertionError("input sent before the approval is missing from the recording")
 
     def test_many_channels_on_a_held_connection(
         self,

@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-protocol-http"
-version = "0.30.3"
+version = "0.30.6"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -12,6 +12,7 @@ cookie = { version = "0.18", default-features = false }
 data-encoding.workspace = true
 delegate.workspace = true
 futures.workspace = true
+hmac = { version = "0.13", default-features = false }
 html-escape.workspace = true
 http.workspace = true
 percent-encoding = { version = "2.1", default-features = false }
@@ -23,6 +24,7 @@ russh.workspace = true
 sea-orm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
 time.workspace = true
@@ -50,6 +52,7 @@ warpgate-web-ssh = { path = "../warpgate-web-ssh", default-features = false }
 poem = { workspace = true, features = ["test"] }
 rustls = { workspace = true, features = ["aws_lc_rs"] }
 sea-orm = { workspace = true, features = ["sqlx-sqlite"] }
+tokio = { workspace = true, features = ["test-util"] }
 warpgate-db-migrations = { path = "../warpgate-db-migrations", features = [
     "sqlite",
 ] }

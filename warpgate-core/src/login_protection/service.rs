@@ -1,10 +1,10 @@
 use std::net::IpAddr;
 use std::time::Duration;
 
-use sea_orm::sea_query::IntoCondition;
+use sea_orm::sea_query::{ExprTrait, IntoCondition};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, EntityTrait,
-    PaginatorTrait, QueryFilter, Set, TransactionTrait,
+    PaginatorTrait, QueryFilter, SelectExt, Set, TransactionTrait,
 };
 use time::OffsetDateTime;
 use tracing::{debug, info};
@@ -662,7 +662,7 @@ fn calculate_block_duration(block_count: u32, config: &IpRateLimitConfig) -> Dur
         .powi(block_count.saturating_sub(1).cast_signed());
     #[allow(clippy::cast_precision_loss)]
     let duration_secs = (base_secs as f32 * factor) as u64;
-    Duration::from_secs(duration_secs.min(max_secs))
+    Duration::from_secs(std::cmp::min(duration_secs, max_secs))
 }
 
 #[cfg(test)]

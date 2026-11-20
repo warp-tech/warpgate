@@ -16,7 +16,7 @@ jobs:
 
       - uses: biomejs/setup-biome@v2.7.1
         with:
-          version: 2.5.9
+          version: 2.6.3
 
       - name: Biome CI
         run: biome ci

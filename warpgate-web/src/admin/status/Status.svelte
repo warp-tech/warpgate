@@ -19,6 +19,9 @@
         '/network': wrap({
             asyncComponent: () => import('./NetworkStatus.svelte'),
         }),
+        '/gitops': wrap({
+            asyncComponent: () => import('./GitopsHistory.svelte'),
+        }),
     }
 
     useSidebar(() => [
@@ -29,6 +32,10 @@
         {
             title: 'Requests',
             href: '/status/requests',
+        },
+        {
+            title: 'GitOps',
+            href: '/status/gitops',
         },
         {
             title: 'Login protection',

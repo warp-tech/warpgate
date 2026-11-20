@@ -35,6 +35,12 @@
             asyncComponent: () =>
                 import('./parameters/InstallationCounter.svelte'),
         }),
+        '/gitops': wrap({
+            asyncComponent: () => import('./GitopsSettings.svelte'),
+        }),
+        '/gitops/schema': wrap({
+            asyncComponent: () => import('./GitopsSchema.svelte'),
+        }),
         '/ldap-servers': wrap({
             asyncComponent: () => import('./ldap/LdapServers.svelte'),
         }),
@@ -81,6 +87,10 @@
         {
             title: 'Network',
             href: '/config/parameters/network',
+        },
+        {
+            title: 'GitOps',
+            href: '/config/gitops',
         },
         {
             title: 'Secret backends',

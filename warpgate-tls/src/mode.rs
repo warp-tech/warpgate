@@ -1,7 +1,8 @@
 use poem_openapi::Enum;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, Enum, PartialEq, Eq, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, Enum, PartialEq, Eq, Default, JsonSchema)]
 pub enum TlsMode {
     #[serde(rename = "disabled")]
     Disabled,

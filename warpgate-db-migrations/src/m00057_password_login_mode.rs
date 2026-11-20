@@ -26,13 +26,12 @@ impl MigrationTrait for Migration {
         // Carry over the previous boolean: a minimized password form maps to
         // the new "Minimized" mode, everything else stays "Enabled".
         let db = manager.get_connection();
-        let backend = db.get_database_backend();
         let stmt = Query::update()
             .table(parameters::Entity)
             .value(Alias::new("password_login_mode"), "Minimized")
             .and_where(Expr::col(Alias::new("minimize_password_login")).eq(true))
             .to_owned();
-        db.execute(backend.build(&stmt)).await?;
+        db.execute(&stmt).await?;
 
         manager
             .alter_table(
@@ -62,13 +61,12 @@ impl MigrationTrait for Migration {
             .await?;
 
         let db = manager.get_connection();
-        let backend = db.get_database_backend();
         let stmt = Query::update()
             .table(parameters::Entity)
             .value(Alias::new("minimize_password_login"), true)
             .and_where(Expr::col(Alias::new("password_login_mode")).eq("Minimized"))
             .to_owned();
-        db.execute(backend.build(&stmt)).await?;
+        db.execute(&stmt).await?;
 
         manager
             .alter_table(

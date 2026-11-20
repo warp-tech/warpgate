@@ -140,7 +140,6 @@ impl MigrationTrait for Migration {
 }
 
 async fn exec<S: StatementBuilder>(db: &DatabaseTransaction, stmt: &S) -> Result<(), DbErr> {
-    let statement = db.get_database_backend().build(stmt);
-    db.execute(statement).await?;
+    db.execute(stmt).await?;
     Ok(())
 }

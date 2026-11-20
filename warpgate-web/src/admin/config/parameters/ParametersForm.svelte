@@ -18,11 +18,6 @@
         title: string
         /** Bind to keep script-level access to the loaded parameters. */
         parameters?: ParameterValues
-        /**
-         * Extra fields merged into the update request on save. Untyped
-         * because the generated model can't express `null` as "clear".
-         */
-        extraUpdate?: () => Record<string, unknown>
         onsaved?: () => Promise<void> | void
         /** Sections; call `refreshValidity` after programmatic value changes. */
         children: Snippet<
@@ -30,13 +25,7 @@
         >
     }
 
-    let {
-        title,
-        parameters = $bindable(),
-        extraUpdate,
-        onsaved,
-        children,
-    }: Props = $props()
+    let { title, parameters = $bindable(), onsaved, children }: Props = $props()
 
     let updateError: string | undefined = $state()
     let formEl: HTMLFormElement | undefined = $state()
@@ -68,6 +57,13 @@
             // is dropped by JSON.stringify, so the server keeps the old value.
             const parameterUpdate = {
                 ...parameters,
+                // These are edited on the GitOps settings page. This page's
+                // copy may be stale, and writing it back would also drop the
+                // Git token.
+                gitopsSource: undefined,
+                gitopsSyncIntervalSeconds: undefined,
+                gitopsSyncOnStartup: undefined,
+                gitopsPrune: undefined,
                 rateLimitBytesPerSecond:
                     parameters.rateLimitBytesPerSecond ?? null,
                 ticketMaxDurationSeconds:
@@ -82,7 +78,6 @@
                     parameters.adminApprovalTimeoutSeconds ?? null,
                 adminApprovalGracePeriodSeconds:
                     parameters.adminApprovalGracePeriodSeconds ?? null,
-                ...extraUpdate?.(),
             } as unknown as ParameterUpdate
             await api.updateParameters({ parameterUpdate })
             await onsaved?.()

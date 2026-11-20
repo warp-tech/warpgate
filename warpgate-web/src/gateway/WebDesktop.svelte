@@ -40,7 +40,6 @@
         | { type: 'cursor'; rect: Rect; data: string }
         | { type: 'clipboard'; text: string }
         | { type: 'bell' }
-        | { type: 'error'; message: string }
 
     // svelte-ignore state_referenced_locally
     let sessionId = $state(params.sessionId)
@@ -164,9 +163,6 @@
                 clipboard.onRemoteCopy(msg.text)
                 break
             case 'bell':
-                break
-            case 'error':
-                notice = msg.message
                 break
             default:
                 queueFrame(msg)

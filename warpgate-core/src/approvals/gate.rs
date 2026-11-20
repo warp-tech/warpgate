@@ -16,6 +16,7 @@ use crate::services::Services;
 use crate::{TargetSessionStart, WarpgateServerHandle};
 
 #[must_use]
+#[allow(clippy::large_enum_variant)]
 pub enum GateOutcome<O = warpgate_common::TargetOptions> {
     Approved(ApprovedTarget<O>),
     Refused,
@@ -34,6 +35,7 @@ impl<O> GateOutcome<O> {
 
 /// Current state of an approval gate
 #[must_use]
+#[allow(clippy::large_enum_variant)]
 pub enum PolledGate<O = warpgate_common::TargetOptions> {
     Approved(ApprovedTarget<O>),
     Refused,
@@ -68,6 +70,7 @@ impl GatedConnection {
 }
 
 #[must_use]
+#[allow(clippy::large_enum_variant)]
 pub enum Admission<O = warpgate_common::TargetOptions> {
     Admitted(AdmittedTarget<O>),
     Refused,

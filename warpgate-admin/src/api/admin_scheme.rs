@@ -202,9 +202,10 @@ pub fn guard_user_mutation(ep: impl Endpoint) -> impl Endpoint {
             // already checked
             return Ok(req);
         }
-        let user_id: uuid::Uuid = req
+        let user_id = req
             .raw_path_param("param0")
             .and_then(|id| id.parse().ok())
+            .map(warpgate_common::UserId)
             .ok_or_else(|| WarpgateError::InvalidRequest("user id missing from path".into()))?;
         let caller = admin_permission_set(ctx).await?;
         let target = user_admin_permission_set(&ctx.services().db, user_id).await?;

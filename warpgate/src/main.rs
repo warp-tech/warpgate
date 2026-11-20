@@ -152,6 +152,11 @@ pub(crate) enum Commands {
     },
     /// Perform basic config checks
     Check,
+    /// Validate, plan and apply resource files, or print their schema
+    Config {
+        #[clap(subcommand)]
+        command: crate::commands::config::ConfigCommand,
+    },
     /// Create a new user
     CreateUser {
         #[clap(action=ArgAction::Set)]
@@ -197,7 +202,12 @@ async fn _main() -> Result<()> {
     #[cfg(debug_assertions)]
     let _ = dotenv::dotenv();
 
-    init_logging(load_config(&params, false).ok().as_ref(), &cli).await?;
+    // Resource files are checked on their own, without any Warpgate config
+    let config = match cli.command {
+        Commands::Config { .. } => None,
+        _ => load_config(&params, false).ok(),
+    };
+    init_logging(config.as_ref(), &cli).await?;
 
     #[allow(clippy::unwrap_used)]
     rustls::crypto::aws_lc_rs::default_provider()
@@ -213,6 +223,7 @@ async fn _main() -> Result<()> {
             crate::commands::run::command(&params, *enable_admin_token).await
         }
         Commands::Check => crate::commands::check::command(&params).await,
+        Commands::Config { command } => crate::commands::config::command(command, &params).await,
         Commands::CreateUser {
             username,
             password: explicit_password,

@@ -1,9 +1,11 @@
+import http.client
 import logging
 import os
 import requests
 import select
 import socket
 import sqlite3
+import ssl
 import subprocess
 import threading
 import time
@@ -177,3 +179,30 @@ def create_ticket(url, username, target_name):
     )
     assert response.status_code == 201
     return response.json()["secret"]
+
+
+def post_declaring_length(
+    port: int, path: str, length: int, headers=None, method="POST"
+):
+    """POST to the local HTTPS port with a `Content-Length` but no body.
+
+    A server that honours the declared length before reading answers at once;
+    one that reads first waits for bytes that never arrive and times out.
+    """
+    conn = http.client.HTTPSConnection(
+        "localhost", port, timeout=10, context=ssl._create_unverified_context()
+    )
+    try:
+        conn.request(
+            method,
+            path,
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": str(length),
+                **(headers or {}),
+            },
+        )
+        response = conn.getresponse()
+        return response.status, response.read().decode()
+    finally:
+        conn.close()

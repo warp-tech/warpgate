@@ -1,0 +1,2 @@
+tests/fixtures/invalid/client-keys.yaml:7:5 spec.private_key: not a private key in OpenSSH or PKCS#8 PEM format without a passphrase
+tests/fixtures/invalid/client-keys.yaml:16:16 spec.private_key: not a valid secret://backend/mount/path#field reference
