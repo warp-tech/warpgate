@@ -1,12 +1,13 @@
 use anyhow::{Context, Result, bail};
 use sea_orm::{
     ConnectionTrait, Database, DatabaseConnection, EntityTrait, IntoActiveModel, Iterable,
-    PaginatorTrait, PrimaryKeyToColumn, QueryOrder, TransactionTrait,
+    PaginatorTrait, PrimaryKeyToColumn, QueryOrder,
 };
 use tracing::info;
 use warpgate_common::GlobalParams;
 use warpgate_core::db::{connect_to_db, migrate_all};
 use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
+use warpgate_db_entities::begin_write;
 
 use crate::config::load_config;
 
@@ -93,7 +94,7 @@ pub async fn command(params: &GlobalParams, target_url: &str) -> Result<()> {
 
     {
         // Migrations create some default entries in the DB
-        let target_tx = target.begin().await?;
+        let target_tx = begin_write(&target).await?;
         clear_tables(&target_tx).await?;
         info!("Copying data");
         copy_rows(&source, &target_tx).await?;

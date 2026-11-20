@@ -416,4 +416,33 @@ mod tests {
             }
         }
     }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn parallel_target_deletes_all_succeed() {
+        use crate::resources::{Actor, targets};
+
+        set_config_migration_values(ConfigMigrationValues::default());
+        let dir = tempfile::tempdir().unwrap();
+        let url = format!("sqlite://{}/db.sqlite3?mode=rwc", dir.path().display());
+        let db = connect_to_sqlite(&url).await.unwrap();
+        migrate_database(&db).await.unwrap();
+
+        let mut ids = vec![];
+        for i in 0..20 {
+            let data = crate::resources::tests::target(
+                &format!("t{i}"),
+                serde_json::json!({"ssh": {"host": format!("h{i}")}}),
+            );
+            let target = targets::create(&db, Actor::Admin, &data).await.unwrap();
+            ids.push(target.id);
+        }
+
+        let deletes = ids.into_iter().map(|id| {
+            let db = db.clone();
+            tokio::spawn(async move { targets::delete(&db, Actor::Admin, id).await })
+        });
+        for result in futures::future::join_all(deletes).await {
+            result.unwrap().unwrap();
+        }
+    }
 }

@@ -6,7 +6,7 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ExprTrait, ModelTrait, QueryFilter, QuerySelect,
-    Set, TransactionTrait,
+    Set,
 };
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -18,7 +18,7 @@ use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_db_entities::Parameters::MfaEnforcement;
 use warpgate_db_entities::{
-    self as entities, CertificateCredential, PasswordCredential, PublicKeyCredential,
+    self as entities, CertificateCredential, PasswordCredential, PublicKeyCredential, begin_write,
 };
 
 use crate::api::auth_scheme::{FullUser, WebSessionUser};
@@ -506,7 +506,7 @@ impl Api {
             != MfaEnforcement::Off;
 
         {
-            let tx = db.begin().await?;
+            let tx = begin_write(db).await?;
             let otp_creds = user
                 .find_related(entities::OtpCredential::Entity)
                 .lock_exclusive()

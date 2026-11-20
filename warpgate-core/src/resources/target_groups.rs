@@ -7,7 +7,7 @@ use sea_orm::{
 use uuid::Uuid;
 use warpgate_common::TargetGroupId;
 use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
-use warpgate_db_entities::{Target, TargetGroup};
+use warpgate_db_entities::{Target, TargetGroup, begin_write};
 use warpgate_gitops::types::ResourceKind;
 
 use super::{Actor, OwnedEntity, ResourceError, check_name, name_taken};
@@ -70,7 +70,7 @@ pub async fn delete<C: ConnectionTrait + TransactionTrait>(
     actor: Actor,
     id: TargetGroupId,
 ) -> Result<(), ResourceError> {
-    let txn = db.begin().await?;
+    let txn = begin_write(db).await?;
     let group = TargetGroup::Entity::find_by_id(id)
         .one(&txn)
         .await?

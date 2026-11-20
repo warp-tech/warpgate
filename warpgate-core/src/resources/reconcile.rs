@@ -10,7 +10,9 @@ use warpgate_common::{
     StoredSecret, Target as TargetConfig, TargetGroupId, TargetId, TargetOptions, TargetSecrets,
     WarpgateError,
 };
-use warpgate_db_entities::{Role, SshClientKey, Target, TargetGroup, TargetRoleAssignment};
+use warpgate_db_entities::{
+    Role, SshClientKey, Target, TargetGroup, TargetRoleAssignment, begin_write,
+};
 use warpgate_gitops::plan::{Change, Current, Plan, References, Row, plan};
 use warpgate_gitops::types::{
     Manifest, OptionReferences, Resource, ResourceKind, RoleSpec, SshClientKeySpec,
@@ -197,7 +199,7 @@ pub async fn apply<'p, C: ConnectionTrait + TransactionTrait>(
     if confirmed.has_errors() {
         return Err(ApplyError::PlanHasErrors);
     }
-    let txn = db.begin().await?;
+    let txn = begin_write(db).await?;
     let current = load_current(&txn).await?;
     let fresh = plan(provider, desired, &current, confirmed.prune);
     if fresh != *confirmed {

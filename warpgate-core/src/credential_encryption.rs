@@ -2,7 +2,7 @@
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, DbErr, EntityTrait,
-    PrimaryKeyTrait, QueryFilter, QuerySelect, Set, TransactionTrait, TryGetableMany,
+    PrimaryKeyTrait, QueryFilter, QuerySelect, Set, TryGetableMany,
 };
 use tracing::{error, info, warn};
 use warpgate_common::encryption::{Keyring, env_keyring};
@@ -10,7 +10,7 @@ use warpgate_common::{
     SshHostKeyKind, StoredSecrets, TargetOptions, WarpgateError, emit_runtime_warning,
 };
 use warpgate_db_entities::Parameters::RecordingsStorageConfig;
-use warpgate_db_entities::{Parameters, SecretBackend, SshClientKey, Target};
+use warpgate_db_entities::{Parameters, SecretBackend, SshClientKey, Target, begin_write};
 
 use crate::cluster::alive_nodes;
 
@@ -275,7 +275,7 @@ async fn lock_row<E>(
 where
     E: EntityTrait,
 {
-    let txn = db.begin().await?;
+    let txn = begin_write(db).await?;
     let row = E::find_by_id(id).lock_exclusive().one(&txn).await?;
     Ok(row.map(|row| (txn, row)))
 }

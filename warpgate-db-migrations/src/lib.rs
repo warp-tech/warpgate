@@ -1,8 +1,9 @@
 use std::fmt::Display;
 
-use sea_orm::{DatabaseBackend, DatabaseConnection, TransactionTrait};
+use sea_orm::{DatabaseBackend, DatabaseConnection};
 use sea_orm_migration::MigrationTrait;
 use sea_orm_migration::prelude::*;
+use warpgate_db_entities::begin_write;
 
 mod m00001_create_ticket;
 mod m00002_create_session;
@@ -224,11 +225,11 @@ async fn run_locked<
     key: impl Display,
     f: F,
 ) -> Result<R, DbErr> {
-    use sea_orm::{ConnectionTrait, DatabaseBackend, Statement, TransactionTrait};
+    use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
     match connection.get_database_backend() {
         DatabaseBackend::Postgres => {
-            let lock = connection.begin().await?;
+            let lock = begin_write(connection).await?;
             // lock is tx scoped
             lock.execute_raw(Statement::from_string(
                 DatabaseBackend::Postgres,
@@ -240,7 +241,7 @@ async fn run_locked<
             result
         }
         DatabaseBackend::MySql => {
-            let lock = connection.begin().await?;
+            let lock = begin_write(connection).await?;
             // lock is session scoped
             lock.execute_raw(Statement::from_string(
                 DatabaseBackend::MySql,
@@ -308,7 +309,7 @@ async fn run_maybe_in_tx(
     steps: Option<u32>,
 ) -> Result<(), DbErr> {
     if connection.get_database_backend() == DatabaseBackend::Sqlite {
-        let tx = connection.begin().await?;
+        let tx = begin_write(connection).await?;
         run(&tx, direction, steps).await?;
         tx.commit().await
     } else {
