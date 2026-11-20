@@ -19,7 +19,6 @@ rsasl = { version = "2.3", default-features = false, features = [
     "config_builder",
     "scram-sha-2",
     "std",
-    "plain",
     "provider",
 ] }
 rustls.workspace = true

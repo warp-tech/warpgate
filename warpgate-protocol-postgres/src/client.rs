@@ -303,3 +303,31 @@ impl PostgresClient {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// PLAIN would hand the target the password itself, on whatever
+    /// transport the target negotiated.
+    #[test]
+    fn sasl_never_selects_a_password_revealing_mechanism() {
+        let client = || {
+            SASLClient::new(
+                SASLConfig::with_credentials(None, "user".into(), "password".into()).unwrap(),
+            )
+        };
+        assert!(
+            client()
+                .start_suggested(&[Mechname::parse(b"PLAIN").unwrap()])
+                .is_err()
+        );
+        let session = client()
+            .start_suggested(&[
+                Mechname::parse(b"PLAIN").unwrap(),
+                Mechname::parse(b"SCRAM-SHA-256").unwrap(),
+            ])
+            .unwrap();
+        assert_eq!(session.get_mechname().as_str(), "SCRAM-SHA-256");
+    }
+}
