@@ -1074,11 +1074,11 @@
                     <div class="load-older-footer">
                         <IntersectionObserver
                             element={loadOlderButton}
-                            on:observe={event => {
+                            onobserve={entry => {
                                 if (
                                     !loading &&
                                     !error &&
-                                    event.detail.isIntersecting &&
+                                    entry.isIntersecting &&
                                     !endReached
                                 ) {
                                     loadOlder()
