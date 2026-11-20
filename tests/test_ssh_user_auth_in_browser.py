@@ -52,9 +52,11 @@ class Test:
                 sdk.UserDataRequest(
                     username=user.username,
                     credential_policy=sdk.UserRequireCredentialsPolicy(
-                        ssh=[sdk.CredentialKind.WEBUSERAPPROVAL] if not include_pk else [
-                            sdk.CredentialKind.PUBLICKEY,
-                            sdk.CredentialKind.WEBUSERAPPROVAL,
+                        ssh=[[sdk.CredentialKind.WEBUSERAPPROVAL]] if not include_pk else [
+                            [
+                                sdk.CredentialKind.PUBLICKEY,
+                                sdk.CredentialKind.WEBUSERAPPROVAL,
+                            ],
                         ],
                     ),
                 ),
