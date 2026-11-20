@@ -10,10 +10,10 @@ use warpgate_core::{Services, WarpgateServerHandle};
 
 use crate::request::trusted_client_ip;
 
-fn extract_remote_socket_addr(remote_addr: &RemoteAddr) -> Option<SocketAddr> {
+fn remote_socket_addr(remote_addr: &RemoteAddr) -> Option<SocketAddr> {
     match remote_addr {
         // An acceptor that learned something during the TLS handshake carries
-        // it after the socket address (see `tls_acceptor::annotate_remote_addr`)
+        // it after the socket address (see `mtls_acceptor::annotate_remote_addr`)
         RemoteAddr(Addr::Custom(_, value)) => value
             .split('|')
             .next()
@@ -23,13 +23,9 @@ fn extract_remote_socket_addr(remote_addr: &RemoteAddr) -> Option<SocketAddr> {
     }
 }
 
-fn raw_remote_socket_addr(req: &Request) -> Option<SocketAddr> {
-    extract_remote_socket_addr(req.remote_addr())
-}
-
 /// The peer IP of the connection itself, ignoring any forwarding headers.
 pub fn raw_remote_ip(req: &Request) -> Option<String> {
-    raw_remote_socket_addr(req).map(|x| x.ip().to_string())
+    remote_socket_addr(req.remote_addr()).map(|x| x.ip().to_string())
 }
 
 pub async fn get_client_ip(req: &Request, services: &Services) -> Option<String> {
@@ -47,16 +43,20 @@ pub async fn get_client_ip_addr(req: &Request, services: &Services) -> Option<Ip
         .and_then(|ip| ip.parse().ok())
 }
 
+/// The port of a client behind a proxy or a forwarding node is unknown and
+/// recorded as 0
+fn client_socket_addr(ip: IpAddr, peer: Option<SocketAddr>) -> SocketAddr {
+    peer.filter(|peer| peer.ip() == ip)
+        .unwrap_or_else(|| SocketAddr::new(ip, 0))
+}
+
+/// The client's address, honoring forwarding headers
 pub async fn get_client_socket_addr(req: &Request, services: &Services) -> Option<SocketAddr> {
     let ip = get_client_ip_addr(req, services).await?;
-    let raw = raw_remote_socket_addr(req);
-    if let Some(addr) = raw
-        && addr.ip() == ip
-    {
-        Some(addr)
-    } else {
-        Some(SocketAddr::new(ip, 0))
-    }
+    Some(client_socket_addr(
+        ip,
+        remote_socket_addr(req.remote_addr()),
+    ))
 }
 
 pub async fn span_for_request(
@@ -123,15 +123,31 @@ mod tests {
     fn extracts_socket_addr_from_plain_and_annotated_remote_addr() {
         let socket: SocketAddr = "203.0.113.10:54321".parse().unwrap();
         assert_eq!(
-            extract_remote_socket_addr(&RemoteAddr(Addr::SocketAddr(socket))),
+            remote_socket_addr(&RemoteAddr(Addr::SocketAddr(socket))),
             Some(socket)
         );
         assert_eq!(
-            extract_remote_socket_addr(&RemoteAddr(Addr::Custom(
+            remote_socket_addr(&RemoteAddr(Addr::Custom(
                 "tls",
                 "203.0.113.10:54321|foo".into(),
             ))),
             Some(socket)
+        );
+    }
+
+    #[test]
+    fn client_socket_addr_keeps_the_port_only_of_a_direct_client() {
+        let peer: SocketAddr = "10.0.0.1:54321".parse().unwrap();
+        let forwarded: IpAddr = "203.0.113.10".parse().unwrap();
+
+        assert_eq!(client_socket_addr(peer.ip(), Some(peer)), peer);
+        assert_eq!(
+            client_socket_addr(forwarded, Some(peer)),
+            SocketAddr::new(forwarded, 0)
+        );
+        assert_eq!(
+            client_socket_addr(forwarded, None),
+            SocketAddr::new(forwarded, 0)
         );
     }
 }
