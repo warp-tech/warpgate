@@ -8,7 +8,7 @@ use uuid::Uuid;
 use warpgate_common::{ProviderId, TargetOptions};
 use warpgate_db_entities::ProviderSync::{PlanAction, PlannedChange, PlannedField, SyncPlan};
 use warpgate_resources::{
-    Comparable, Compared, FieldChange, ResourceKind, RoleSpec, Row, SshClientKeySpec,
+    Comparable, ComparableValues, FieldChange, ResourceKind, RoleSpec, Row, SshClientKeySpec,
     TargetGroupSpec, TargetSpec, ValueChange, compare_target, key_identity,
 };
 
@@ -169,7 +169,7 @@ struct LiveRow<'a> {
     id: Uuid,
     name: &'a str,
     provider: Option<ProviderId>,
-    compared: Compared,
+    compared: ComparableValues,
 }
 
 pub fn plan(provider: ProviderId, desired: &[Resource], current: &Current, prune: Prune) -> Plan {
@@ -241,7 +241,7 @@ pub fn plan(provider: ProviderId, desired: &[Resource], current: &Current, prune
         };
 
         let wanted = compare_resource(resource, &references);
-        if wanted.protocol() != row.compared.protocol() {
+        if protocol(&wanted) != protocol(&row.compared) {
             changes.push(Change::Blocked {
                 kind,
                 name: name.clone(),
@@ -503,7 +503,13 @@ fn unresolved_reference(
     None
 }
 
-fn compare_resource(resource: &Resource, references: &References) -> Compared {
+/// A target's protocol is the one key of its options. `None` for the other
+/// kinds
+fn protocol(values: &ComparableValues) -> Option<&String> {
+    values.pointer("/spec/options")?.as_object()?.keys().next()
+}
+
+fn compare_resource(resource: &Resource, references: &References) -> ComparableValues {
     let compared = match resource {
         Resource::Target(m) => compare_target(&m.spec, |kind, name| {
             references

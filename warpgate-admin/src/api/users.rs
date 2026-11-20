@@ -14,6 +14,7 @@ use warpgate_common::{
 use warpgate_common_http::errors::{bad_request, invalid_field};
 use warpgate_core::SessionsFilter;
 use warpgate_core::logging::{AuditEvent, format_related_ids};
+use warpgate_core::resources::audit;
 use warpgate_db_entities::{AdminRole, Role, User, UserAdminRoleAssignment, UserRoleAssignment};
 
 use super::{AdminContext, guard_user_mutation};
@@ -298,23 +299,15 @@ impl DetailApi {
         let credential_policy =
             serde_json::to_value(body.credential_policy.clone()).map_err(WarpgateError::from)?;
 
-        let mut model: User::ActiveModel = user.into();
+        let mut model: User::ActiveModel = user.clone().into();
 
         model.username = Set(body.username.clone());
         model.description = Set(body.description.clone().unwrap_or_default());
-        model.credential_policy = Set(credential_policy.clone());
+        model.credential_policy = Set(credential_policy);
         model.rate_limit_bytes_per_second = Set(body.rate_limit_bytes_per_second.map(i64::from));
-        model.allowed_ip_ranges = Set(allowed_ip_ranges.clone());
-        let user = model.update(db).await?;
-
-        AuditEvent::UserUpdated {
-            user_id: user.id,
-            username: user.username.clone(),
-            credential_policy: credential_policy.to_string(),
-            allowed_ip_ranges: allowed_ip_ranges.to_string(),
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        model.allowed_ip_ranges = Set(allowed_ip_ranges);
+        let updated = model.update(db).await?;
+        audit::updated(db, admin.changed_by(), &user, &updated).await;
 
         warpgate_core::rate_limiting::apply_new_rate_limits(
             &admin.services().rate_limiter_registry,
@@ -322,7 +315,7 @@ impl DetailApi {
         )
         .await?;
 
-        Ok(UpdateUserResponse::Ok(Json(user.try_into()?)))
+        Ok(UpdateUserResponse::Ok(Json(updated.try_into()?)))
     }
 
     #[oai(
@@ -712,7 +705,7 @@ impl RolesApi {
             grantee_username: grantee.username.clone(),
             role_id: role.id,
             role_name: role.name.clone(),
-            // the stored value: re-granting a still-active assignment keeps its old expiry
+            // The stored expiry. A re-grant of an active assignment keeps the old one
             expires_at: assignment.expires_at,
             actor_user_id: admin.auth.user_id(),
             related_access_roles: format_related_ids(&[role.id]),

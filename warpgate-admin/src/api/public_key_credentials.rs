@@ -7,7 +7,7 @@ use sea_orm::{
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, UserId, UserPublicKeyCredential, WarpgateError};
-use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
+use warpgate_core::logging::CredentialChange;
 use warpgate_db_entities::{PublicKeyCredential, User};
 
 use super::{AdminContext, guard_user_mutation};
@@ -170,15 +170,12 @@ impl ListApi {
         .map_err(WarpgateError::from)?;
 
         let credential_name = body.label.clone();
-        AuditEvent::CredentialCreated {
-            credential_type: "public_key".to_string(),
-            credential_name: Some(credential_name),
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username: user.username.clone(),
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        admin.audit_credential(
+            CredentialChange::Created,
+            "public_key",
+            Some(&credential_name),
+            &user,
+        );
 
         Ok(CreatePublicKeyCredentialResponse::Created(Json(
             object.into(),
@@ -247,15 +244,12 @@ impl DetailApi {
             return Ok(UpdatePublicKeyCredentialResponse::NotFound);
         };
 
-        AuditEvent::CredentialUpdated {
-            credential_type: "public_key".to_string(),
-            credential_name: Some(model.label.clone()),
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username: user.username,
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        admin.audit_credential(
+            CredentialChange::Updated,
+            "public_key",
+            Some(&model.label),
+            &user,
+        );
 
         Ok(UpdatePublicKeyCredentialResponse::Updated(Json(
             model.into(),
@@ -297,15 +291,12 @@ impl DetailApi {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
-        AuditEvent::CredentialDeleted {
-            credential_type: "public_key".to_string(),
-            credential_name: Some(credential_name.clone()),
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username: user.username,
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        admin.audit_credential(
+            CredentialChange::Deleted,
+            "public_key",
+            Some(&credential_name),
+            &user,
+        );
 
         Ok(DeleteCredentialResponse::Deleted)
     }

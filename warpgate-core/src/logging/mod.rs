@@ -9,4 +9,6 @@ pub use database::{
 };
 pub use json_console::make_json_console_logger_layer;
 pub use socket::make_socket_logger_layer;
-pub use warpgate_common::audit::{AuditEvent, CredentialChangedVia, KubernetesAuditSubject};
+pub use warpgate_common::audit::{
+    AuditEvent, CredentialChange, CredentialChangedVia, KubernetesAuditSubject,
+};

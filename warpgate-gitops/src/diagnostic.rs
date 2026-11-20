@@ -15,7 +15,8 @@ impl fmt::Display for Location {
     }
 }
 
-/// As far as a deserialization error knows where it happened
+/// The path to a deserialization error, up to the first segment that serde
+/// could not track
 pub fn error_path(path: &serde_path_to_error::Path) -> Path {
     use serde_path_to_error::Segment as S;
     Path(

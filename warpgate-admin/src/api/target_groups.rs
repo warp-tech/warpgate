@@ -64,7 +64,9 @@ impl ListApi {
         admin.require(AdminPermission::TargetsCreate)?;
 
         match store::create(&admin.services().db, Actor::Admin, &body).await {
-            Ok(group) => Ok(CreateTargetGroupResponse::Created(Json(group))),
+            Ok(group) => Ok(CreateTargetGroupResponse::Created(Json(
+                admin.audited(group).await,
+            ))),
             Err(ResourceError::EmptyName) => Ok(CreateTargetGroupResponse::BadRequest(
                 invalid_field("name", "target group name is empty"),
             )),
@@ -159,7 +161,9 @@ impl DetailApi {
         admin.require(AdminPermission::TargetsEdit)?;
 
         match store::update(&admin.services().db, Actor::Admin, id.0, &body).await {
-            Ok(group) => Ok(UpdateTargetGroupResponse::Ok(Json(group))),
+            Ok(group) => Ok(UpdateTargetGroupResponse::Ok(Json(
+                admin.audited(group).await,
+            ))),
             Err(ResourceError::EmptyName) => {
                 warn!("Rejecting request: target group name is empty");
                 Ok(UpdateTargetGroupResponse::BadRequest)
@@ -188,7 +192,10 @@ impl DetailApi {
         admin.require(AdminPermission::TargetsDelete)?;
 
         match store::delete(&admin.services().db, Actor::Admin, id.0).await {
-            Ok(()) => Ok(DeleteTargetGroupResponse::Deleted),
+            Ok(group) => {
+                admin.audited(group).await;
+                Ok(DeleteTargetGroupResponse::Deleted)
+            }
             Err(ResourceError::NotFound) => Ok(DeleteTargetGroupResponse::NotFound),
             Err(err @ ResourceError::OwnedBy(_)) => {
                 Ok(DeleteTargetGroupResponse::Conflict(Json(err.to_string())))

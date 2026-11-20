@@ -1,14 +1,13 @@
 use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, ExprTrait, QueryFilter, QueryOrder};
+use sea_orm::{ColumnTrait, EntityTrait, ExprTrait, QueryFilter, QueryOrder};
 use tracing::warn;
 use warpgate_common::{
     AdminPermission, Role as RoleConfig, RoleId, StoredSecrets, Target as TargetConfig,
     TargetGroupId, TargetId, TargetOptions, TargetSSHOptions, WarpgateError,
 };
 use warpgate_common_http::errors::invalid_field;
-use warpgate_core::logging::AuditEvent;
 use warpgate_core::resources::targets::{self as store, TargetDataRequest};
 use warpgate_core::resources::{Actor, ResourceError};
 use warpgate_db_entities::Target::fuzzy_filter_targets;
@@ -88,17 +87,10 @@ impl ListApi {
         admin.require(AdminPermission::TargetsCreate)?;
 
         match store::create(&admin.services().db, Actor::Admin, &body).await {
-            Ok(target) => {
-                AuditEvent::TargetCreated {
-                    target_id: target.id,
-                    target_name: target.name.clone(),
-                    actor_user_id: admin.auth.user_id(),
-                }
-                .emit();
-                Ok(CreateTargetResponse::Created(Json(maybe_redacted_target(
-                    &admin, target,
-                )?)))
-            }
+            Ok(target) => Ok(CreateTargetResponse::Created(Json(maybe_redacted_target(
+                &admin,
+                admin.audited(target).await,
+            )?))),
             Err(ResourceError::EmptyName) => Ok(CreateTargetResponse::BadRequest(invalid_field(
                 "name",
                 "target name is empty",
@@ -203,7 +195,7 @@ impl DetailApi {
 
         let services = admin.services();
         let target = match store::update(&services.db, Actor::Admin, id.0, &body).await {
-            Ok(target) => target,
+            Ok(target) => admin.audited(target).await,
             Err(ResourceError::EmptyName) => {
                 warn!("Rejecting request: target name is empty");
                 return Ok(UpdateTargetResponse::BadRequest);
@@ -223,13 +215,6 @@ impl DetailApi {
             }
             Err(err) => return Err(err.into()),
         };
-
-        AuditEvent::TargetUpdated {
-            target_id: target.id,
-            target_name: target.name.clone(),
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
 
         warpgate_core::rate_limiting::apply_new_rate_limits(
             &services.rate_limiter_registry,
@@ -257,12 +242,7 @@ impl DetailApi {
         let services = admin.services();
         match store::delete(&services.db, Actor::Admin, id.0).await {
             Ok((target, admitted)) => {
-                AuditEvent::TargetDeleted {
-                    target_id: target.id,
-                    target_name: target.name,
-                    actor_user_id: admin.auth.user_id(),
-                }
-                .emit();
+                admin.audited(target).await;
                 services.close_admitted_sessions(admitted).await?;
                 Ok(DeleteTargetResponse::Deleted)
             }
@@ -387,21 +367,9 @@ impl RolesApi {
     ) -> Result<AddTargetRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesAssign)?;
 
-        let db = &admin.services().db;
-        let Some((target_name, role_name)) = target_and_role_names(db, id.0, role_id.0).await?
-        else {
-            return Ok(AddTargetRoleResponse::NotFound);
-        };
-        match store::add_role(db, Actor::Admin, id.0, role_id.0).await {
-            Ok(()) => {
-                AuditEvent::TargetRoleAdded {
-                    target_id: id.0,
-                    target_name,
-                    role_id: role_id.0,
-                    role_name,
-                    actor_user_id: admin.auth.user_id(),
-                }
-                .emit();
+        match store::add_role(&admin.services().db, Actor::Admin, id.0, role_id.0).await {
+            Ok(change) => {
+                change.audit(admin.changed_by());
                 Ok(AddTargetRoleResponse::Created)
             }
             Err(err @ (ResourceError::RoleAlreadyAssigned | ResourceError::OwnedBy(_))) => {
@@ -425,21 +393,9 @@ impl RolesApi {
     ) -> Result<DeleteTargetRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesAssign)?;
 
-        let db = &admin.services().db;
-        let Some((target_name, role_name)) = target_and_role_names(db, id.0, role_id.0).await?
-        else {
-            return Ok(DeleteTargetRoleResponse::NotFound);
-        };
-        match store::remove_role(db, Actor::Admin, id.0, role_id.0).await {
-            Ok(()) => {
-                AuditEvent::TargetRoleRemoved {
-                    target_id: id.0,
-                    target_name,
-                    role_id: role_id.0,
-                    role_name,
-                    actor_user_id: admin.auth.user_id(),
-                }
-                .emit();
+        match store::remove_role(&admin.services().db, Actor::Admin, id.0, role_id.0).await {
+            Ok(change) => {
+                change.audit(admin.changed_by());
                 Ok(DeleteTargetRoleResponse::Deleted)
             }
             Err(ResourceError::NotFound) => Ok(DeleteTargetRoleResponse::NotFound),
@@ -449,17 +405,4 @@ impl RolesApi {
             Err(err) => Err(err.into()),
         }
     }
-}
-
-/// `None` if either row is missing
-async fn target_and_role_names(
-    db: &DatabaseConnection,
-    target_id: TargetId,
-    role_id: RoleId,
-) -> Result<Option<(String, String)>, WarpgateError> {
-    let target = Target::Entity::find_by_id(target_id).one(db).await?;
-    let role = Role::Entity::find_by_id(role_id).one(db).await?;
-    Ok(target
-        .zip(role)
-        .map(|(target, role)| (target.name, role.name)))
 }

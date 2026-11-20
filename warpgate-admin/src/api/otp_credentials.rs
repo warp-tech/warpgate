@@ -4,7 +4,7 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, Set};
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, UserId, UserTotpCredential, WarpgateError};
-use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
+use warpgate_core::logging::CredentialChange;
 use warpgate_db_entities::{OtpCredential, User};
 
 use super::{AdminContext, guard_user_mutation};
@@ -103,18 +103,9 @@ impl ListApi {
         let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
             return Ok(CreateOtpCredentialResponse::NotFound);
         };
-        let username = user.username.clone();
-        user.require_otp_in_policy(db).await?;
+        user.clone().require_otp_in_policy(db).await?;
 
-        AuditEvent::CredentialCreated {
-            credential_type: "otp".to_string(),
-            credential_name: None,
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username,
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        admin.audit_credential(CredentialChange::Created, "otp", None, &user);
 
         Ok(CreateOtpCredentialResponse::Created(Json(object.into())))
     }
@@ -162,15 +153,7 @@ impl DetailApi {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
-        AuditEvent::CredentialDeleted {
-            credential_type: "otp".to_string(),
-            credential_name: None,
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username: user.username,
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        admin.audit_credential(CredentialChange::Deleted, "otp", None, &user);
 
         Ok(DeleteCredentialResponse::Deleted)
     }

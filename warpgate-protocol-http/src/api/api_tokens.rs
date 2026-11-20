@@ -7,10 +7,11 @@ use uuid::Uuid;
 use warpgate_common::WarpgateError;
 use warpgate_common::helpers::hash::{generate_ticket_secret, hash_secret};
 use warpgate_common_http::errors::bad_request;
-use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
+use warpgate_core::logging::CredentialChange;
 use warpgate_db_entities::ApiToken;
 
 use crate::api::auth_scheme::{FullUser, WebSessionUser};
+use crate::api::credentials::audit_own_credential;
 
 pub struct Api;
 
@@ -124,15 +125,13 @@ impl Api {
         .await
         .map_err(WarpgateError::from)?;
 
-        AuditEvent::CredentialCreated {
-            credential_type: "api_token".to_string(),
-            credential_name: Some(object.label.clone()),
-            via: CredentialChangedVia::SelfService,
-            user_id: user_model.id,
-            username: user_model.username.clone(),
-            actor_user_id: user_model.id,
-        }
-        .emit();
+        audit_own_credential(
+            CredentialChange::Created,
+            "api_token",
+            Some(&object.label),
+            user_model.id,
+            &user_model.username,
+        );
 
         Ok(CreateApiTokenResponse::Created(Json(TokenAndSecret {
             token: object.into(),
@@ -165,15 +164,13 @@ impl Api {
         let credential_name = model.label.clone();
         model.delete(db).await?;
 
-        AuditEvent::CredentialDeleted {
-            credential_type: "api_token".to_string(),
-            credential_name: Some(credential_name),
-            via: CredentialChangedVia::SelfService,
-            user_id: user_model.id,
-            username: user_model.username.clone(),
-            actor_user_id: user_model.id,
-        }
-        .emit();
+        audit_own_credential(
+            CredentialChange::Deleted,
+            "api_token",
+            Some(&credential_name),
+            user_model.id,
+            &user_model.username,
+        );
 
         Ok(DeleteApiTokenResponse::Deleted)
     }

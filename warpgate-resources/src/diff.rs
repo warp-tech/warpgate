@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashSet};
 
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use uuid::Uuid;
 use warpgate_common::{
     MaybeSecretRef, ProviderId, StoredSecrets, TargetOptions, public_key_of_pem,
@@ -21,7 +21,7 @@ pub struct Row<S> {
 }
 
 impl<S: Comparable> Row<S> {
-    pub fn compared(&self) -> Compared {
+    pub fn compared(&self) -> ComparableValues {
         self.live.compared().named(&self.name)
     }
 }
@@ -58,13 +58,30 @@ impl From<&FieldChange> for PlannedField {
 }
 
 /// A row, or a resource, reduced to what the diff compares
-pub struct Compared {
+pub struct ComparableValues {
     value: Value,
     credentials: HashSet<Path>,
-    protocol: Option<String>,
 }
 
-impl Compared {
+impl ComparableValues {
+    /// A spec with no references and no credentials
+    pub fn plain<S: Serialize>(spec: &S) -> Self {
+        Self::redacting(spec, spec)
+    }
+
+    /// A spec with no references. `redacted` is the same spec with its
+    /// credentials blanked. Fields that differ between the two are
+    /// credentials
+    pub fn redacting<S: Serialize>(spec: &S, redacted: &S) -> Self {
+        let value = to_value(spec);
+        Self {
+            credentials: differing_paths(&value, &to_value(redacted), &["spec"])
+                .into_iter()
+                .collect(),
+            value: json!({ "spec": value }),
+        }
+    }
+
     /// A spec doesn't hold its resource's name
     #[must_use]
     pub fn named(mut self, name: &str) -> Self {
@@ -74,14 +91,33 @@ impl Compared {
         self
     }
 
-    /// A target's protocol, `None` for the other kinds
-    pub fn protocol(&self) -> Option<&str> {
-        self.protocol.as_deref()
-    }
-
     /// The compared value at a JSON pointer, such as `/spec/private_key`
     pub fn pointer(&self, pointer: &str) -> Option<&Value> {
         self.value.pointer(pointer)
+    }
+
+    /// The non-empty fields of the spec, in key order and in a plan's format.
+    /// They describe a new row, so they have no `from`
+    pub fn contents(&self) -> Vec<PlannedField> {
+        let mut fields = Vec::new();
+        let spec = self.value.get("spec").unwrap_or(&Value::Null);
+        let mut path = Path::keys(&["spec"]).0;
+        diff(
+            &Value::Null,
+            spec,
+            &mut path,
+            &self.credentials,
+            &mut fields,
+        );
+        fields
+            .iter()
+            .map(PlannedField::from)
+            .filter(|field| field.credential || !field.to.as_ref().is_none_or(is_blank))
+            .map(|field| PlannedField {
+                from: None,
+                ..field
+            })
+            .collect()
     }
 
     /// The fields in which `to` differs, in key order
@@ -101,42 +137,33 @@ impl Compared {
 
 /// A spec as the diff compares it, with its references as written
 pub trait Comparable {
-    fn compared(&self) -> Compared;
+    fn compared(&self) -> ComparableValues;
 }
 
 impl Comparable for TargetGroupSpec {
-    fn compared(&self) -> Compared {
-        plain(self)
+    fn compared(&self) -> ComparableValues {
+        ComparableValues::plain(self)
     }
 }
 
 impl Comparable for RoleSpec {
-    fn compared(&self) -> Compared {
-        plain(self)
+    fn compared(&self) -> ComparableValues {
+        ComparableValues::plain(self)
     }
 }
 
 impl Comparable for SshClientKeySpec {
-    fn compared(&self) -> Compared {
-        Compared {
+    fn compared(&self) -> ComparableValues {
+        ComparableValues {
             value: json!({ "spec": { "private_key": key_identity(self), "is_default": self.is_default } }),
             credentials: HashSet::from([Path::keys(&["spec", "private_key"])]),
-            protocol: None,
         }
     }
 }
 
 impl Comparable for TargetSpec {
-    fn compared(&self) -> Compared {
+    fn compared(&self) -> ComparableValues {
         compare_target(self, |_, name| name.to_owned())
-    }
-}
-
-fn plain<S: Serialize>(spec: &S) -> Compared {
-    Compared {
-        value: json!({ "spec": to_value(spec) }),
-        credentials: HashSet::new(),
-        protocol: None,
     }
 }
 
@@ -144,7 +171,7 @@ fn plain<S: Serialize>(spec: &S) -> Compared {
 pub fn compare_target(
     spec: &TargetSpec,
     resolve: impl Fn(ResourceKind, &str) -> String,
-) -> Compared {
+) -> ComparableValues {
     let mut spec = spec.clone();
     spec.group = spec
         .group
@@ -167,12 +194,10 @@ pub fn compare_target(
         .as_ref()
         .map(|key| resolve(ResourceKind::SshClientKey, key));
 
-    let options = to_value(&spec.options);
     let mut value = to_value(&spec);
     spec.references.put(&mut value);
-    Compared {
+    ComparableValues {
         credentials: credential_paths(&spec.options),
-        protocol: options.as_object().and_then(|o| o.keys().next().cloned()),
         value: json!({ "spec": value }),
     }
 }
@@ -202,16 +227,29 @@ fn credential_paths(options: &TargetOptions) -> HashSet<Path> {
 /// Paths from the resource's root at which `altered` differs from `options`,
 /// in key order
 pub fn changed_paths(options: &TargetOptions, altered: &TargetOptions) -> Vec<Path> {
+    differing_paths(&to_value(options), &to_value(altered), &["spec", "options"])
+}
+
+fn differing_paths(from: &Value, to: &Value, prefix: &[&str]) -> Vec<Path> {
     let mut changes = Vec::new();
-    let mut prefix = vec![Segment::Key("spec".into()), Segment::Key("options".into())];
     diff(
-        &to_value(options),
-        &to_value(altered),
-        &mut prefix,
+        from,
+        to,
+        &mut Path::keys(prefix).0,
         &HashSet::new(),
         &mut changes,
     );
     changes.into_iter().map(|change| change.path).collect()
+}
+
+fn is_blank(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::String(text) => text.is_empty(),
+        Value::Array(items) => items.is_empty(),
+        Value::Object(fields) => fields.is_empty(),
+        Value::Bool(_) | Value::Number(_) => false,
+    }
 }
 
 fn to_value<T: Serialize>(value: &T) -> Value {
@@ -237,7 +275,16 @@ fn diff(
         });
         return;
     }
-    if let (Value::Object(a), Value::Object(b)) = (from, to) {
+    // An absent object is compared as an empty one. Each field of the other
+    // side is then reported separately, and a credential among them is hidden
+    let absent = Map::new();
+    let objects = match (from, to) {
+        (Value::Object(a), Value::Object(b)) => Some((a, b)),
+        (Value::Object(a), Value::Null) if !a.is_empty() => Some((a, &absent)),
+        (Value::Null, Value::Object(b)) if !b.is_empty() => Some((&absent, b)),
+        _ => None,
+    };
+    if let Some((a, b)) = objects {
         let keys: BTreeSet<&String> = a.keys().chain(b.keys()).collect();
         for key in keys {
             path.push(Segment::Key(key.clone()));
@@ -252,11 +299,151 @@ fn diff(
         }
         return;
     }
-    out.push(FieldChange {
-        path: here,
-        change: ValueChange::Value {
+    // A value that can't be split into fields is hidden entirely if it
+    // contains a credential
+    let holds_credential = credentials
+        .iter()
+        .any(|credential| credential.0.starts_with(path));
+    let change = if holds_credential {
+        ValueChange::Credential
+    } else {
+        ValueChange::Value {
             from: from.clone(),
             to: to.clone(),
-        },
-    });
+        }
+    };
+    out.push(FieldChange { path: here, change });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mysql(name: &str, port: u16, password: &str) -> Row<TargetSpec> {
+        Row {
+            id: Uuid::nil(),
+            name: name.into(),
+            provider: None,
+            live: serde_json::from_value(json!({"options": {"mysql": {
+                "host": "h",
+                "port": port,
+                "auth": {"kind": "password", "password": password},
+            }}}))
+            .unwrap(),
+        }
+    }
+
+    fn planned(before: &Row<TargetSpec>, after: &Row<TargetSpec>) -> Vec<PlannedField> {
+        let fields = before.compared().changes_to(&after.compared());
+        fields.iter().map(PlannedField::from).collect()
+    }
+
+    #[test]
+    fn changes_name_the_fields_and_hide_credentials() {
+        let before = mysql("db", 3306, "old-secret");
+        assert_eq!(planned(&before, &mysql("db", 3306, "old-secret")), []);
+
+        let changes = planned(&before, &mysql("db2", 3307, "new-secret"));
+        let summary: Vec<_> = changes
+            .iter()
+            .map(|field| {
+                (
+                    field.path.as_str(),
+                    field.credential,
+                    &field.from,
+                    &field.to,
+                )
+            })
+            .collect();
+        assert_eq!(
+            summary,
+            [
+                ("name", false, &Some(json!("db")), &Some(json!("db2"))),
+                ("spec.options.mysql.auth.password", true, &None, &None),
+                (
+                    "spec.options.mysql.port",
+                    false,
+                    &Some(json!(3306)),
+                    &Some(json!(3307))
+                ),
+            ]
+        );
+    }
+
+    #[derive(Serialize)]
+    struct Settings {
+        source: Option<Source>,
+    }
+
+    #[derive(Clone, Serialize)]
+    struct Source {
+        url: String,
+        password: String,
+    }
+
+    fn settings(source: Option<Source>) -> ComparableValues {
+        let redacted = source.clone().map(|source| Source {
+            password: String::new(),
+            ..source
+        });
+        ComparableValues::redacting(&Settings { source }, &Settings { source: redacted })
+    }
+
+    fn summary(fields: &[FieldChange]) -> Vec<(String, &ValueChange)> {
+        fields
+            .iter()
+            .map(|field| (field.path.to_string(), &field.change))
+            .collect()
+    }
+
+    #[test]
+    fn a_credential_in_an_object_that_appears_or_goes_is_hidden() {
+        let unset = settings(None);
+        let set = settings(Some(Source {
+            url: "https://git".into(),
+            password: "old-secret".into(),
+        }));
+
+        for (from, to) in [(&unset, &set), (&set, &unset)] {
+            let fields = from.changes_to(to);
+            let paths: Vec<_> = fields.iter().map(|field| field.path.to_string()).collect();
+            assert_eq!(paths, ["spec.source.password", "spec.source.url"]);
+            assert_eq!(fields[0].change, ValueChange::Credential);
+            assert!(!format!("{fields:?}").contains("secret"));
+        }
+    }
+
+    #[test]
+    fn a_value_that_holds_a_credential_and_has_no_fields_is_hidden_whole() {
+        let mut credentials = HashSet::new();
+        credentials.insert(Path::keys(&["spec", "source", "password"]));
+        let compared = |value: Value| ComparableValues {
+            value: json!({ "spec": { "source": value } }),
+            credentials: credentials.clone(),
+        };
+        let fields =
+            compared(json!("disabled")).changes_to(&compared(json!({ "password": "old-secret" })));
+        assert_eq!(
+            summary(&fields),
+            [("spec.source".to_owned(), &ValueChange::Credential)]
+        );
+    }
+
+    #[test]
+    fn contents_are_the_set_fields_without_credential_values() {
+        let fields = mysql("db", 3306, "old-secret").compared().contents();
+        let port = fields
+            .iter()
+            .find(|field| field.path == "spec.options.mysql.port");
+        assert_eq!(
+            port.map(|field| (&field.from, &field.to)),
+            Some((&None, &Some(json!(3306))))
+        );
+        let password = fields
+            .iter()
+            .find(|field| field.path == "spec.options.mysql.auth.password");
+        assert!(password.is_some_and(|field| field.credential));
+        assert!(!fields.iter().any(|field| field.path == "spec.description"));
+        assert!(!format!("{fields:?}").contains("secret"));
+    }
 }

@@ -5,7 +5,7 @@ use sea_orm::{ActiveModelTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, AdminRole as AdminRoleConfig, WarpgateError};
 use warpgate_core::consts::BUILTIN_ADMIN_ROLE_NAME;
-use warpgate_core::logging::AuditEvent;
+use warpgate_core::resources::audit;
 use warpgate_db_entities::{AdminRole, User};
 
 use super::AdminContext;
@@ -158,17 +158,9 @@ impl ListApi {
         };
 
         let role = values.insert(db).await?;
-        let role_config: AdminRoleConfig = role.into();
+        audit::created(db, admin.changed_by(), &role).await;
 
-        AuditEvent::AdminRoleCreated {
-            admin_role_id: role_config.id,
-            admin_role_name: role_config.name.clone(),
-            permissions: role_config.permissions(),
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
-
-        Ok(CreateAdminRoleResponse::Created(Json(role_config)))
+        Ok(CreateAdminRoleResponse::Created(Json(role.into())))
     }
 }
 
@@ -212,7 +204,7 @@ impl DetailApi {
             return Ok(UpdateAdminRoleResponse::NotFound);
         };
 
-        let mut model: AdminRole::ActiveModel = role.into();
+        let mut model: AdminRole::ActiveModel = role.clone().into();
         model.name = Set(body.name.clone());
         model.description = Set(body.description.clone().unwrap_or_default());
         model.targets_create = Set(body.targets_create);
@@ -234,17 +226,10 @@ impl DetailApi {
         model.config_edit = Set(body.config_edit);
         model.admin_roles_manage = Set(body.admin_roles_manage);
         model.ticket_requests_manage = Set(body.ticket_requests_manage);
-        let role: AdminRoleConfig = model.update(db).await?.into();
+        let updated = model.update(db).await?;
+        audit::updated(db, admin.changed_by(), &role, &updated).await;
 
-        AuditEvent::AdminRoleUpdated {
-            admin_role_id: role.id,
-            admin_role_name: role.name.clone(),
-            permissions: role.permissions(),
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
-
-        Ok(UpdateAdminRoleResponse::Ok(Json(role)))
+        Ok(UpdateAdminRoleResponse::Ok(Json(updated.into())))
     }
 
     #[oai(
@@ -269,15 +254,8 @@ impl DetailApi {
             return Ok(DeleteAdminRoleResponse::Forbidden);
         }
 
-        let (admin_role_id, admin_role_name) = (role.id, role.name.clone());
-        role.delete(db).await?;
-
-        AuditEvent::AdminRoleDeleted {
-            admin_role_id,
-            admin_role_name,
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        role.clone().delete(db).await?;
+        audit::deleted(admin.changed_by(), &role);
 
         Ok(DeleteAdminRoleResponse::Deleted)
     }

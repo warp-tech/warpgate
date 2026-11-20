@@ -17,7 +17,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 use warpgate_common::{ProviderId, SecretResolver, UserId, WarpgateError};
 use warpgate_db_entities::Parameters::{self, GitopsSource};
-use warpgate_db_entities::ProviderSync::{self, PlannedChange, SyncPlan, SyncStatus, SyncTrigger};
+use warpgate_db_entities::ProviderSync::{self, SyncPlan, SyncStatus, SyncTrigger};
 use warpgate_gitops::format_text;
 use warpgate_gitops::plan::{Plan, Prune, format_errors, plan};
 use warpgate_gitops::source::{Checkout, checkout, checkout_text, content_hash};
@@ -25,6 +25,7 @@ use warpgate_gitops::types::Resource;
 use warpgate_gitops::validate::check_files;
 
 use super::AdmittedSessions;
+use super::audit::ChangedBy;
 use super::reconcile::{Applied, apply, load_current};
 use crate::Services;
 use crate::cluster::alive_nodes;
@@ -298,23 +299,17 @@ fn audit_sync(row: &ProviderSync::Model, admin: Option<UserId>) {
     .emit();
 }
 
-fn audit_changes(sync_id: Uuid, admin: Option<UserId>, applied: &Applied<'_>) {
-    for (change, id) in &applied.changes {
-        let change = PlannedChange::from(*change);
-        let fields = (!change.fields.is_empty())
-            .then(|| serde_json::to_string(&change.fields).ok())
-            .flatten();
-        AuditEvent::ManagedResourceChanged {
-            sync_id,
-            provider: PROVIDER.label(),
-            action: format!("{:?}", change.action),
-            kind: change.kind,
-            id: *id,
-            name: change.name,
-            fields,
-            actor_user_id: admin,
-        }
-        .emit();
+fn audit_changes(sync_id: Uuid, admin: Option<UserId>, applied: &Applied) {
+    let by = ChangedBy::Sync {
+        id: sync_id,
+        provider: PROVIDER,
+        admin,
+    };
+    for entry in &applied.entries {
+        entry.log(by);
+    }
+    for change in &applied.role_assignments {
+        change.audit(by);
     }
 }
 
@@ -323,7 +318,7 @@ pub async fn record_cli_apply(
     db: &DatabaseConnection,
     files: &[(PathBuf, String)],
     plan: &Plan,
-    applied: &Applied<'_>,
+    applied: &Applied,
 ) -> Result<(), SyncError> {
     let now = OffsetDateTime::now_utc();
     let row = ProviderSync::Model {
@@ -358,7 +353,7 @@ async fn attempt_sync(
     let applied = apply(db, PROVIDER, &resources, &plan, secrets)
         .await
         .map_err(|e| e.to_string())?;
-    if applied.changes.is_empty() {
+    if applied.entries.is_empty() {
         return Ok(None);
     }
     audit_changes(attempt.id, attempt.admin, &applied);

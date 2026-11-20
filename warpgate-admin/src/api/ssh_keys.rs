@@ -9,6 +9,7 @@ use serde::Serialize;
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{AdminPermission, ProviderId, SecretRef, SshClientKeyId, WarpgateError};
 use warpgate_common_http::errors::bad_request;
+use warpgate_core::resources::audit::Unaudited;
 use warpgate_core::resources::ssh_client_keys::{self, KeyMaterial, SshClientKeyDataRequest};
 use warpgate_core::resources::{Actor, ResourceError};
 use warpgate_db_entities::SshClientKey;
@@ -236,7 +237,11 @@ impl Api {
             label: body.label.clone(),
             is_default: body.is_default,
         };
-        created(ssh_client_keys::create(&services.db, Actor::Admin, &data, material).await)
+        created(
+            &admin,
+            ssh_client_keys::create(&services.db, Actor::Admin, &data, material).await,
+        )
+        .await
     }
 
     #[oai(
@@ -257,7 +262,9 @@ impl Api {
             is_default: body.is_default,
         };
         match ssh_client_keys::update(&admin.services().db, Actor::Admin, id.0, &data, None).await {
-            Ok(model) => Ok(UpdateSSHClientKeyResponse::Ok(Json(model.into()))),
+            Ok(key) => Ok(UpdateSSHClientKeyResponse::Ok(Json(
+                admin.audited(key).await.into(),
+            ))),
             Err(ResourceError::EmptyName) => Ok(UpdateSSHClientKeyResponse::BadRequest(
                 bad_request("The label is empty"),
             )),
@@ -305,7 +312,10 @@ impl Api {
         admin.require(AdminPermission::ConfigEdit)?;
 
         match ssh_client_keys::delete(&admin.services().db, Actor::Admin, id.0).await {
-            Ok(()) => Ok(DeleteSSHClientKeyResponse::Deleted),
+            Ok(key) => {
+                admin.audited(key).await;
+                Ok(DeleteSSHClientKeyResponse::Deleted)
+            }
             Err(err @ ResourceError::LastClientKey) => Ok(DeleteSSHClientKeyResponse::BadRequest(
                 bad_request(err.to_string()),
             )),
@@ -330,14 +340,21 @@ async fn store_new_key(
         is_default,
     };
     let material = KeyMaterial::inline(key)?;
-    created(ssh_client_keys::create(&admin.services().db, Actor::Admin, &data, material).await)
+    created(
+        admin,
+        ssh_client_keys::create(&admin.services().db, Actor::Admin, &data, material).await,
+    )
+    .await
 }
 
-fn created(
-    result: Result<SshClientKey::Model, ResourceError>,
+async fn created(
+    admin: &AdminContext,
+    result: Result<Unaudited<SshClientKey::Model>, ResourceError>,
 ) -> Result<CreateSSHClientKeyResponse, WarpgateError> {
     match result {
-        Ok(model) => Ok(CreateSSHClientKeyResponse::Created(Json(model.into()))),
+        Ok(key) => Ok(CreateSSHClientKeyResponse::Created(Json(
+            admin.audited(key).await.into(),
+        ))),
         Err(ResourceError::KeyTaken) => Ok(CreateSSHClientKeyResponse::Conflict(Json(
             "This key is already imported".into(),
         ))),

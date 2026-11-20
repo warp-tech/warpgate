@@ -4,7 +4,7 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, Set};
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, UserId, UserSsoCredential, WarpgateError};
-use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
+use warpgate_core::logging::CredentialChange;
 use warpgate_db_entities::{SsoCredential, User};
 
 use super::{AdminContext, guard_user_mutation};
@@ -121,15 +121,12 @@ impl ListApi {
         };
 
         let credential_name = body.email.clone();
-        AuditEvent::CredentialCreated {
-            credential_type: "sso".to_string(),
-            credential_name: Some(credential_name),
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username: user.username,
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        admin.audit_credential(
+            CredentialChange::Created,
+            "sso",
+            Some(&credential_name),
+            &user,
+        );
 
         Ok(CreateSsoCredentialResponse::Created(Json(object.into())))
     }
@@ -184,15 +181,7 @@ impl DetailApi {
             return Ok(UpdateSsoCredentialResponse::NotFound);
         };
 
-        AuditEvent::CredentialUpdated {
-            credential_type: "sso".to_string(),
-            credential_name: Some(model.email.clone()),
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username: user.username,
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        admin.audit_credential(CredentialChange::Updated, "sso", Some(&model.email), &user);
 
         Ok(UpdateSsoCredentialResponse::Updated(Json(model.into())))
     }
@@ -229,15 +218,12 @@ impl DetailApi {
 
         role.delete(db).await?;
 
-        AuditEvent::CredentialDeleted {
-            credential_type: "sso".to_string(),
-            credential_name: Some(credential_name.clone()),
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username: user.username.clone(),
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        admin.audit_credential(
+            CredentialChange::Deleted,
+            "sso",
+            Some(&credential_name),
+            &user,
+        );
 
         Ok(DeleteCredentialResponse::Deleted)
     }

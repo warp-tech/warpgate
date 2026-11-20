@@ -1,3 +1,4 @@
+pub mod audit;
 pub mod export;
 pub mod reconcile;
 pub mod roles;
@@ -6,9 +7,16 @@ pub mod sync;
 pub mod target_groups;
 pub mod targets;
 
+use std::collections::HashMap;
+use std::hash::Hash;
+
 use sea_orm::prelude::Expr;
-use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect};
-use warpgate_common::{ProviderId, RowId, UserSessionId, WarpgateError};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect, TryGetable,
+};
+use warpgate_common::{
+    MaybeSecretRef, ProviderId, RowId, StoredSecret, UserSessionId, WarpgateError,
+};
 use warpgate_resources::ResourceKind;
 
 use crate::db::is_unique_violation;
@@ -95,7 +103,28 @@ pub trait OwnedEntity: EntityTrait {
     type Id: RowId + Into<sea_orm::Value>;
     const KIND: ResourceKind;
     const ID: Self::Column;
+    const NAME: Self::Column;
     const PROVIDER: Self::Column;
+}
+
+async fn names_of<E: OwnedEntity, C: ConnectionTrait>(
+    db: &C,
+    ids: Vec<E::Id>,
+) -> Result<HashMap<E::Id, String>, DbErr>
+where
+    E::Id: TryGetable + Hash + Eq,
+{
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let names = E::find()
+        .select_only()
+        .columns([E::ID, E::NAME])
+        .filter(E::ID.is_in(ids))
+        .into_tuple()
+        .all(db)
+        .await?;
+    Ok(names.into_iter().collect())
 }
 
 /// Sets a row's owner and nothing else. This is the only write that skips
@@ -132,6 +161,14 @@ pub async fn release<E: OwnedEntity, C: ConnectionTrait>(
     };
     set_owner::<E, C>(db, id, None).await?;
     Ok(Some(owner))
+}
+
+/// Decrypts an inline credential, so that it compares with a file's literal
+fn reveal_inline(slot: &mut MaybeSecretRef) -> Result<(), WarpgateError> {
+    if let MaybeSecretRef::Inline(secret) = slot {
+        *secret = StoredSecret::from(secret.reveal()?.expose_secret().clone());
+    }
+    Ok(())
 }
 
 const fn check_name(name: &str) -> Result<(), ResourceError> {
@@ -211,7 +248,8 @@ pub(crate) mod tests {
         let db = db().await;
         let web = targets::create(&db, Actor::Admin, &ssh("web"))
             .await
-            .unwrap();
+            .unwrap()
+            .skip_audit();
         assert_eq!(web.rate_limit_bytes_per_second, Some(1000));
 
         let result = targets::create(&db, Actor::Admin, &ssh("web")).await;
@@ -227,8 +265,9 @@ pub(crate) mod tests {
 
         let dba = roles::create(&db, Actor::Admin, &role("dba", None))
             .await
-            .unwrap();
-        targets::add_role(&db, Actor::Admin, web.id, dba.id)
+            .unwrap()
+            .skip_audit();
+        let _ = targets::add_role(&db, Actor::Admin, web.id, dba.id)
             .await
             .unwrap();
         let result = targets::add_role(&db, Actor::Admin, web.id, dba.id).await;
@@ -246,30 +285,34 @@ pub(crate) mod tests {
         let db = db().await;
         let dba = roles::create(&db, Actor::Admin, &role("dba", Some(true)))
             .await
-            .unwrap();
+            .unwrap()
+            .skip_audit();
         let result = roles::create(&db, Actor::Admin, &role("dba", None)).await;
         assert!(matches!(result, Err(ResourceError::NameTaken)));
 
         let ops = roles::create(&db, Actor::Admin, &role("ops", None))
             .await
-            .unwrap();
+            .unwrap()
+            .skip_audit();
         assert!(!ops.is_default);
         let result = roles::update(&db, Actor::Admin, ops.id, &role("dba", None)).await;
         assert!(matches!(result, Err(ResourceError::NameTaken)));
 
         let renamed = roles::update(&db, Actor::Admin, dba.id, &role("dbas", None))
             .await
-            .unwrap();
+            .unwrap()
+            .skip_audit();
         assert_eq!(renamed.name, "dbas");
         assert!(renamed.is_default, "an omitted is_default stays as it was");
 
         let web = targets::create(&db, Actor::Admin, &ssh("web"))
             .await
-            .unwrap();
-        targets::add_role(&db, Actor::Admin, web.id, dba.id)
+            .unwrap()
+            .skip_audit();
+        let _ = targets::add_role(&db, Actor::Admin, web.id, dba.id)
             .await
             .unwrap();
-        roles::delete(&db, Actor::Admin, dba.id).await.unwrap();
+        let _ = roles::delete(&db, Actor::Admin, dba.id).await.unwrap();
         assert_eq!(assignments(&db).await, 0);
         let result = targets::remove_role(&db, Actor::Admin, web.id, dba.id).await;
         assert!(matches!(result, Err(ResourceError::NotFound)));
@@ -285,12 +328,16 @@ pub(crate) mod tests {
         };
         let prod = target_groups::create(&db, Actor::Admin, &group)
             .await
-            .unwrap();
+            .unwrap()
+            .skip_audit();
         let mut web = ssh("web");
         web.group_id = Some(prod.id);
-        let web = targets::create(&db, Actor::Admin, &web).await.unwrap();
+        let web = targets::create(&db, Actor::Admin, &web)
+            .await
+            .unwrap()
+            .skip_audit();
 
-        target_groups::delete(&db, Actor::Admin, prod.id)
+        let _ = target_groups::delete(&db, Actor::Admin, prod.id)
             .await
             .unwrap();
         let web = Target::Entity::find_by_id(web.id)
@@ -307,11 +354,15 @@ pub(crate) mod tests {
         let gitops = Actor::Provider(ProviderId::GITOPS);
         let other = Actor::Provider(ProviderId(Uuid::new_v4()));
 
-        let web = targets::create(&db, gitops, &ssh("web")).await.unwrap();
+        let web = targets::create(&db, gitops, &ssh("web"))
+            .await
+            .unwrap()
+            .skip_audit();
         assert_eq!(web.provider, Some(ProviderId::GITOPS));
         let dba = roles::create(&db, gitops, &role("dba", None))
             .await
-            .unwrap();
+            .unwrap()
+            .skip_audit();
         let prod = target_groups::create(
             &db,
             gitops,
@@ -322,7 +373,8 @@ pub(crate) mod tests {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .skip_audit();
 
         fn owned<T: std::fmt::Debug>(r: Result<T, ResourceError>) {
             assert!(
@@ -340,31 +392,36 @@ pub(crate) mod tests {
             owned(target_groups::delete(&db, actor, prod.id).await);
         }
 
-        targets::add_role(&db, gitops, web.id, dba.id)
+        let _ = targets::add_role(&db, gitops, web.id, dba.id)
             .await
             .unwrap();
         targets::update(&db, gitops, web.id, &ssh("web2"))
             .await
-            .unwrap();
+            .unwrap()
+            .skip_audit();
         let (_, admitted) = targets::delete(&db, gitops, web.id).await.unwrap();
         assert!(admitted.0.is_empty());
 
         // A row created by hand is never a provider's to change
         let manual = targets::create(&db, Actor::Admin, &ssh("manual"))
             .await
-            .unwrap();
+            .unwrap()
+            .skip_audit();
         assert_eq!(manual.provider, None);
         for result in [
             targets::update(&db, gitops, manual.id, &ssh("manual"))
                 .await
                 .map(|_| ()),
             targets::delete(&db, gitops, manual.id).await.map(|_| ()),
-            targets::add_role(&db, gitops, manual.id, dba.id).await,
+            targets::add_role(&db, gitops, manual.id, dba.id)
+                .await
+                .map(|_| ()),
         ] {
             assert!(matches!(result, Err(ResourceError::Manual)), "{result:?}");
         }
         targets::update(&db, Actor::Admin, manual.id, &ssh("manual"))
             .await
-            .unwrap();
+            .unwrap()
+            .skip_audit();
     }
 }

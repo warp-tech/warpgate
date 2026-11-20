@@ -7,7 +7,7 @@ use warpgate_common::{
     AdminPermission, PasswordPolicyViolation, Secret, UserId, UserPasswordCredential,
     WarpgateError, validate_password,
 };
-use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
+use warpgate_core::logging::CredentialChange;
 use warpgate_db_entities::{PasswordCredential, User};
 
 use super::{AdminContext, guard_user_mutation};
@@ -112,15 +112,7 @@ impl ListApi {
             return Ok(CreatePasswordCredentialResponse::NotFound);
         };
 
-        AuditEvent::CredentialCreated {
-            credential_type: "password".to_string(),
-            credential_name: None,
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username: user.username,
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        admin.audit_credential(CredentialChange::Created, "password", None, &user);
 
         Ok(CreatePasswordCredentialResponse::Created(Json(
             object.into(),
@@ -170,15 +162,7 @@ impl DetailApi {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
-        AuditEvent::CredentialDeleted {
-            credential_type: "password".to_string(),
-            credential_name: None,
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username: user.username,
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        admin.audit_credential(CredentialChange::Deleted, "password", None, &user);
 
         Ok(DeleteCredentialResponse::Deleted)
     }

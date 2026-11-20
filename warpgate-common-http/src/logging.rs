@@ -58,7 +58,7 @@ pub async fn span_for_request(
             info_span!("HTTP", session=%handle.user_session_id(), %client_ip)
         }
     } else {
-        info_span!("HTTP")
+        info_span!("HTTP", %client_ip)
     })
 }
 

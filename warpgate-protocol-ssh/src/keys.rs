@@ -138,7 +138,9 @@ async fn store_bootstrap_key(
         label: label.into(),
         is_default: true,
     };
-    ssh_client_keys::create(db, Actor::Admin, &data, KeyMaterial::inline(key)?).await?;
+    ssh_client_keys::create(db, Actor::Admin, &data, KeyMaterial::inline(key)?)
+        .await?
+        .skip_audit();
     Ok(())
 }
 

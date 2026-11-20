@@ -6,7 +6,14 @@ use tracing::info;
 use uuid::Uuid;
 
 use crate::helpers::logging::format_related_ids;
-use crate::{AdminPermission, RoleId, TargetId, UserId};
+use crate::{RoleId, TargetId, UserId};
+
+#[derive(Clone, Copy)]
+pub enum CredentialChange {
+    Created,
+    Updated,
+    Deleted,
+}
 
 #[derive(Clone)]
 pub enum CredentialChangedVia {
@@ -36,23 +43,8 @@ pub struct KubernetesAuditSubject {
 
 #[derive(Clone)]
 pub enum AuditEvent {
-    CredentialCreated {
-        credential_type: String,
-        credential_name: Option<String>,
-        via: CredentialChangedVia,
-        user_id: UserId,
-        username: String,
-        actor_user_id: UserId,
-    },
-    CredentialUpdated {
-        credential_type: String,
-        credential_name: Option<String>,
-        via: CredentialChangedVia,
-        user_id: UserId,
-        username: String,
-        actor_user_id: UserId,
-    },
-    CredentialDeleted {
+    CredentialChanged {
+        change: CredentialChange,
         credential_type: String,
         credential_name: Option<String>,
         via: CredentialChangedVia,
@@ -63,13 +55,6 @@ pub enum AuditEvent {
     UserCreated {
         user_id: UserId,
         username: String,
-        actor_user_id: UserId,
-    },
-    UserUpdated {
-        user_id: UserId,
-        username: String,
-        credential_policy: String,
-        allowed_ip_ranges: String,
         actor_user_id: UserId,
     },
     UserDeleted {
@@ -132,7 +117,7 @@ pub enum AuditEvent {
         actor_user_id: UserId,
         related_admin_roles: String,
     },
-    /// Covers renewals, which also clear a revocation.
+    /// A renewal also clears a revocation
     AccessRoleExpiryChanged {
         grantee_id: UserId,
         grantee_username: String,
@@ -142,66 +127,16 @@ pub enum AuditEvent {
         revocation_cleared: bool,
         actor_user_id: UserId,
     },
-    AdminRoleCreated {
-        admin_role_id: Uuid,
-        admin_role_name: String,
-        permissions: Vec<AdminPermission>,
-        actor_user_id: UserId,
-    },
-    AdminRoleUpdated {
-        admin_role_id: Uuid,
-        admin_role_name: String,
-        permissions: Vec<AdminPermission>,
-        actor_user_id: UserId,
-    },
-    AdminRoleDeleted {
-        admin_role_id: Uuid,
-        admin_role_name: String,
-        actor_user_id: UserId,
-    },
-    RoleCreated {
-        role_id: RoleId,
-        role_name: String,
-        actor_user_id: UserId,
-    },
-    RoleUpdated {
-        role_id: RoleId,
-        role_name: String,
-        actor_user_id: UserId,
-    },
-    RoleDeleted {
-        role_id: RoleId,
-        role_name: String,
-        actor_user_id: UserId,
-    },
-    TargetCreated {
-        target_id: TargetId,
-        target_name: String,
-        actor_user_id: UserId,
-    },
-    TargetUpdated {
-        target_id: TargetId,
-        target_name: String,
-        actor_user_id: UserId,
-    },
-    TargetDeleted {
-        target_id: TargetId,
-        target_name: String,
-        actor_user_id: UserId,
-    },
-    TargetRoleAdded {
+    /// An admin or a provider sync assigned a role to a target or removed it
+    TargetRoleChanged {
+        added: bool,
         target_id: TargetId,
         target_name: String,
         role_id: RoleId,
         role_name: String,
-        actor_user_id: UserId,
-    },
-    TargetRoleRemoved {
-        target_id: TargetId,
-        target_name: String,
-        role_id: RoleId,
-        role_name: String,
-        actor_user_id: UserId,
+        /// Sync ID and provider. `None` for an admin's edit
+        sync: Option<(Uuid, String)>,
+        actor_user_id: Option<UserId>,
     },
     // currently used for RDP logon PDU
     TargetLogon {
@@ -345,18 +280,23 @@ pub enum AuditEvent {
         /// The admin who requested the sync
         actor_user_id: Option<UserId>,
     },
-    /// A resource that a provider sync created, changed or deleted
-    ManagedResourceChanged {
-        sync_id: Uuid,
-        provider: String,
+    /// An admin or a provider sync created, changed or deleted a resource.
+    /// Admin edits of rows that no provider manages use it too
+    ResourceChanged {
         /// `Create`, `Update`, `Adopt` or `Delete`
         action: String,
         kind: String,
         id: Uuid,
         name: String,
-        /// The changed fields as a JSON array, without credential values
+        /// JSON array of the changed fields, or of a new row's set fields,
+        /// without credential values. `None` if there are none or the rows
+        /// could not be compared
         fields: Option<String>,
-        actor_user_id: Option<UserId>,
+        /// Sync ID and provider. `None` for an admin's edit
+        sync: Option<(Uuid, String)>,
+        related_users: Option<String>,
+        related_access_roles: Option<String>,
+        related_admin_roles: Option<String>,
     },
     /// An admin made a provider's resource editable by hand again
     ProviderResourceReleased {
@@ -370,19 +310,16 @@ pub enum AuditEvent {
     },
 }
 
-/// Absent for `None`, so a permanent grant has no `expires_at` at all
+/// A permanent grant logs no `expires_at` field
 fn rfc3339(time: Option<OffsetDateTime>) -> Option<String> {
     time.map(|time| time.format(&Rfc3339).unwrap_or_else(|_| time.to_string()))
-}
-
-fn json_list<T: serde::Serialize>(items: &[T]) -> String {
-    serde_json::to_string(items).unwrap_or_else(|_| "[]".to_owned())
 }
 
 impl AuditEvent {
     pub fn emit(&self) {
         match self {
-            Self::CredentialCreated {
+            Self::CredentialChanged {
+                change,
                 credential_type,
                 credential_name,
                 via,
@@ -390,83 +327,22 @@ impl AuditEvent {
                 username,
                 actor_user_id,
             } => {
-                if let Some(credential_name) = credential_name {
-                    info!(
-                        target: "audit",
-                        _type = "CredentialCreated1",
-                        credential_type = %credential_type,
-                        credential_name = %credential_name,
-                        via = %via,
-                        user_id = %user_id,
-                        username = %username,
-                        related_users = %format_related_ids(&[*user_id, *actor_user_id]),
-                        "Created credential"
-                    );
-                } else {
-                    info!(
-                        target: "audit",
-                        _type = "CredentialCreated1",
-                        credential_type = %credential_type,
-                        via = %via,
-                        user_id = %user_id,
-                        username = %username,
-                        related_users = %format_related_ids(&[*user_id, *actor_user_id]),
-                        "Created credential"
-                    );
-                }
-            }
-            Self::CredentialUpdated {
-                credential_type,
-                credential_name,
-                via,
-                user_id,
-                username,
-                actor_user_id,
-            } => {
+                let (event, message) = match change {
+                    CredentialChange::Created => ("CredentialCreated1", "Created credential"),
+                    CredentialChange::Updated => ("CredentialUpdated1", "Updated credential"),
+                    CredentialChange::Deleted => ("CredentialDeleted1", "Deleted credential"),
+                };
                 info!(
                     target: "audit",
-                    _type = "CredentialUpdated1",
+                    _type = event,
                     credential_type = %credential_type,
-                    credential_name = credential_name.as_deref().unwrap_or_default(),
+                    credential_name = credential_name.as_deref(),
                     via = %via,
                     user_id = %user_id,
                     username = %username,
                     related_users = %format_related_ids(&[*user_id, *actor_user_id]),
-                    "Updated credential"
+                    "{message}"
                 );
-            }
-            Self::CredentialDeleted {
-                credential_type,
-                credential_name,
-                via,
-                user_id,
-                username,
-                actor_user_id,
-            } => {
-                if let Some(credential_name) = credential_name {
-                    info!(
-                        target: "audit",
-                        _type = "CredentialDeleted1",
-                        credential_type = %credential_type,
-                        credential_name = %credential_name,
-                        via = %via,
-                        user_id = %user_id,
-                        username = %username,
-                        related_users = %format_related_ids(&[*user_id, *actor_user_id]),
-                        "Deleted credential"
-                    );
-                } else {
-                    info!(
-                        target: "audit",
-                        _type = "CredentialDeleted1",
-                        credential_type = %credential_type,
-                        via = %via,
-                        user_id = %user_id,
-                        username = %username,
-                        related_users = %format_related_ids(&[*user_id, *actor_user_id]),
-                        "Deleted credential"
-                    );
-                }
             }
             Self::UserCreated {
                 user_id,
@@ -480,24 +356,6 @@ impl AuditEvent {
                     username = %username,
                         related_users = %format_related_ids(&[*user_id, *actor_user_id]),
                     "Created user"
-                );
-            }
-            Self::UserUpdated {
-                user_id,
-                username,
-                credential_policy,
-                allowed_ip_ranges,
-                actor_user_id,
-            } => {
-                info!(
-                    target: "audit",
-                    _type = "UserUpdated1",
-                    user_id = %user_id,
-                    username = %username,
-                    credential_policy = %credential_policy,
-                    allowed_ip_ranges = %allowed_ip_ranges,
-                    related_users = %format_related_ids(&[*user_id, *actor_user_id]),
-                    "Updated user"
                 );
             }
             Self::UserDeleted {
@@ -635,178 +493,33 @@ impl AuditEvent {
                     "Changed access role expiry"
                 );
             }
-            Self::AdminRoleCreated {
-                admin_role_id,
-                admin_role_name,
-                permissions,
-                actor_user_id,
-            } => {
-                info!(
-                    target: "audit",
-                    _type = "AdminRoleCreated1",
-                    admin_role_id = %admin_role_id,
-                    admin_role_name = %admin_role_name,
-                    permissions = %json_list(permissions),
-                    related_users = %format_related_ids(&[*actor_user_id]),
-                    related_admin_roles = %format_related_ids(&[*admin_role_id]),
-                    "Created admin role"
-                );
-            }
-            Self::AdminRoleUpdated {
-                admin_role_id,
-                admin_role_name,
-                permissions,
-                actor_user_id,
-            } => {
-                info!(
-                    target: "audit",
-                    _type = "AdminRoleUpdated1",
-                    admin_role_id = %admin_role_id,
-                    admin_role_name = %admin_role_name,
-                    permissions = %json_list(permissions),
-                    related_users = %format_related_ids(&[*actor_user_id]),
-                    related_admin_roles = %format_related_ids(&[*admin_role_id]),
-                    "Updated admin role"
-                );
-            }
-            Self::AdminRoleDeleted {
-                admin_role_id,
-                admin_role_name,
-                actor_user_id,
-            } => {
-                info!(
-                    target: "audit",
-                    _type = "AdminRoleDeleted1",
-                    admin_role_id = %admin_role_id,
-                    admin_role_name = %admin_role_name,
-                    related_users = %format_related_ids(&[*actor_user_id]),
-                    related_admin_roles = %format_related_ids(&[*admin_role_id]),
-                    "Deleted admin role"
-                );
-            }
-            Self::RoleCreated {
-                role_id,
-                role_name,
-                actor_user_id,
-            } => {
-                info!(
-                    target: "audit",
-                    _type = "RoleCreated1",
-                    role_id = %role_id,
-                    role_name = %role_name,
-                    related_users = %format_related_ids(&[*actor_user_id]),
-                    related_access_roles = %format_related_ids(&[*role_id]),
-                    "Created access role"
-                );
-            }
-            Self::RoleUpdated {
-                role_id,
-                role_name,
-                actor_user_id,
-            } => {
-                info!(
-                    target: "audit",
-                    _type = "RoleUpdated1",
-                    role_id = %role_id,
-                    role_name = %role_name,
-                    related_users = %format_related_ids(&[*actor_user_id]),
-                    related_access_roles = %format_related_ids(&[*role_id]),
-                    "Updated access role"
-                );
-            }
-            Self::RoleDeleted {
-                role_id,
-                role_name,
-                actor_user_id,
-            } => {
-                info!(
-                    target: "audit",
-                    _type = "RoleDeleted1",
-                    role_id = %role_id,
-                    role_name = %role_name,
-                    related_users = %format_related_ids(&[*actor_user_id]),
-                    related_access_roles = %format_related_ids(&[*role_id]),
-                    "Deleted access role"
-                );
-            }
-            Self::TargetCreated {
-                target_id,
-                target_name,
-                actor_user_id,
-            } => {
-                info!(
-                    target: "audit",
-                    _type = "TargetCreated1",
-                    target_id = %target_id,
-                    target_name = %target_name,
-                    related_users = %format_related_ids(&[*actor_user_id]),
-                    "Created target"
-                );
-            }
-            Self::TargetUpdated {
-                target_id,
-                target_name,
-                actor_user_id,
-            } => {
-                info!(
-                    target: "audit",
-                    _type = "TargetUpdated1",
-                    target_id = %target_id,
-                    target_name = %target_name,
-                    related_users = %format_related_ids(&[*actor_user_id]),
-                    "Updated target"
-                );
-            }
-            Self::TargetDeleted {
-                target_id,
-                target_name,
-                actor_user_id,
-            } => {
-                info!(
-                    target: "audit",
-                    _type = "TargetDeleted1",
-                    target_id = %target_id,
-                    target_name = %target_name,
-                    related_users = %format_related_ids(&[*actor_user_id]),
-                    "Deleted target"
-                );
-            }
-            Self::TargetRoleAdded {
+            Self::TargetRoleChanged {
+                added,
                 target_id,
                 target_name,
                 role_id,
                 role_name,
+                sync,
                 actor_user_id,
             } => {
+                let (event, message) = if *added {
+                    ("TargetRoleAdded1", "Added access role to target")
+                } else {
+                    ("TargetRoleRemoved1", "Removed access role from target")
+                };
+                let related_users = actor_user_id.map(|id| format_related_ids(&[id]));
                 info!(
                     target: "audit",
-                    _type = "TargetRoleAdded1",
+                    _type = event,
                     target_id = %target_id,
                     target_name = %target_name,
                     role_id = %role_id,
                     role_name = %role_name,
-                    related_users = %format_related_ids(&[*actor_user_id]),
+                    sync_id = sync.as_ref().map(|(id, _)| id.to_string()),
+                    provider = sync.as_ref().map(|(_, provider)| provider.as_str()),
+                    related_users = related_users.as_deref(),
                     related_access_roles = %format_related_ids(&[*role_id]),
-                    "Added access role to target"
-                );
-            }
-            Self::TargetRoleRemoved {
-                target_id,
-                target_name,
-                role_id,
-                role_name,
-                actor_user_id,
-            } => {
-                info!(
-                    target: "audit",
-                    _type = "TargetRoleRemoved1",
-                    target_id = %target_id,
-                    target_name = %target_name,
-                    role_id = %role_id,
-                    role_name = %role_name,
-                    related_users = %format_related_ids(&[*actor_user_id]),
-                    related_access_roles = %format_related_ids(&[*role_id]),
-                    "Removed access role from target"
+                    "{message}"
                 );
             }
             Self::TargetSessionStarted {
@@ -1155,29 +868,31 @@ impl AuditEvent {
                     "Provider synced"
                 );
             }
-            Self::ManagedResourceChanged {
-                sync_id,
-                provider,
+            Self::ResourceChanged {
                 action,
                 kind,
                 id,
                 name,
                 fields,
-                actor_user_id,
+                sync,
+                related_users,
+                related_access_roles,
+                related_admin_roles,
             } => {
-                let related_users = actor_user_id.map(|id| format_related_ids(&[id]));
                 info!(
                     target: "audit",
-                    _type = "ProviderResourceChanged1",
-                    sync_id = %sync_id,
-                    provider = %provider,
+                    _type = "ResourceChanged1",
                     action = %action,
                     kind = %kind,
                     id = %id,
                     name = %name,
                     fields = fields.as_deref(),
+                    sync_id = sync.as_ref().map(|(id, _)| id.to_string()),
+                    provider = sync.as_ref().map(|(_, provider)| provider.as_str()),
                     related_users = related_users.as_deref(),
-                    "Provider sync changed a resource"
+                    related_access_roles = related_access_roles.as_deref(),
+                    related_admin_roles = related_admin_roles.as_deref(),
+                    "Resource changed"
                 );
             }
             Self::ProviderResourceReleased {

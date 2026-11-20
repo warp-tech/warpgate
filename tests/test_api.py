@@ -1408,8 +1408,8 @@ def _poll_logs(
     collect: Callable,
     done: Callable,
 ):
-    """`collect(entries)` of the log, re-read for up to 10 s until `done`
-    accepts it. Log entries reach the database asynchronously."""
+    """Re-reads the log for up to 10 s until `done` accepts `collect(entries)`,
+    and returns that. Log entries reach the database asynchronously"""
     deadline = time.monotonic() + 10
     while True:
         found = collect(admin_client.get_logs(request))
@@ -1650,17 +1650,22 @@ spec:
         assert (head.stats.create, head.stats.update) == (2, 0)
         assert port() == 2222
         assert f"file://{repo}@main" in head.source
-        entries = audited(head.id, 3)
+        entries = audited(head.id, 4)
         assert {(e["_type"], e.get("action"), e.get("kind"), e.get("name")) for e in entries} == {
             ("ProviderSynced1", None, None, None),
-            ("ProviderResourceChanged1", "Create", "Role", name),
-            ("ProviderResourceChanged1", "Create", "Target", name),
+            ("ResourceChanged1", "Create", "Role", name),
+            ("ResourceChanged1", "Create", "Target", name),
+            ("TargetRoleAdded1", None, None, None),
         }
+        [granted] = [e for e in entries if e["_type"] == "TargetRoleAdded1"]
+        assert (granted["target_name"], granted["role_name"]) == (name, name)
+        role_id = next(r.id for r in admin_client.get_roles() if r.name == name)
+        assert granted["related_access_roles"] == f"${role_id}$"
 
         again = admin_client.sync_gitops(sdk.SyncGitopsRequest())
         assert again.id == head.id, "an unchanged sync extends the latest row"
         assert [row.revision for row in admin_client.get_gitops_history().items[:1]] == [second]
-        assert len(audited(head.id, 4)) == 3, "an unchanged sync is not audited again"
+        assert len(audited(head.id, 5)) == 4, "an unchanged sync is not audited again"
 
         webhook = f"https://localhost:{pg_wg.http_port}/@warpgate/api/gitops/webhook"
 
@@ -1694,7 +1699,7 @@ spec:
             time.sleep(0.5)
         assert (latest.status, latest.revision) == ("Applied", third)
         assert port() == 2200
-        [update] = [e for e in audited(latest.id, 2) if e["_type"] == "ProviderResourceChanged1"]
+        [update] = [e for e in audited(latest.id, 2) if e["_type"] == "ResourceChanged1"]
         assert (update["action"], update["kind"], update["name"]) == ("Update", "Target", name)
         assert '"from":2222' in update["fields"] and '"to":2200' in update["fields"]
 
@@ -1825,9 +1830,9 @@ def test_update_target_rejects_empty_name(admin_client: sdk.DefaultApi):
 
 
 def _logged_in_full_admin(url: str, admin_client: sdk.DefaultApi):
-    """Logs in as a new full admin, so the audit entries name an actor: an
-    admin token request has none.
-    Returns the admin and a `call(method, path, json)` helper bound to it."""
+    """Logs in as a new full admin. A request with the admin token has no user
+    in its audit entries.
+    Returns the admin and a `call(method, path, json)` helper for its session"""
     full_admin = {
         k: True if isinstance(v, bool) else v
         for k, v in make_limited_admin_role_payload().items()
@@ -1858,7 +1863,7 @@ def _wait_for_audit_entries(
     key: Callable = lambda values: values.get("_type"),
 ):
     """Polls the log for entries mentioning `tag` until one exists for each
-    `key(values)` in `expected`. Returns them as {key: entry}."""
+    `key(values)` in `expected`. Returns them as {key: entry}"""
     return _poll_logs(
         admin_client,
         sdk.GetLogsRequest(search=tag, limit=100),
@@ -1876,9 +1881,30 @@ def test_admin_changes_to_roles_and_targets_are_audited(
 
     tag = uuid4().hex
     role = call("POST", "/admin/api/roles", {"name": f"audit-role-{tag}"})
-    call("PUT", f"/admin/api/role/{role['id']}", {"name": role["name"]})
+    call("PUT", f"/admin/api/role/{role['id']}", {"name": role["name"], "description": "dbas"})
+    group = call("POST", "/admin/api/target-groups", {"name": f"audit-group-{tag}"})
+    call(
+        "PUT",
+        f"/admin/api/target-groups/{group['id']}",
+        {"name": group["name"], "description": "prod"},
+    )
+    key = call(
+        "POST", "/admin/api/ssh/own-keys/generate", {"label": f"audit-key-{tag}", "kind": "Ed25519"}
+    )
+    call(
+        "PUT",
+        f"/admin/api/ssh/own-keys/{key['id']}",
+        {"label": f"audit-key-renamed-{tag}", "is_default": False},
+    )
+    call("DELETE", f"/admin/api/ssh/own-keys/{key['id']}")
+
     target_body = _ssh_target_request(f"audit-target-{tag}").to_dict()
+    target_body["options"]["auth"] = {"kind": "Password", "password": "old-secret"}
     target = call("POST", "/admin/api/targets", target_body)
+    call("PUT", f"/admin/api/targets/{target['id']}", target_body)
+    target_body["options"]["port"] = 2222
+    target_body["options"]["auth"]["password"] = "new-secret"
+    target_body["group_id"] = group["id"]
     call("PUT", f"/admin/api/targets/{target['id']}", target_body)
     call("POST", f"/admin/api/targets/{target['id']}/roles/{role['id']}")
     call("DELETE", f"/admin/api/targets/{target['id']}/roles/{role['id']}")
@@ -1894,28 +1920,151 @@ def test_admin_changes_to_roles_and_targets_are_audited(
     )
 
     call("DELETE", f"/admin/api/targets/{target['id']}")
+    call("DELETE", f"/admin/api/target-groups/{group['id']}")
     call("DELETE", f"/admin/api/role/{role['id']}")
 
     expected = {
-        "RoleCreated1",
-        "RoleUpdated1",
-        "RoleDeleted1",
-        "TargetCreated1",
-        "TargetUpdated1",
-        "TargetDeleted1",
-        "TargetRoleAdded1",
-        "TargetRoleRemoved1",
-        "AccessRoleExpiryChanged1",
+        ("ResourceChanged1", action, kind)
+        for action in ("Create", "Update", "Delete")
+        for kind in ("Role", "Target", "TargetGroup", "SshClientKey")
+    } | {
+        ("TargetRoleAdded1", None, None),
+        ("TargetRoleRemoved1", None, None),
+        ("AccessRoleExpiryChanged1", None, None),
     }
-    entries = _wait_for_audit_entries(admin_client, tag, expected)
+    entries = _wait_for_audit_entries(
+        admin_client,
+        tag,
+        expected,
+        key=lambda values: (values.get("_type"), values.get("action"), values.get("kind")),
+    )
 
     assert entries.keys() == expected
     assert all(e.username == actor.username for e in entries.values())
-    added = entries["TargetRoleAdded1"].values
+
+    updates = _audited(
+        admin_client, 1, _type="ResourceChanged1", action="Update", id=target["id"]
+    )
+    assert len(updates) == 1, "a save that changes nothing is not audited"
+    fields = {field["path"]: field for field in json.loads(updates[0]["fields"])}
+    assert fields.keys() == {
+        "spec.group",
+        "spec.options.ssh.auth.password",
+        "spec.options.ssh.port",
+    }
+    assert (fields["spec.options.ssh.port"]["from"], fields["spec.options.ssh.port"]["to"]) == (22, 2222)
+    assert fields["spec.group"]["to"] == group["name"]
+    assert "secret" not in updates[0]["fields"]
+
+    created = entries[("ResourceChanged1", "Create", "Target")].values["fields"]
+    assert "secret" not in created
+    created = {field["path"]: field for field in json.loads(created)}
+    assert created["spec.options.ssh.port"] == {"path": "spec.options.ssh.port", "to": 22}
+    assert created["spec.options.ssh.auth.password"]["credential"]
+
+    added = entries[("TargetRoleAdded1", None, None)].values
     assert (added["target_name"], added["role_name"]) == (target["name"], role["name"])
-    expiry_changed = entries["AccessRoleExpiryChanged1"].values
+    expiry_changed = entries[("AccessRoleExpiryChanged1", None, None)].values
     assert expiry_changed["revocation_cleared"] in (True, "true")
     assert expiry_changed["expires_at"].startswith(expiry.isoformat(timespec="seconds")[:19])
+
+
+def test_admin_changes_to_configuration_are_audited(
+    pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
+):
+    actor, call = _logged_in_full_admin(f"https://localhost:{pg_wg.http_port}", admin_client)
+
+    tag = uuid4().hex[:8]
+    ldap_body = sdk.UpdateLdapServerRequest(
+        name=f"audit-ldap-{tag}",
+        host="127.0.0.1",
+        bind_dn="cn=admin,dc=example,dc=org",
+        bind_password="old-secret",
+        auto_link_sso_users=False,
+        description="",
+        enabled=True,
+        port=389,
+        ssh_key_attribute="sshPublicKey",
+        tls_mode=sdk.TlsMode.DISABLED,
+        tls_verify=False,
+        user_filter="(uid={0})",
+        username_attribute=sdk.LdapUsernameAttribute.UID,
+        uuid_attribute="uid",
+    ).to_dict()
+    ldap = call("POST", "/admin/api/ldap-servers", ldap_body)
+    call(
+        "PUT",
+        f"/admin/api/ldap-servers/{ldap['id']}",
+        {**ldap_body, "port": 636, "bind_password": "new-secret"},
+    )
+    call("DELETE", f"/admin/api/ldap-servers/{ldap['id']}")
+
+    backend_body = sdk.SecretBackendRequest(
+        name=f"audit-{tag}",
+        backend_type="vault",
+        address="https://vault.invalid:8200",
+        auth=sdk.SecretBackendAuth(
+            sdk.SecretBackendAuthVaultTokenAuth(method="Token", token="old-secret")
+        ),
+    ).to_dict()
+    backend = call("POST", "/admin/api/secret-backends", backend_body)
+    call(
+        "PUT",
+        f"/admin/api/secret-backends/{backend['id']}",
+        {
+            **backend_body,
+            "address": "https://vault2.invalid:8200",
+            "auth": {"method": "Token", "token": "new-secret"},
+        },
+    )
+    call("DELETE", f"/admin/api/secret-backends/{backend['id']}")
+
+    known_host = call(
+        "POST",
+        "/admin/api/ssh/known-hosts",
+        {
+            "host": f"{tag}.invalid",
+            "port": 22,
+            "key_type": "ecdsa-sha2-nistp256",
+            "key_base64": "AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBKL5C+OCN2hAbPoR+mwG4M402Z0XVDOuV5k7n6zCRIMsgnYiyz6a61Zcw/RRHoQAb7ndqUyk8eAi9gjPEiGq2d0=",
+        },
+    )
+    call("DELETE", f"/admin/api/ssh/known-hosts/{known_host['id']}")
+
+    call("PUT", "/admin/api/parameters", {"banner": f"audit-{tag}"})
+    call("PUT", "/admin/api/parameters", {"banner": ""})
+
+    expected = {
+        ("ResourceChanged1", action, kind)
+        for kind in ("LdapServer", "SecretBackend")
+        for action in ("Create", "Update", "Delete")
+    } | {
+        ("ResourceChanged1", "Create", "KnownHost"),
+        ("ResourceChanged1", "Delete", "KnownHost"),
+        ("ResourceChanged1", "Update", "Parameters"),
+    }
+    entries = _wait_for_audit_entries(
+        admin_client,
+        tag,
+        expected,
+        key=lambda values: (values.get("_type"), values.get("action"), values.get("kind")),
+    )
+
+    assert entries.keys() == expected
+    assert all(e.username == actor.username for e in entries.values())
+
+    def changed(kind: str) -> dict:
+        fields = entries[("ResourceChanged1", "Update", kind)].values["fields"]
+        assert "secret" not in fields
+        return {field["path"]: field for field in json.loads(fields)}
+
+    ldap_fields = changed("LdapServer")
+    assert ldap_fields.keys() == {"spec.bind_password", "spec.port"}
+    assert ldap_fields["spec.bind_password"]["credential"]
+    backend_fields = changed("SecretBackend")
+    assert backend_fields.keys() == {"spec.address", "spec.auth.token"}
+    assert backend_fields["spec.auth.token"]["credential"]
+    assert changed("Parameters").keys() == {"spec.banner"}
 
 
 def test_admin_changes_to_admin_roles_users_and_tokens_are_audited(
@@ -1924,7 +2073,9 @@ def test_admin_changes_to_admin_roles_users_and_tokens_are_audited(
     actor, call = _logged_in_full_admin(f"https://localhost:{pg_wg.http_port}", admin_client)
 
     tag = uuid4().hex
-    admin_role_body = make_limited_admin_role_payload(name=f"audit-admin-role-{tag}")
+    admin_role_body = make_limited_admin_role_payload(
+        name=f"audit-admin-role-{tag}", sessions_view=True
+    )
     admin_role = call("POST", "/admin/api/admin-roles", admin_role_body)
     call(
         "PUT",
@@ -1977,32 +2128,47 @@ def test_admin_changes_to_admin_roles_users_and_tokens_are_audited(
     call("DELETE", f"/api/profile/api-tokens/{token['token']['id']}")
 
     expected = {
-        ("AdminRoleCreated1", None),
-        ("AdminRoleUpdated1", None),
-        ("AdminRoleDeleted1", None),
-        ("UserUpdated1", None),
-        ("CredentialUpdated1", "public_key"),
-        ("CredentialUpdated1", "sso"),
-        ("CredentialUpdated1", "certificate"),
-        ("CredentialCreated1", "api_token"),
-        ("CredentialDeleted1", "api_token"),
+        ("ResourceChanged1", "AdminRole", "Create"),
+        ("ResourceChanged1", "AdminRole", "Update"),
+        ("ResourceChanged1", "AdminRole", "Delete"),
+        ("ResourceChanged1", "User", "Update"),
+        ("CredentialUpdated1", "public_key", None),
+        ("CredentialUpdated1", "sso", None),
+        ("CredentialUpdated1", "certificate", None),
+        ("CredentialCreated1", "api_token", None),
+        ("CredentialDeleted1", "api_token", None),
     }
     entries = _wait_for_audit_entries(
         admin_client,
         tag,
         expected,
-        key=lambda values: (values.get("_type"), values.get("credential_type")),
+        key=lambda values: (
+            values.get("_type"),
+            values.get("kind") or values.get("credential_type"),
+            values.get("action"),
+        ),
     )
 
     assert entries.keys() == expected
     assert all(e.username == actor.username for e in entries.values())
-    assert "users_edit" in json.loads(entries[("AdminRoleUpdated1", None)].values["permissions"])
-    assert "10.0.0.0/8" in entries[("UserUpdated1", None)].values["allowed_ip_ranges"]
+    role_created = json.loads(entries[("ResourceChanged1", "AdminRole", "Create")].values["fields"])
+    granted = {field["path"] for field in role_created if field.get("to") is True}
+    assert granted == {"spec.sessions_view"}
+    role_updated = entries[("ResourceChanged1", "AdminRole", "Update")].values
+    [permission] = json.loads(role_updated["fields"])
+    assert (permission["path"], permission["to"]) == ("spec.users_edit", True)
+    updated = entries[("ResourceChanged1", "User", "Update")].values
+    assert updated["id"] == user.id
+    [ranges] = json.loads(updated["fields"])
+    assert (ranges["path"], ranges["to"]) == ("spec.allowed_ip_ranges", ["10.0.0.0/8"])
     assert (
-        entries[("CredentialUpdated1", "certificate")].values["credential_name"]
+        entries[("CredentialUpdated1", "certificate", None)].values["credential_name"]
         == f"cert-renamed-{tag}"
     )
-    assert entries[("CredentialCreated1", "api_token")].values["credential_name"] == f"token-{tag}"
+    assert (
+        entries[("CredentialCreated1", "api_token", None)].values["credential_name"]
+        == f"token-{tag}"
+    )
 
 
 HTTP_HEADER_SECRET = "Bearer s3cr3t-upstream"

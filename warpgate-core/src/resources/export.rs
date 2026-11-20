@@ -120,7 +120,8 @@ mod tests {
                 },
             )
             .await
-            .unwrap();
+            .unwrap()
+            .skip_audit();
         }
 
         let yaml = unmanaged(&db).await.unwrap();
@@ -141,7 +142,8 @@ mod tests {
         ] {
             targets::create(&db, Actor::Admin, &target(name, json!({ "ssh": ssh })))
                 .await
-                .unwrap();
+                .unwrap()
+                .skip_audit();
         }
 
         let yaml = unmanaged(&db).await.unwrap();

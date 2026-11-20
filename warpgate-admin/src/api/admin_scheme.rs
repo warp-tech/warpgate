@@ -9,6 +9,9 @@ use poem_openapi::SecurityScheme;
 use poem_openapi::auth::ApiKey;
 use warpgate_common::{AdminPermission, AdminPermissionSet, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
+use warpgate_core::logging::{AuditEvent, CredentialChange, CredentialChangedVia};
+use warpgate_core::resources::audit::{Audited, ChangedBy, Unaudited};
+use warpgate_db_entities::User;
 
 use super::common::{admin_permission_set, user_admin_permission_set};
 
@@ -113,6 +116,33 @@ impl AdminContext {
     /// Require a specific permission, yielding a [`PermissionGranted`] proof or a 403.
     pub(crate) const fn require(&self, permission: AdminPermission) -> Result<(), WarpgateError> {
         self.access().require(permission)
+    }
+
+    pub(crate) const fn changed_by(&self) -> ChangedBy {
+        ChangedBy::Admin(self.access().ctx.auth.user_id())
+    }
+
+    pub(crate) fn audit_credential(
+        &self,
+        change: CredentialChange,
+        credential_type: &str,
+        credential_name: Option<&str>,
+        user: &User::Model,
+    ) {
+        AuditEvent::CredentialChanged {
+            change,
+            credential_type: credential_type.to_owned(),
+            credential_name: credential_name.map(str::to_owned),
+            via: CredentialChangedVia::Admin,
+            user_id: user.id,
+            username: user.username.clone(),
+            actor_user_id: self.auth.user_id(),
+        }
+        .emit();
+    }
+
+    pub(crate) async fn audited<M: Audited>(&self, write: Unaudited<M>) -> M {
+        write.audited(&self.services().db, self.changed_by()).await
     }
 }
 

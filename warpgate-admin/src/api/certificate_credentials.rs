@@ -8,7 +8,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
 use warpgate_common::{AdminPermission, UserId, WarpgateError};
-use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
+use warpgate_core::logging::CredentialChange;
 use warpgate_db_entities::{CertificateCredential, CertificateRevocation, User};
 
 use super::{AdminContext, guard_user_mutation};
@@ -153,15 +153,12 @@ impl ListApi {
         .map_err(WarpgateError::from)?;
 
         let credential_name = body.label.clone();
-        AuditEvent::CredentialCreated {
-            credential_type: "certificate".to_string(),
-            credential_name: Some(credential_name),
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username: user.username.clone(),
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        admin.audit_credential(
+            CredentialChange::Created,
+            "certificate",
+            Some(&credential_name),
+            &user,
+        );
 
         Ok(IssueCertificateCredentialResponse::Issued(Json(
             IssuedCertificateCredential {
@@ -217,15 +214,12 @@ impl DetailApi {
         am.label = Set(body.label.clone());
         let model = am.update(db).await?;
 
-        AuditEvent::CredentialUpdated {
-            credential_type: "certificate".to_string(),
-            credential_name: Some(model.label.clone()),
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username: user.username,
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        admin.audit_credential(
+            CredentialChange::Updated,
+            "certificate",
+            Some(&model.label),
+            &user,
+        );
 
         Ok(UpdateCertificateCredentialResponse::Updated(Json(
             model.into(),
@@ -273,15 +267,12 @@ impl DetailApi {
             return Ok(RevokeCertificateCredentialResponse::NotFound);
         };
 
-        AuditEvent::CredentialDeleted {
-            credential_type: "certificate".to_string(),
-            credential_name: Some(credential_name.clone()),
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username: user.username,
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        admin.audit_credential(
+            CredentialChange::Deleted,
+            "certificate",
+            Some(&credential_name),
+            &user,
+        );
 
         Ok(RevokeCertificateCredentialResponse::Revoked)
     }

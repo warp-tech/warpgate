@@ -8,7 +8,6 @@ use warpgate_common::{
     WarpgateError,
 };
 use warpgate_common_http::errors::invalid_field;
-use warpgate_core::logging::AuditEvent;
 use warpgate_core::resources::roles::{self as store, RoleDataRequest};
 use warpgate_core::resources::{Actor, ResourceError};
 use warpgate_db_entities::{Role, Target, User};
@@ -69,15 +68,9 @@ impl ListApi {
         admin.require(AdminPermission::AccessRolesCreate)?;
 
         match store::create(&admin.services().db, Actor::Admin, &body).await {
-            Ok(role) => {
-                AuditEvent::RoleCreated {
-                    role_id: role.id,
-                    role_name: role.name.clone(),
-                    actor_user_id: admin.auth.user_id(),
-                }
-                .emit();
-                Ok(CreateRoleResponse::Created(Json(role.into())))
-            }
+            Ok(role) => Ok(CreateRoleResponse::Created(Json(
+                admin.audited(role).await.into(),
+            ))),
             Err(ResourceError::EmptyName) => Ok(CreateRoleResponse::BadRequest(invalid_field(
                 "name",
                 "role name is empty",
@@ -180,15 +173,9 @@ impl DetailApi {
         admin.require(AdminPermission::AccessRolesEdit)?;
 
         match store::update(&admin.services().db, Actor::Admin, id.0, &body).await {
-            Ok(role) => {
-                AuditEvent::RoleUpdated {
-                    role_id: role.id,
-                    role_name: role.name.clone(),
-                    actor_user_id: admin.auth.user_id(),
-                }
-                .emit();
-                Ok(UpdateRoleResponse::Ok(Json(role.into())))
-            }
+            Ok(role) => Ok(UpdateRoleResponse::Ok(Json(
+                admin.audited(role).await.into(),
+            ))),
             Err(ResourceError::EmptyName) => {
                 warn!("Rejecting request: role name is empty");
                 Ok(UpdateRoleResponse::BadRequest)
@@ -214,12 +201,7 @@ impl DetailApi {
 
         match store::delete(&admin.services().db, Actor::Admin, id.0).await {
             Ok(role) => {
-                AuditEvent::RoleDeleted {
-                    role_id: role.id,
-                    role_name: role.name,
-                    actor_user_id: admin.auth.user_id(),
-                }
-                .emit();
+                admin.audited(role).await;
                 Ok(DeleteRoleResponse::Deleted)
             }
             Err(ResourceError::NotFound) => Ok(DeleteRoleResponse::NotFound),

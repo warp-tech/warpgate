@@ -16,6 +16,9 @@
     import { firstBy } from 'thenby'
     import AccessRoleBadge from './AccessRoleBadge.svelte'
     import AdminRoleBadge from './AdminRoleBadge.svelte'
+    import ResourceChangeEntry, {
+        type ResourceChanged1,
+    } from './ResourceChangeEntry.svelte'
     import TargetBadge from './TargetBadge.svelte'
     import UserBadge from './UserBadge.svelte'
 
@@ -444,6 +447,7 @@
         | KubernetesPodCreated1
         | KubernetesPodUpdated1
         | KubernetesUnknownRequest1
+        | ResourceChanged1
 
     function richLogType(entry: LogEntry): string {
         return String(entry.values?._type ?? '').replace(/^"|"$/g, '')
@@ -473,6 +477,7 @@
         'KubernetesPodCreated1',
         'KubernetesPodUpdated1',
         'KubernetesUnknownRequest1',
+        'ResourceChanged1',
     ])
 
     const credentialChangeWording = {
@@ -480,12 +485,6 @@
         CredentialUpdated1: ['Updated', 'of'],
         CredentialDeleted1: ['Removed', 'from'],
     } as const
-
-    // Generic rows hide `username`, which is the subject in these
-    const userSubjectLogTypes: ReadonlySet<string> = new Set([
-        'UserUpdated1',
-        'UserLdapLinkChanged1',
-    ])
 
     function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
         return richLogTypes.has(richLogType(entry))
@@ -806,6 +805,13 @@
                                             </span>
                                         {/if}
                                     </div>
+                                {:else if richEntry?._type ===
+                                    'ResourceChanged1'}
+                                    <div class="rich-entry">
+                                        <ResourceChangeEntry
+                                            entry={richEntry}
+                                        />
+                                    </div>
                                 {:else if richEntry?._type === 'TicketCreated1'}
                                     <div class="rich-entry">
                                         Created ticket for
@@ -1041,9 +1047,9 @@
                                     <span class="text">
                                         {item.text}
                                     </span>
-                                    {#if userSubjectLogTypes.has(
-                                        richLogType(item),
-                                    )}
+                                    <!-- Generic rows hide `username`, which is the changed user here -->
+                                    {#if richLogType(item) ===
+                                        'UserLdapLinkChanged1'}
                                         <UserBadge
                                             id={String(item.values?.user_id)}
                                             name={String(item.values?.username)}
