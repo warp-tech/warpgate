@@ -423,7 +423,7 @@ mod tests {
 
         set_config_migration_values(ConfigMigrationValues::default());
         let dir = tempfile::tempdir().unwrap();
-        let db = connect_to_sqlite(&dir.path().join("db.sqlite3"))
+        let db = connect_to_sqlite(dir.path().join("db.sqlite3").as_path())
             .await
             .unwrap();
         migrate_database(&db).await.unwrap();
