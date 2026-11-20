@@ -11,6 +11,7 @@ use warpgate_common::{AdminPermission, UserId, WarpgateError};
 use warpgate_core::logging::CredentialChange;
 use warpgate_db_entities::{CertificateCredential, CertificateRevocation, User};
 
+use super::common::audit_credential;
 use super::{AdminContext, guard_user_mutation};
 
 fn certificate_fingerprint(certificate_pem: &str) -> Result<String, WarpgateError> {
@@ -153,7 +154,8 @@ impl ListApi {
         .map_err(WarpgateError::from)?;
 
         let credential_name = body.label.clone();
-        admin.audit_credential(
+        audit_credential(
+            &admin,
             CredentialChange::Created,
             "certificate",
             Some(&credential_name),
@@ -214,7 +216,8 @@ impl DetailApi {
         am.label = Set(body.label.clone());
         let model = am.update(db).await?;
 
-        admin.audit_credential(
+        audit_credential(
+            &admin,
             CredentialChange::Updated,
             "certificate",
             Some(&model.label),
@@ -267,7 +270,8 @@ impl DetailApi {
             return Ok(RevokeCertificateCredentialResponse::NotFound);
         };
 
-        admin.audit_credential(
+        audit_credential(
+            &admin,
             CredentialChange::Deleted,
             "certificate",
             Some(&credential_name),

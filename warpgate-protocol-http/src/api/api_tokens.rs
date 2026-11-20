@@ -11,7 +11,7 @@ use warpgate_core::logging::CredentialChange;
 use warpgate_db_entities::ApiToken;
 
 use crate::api::auth_scheme::{FullUser, WebSessionUser};
-use crate::api::credentials::audit_own_credential;
+use crate::api::common::audit_own_credential;
 
 pub struct Api;
 

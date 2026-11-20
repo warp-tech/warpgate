@@ -7,6 +7,7 @@ use warpgate_common::{AdminPermission, UserId, UserSsoCredential, WarpgateError}
 use warpgate_core::logging::CredentialChange;
 use warpgate_db_entities::{SsoCredential, User};
 
+use super::common::audit_credential;
 use super::{AdminContext, guard_user_mutation};
 
 #[derive(Object)]
@@ -121,7 +122,8 @@ impl ListApi {
         };
 
         let credential_name = body.email.clone();
-        admin.audit_credential(
+        audit_credential(
+            &admin,
             CredentialChange::Created,
             "sso",
             Some(&credential_name),
@@ -181,7 +183,13 @@ impl DetailApi {
             return Ok(UpdateSsoCredentialResponse::NotFound);
         };
 
-        admin.audit_credential(CredentialChange::Updated, "sso", Some(&model.email), &user);
+        audit_credential(
+            &admin,
+            CredentialChange::Updated,
+            "sso",
+            Some(&model.email),
+            &user,
+        );
 
         Ok(UpdateSsoCredentialResponse::Updated(Json(model.into())))
     }
@@ -218,7 +226,8 @@ impl DetailApi {
 
         role.delete(db).await?;
 
-        admin.audit_credential(
+        audit_credential(
+            &admin,
             CredentialChange::Deleted,
             "sso",
             Some(&credential_name),

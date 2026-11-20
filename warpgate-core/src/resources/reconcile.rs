@@ -259,6 +259,8 @@ trait Store {
     type Row: Audited;
     type Data;
 
+    fn id(row: &Self::Row) -> Id<Self>;
+
     async fn create<C: ConnectionTrait>(
         db: &C,
         actor: Actor,
@@ -283,6 +285,10 @@ macro_rules! store {
             type Entity = $entity::Entity;
             type Row = $entity::Model;
             type Data = $data;
+
+            fn id(row: &Self::Row) -> Id<Self> {
+                row.id
+            }
 
             async fn create<C: ConnectionTrait>(
                 db: &C,
@@ -318,6 +324,10 @@ impl Store for SshClientKeySpec {
     type Row = SshClientKey::Model;
     type Data = (SshClientKeyDataRequest, KeyMaterial);
 
+    fn id(row: &Self::Row) -> Id<Self> {
+        row.id
+    }
+
     async fn create<C: ConnectionTrait>(
         db: &C,
         actor: Actor,
@@ -349,7 +359,7 @@ impl<C: ConnectionTrait> Write<'_, C> {
             Some(id) => S::update(self.db, self.actor, id, data).await?,
         };
         let (row, entry) = write.deferred(self.db).await;
-        Ok((Id::<S>::from_uuid(row.subject().id()), entry))
+        Ok((S::id(&row), entry))
     }
 
     async fn group(

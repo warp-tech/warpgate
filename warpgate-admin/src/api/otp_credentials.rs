@@ -7,6 +7,7 @@ use warpgate_common::{AdminPermission, UserId, UserTotpCredential, WarpgateError
 use warpgate_core::logging::CredentialChange;
 use warpgate_db_entities::{OtpCredential, User};
 
+use super::common::audit_credential;
 use super::{AdminContext, guard_user_mutation};
 
 #[derive(Object)]
@@ -105,7 +106,7 @@ impl ListApi {
         };
         user.clone().require_otp_in_policy(db).await?;
 
-        admin.audit_credential(CredentialChange::Created, "otp", None, &user);
+        audit_credential(&admin, CredentialChange::Created, "otp", None, &user);
 
         Ok(CreateOtpCredentialResponse::Created(Json(object.into())))
     }
@@ -153,7 +154,7 @@ impl DetailApi {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
-        admin.audit_credential(CredentialChange::Deleted, "otp", None, &user);
+        audit_credential(&admin, CredentialChange::Deleted, "otp", None, &user);
 
         Ok(DeleteCredentialResponse::Deleted)
     }

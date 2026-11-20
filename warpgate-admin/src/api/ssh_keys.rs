@@ -15,6 +15,7 @@ use warpgate_core::resources::{Actor, ResourceError};
 use warpgate_db_entities::SshClientKey;
 
 use super::AdminContext;
+use super::common::audited;
 
 pub struct Api;
 
@@ -263,7 +264,7 @@ impl Api {
         };
         match ssh_client_keys::update(&admin.services().db, Actor::Admin, id.0, &data, None).await {
             Ok(key) => Ok(UpdateSSHClientKeyResponse::Ok(Json(
-                admin.audited(key).await.into(),
+                audited(&admin, key).await.into(),
             ))),
             Err(ResourceError::EmptyName) => Ok(UpdateSSHClientKeyResponse::BadRequest(
                 bad_request("The label is empty"),
@@ -313,7 +314,7 @@ impl Api {
 
         match ssh_client_keys::delete(&admin.services().db, Actor::Admin, id.0).await {
             Ok(key) => {
-                admin.audited(key).await;
+                audited(&admin, key).await;
                 Ok(DeleteSSHClientKeyResponse::Deleted)
             }
             Err(err @ ResourceError::LastClientKey) => Ok(DeleteSSHClientKeyResponse::BadRequest(
@@ -353,7 +354,7 @@ async fn created(
 ) -> Result<CreateSSHClientKeyResponse, WarpgateError> {
     match result {
         Ok(key) => Ok(CreateSSHClientKeyResponse::Created(Json(
-            admin.audited(key).await.into(),
+            audited(admin, key).await.into(),
         ))),
         Err(ResourceError::KeyTaken) => Ok(CreateSSHClientKeyResponse::Conflict(Json(
             "This key is already imported".into(),

@@ -10,6 +10,7 @@ use warpgate_common::{
 use warpgate_core::logging::CredentialChange;
 use warpgate_db_entities::{PasswordCredential, User};
 
+use super::common::audit_credential;
 use super::{AdminContext, guard_user_mutation};
 
 #[derive(Object)]
@@ -112,7 +113,7 @@ impl ListApi {
             return Ok(CreatePasswordCredentialResponse::NotFound);
         };
 
-        admin.audit_credential(CredentialChange::Created, "password", None, &user);
+        audit_credential(&admin, CredentialChange::Created, "password", None, &user);
 
         Ok(CreatePasswordCredentialResponse::Created(Json(
             object.into(),
@@ -162,7 +163,7 @@ impl DetailApi {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
-        admin.audit_credential(CredentialChange::Deleted, "password", None, &user);
+        audit_credential(&admin, CredentialChange::Deleted, "password", None, &user);
 
         Ok(DeleteCredentialResponse::Deleted)
     }

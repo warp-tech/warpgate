@@ -11,39 +11,21 @@ use sea_orm::{
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::{
-    PasswordPolicy, PasswordPolicyViolation, User, UserId, UserPasswordCredential,
+    PasswordPolicy, PasswordPolicyViolation, User, UserPasswordCredential,
     UserRequireCredentialsPolicy, WarpgateError, validate_password,
 };
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
-use warpgate_core::logging::{AuditEvent, CredentialChange, CredentialChangedVia};
+use warpgate_core::logging::CredentialChange;
 use warpgate_db_entities::Parameters::MfaEnforcement;
 use warpgate_db_entities::{
     self as entities, CertificateCredential, PasswordCredential, PublicKeyCredential,
 };
 
 use crate::api::auth_scheme::{FullUser, WebSessionUser};
+use crate::api::common::audit_own_credential;
 use crate::common::endpoint_auth;
 
 pub struct Api;
-
-pub(crate) fn audit_own_credential(
-    change: CredentialChange,
-    credential_type: &str,
-    credential_name: Option<&str>,
-    user_id: UserId,
-    username: &str,
-) {
-    AuditEvent::CredentialChanged {
-        change,
-        credential_type: credential_type.to_owned(),
-        credential_name: credential_name.map(str::to_owned),
-        via: CredentialChangedVia::SelfService,
-        user_id,
-        username: username.to_owned(),
-        actor_user_id: user_id,
-    }
-    .emit();
-}
 
 #[derive(Enum)]
 enum PasswordState {

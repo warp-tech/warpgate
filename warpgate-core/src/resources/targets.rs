@@ -14,14 +14,17 @@ use warpgate_db_entities::{
     KnownHost, Role, SshClientKey, Target, TargetGroup, TargetRoleAssignment, TargetSession,
     Ticket, TicketRequest,
 };
-use warpgate_resources::{Comparable, ComparableValues, OptionReferences, ResourceKind, Row, TargetSpec};
+use warpgate_resources::{
+    Comparable, ComparableValues, OptionReferences, ResourceKind, Row, TargetSpec,
+};
 
-use super::audit::{Audited, Subject, Unaudited};
+use super::audit::{Audited, ChangedBy, Subject, Unaudited};
 use super::{
     Actor, AdmittedSessions, OwnedEntity, ResourceError, check_name, name_taken, names_of,
     reveal_inline,
 };
 use crate::db::is_unique_violation;
+use crate::logging::AuditEvent;
 
 impl OwnedEntity for Target::Entity {
     type Id = TargetId;
@@ -145,7 +148,10 @@ impl Audited for Target::Model {
         self.name.clone()
     }
 
-    async fn compared<C: ConnectionTrait>(&self, db: &C) -> Result<ComparableValues, WarpgateError> {
+    async fn compared<C: ConnectionTrait>(
+        &self,
+        db: &C,
+    ) -> Result<ComparableValues, WarpgateError> {
         let target = TargetConfig::try_from(self.clone())?;
         let names = Names::referenced_by(db, &[&target]).await?;
         // A role assignment has a log entry of its own
@@ -246,6 +252,22 @@ pub struct RoleAssignmentChange {
     pub(super) target: Target::Model,
     pub(super) role: Role::Model,
     pub(super) added: bool,
+}
+
+impl RoleAssignmentChange {
+    pub fn audit(&self, by: ChangedBy) {
+        let (sync, actor_user_id) = by.origin();
+        AuditEvent::TargetRoleChanged {
+            added: self.added,
+            target_id: self.target.id,
+            target_name: self.target.name.clone(),
+            role_id: self.role.id,
+            role_name: self.role.name.clone(),
+            sync,
+            actor_user_id,
+        }
+        .emit();
+    }
 }
 
 /// The rows of an assignment that `actor` may change. Role assignments have

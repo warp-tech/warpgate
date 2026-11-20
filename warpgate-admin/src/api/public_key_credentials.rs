@@ -10,6 +10,7 @@ use warpgate_common::{AdminPermission, UserId, UserPublicKeyCredential, Warpgate
 use warpgate_core::logging::CredentialChange;
 use warpgate_db_entities::{PublicKeyCredential, User};
 
+use super::common::audit_credential;
 use super::{AdminContext, guard_user_mutation};
 
 async fn check_user_ldap_linked(
@@ -170,7 +171,8 @@ impl ListApi {
         .map_err(WarpgateError::from)?;
 
         let credential_name = body.label.clone();
-        admin.audit_credential(
+        audit_credential(
+            &admin,
             CredentialChange::Created,
             "public_key",
             Some(&credential_name),
@@ -244,7 +246,8 @@ impl DetailApi {
             return Ok(UpdatePublicKeyCredentialResponse::NotFound);
         };
 
-        admin.audit_credential(
+        audit_credential(
+            &admin,
             CredentialChange::Updated,
             "public_key",
             Some(&model.label),
@@ -291,7 +294,8 @@ impl DetailApi {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
-        admin.audit_credential(
+        audit_credential(
+            &admin,
             CredentialChange::Deleted,
             "public_key",
             Some(&credential_name),

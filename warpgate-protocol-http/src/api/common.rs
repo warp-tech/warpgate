@@ -6,11 +6,12 @@ use tracing::info;
 use uuid::Uuid;
 use warpgate_admin::api::cluster_proxy::{Owner, forward_websocket};
 use warpgate_common::{
-    Protocol, TargetId, TargetOptions, UserSessionId, WarpgateConfig, WarpgateError,
+    Protocol, TargetId, TargetOptions, UserId, UserSessionId, WarpgateConfig, WarpgateError,
 };
 use warpgate_common_http::auth::{
     AuthenticatedRequestContext, FullUserAuthorization, web_reauth_required,
 };
+use warpgate_core::logging::{AuditEvent, CredentialChange, CredentialChangedVia};
 use warpgate_core::{ConfigProvider, TargetAuthorization, authorize_for_target};
 use warpgate_db_entities as entities;
 
@@ -36,6 +37,25 @@ pub fn emit_unknown_authentication_failed_event(
         reason = %reason,
         "Authentication failed",
     );
+}
+
+pub fn audit_own_credential(
+    change: CredentialChange,
+    credential_type: &str,
+    credential_name: Option<&str>,
+    user_id: UserId,
+    username: &str,
+) {
+    AuditEvent::CredentialChanged {
+        change,
+        credential_type: credential_type.to_owned(),
+        credential_name: credential_name.map(str::to_owned),
+        via: CredentialChangedVia::SelfService,
+        user_id,
+        username: username.to_owned(),
+        actor_user_id: user_id,
+    }
+    .emit();
 }
 
 pub fn local_logout_disabled(session: &Session, config: &WarpgateConfig) -> bool {

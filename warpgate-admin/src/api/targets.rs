@@ -14,6 +14,7 @@ use warpgate_db_entities::Target::fuzzy_filter_targets;
 use warpgate_db_entities::{KnownHost, Role, Target, TargetGroup};
 
 use super::AdminContext;
+use super::common::audited;
 
 pub(crate) fn maybe_redacted_target(
     admin: &AdminContext,
@@ -89,7 +90,7 @@ impl ListApi {
         match store::create(&admin.services().db, Actor::Admin, &body).await {
             Ok(target) => Ok(CreateTargetResponse::Created(Json(maybe_redacted_target(
                 &admin,
-                admin.audited(target).await,
+                audited(&admin, target).await,
             )?))),
             Err(ResourceError::EmptyName) => Ok(CreateTargetResponse::BadRequest(invalid_field(
                 "name",
@@ -195,7 +196,7 @@ impl DetailApi {
 
         let services = admin.services();
         let target = match store::update(&services.db, Actor::Admin, id.0, &body).await {
-            Ok(target) => admin.audited(target).await,
+            Ok(target) => audited(&admin, target).await,
             Err(ResourceError::EmptyName) => {
                 warn!("Rejecting request: target name is empty");
                 return Ok(UpdateTargetResponse::BadRequest);
@@ -242,7 +243,7 @@ impl DetailApi {
         let services = admin.services();
         match store::delete(&services.db, Actor::Admin, id.0).await {
             Ok((target, admitted)) => {
-                admin.audited(target).await;
+                audited(&admin, target).await;
                 services.close_admitted_sessions(admitted).await?;
                 Ok(DeleteTargetResponse::Deleted)
             }

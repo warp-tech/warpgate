@@ -17,7 +17,6 @@ pub use warpgate_resources::ComparableValues;
 use warpgate_resources::ResourceKind;
 
 use super::OwnedEntity;
-use super::targets::RoleAssignmentChange;
 use crate::logging::{AuditEvent, format_related_ids};
 
 #[derive(Clone, Copy, Debug)]
@@ -33,7 +32,7 @@ pub enum ChangedBy {
 
 impl ChangedBy {
     /// Sync ID with the provider's label, and the acting admin
-    fn origin(self) -> (Option<(Uuid, String)>, Option<UserId>) {
+    pub(super) fn origin(self) -> (Option<(Uuid, String)>, Option<UserId>) {
         match self {
             Self::Admin(user) => (None, Some(user)),
             Self::Sync {
@@ -66,12 +65,6 @@ impl Subject {
     pub fn of<E: OwnedEntity>(id: E::Id) -> Self {
         Self::Resource(E::KIND, id.uuid())
     }
-
-    pub const fn id(self) -> Uuid {
-        match self {
-            Self::Resource(_, id) | Self::Row(_, id) => id,
-        }
-    }
 }
 
 /// A row that the audit log can describe
@@ -100,7 +93,10 @@ pub fn columns<M: Serialize>(row: &M, redacted: &M) -> Result<ComparableValues, 
         }
         Ok::<_, WarpgateError>(value)
     };
-    Ok(ComparableValues::redacting(&columns(row)?, &columns(redacted)?))
+    Ok(ComparableValues::redacting(
+        &columns(row)?,
+        &columns(redacted)?,
+    ))
 }
 
 /// A write that isn't in the audit log yet. The written row is reachable
@@ -303,22 +299,6 @@ impl ResourceChange {
     }
 }
 
-impl RoleAssignmentChange {
-    pub fn audit(&self, by: ChangedBy) {
-        let (sync, actor_user_id) = by.origin();
-        AuditEvent::TargetRoleChanged {
-            added: self.added,
-            target_id: self.target.id,
-            target_name: self.target.name.clone(),
-            role_id: self.role.id,
-            role_name: self.role.name.clone(),
-            sync,
-            actor_user_id,
-        }
-        .emit();
-    }
-}
-
 /// The compared fields of a user. Users have no spec
 #[derive(Serialize)]
 struct UserFields {
@@ -337,7 +317,10 @@ impl Audited for User::Model {
         self.username.clone()
     }
 
-    async fn compared<C: ConnectionTrait>(&self, _db: &C) -> Result<ComparableValues, WarpgateError> {
+    async fn compared<C: ConnectionTrait>(
+        &self,
+        _db: &C,
+    ) -> Result<ComparableValues, WarpgateError> {
         let user = UserConfig::try_from(self.clone())?;
         Ok(ComparableValues::plain(&UserFields {
             description: user.description,
@@ -359,7 +342,10 @@ impl Audited for AdminRole::Model {
         self.name.clone()
     }
 
-    async fn compared<C: ConnectionTrait>(&self, _db: &C) -> Result<ComparableValues, WarpgateError> {
+    async fn compared<C: ConnectionTrait>(
+        &self,
+        _db: &C,
+    ) -> Result<ComparableValues, WarpgateError> {
         columns(self, self)
     }
 }
@@ -373,7 +359,10 @@ impl Audited for KnownHost::Model {
         self.address()
     }
 
-    async fn compared<C: ConnectionTrait>(&self, _db: &C) -> Result<ComparableValues, WarpgateError> {
+    async fn compared<C: ConnectionTrait>(
+        &self,
+        _db: &C,
+    ) -> Result<ComparableValues, WarpgateError> {
         columns(self, self)
     }
 }

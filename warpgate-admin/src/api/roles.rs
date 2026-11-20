@@ -14,7 +14,7 @@ use warpgate_db_entities::{Role, Target, User};
 
 use super::AdminContext;
 use super::targets::maybe_redacted_target;
-use crate::api::common::case_insensitive_search;
+use crate::api::common::{audited, case_insensitive_search};
 
 #[derive(ApiResponse)]
 enum GetRolesResponse {
@@ -69,7 +69,7 @@ impl ListApi {
 
         match store::create(&admin.services().db, Actor::Admin, &body).await {
             Ok(role) => Ok(CreateRoleResponse::Created(Json(
-                admin.audited(role).await.into(),
+                audited(&admin, role).await.into(),
             ))),
             Err(ResourceError::EmptyName) => Ok(CreateRoleResponse::BadRequest(invalid_field(
                 "name",
@@ -174,7 +174,7 @@ impl DetailApi {
 
         match store::update(&admin.services().db, Actor::Admin, id.0, &body).await {
             Ok(role) => Ok(UpdateRoleResponse::Ok(Json(
-                admin.audited(role).await.into(),
+                audited(&admin, role).await.into(),
             ))),
             Err(ResourceError::EmptyName) => {
                 warn!("Rejecting request: role name is empty");
@@ -201,7 +201,7 @@ impl DetailApi {
 
         match store::delete(&admin.services().db, Actor::Admin, id.0).await {
             Ok(role) => {
-                admin.audited(role).await;
+                audited(&admin, role).await;
                 Ok(DeleteRoleResponse::Deleted)
             }
             Err(ResourceError::NotFound) => Ok(DeleteRoleResponse::NotFound),

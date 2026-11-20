@@ -10,6 +10,7 @@ use warpgate_core::resources::{Actor, ResourceError};
 use warpgate_db_entities::TargetGroup;
 
 use super::AdminContext;
+use super::common::audited;
 
 #[derive(ApiResponse)]
 enum GetTargetGroupsResponse {
@@ -65,7 +66,7 @@ impl ListApi {
 
         match store::create(&admin.services().db, Actor::Admin, &body).await {
             Ok(group) => Ok(CreateTargetGroupResponse::Created(Json(
-                admin.audited(group).await,
+                audited(&admin, group).await,
             ))),
             Err(ResourceError::EmptyName) => Ok(CreateTargetGroupResponse::BadRequest(
                 invalid_field("name", "target group name is empty"),
@@ -162,7 +163,7 @@ impl DetailApi {
 
         match store::update(&admin.services().db, Actor::Admin, id.0, &body).await {
             Ok(group) => Ok(UpdateTargetGroupResponse::Ok(Json(
-                admin.audited(group).await,
+                audited(&admin, group).await,
             ))),
             Err(ResourceError::EmptyName) => {
                 warn!("Rejecting request: target group name is empty");
@@ -193,7 +194,7 @@ impl DetailApi {
 
         match store::delete(&admin.services().db, Actor::Admin, id.0).await {
             Ok(group) => {
-                admin.audited(group).await;
+                audited(&admin, group).await;
                 Ok(DeleteTargetGroupResponse::Deleted)
             }
             Err(ResourceError::NotFound) => Ok(DeleteTargetGroupResponse::NotFound),
