@@ -4,12 +4,13 @@ use tracing::debug;
 
 /// Parse the AWS region from an EKS cluster API URL.
 ///
-/// EKS URLs follow the pattern: `https://<id>.<suffix>.<region>.eks.amazonaws.com`
+/// EKS URLs follow one of two patterns:
+/// - IPv4 clusters: `https://<id>.<suffix>.<region>.eks.amazonaws.com`
+/// - IPv6 clusters (dual-stack endpoint): `https://<id>.<suffix>.eks-cluster.<region>.api.aws`
 pub fn parse_eks_region(url: &str) -> Option<String> {
     let host = url::Url::parse(url).ok()?.host_str()?.to_string();
-    // e.g. ABCD1234.gr7.us-east-1.eks.amazonaws.com
     let parts: Vec<&str> = host.split('.').collect();
-    // Find "eks" and "amazonaws" in the parts
+    // e.g. ABCD1234.gr7.us-east-1.eks.amazonaws.com: the region precedes "eks"
     if let Some(eks_pos) = parts.iter().position(|&p| p == "eks")
         && eks_pos >= 1
     {
@@ -18,6 +19,13 @@ pub fn parse_eks_region(url: &str) -> Option<String> {
         if region.contains('-') {
             return Some(region.to_string());
         }
+    }
+    // e.g. ABCD1234.gr7.eks-cluster.us-east-1.api.aws: the region follows "eks-cluster"
+    if let Some(eks_pos) = parts.iter().position(|&p| p == "eks-cluster")
+        && let Some(region) = parts.get(eks_pos + 1)
+        && region.contains('-')
+    {
+        return Some((*region).to_string());
     }
     None
 }
@@ -89,6 +97,16 @@ mod tests {
             parse_eks_region("https://xyz.sk1.eu-west-2.eks.amazonaws.com"),
             Some("eu-west-2".to_string())
         );
+        // Dual-stack endpoint of an IPv6 cluster
+        assert_eq!(
+            parse_eks_region("https://ABCD1234.yl4.eks-cluster.eu-west-2.api.aws"),
+            Some("eu-west-2".to_string())
+        );
+        assert_eq!(
+            parse_eks_region("https://abcd1234.gr7.eks-cluster.us-east-1.api.aws/"),
+            Some("us-east-1".to_string())
+        );
+        assert_eq!(parse_eks_region("https://xyz.eks-cluster.api.aws"), None);
         assert_eq!(parse_eks_region("https://example.com"), None);
         assert_eq!(parse_eks_region("not-a-url"), None);
     }

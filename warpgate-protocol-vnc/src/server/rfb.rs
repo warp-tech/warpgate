@@ -225,9 +225,8 @@ E485B576625E7EC6F44C42E9A63A3620FFFFFFFFFFFFFFFF";
     /// Decode a fixed-width NUL-terminated C string field. A field with no NUL terminator
     /// (i.e. one that fills the whole width) is malformed — reject it rather than guess.
     fn cstr(bytes: &[u8]) -> Option<String> {
-        let end = bytes.iter().position(|&b| b == 0)?;
-        #[allow(clippy::indexing_slicing, reason = "checked")]
-        Some(String::from_utf8_lossy(&bytes[..end]).into_owned())
+        let (text, _) = bytes.split_once(|&b| b == 0)?;
+        Some(String::from_utf8_lossy(text).into_owned())
     }
 
     fn md5_16(data: &[u8]) -> [u8; 16] {
@@ -269,8 +268,8 @@ where
     let mut pass = vec![0u8; pass_len];
     stream.read_exact(&mut pass).await?;
     Ok((
-        String::from_utf8_lossy(&user).into_owned(),
-        String::from_utf8_lossy(&pass).into_owned(),
+        String::from_utf8_lossy_owned(user),
+        String::from_utf8_lossy_owned(pass),
     ))
 }
 

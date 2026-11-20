@@ -30,8 +30,12 @@ def _url(wg: WarpgateProcess, path: str) -> str:
 
 
 def _set_logo(wg: WarpgateProcess, logo) -> requests.Response:
-    # The SDK drops None fields, so an explicit null has to go out as raw JSON.
-    return _session(wg).put(_url(wg, "/admin/api/parameters"), json={"logo": logo})
+    # Not through the SDK, which refuses an invalid logo before sending it.
+    return _session(wg).put(_url(wg, "/admin/api/parameters/logo"), json={"logo": logo})
+
+
+def _clear_logo(wg: WarpgateProcess) -> requests.Response:
+    return _session(wg).delete(_url(wg, "/admin/api/parameters/logo"))
 
 
 def _info_logo_etag(wg: WarpgateProcess):
@@ -52,9 +56,9 @@ def _assert_round_trip(wg: WarpgateProcess, content_type: str, data: bytes) -> N
 
 @pytest.fixture
 def clean_logo(shared_wg: WarpgateProcess):
-    assert _set_logo(shared_wg, None).status_code == 201
+    assert _clear_logo(shared_wg).status_code == 204
     yield shared_wg
-    assert _set_logo(shared_wg, None).status_code == 201
+    assert _clear_logo(shared_wg).status_code == 204
 
 
 class TestLogo:
@@ -112,7 +116,7 @@ class TestLogo:
     def test_clearing_the_logo(self, clean_logo: WarpgateProcess):
         wg = clean_logo
         _assert_round_trip(wg, "image/png", PNG)
-        assert _set_logo(wg, None).status_code == 201
+        assert _clear_logo(wg).status_code == 204
         assert _info_logo_etag(wg) is None
         assert requests.get(_url(wg, "/api/logo"), verify=False).status_code == 404
 
@@ -130,6 +134,7 @@ class TestLogo:
     @pytest.mark.parametrize(
         "logo",
         [
+            None,
             "",
             "https://example.com/logo.png",
             _data_url("text/html", b"<script></script>"),

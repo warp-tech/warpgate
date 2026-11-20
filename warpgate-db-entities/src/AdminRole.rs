@@ -14,6 +14,8 @@ pub struct Model {
     pub name: String,
     #[sea_orm(column_type = "Text")]
     pub description: String,
+    /// Created by Warpgate itself; cannot be renamed or deleted.
+    pub builtin: bool,
 
     // permissions
     pub targets_create: bool,
@@ -73,6 +75,7 @@ impl From<Model> for warpgate_common::AdminRole {
             id: model.id,
             name: model.name,
             description: model.description,
+            builtin: model.builtin,
             targets_create: model.targets_create,
             targets_edit: model.targets_edit,
             targets_delete: model.targets_delete,

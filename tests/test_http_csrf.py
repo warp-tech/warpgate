@@ -113,6 +113,47 @@ class TestHttpCsrf:
         info = session.get(f"{_url(CONTROL_PLANE, wg.http_port)}/@warpgate/api/info")
         assert info.json()["username"] is None
 
+    def test_bound_target_only_on_its_own_host(self, wg, setup, echo_server_port):
+        cp = _url(CONTROL_PLANE, wg.http_port)
+        target = _url(TARGET_HOST, wg.http_port)
+        with admin_client(cp) as api:
+            unbound = _create_echo_target(api, echo_server_port, setup["role"].id)
+        session = _login(CONTROL_PLANE, wg.http_port, setup["admin"].username)
+
+        def refused(url):
+            resp = session.get(url, allow_redirects=False)
+            return resp.status_code == 307 and resp.headers["Location"] == "/@warpgate"
+
+        # A bound target is not served on the control plane, by name or from
+        # the session.
+        assert refused(f"{cp}/probe?warpgate-target={setup['target'].name}")
+        assert session.get(f"{target}/probe", allow_redirects=False).status_code == 200
+        assert refused(f"{cp}/probe")
+
+        # A bound host serves no other target.
+        assert refused(f"{target}/probe?warpgate-target={unbound.name}")
+        resp = session.get(
+            f"{cp}/probe?warpgate-target={unbound.name}", allow_redirects=False
+        )
+        assert resp.status_code == 200, resp.text
+        assert session.get(f"{target}/probe", allow_redirects=False).status_code == 200
+
+    def test_host_bound_target_is_not_remembered_for_the_main_host(self, wg, setup):
+        session = _login(CONTROL_PLANE, wg.http_port, setup["admin"].username)
+
+        resp = session.get(
+            f"{_url(TARGET_HOST, wg.http_port)}/probe", allow_redirects=False
+        )
+        assert resp.status_code // 100 == 2, resp.text
+
+        resp = session.get(
+            f"{_url(CONTROL_PLANE, wg.http_port)}/probe",
+            headers=NAVIGATION,
+            allow_redirects=False,
+        )
+        assert resp.status_code == 307, resp.text
+        assert resp.headers["Location"] == "/@warpgate"
+
     def test_control_plane_same_origin_allowed(self, wg, setup):
         cp = _url(CONTROL_PLANE, wg.http_port)
         session = _login(CONTROL_PLANE, wg.http_port, setup["admin"].username)
@@ -163,6 +204,14 @@ class TestHttpCsrfMfaGate:
             info = session.get(f"{target}/@warpgate/api/info").json()
             assert info["needs_mfa_setup"] is True
             assert info["control_plane_host"] == CONTROL_PLANE
+
+            # OTP enrolment is refused on a target host.
+            resp = session.post(
+                f"{target}/@warpgate/api/profile/credentials/otp",
+                json={"secret_key": list(range(20))},
+                headers={"Origin": target, "Sec-Fetch-Site": "same-origin"},
+            )
+            assert resp.status_code == 401, resp.text
 
             resp = session.post(
                 f"{cp}/@warpgate/api/profile/credentials/otp",

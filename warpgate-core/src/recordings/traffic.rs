@@ -113,7 +113,7 @@ impl ConnectionRecorder {
         .await?;
         self.write_packet(self.tcp_packet_tx(|b| {
             Ok(b.sequence(self.seq_tx)?
-                .acknowledgment(seq_rx + 1)?
+                .acknowledgment(seq_rx.wrapping_add(1))?
                 .flags(packet::tcp::Flags::ACK)?
                 .build()?
                 .into())
@@ -132,7 +132,7 @@ impl ConnectionRecorder {
         .await?;
         self.write_packet(self.tcp_packet_rx(|b| {
             Ok(b.sequence(self.seq_rx)?
-                .acknowledgment(seq_tx + 1)?
+                .acknowledgment(seq_tx.wrapping_add(1))?
                 .flags(packet::tcp::Flags::ACK)?
                 .build()?
                 .into())
@@ -216,14 +216,14 @@ impl ConnectionRecorder {
             })?,
             self.tcp_packet_rx(|b| {
                 Ok(b.sequence(seq_rx)?
-                    .acknowledgment(seq_tx + 1)?
+                    .acknowledgment(seq_tx.wrapping_add(1))?
                     .flags(packet::tcp::Flags::SYN | packet::tcp::Flags::ACK)?
                     .build()?
                     .into())
             })?,
             self.tcp_packet_tx(|b| {
-                Ok(b.sequence(seq_tx + 1)?
-                    .acknowledgment(seq_rx + 1)?
+                Ok(b.sequence(seq_tx.wrapping_add(1))?
+                    .acknowledgment(seq_rx.wrapping_add(1))?
                     .flags(packet::tcp::Flags::ACK)?
                     .build()?
                     .into())

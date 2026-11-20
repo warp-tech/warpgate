@@ -66,13 +66,17 @@ where
     loop {
         tokio::select! {
             event = events_rx.recv(), if !render.reader_done => {
+                let Some(event) = event else {
+                    render.note_event(None);
+                    bail!("VNC viewer disconnected while viewing banner");
+                };
                 let acknowledged = matches!(
                     event,
-                    Some(ClientEvent::Key { down: true, .. })
+                    ClientEvent::Key { down: true, .. }
                         // Any pressed button; a bare move (empty mask) isn't an acknowledgement.
-                        | Some(ClientEvent::Pointer { buttons: 1.., .. })
+                        | ClientEvent::Pointer { buttons: 1.., .. }
                 );
-                render.note_event(event.as_ref());
+                render.note_event(Some(&event));
                 if acknowledged {
                     return Ok(());
                 }

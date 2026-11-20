@@ -8,7 +8,7 @@ use futures::{SinkExt, StreamExt};
 use poem::IntoResponse;
 use poem::web::websocket::{Message, WebSocket};
 use sea_orm::ActiveValue::Set;
-use sea_orm::sea_query::{Expr, IntoCondition, OnConflict};
+use sea_orm::sea_query::{Expr, ExprTrait, IntoCondition, OnConflict};
 use sea_orm::{ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -18,7 +18,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 use warpgate_ca::{CLUSTER_TLS_SNI_NAME, ClusterTlsIdentity};
 use warpgate_common::http_headers::X_WARPGATE_CLUSTER_NODE;
-use warpgate_common::{NodeId, Protocol, UserSessionId, WarpgateError};
+use warpgate_common::{NodeId, Protocol, UserId, UserSessionId, WarpgateError};
 use warpgate_db_entities::{HttpSession, Node, Parameters, TargetSession, UserSession};
 use warpgate_tls::configure_cluster_tls_connector;
 
@@ -40,7 +40,7 @@ pub enum ClusterNotification {
     SessionApprovalsChanged,
     WebAuthRequested {
         session_id: UserSessionId,
-        user_id: Uuid,
+        user_id: UserId,
     },
 }
 
@@ -385,7 +385,7 @@ async fn end_connection_bound_sessions(
     db: &DatabaseConnection,
     node_filter: impl IntoCondition,
 ) -> Result<Vec<UserSessionId>, WarpgateError> {
-    UserSession::revoke_open_matching(
+    crate::user_sessions::revoke_open_matching(
         db,
         Condition::all()
             .add(node_filter.into_condition())
@@ -400,7 +400,7 @@ async fn end_sessions_without_cookie(
     db: &DatabaseConnection,
 ) -> Result<Vec<UserSessionId>, WarpgateError> {
     let grace_cutoff = OffsetDateTime::now_utc() - SHARED_SESSION_ORPHAN_GRACE;
-    UserSession::revoke_open_matching(
+    crate::user_sessions::revoke_open_matching(
         db,
         Condition::all()
             .add(UserSession::Column::Protocol.eq(Protocol::Http.name()))
@@ -519,7 +519,7 @@ fn non_empty_env(key: &str) -> Option<String> {
 mod tests {
     use sea_orm::ActiveValue::NotSet;
     use sea_orm::Database;
-    use warpgate_common::Protocol;
+    use warpgate_common::{Protocol, TargetId};
     use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
     use warpgate_db_migrations::migrate_database;
 
@@ -538,7 +538,7 @@ mod tests {
             id: Set(warpgate_common::TargetSessionId(id)),
             user_session_id: Set(warpgate_common::UserSessionId(parent)),
             target_snapshot: Set(r#"{"name":"web"}"#.into()),
-            target_id: Set(Uuid::new_v4()),
+            target_id: Set(TargetId(Uuid::new_v4())),
             started: Set(OffsetDateTime::now_utc()),
             ended: Set(None),
             ticket_id: Set(None),
@@ -570,7 +570,7 @@ mod tests {
         UserSession::Entity::insert(UserSession::ActiveModel {
             id: Set(warpgate_common::UserSessionId(id)),
             username: Set(Some("alice".into())),
-            user_id: Set(Some(Uuid::new_v4())),
+            user_id: Set(Some(UserId(Uuid::new_v4()))),
             remote_address: Set("127.0.0.1:1".into()),
             started: Set(started),
             ended: Set(None),
@@ -618,7 +618,7 @@ mod tests {
 
     #[test]
     fn notification_wire_format_is_tagged_by_type() {
-        let user_id = Uuid::new_v4();
+        let user_id = UserId(Uuid::new_v4());
         let msg = ClusterNotification::WebAuthRequested {
             session_id: UserSessionId(Uuid::nil()),
             user_id,
@@ -807,7 +807,7 @@ mod tests {
         target_session(&db, password, None).await;
         let ended = user_session_started(&db, None, Protocol::Ssh, now).await;
         admitted_by(&db, target_session(&db, ended, None).await, expired).await;
-        UserSession::revoke(&db, UserSessionId(ended))
+        crate::user_sessions::revoke(&db, UserSessionId(ended))
             .await
             .unwrap();
 

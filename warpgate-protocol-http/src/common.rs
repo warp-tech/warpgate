@@ -474,7 +474,7 @@ async fn cluster_request_authorization(
     let Some(user_id) = header.to_str().ok().and_then(|s| s.parse::<Uuid>().ok()) else {
         return Ok(None);
     };
-    Ok(User::Entity::find_by_id(user_id)
+    Ok(User::Entity::find_by_id(warpgate_common::UserId(user_id))
         .one(&ctx.services().db)
         .await
         .map_err(poem::error::InternalServerError)?
@@ -648,12 +648,21 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
     };
 
     if let Some(auth) = auth {
-        // additional span to include the session_username for token requests
+        // The outer span takes the user and session from this node's live
+        // session handle. A node that has none for this browser session
+        // still logs both
         let span = match &auth {
             RequestAuthorization::UserToken { username, .. } => {
                 tracing::info_span!("API token", session_username = %username)
             }
-            _ => tracing::Span::none(),
+            RequestAuthorization::Session(auth) => tracing::info_span!(
+                "Session",
+                session = session.get_session_id().map(|id| id.to_string()),
+                session_username = %auth.username(),
+            ),
+            RequestAuthorization::AdminToken | RequestAuthorization::ClusterPeer => {
+                tracing::Span::none()
+            }
         };
         // build context and attach it instead of raw authorization
         let actx = ctx.to_authenticated(auth);

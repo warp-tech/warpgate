@@ -222,7 +222,7 @@ impl Framebuffer {
             }
             DesktopEvent::JpegImage { rect, data } => {
                 // Best-effort: on a decode failure that region stays stale until repainted.
-                if let Some((_, _, rgb)) = decode_jpeg_rgb(data) {
+                if let Some(rgb) = decode_jpeg_rgb(data, rect.width, rect.height) {
                     self.blit_rgb(
                         u32::from(rect.x),
                         u32::from(rect.y),
@@ -355,16 +355,25 @@ pub fn decode_png_rgba(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
 
 /// Decode a JPEG (VNC tight encoding) to RGB. Best-effort: returns `None` on any error so
 /// the recording continues (that framebuffer region is simply left stale until repaint).
-pub fn decode_jpeg_rgb(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
+///
+/// `width` and `height` are the rect's. The JPEG header comes from the target, and the
+/// decoder allocates for the size in it, so any other size is refused before decoding
+pub fn decode_jpeg_rgb(data: &[u8], width: u16, height: u16) -> Option<Vec<u8>> {
     use zune_jpeg::JpegDecoder;
     use zune_jpeg::zune_core::colorspace::ColorSpace;
     use zune_jpeg::zune_core::options::DecoderOptions;
 
-    let options = DecoderOptions::default().jpeg_set_out_colorspace(ColorSpace::RGB);
+    let (width, height) = (usize::from(width), usize::from(height));
+    let options = DecoderOptions::default()
+        .set_max_width(width)
+        .set_max_height(height)
+        .jpeg_set_out_colorspace(ColorSpace::RGB);
     let mut decoder = JpegDecoder::new_with_options(ZCursor::from(data), options);
-    let pixels = decoder.decode().ok()?;
-    let (w, h) = decoder.dimensions()?;
-    Some((w as u32, h as u32, pixels))
+    decoder.decode_headers().ok()?;
+    if decoder.dimensions()? != (width, height) {
+        return None;
+    }
+    decoder.decode().ok()
 }
 
 #[cfg(test)]
@@ -445,6 +454,16 @@ mod tests {
         });
 
         assert_eq!(fb.rgba().get(4..8), Some(&[9u8, 8, 7, 255][..]));
+    }
+
+    #[test]
+    fn decode_jpeg_rgb_is_bound_to_the_rect() {
+        let jpeg = include_bytes!("testdata/2x2.jpg");
+        assert_eq!(decode_jpeg_rgb(jpeg, 2, 2).map(|rgb| rgb.len()), Some(12));
+        assert!(decode_jpeg_rgb(jpeg, 1, 2).is_none());
+        assert!(decode_jpeg_rgb(jpeg, 2, 1).is_none());
+        // A smaller image would under-fill the blit
+        assert!(decode_jpeg_rgb(jpeg, 3, 2).is_none());
     }
 
     #[test]

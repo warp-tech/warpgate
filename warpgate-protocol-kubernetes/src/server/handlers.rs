@@ -21,17 +21,31 @@ use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
+use warpgate_common_http::{UpstreamBody, buffer_response, read_body_limited_with_timeout};
 use warpgate_core::logging::KubernetesAuditSubject;
 use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
 use warpgate_core::{Services, WarpgateServerHandle};
 
-use crate::audit::{StreamOperation, classify_mutating, classify_stream};
+use crate::audit::{
+    PendingRun, StreamOperation, classify_node_run, classify_pod_write, classify_stream,
+};
 use crate::correlator::{AdmittedSession, RequestCorrelator, correlated_authorization};
 use crate::recording::{start_recording_api, start_recording_exec};
 use crate::server::UpstreamClientCache;
 use crate::server::auth::{
     KubernetesIdentity, authenticate_kubernetes_user, create_authenticated_client, unauthorized,
 };
+
+/// The kube-apiserver's hardcoded cap on a write request body (twice etcd's
+/// 1.5 MiB request limit). The apiserver does not apply it to `.../proxy`
+/// subresources; this does.
+const MAX_REQUEST_BODY_BYTES: usize = 3 * 1024 * 1024;
+
+/// Responses up to this size are buffered. Larger ones are streamed and
+/// recorded without their body. The limit equals [`MAX_REQUEST_BODY_BYTES`]
+/// because a write usually returns the object it was sent. It applies to the
+/// body after reqwest has decompressed it.
+const MAX_BUFFERED_RESPONSE_BYTES: usize = 3 * 1024 * 1024;
 
 /// A client-supplied impersonation header (`Impersonate-User`,
 /// `Impersonate-Group`, `Impersonate-Uid`, `Impersonate-Extra-*`). These let a
@@ -290,6 +304,45 @@ fn copy_response_headers(
     builder
 }
 
+/// Streams chunked, watch and follow responses as they arrive and buffers the
+/// rest up to [`MAX_BUFFERED_RESPONSE_BYTES`]. A write's response is buffered
+/// even if it is chunked, and reading it ignores `closed`, so a close can't
+/// truncate a response that fits in the buffer.
+async fn take_response_body(
+    response: reqwest::Response,
+    is_write: bool,
+    query: Option<&str>,
+    closed: &CancellationToken,
+) -> Result<UpstreamBody, WarpgateError> {
+    let is_chunked = response
+        .headers()
+        .get(http::header::TRANSFER_ENCODING)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.eq_ignore_ascii_case("chunked"));
+
+    // watch: used by kubectl to await changes
+    // follow: used by kubectl logs
+    let is_streaming_response = query.is_some_and(|q| {
+        url::form_urlencoded::parse(q.as_bytes())
+            .any(|(k, v)| (k == "watch" || k == "follow") && crate::audit::parse_bool(&v))
+    });
+
+    if !is_write && (is_chunked || is_streaming_response) {
+        return Ok(UpstreamBody::Streamed(response.bytes_stream().boxed()));
+    }
+
+    let read = buffer_response(response, MAX_BUFFERED_RESPONSE_BYTES);
+    Ok(if is_write {
+        read.await
+    } else {
+        closed
+            .run_until_cancelled(read)
+            .await
+            .ok_or(WarpgateError::UserSessionEnded)?
+    }
+    .context("reading kubernetes response")?)
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn _handle_normal_request_inner(
     req: &Request,
@@ -361,10 +414,13 @@ async fn _handle_normal_request_inner(
 
     // Cancel slow uploads when the session closes.
     let body_bytes = closed
-        .run_until_cancelled(body.into_bytes())
+        .run_until_cancelled(read_body_limited_with_timeout(
+            req.headers(),
+            body,
+            MAX_REQUEST_BODY_BYTES,
+        ))
         .await
-        .ok_or(WarpgateError::UserSessionEnded)?
-        .context("reading request body")?;
+        .ok_or(WarpgateError::UserSessionEnded)??;
 
     let mut recorder_opt = match start_recording_api(&admitted.id(), &services.recordings).await {
         Ok(recorder) => recorder,
@@ -409,7 +465,7 @@ async fn _handle_normal_request_inner(
     );
 
     if !body_bytes.is_empty() {
-        request_builder = request_builder.body(body_bytes.to_vec());
+        request_builder = request_builder.body(body_bytes.clone());
     }
 
     // Debug logging for upstream request
@@ -425,34 +481,51 @@ async fn _handle_normal_request_inner(
     // the client learns whether it was applied and an audited one keeps its
     // event. A close before dispatch still refuses it.
     let is_write = !req.method().is_safe();
-    let response = if is_write {
-        if closed.is_cancelled() {
-            return Err(WarpgateError::UserSessionEnded);
-        }
-        request_builder.send().await?
+    if is_write && closed.is_cancelled() {
+        return Err(WarpgateError::UserSessionEnded);
+    }
+
+    // A kubelet `/run` must be audited once it is sent, even if no answer
+    // arrives, so the guard is created before the send.
+    let pending_run = classify_node_run(method, api_path, req.uri().query())
+        .map(|run| PendingRun::new(run, audit_subject));
+
+    let sent = if is_write {
+        request_builder.send().await
     } else {
         closed
             .run_until_cancelled(request_builder.send())
             .await
-            .ok_or(WarpgateError::UserSessionEnded)??
+            .ok_or(WarpgateError::UserSessionEnded)?
     };
 
+    // Audit before a response read error aborts this task.
+    if let Some(write) = classify_pod_write(method, api_path, req.uri().query()) {
+        let content_type = req
+            .headers()
+            .get(http::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok());
+        let status = sent.as_ref().ok().map(|r| r.status().as_u16());
+        for event in write
+            .read(content_type, &body_bytes)
+            .audit_events(audit_subject, status)
+        {
+            event.emit();
+        }
+    }
+
+    let response = sent?;
     let status = response.status();
     let response_headers = response.headers().clone();
+
+    if let Some(run) = pending_run {
+        run.answered(status.as_u16());
+    }
 
     // The cached client's credential may have been rotated or expired upstream;
     // build a fresh one for the next request.
     if status == http::StatusCode::UNAUTHORIZED {
         upstream_clients.remove(&target_id);
-    }
-
-    // Emitted after the response so a refused `kubectl debug` is audited as
-    // clearly as an accepted one, and before the body is consumed so a failure
-    // to read it cannot lose the event.
-    if let Some(operation) = classify_mutating(method, api_path, req.uri().query(), &body_bytes) {
-        for event in operation.audit_events(audit_subject, status.as_u16()) {
-            event.emit();
-        }
     }
 
     debug!(
@@ -463,48 +536,19 @@ async fn _handle_normal_request_inner(
         "Received response from upstream Kubernetes API"
     );
 
-    let (response_body, body_for_recording) = {
-        // k8s uses streaming chunked responses for watch API
-        let transfer_encoding = response_headers
-            .get(poem::http::header::TRANSFER_ENCODING)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or_default()
-            .to_lowercase();
-
-        let query_pairs: Vec<_> = req
-            .uri()
-            .query()
-            .map(|q| url::form_urlencoded::parse(q.as_bytes()).collect())
-            .unwrap_or_default();
-
-        // watch: used by kubectl to await changes
-        // follow: used by kubectl logs
-        let is_streaming_response = query_pairs
-            .iter()
-            .any(|(k, v)| (k == "watch" || k == "follow") && crate::audit::parse_bool(v));
-
-        // A write's response is always read in full, even if it is framed as
-        // chunked, so a close can't cut off its answer.
-        if !is_write && (transfer_encoding == "chunked" || is_streaming_response) {
-            let upstream = response.bytes_stream().map_err(std::io::Error::other);
-            (
-                Body::from_bytes_stream(end_on_close(upstream, closed, handle)),
-                None,
-            )
-        } else {
-            let bytes = if is_write {
-                response.bytes().await
-            } else {
-                closed
-                    .run_until_cancelled(response.bytes())
-                    .await
-                    .ok_or(WarpgateError::UserSessionEnded)?
-            }
-            .context("reading kubernetes response")?;
-
-            (Body::from_bytes(bytes.clone()), Some(bytes.to_vec()))
-        }
-    };
+    // A streamed body is recorded as empty.
+    let (response_body, body_for_recording) =
+        match take_response_body(response, is_write, req.uri().query(), &closed).await? {
+            UpstreamBody::Buffered(bytes) => (Body::from_bytes(bytes.clone()), bytes),
+            UpstreamBody::Streamed(upstream) => (
+                Body::from_bytes_stream(end_on_close(
+                    upstream.map_err(std::io::Error::other),
+                    closed,
+                    handle,
+                )),
+                bytes::Bytes::new(),
+            ),
+        };
 
     // Record the response
     if let Some(ref mut recorder) = recorder_opt
@@ -515,7 +559,7 @@ async fn _handle_normal_request_inner(
                 redacted_headers,
                 &body_bytes,
                 status.as_u16(),
-                body_for_recording.unwrap_or_default().as_ref(),
+                &body_for_recording,
             )
             .await
     {
@@ -628,19 +672,17 @@ async fn _handle_websocket_request_inner(
     };
     let (client_socket, selected_protocol) = match connection {
         Ok(UpstreamWebsocket::Established { socket, protocol }) => (socket, protocol),
-        // Audit before reading the body, then forward the cluster's refusal.
+        // Audit, then forward the cluster's refusal.
         Ok(UpstreamWebsocket::Rejected(response)) => {
             if let Some(operation) = &operation {
                 operation
                     .rejection_event(audit_subject, response.status().as_u16())
                     .emit();
             }
-            let response = tokio::select! {
-                biased;
-                () = closed.cancelled() => bail!("Session closed while reading the Kubernetes websocket refusal"),
-                result = forward_rejected_upstream_response(response) => result?,
-            };
-            return Ok(response.into_response());
+            let mut response = forward_rejected_upstream_response(response);
+            let body = Box::pin(response.take_body().into_bytes_stream());
+            response.set_body(Body::from_bytes_stream(end_on_close(body, closed, handle)));
+            return Ok(response);
         }
         // Transport or invalid-handshake failures have no response to forward.
         Err(error) => {
@@ -795,21 +837,15 @@ enum UpstreamWebsocket {
     Rejected(reqwest::Response),
 }
 
-async fn forward_rejected_upstream_response(
-    response: reqwest::Response,
-) -> anyhow::Result<Response> {
+fn forward_rejected_upstream_response(response: reqwest::Response) -> Response {
     let status = response.status();
-    // The body is re-sent in full, so the upstream framing headers no longer
-    // describe it; Poem sets the length itself.
+    // Poem sets the transfer encoding for the streamed body.
     let mut headers = response.headers().clone();
     headers.remove(http::header::TRANSFER_ENCODING);
-    headers.remove(http::header::CONTENT_LENGTH);
-    let body = response
-        .bytes()
-        .await
-        .context("reading Kubernetes API response")?;
+    let body = response.bytes_stream().map_err(std::io::Error::other);
 
-    Ok(copy_response_headers(Response::builder().status(status), &headers).body(body))
+    copy_response_headers(Response::builder().status(status), &headers)
+        .body(Body::from_bytes_stream(body))
 }
 
 /// Connect before replying downstream so both sides use the selected protocol.
@@ -1129,7 +1165,7 @@ mod tests {
         };
         assert_eq!(response.status(), http::StatusCode::FORBIDDEN);
 
-        let forwarded = forward_rejected_upstream_response(response).await.unwrap();
+        let forwarded = forward_rejected_upstream_response(response);
         assert_eq!(forwarded.status(), http::StatusCode::FORBIDDEN);
         assert_eq!(
             forwarded.headers().get(http::header::CONTENT_TYPE).unwrap(),
@@ -1141,6 +1177,66 @@ mod tests {
         );
 
         server.await.unwrap();
+    }
+
+    fn upstream_response(body: &[u8]) -> reqwest::Response {
+        let chunks: Vec<_> = body
+            .chunks(64 * 1024)
+            .map(|chunk| Ok::<_, std::io::Error>(chunk.to_vec()))
+            .collect();
+        http::Response::new(reqwest::Body::wrap_stream(futures::stream::iter(chunks))).into()
+    }
+
+    fn body_of_len(len: usize) -> Vec<u8> {
+        b"0123456789".iter().copied().cycle().take(len).collect()
+    }
+
+    #[tokio::test]
+    async fn response_within_the_buffer_limit_is_held_in_memory() {
+        use tokio_util::sync::CancellationToken;
+        use warpgate_common_http::UpstreamBody;
+
+        use super::{MAX_BUFFERED_RESPONSE_BYTES, take_response_body};
+
+        let body = body_of_len(MAX_BUFFERED_RESPONSE_BYTES);
+        let taken = take_response_body(
+            upstream_response(&body),
+            false,
+            None,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        let UpstreamBody::Buffered(taken) = taken else {
+            panic!("a response within the limit must be buffered, so that it is recorded");
+        };
+        assert_eq!(taken, body);
+    }
+
+    #[tokio::test]
+    async fn response_over_the_buffer_limit_is_streamed_whole() {
+        use futures::TryStreamExt;
+        use tokio_util::sync::CancellationToken;
+        use warpgate_common_http::UpstreamBody;
+
+        use super::{MAX_BUFFERED_RESPONSE_BYTES, take_response_body};
+
+        let body = body_of_len(MAX_BUFFERED_RESPONSE_BYTES + 1);
+        for is_write in [false, true] {
+            let taken = take_response_body(
+                upstream_response(&body),
+                is_write,
+                None,
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+            let UpstreamBody::Streamed(taken) = taken else {
+                panic!("a response over the limit must not be buffered (is_write={is_write})");
+            };
+            let chunks: Vec<bytes::Bytes> = taken.try_collect().await.unwrap();
+            assert_eq!(chunks.concat(), body, "is_write={is_write}");
+        }
     }
 
     use std::collections::HashMap;

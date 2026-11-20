@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-core"
-version = "0.30.3"
+version = "0.31.0-beta.1"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -19,7 +19,7 @@ humantime-serde = { version = "1.1", default-features = false }
 ipnet.workspace = true
 ldap3.workspace = true
 packet = { version = "0.1", default-features = false }
-password-hash.workspace = true
+percent-encoding = { version = "2.1", default-features = false, features = ["alloc"] }
 png = "0.18"
 poem.workspace = true
 poem-openapi.workspace = true
@@ -33,7 +33,7 @@ sea-orm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-time.workspace = true
+time = { workspace = true, features = ["formatting"] }
 tokio.workspace = true
 tokio-util.workspace = true
 totp-rs = { version = "5.0", features = ["otpauth"], default-features = false }
@@ -50,12 +50,17 @@ warpgate-common = { path = "../warpgate-common" }
 warpgate-common-cache = { path = "../warpgate-common-cache" }
 warpgate-db-entities = { path = "../warpgate-db-entities" }
 warpgate-db-migrations = { path = "../warpgate-db-migrations" }
+warpgate-gitops = { path = "../warpgate-gitops" }
 warpgate-ldap = { path = "../warpgate-ldap" }
+warpgate-resources = { path = "../warpgate-resources" }
 warpgate-secrets-vault = { path = "../warpgate-secrets-vault" }
 warpgate-sso = { path = "../warpgate-sso", default-features = false }
 warpgate-tls = { path = "../warpgate-tls" }
 webpki = { version = "0.22", default-features = false }
 zune-jpeg.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
 
 [features]
 postgres = ["sea-orm/sqlx-postgres"]

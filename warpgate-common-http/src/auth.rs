@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
 use uuid::Uuid;
 use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_common::{Protocol, WarpgateError};
+use warpgate_common::{Protocol, TargetId, UserId, WarpgateError};
 use warpgate_core::AuthorizedIdentity;
 use warpgate_db_entities::Parameters;
 
@@ -57,7 +57,7 @@ fn login_too_old(
         RequestAuthorization::Session(SessionAuthorization::User { .. }) => {
             auth_time.is_none_or(|auth_time| now.saturating_sub(auth_time) >= max_age)
         }
-        /// token has no session age and always fails
+        // token has no session age and always fails
         RequestAuthorization::UserToken { .. } => true,
         RequestAuthorization::Session(SessionAuthorization::Ticket { .. })
         | RequestAuthorization::AdminToken
@@ -69,15 +69,15 @@ fn login_too_old(
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum SessionAuthorization {
     User {
-        user_id: Uuid,
+        user_id: UserId,
         username: String,
     },
     Ticket {
-        user_id: Uuid,
+        user_id: UserId,
         username: String,
         /// The row the ticket was issued for. Pinned by id so a rename — or a
         /// new target claiming the old name — can't redirect the session.
-        target_id: Uuid,
+        target_id: TargetId,
         #[serde(default)]
         ticket_id: Option<Uuid>,
     },
@@ -90,7 +90,7 @@ impl SessionAuthorization {
         }
     }
 
-    pub const fn user_id(&self) -> Uuid {
+    pub const fn user_id(&self) -> UserId {
         match self {
             Self::User { user_id, .. } | Self::Ticket { user_id, .. } => *user_id,
         }
@@ -102,7 +102,7 @@ impl SessionAuthorization {
 pub enum RequestAuthorization {
     Session(SessionAuthorization),
     UserToken {
-        user_id: Uuid,
+        user_id: UserId,
         username: String,
     },
     AdminToken,
@@ -229,7 +229,7 @@ impl Deref for AuthenticatedRequestContext {
 pub struct FullUserAuthorization(AuthStateUserInfo);
 
 impl FullUserAuthorization {
-    pub const fn user_id(&self) -> Uuid {
+    pub const fn user_id(&self) -> UserId {
         self.0.id
     }
 
@@ -261,11 +261,11 @@ impl RequestAuthorization {
     }
 
     /// Returns a user ID if present in the authorization context or nil UUID
-    pub const fn user_id(&self) -> Uuid {
+    pub const fn user_id(&self) -> UserId {
         match self {
             Self::Session(auth) => auth.user_id(),
             Self::UserToken { user_id, .. } => *user_id,
-            Self::AdminToken | Self::ClusterPeer => Uuid::nil(),
+            Self::AdminToken | Self::ClusterPeer => UserId(Uuid::nil()),
         }
     }
 
@@ -326,28 +326,29 @@ mod tests {
     }
 
     use uuid::Uuid;
+    use warpgate_common::{TargetId, UserId};
 
     use super::{RequestAuthorization, SessionAuthorization};
 
     fn ticket() -> RequestAuthorization {
         RequestAuthorization::Session(SessionAuthorization::Ticket {
-            user_id: Uuid::nil(),
+            user_id: UserId(Uuid::nil()),
             username: "alice".into(),
-            target_id: Uuid::nil(),
+            target_id: TargetId(Uuid::nil()),
             ticket_id: None,
         })
     }
 
     fn user_session() -> RequestAuthorization {
         RequestAuthorization::Session(SessionAuthorization::User {
-            user_id: Uuid::nil(),
+            user_id: UserId(Uuid::nil()),
             username: "alice".into(),
         })
     }
 
     fn user_token() -> RequestAuthorization {
         RequestAuthorization::UserToken {
-            user_id: Uuid::nil(),
+            user_id: UserId(Uuid::nil()),
             username: "alice".into(),
         }
     }

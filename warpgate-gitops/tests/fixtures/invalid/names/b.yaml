@@ -1,0 +1,23 @@
+apiVersion: warpgate/v1
+kind: Role
+metadata:
+  name: DBA
+spec: {}
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: web
+spec:
+  options:
+    ssh:
+      host: h
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: web
+spec:
+  options:
+    ssh:
+      host: h2
