@@ -1,5 +1,6 @@
-use std::borrow::Borrow;
 use std::fmt;
+
+use warpgate_resources::{Path, Segment};
 
 /// A 1-based position in the source
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -14,60 +15,18 @@ impl fmt::Display for Location {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Segment {
-    Key(String),
-    Index(usize),
-}
-
-/// The address of a node within its document. Mapping keys are kept whole, so
-/// a key that contains a dot stays a single segment.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Path(pub Vec<Segment>);
-
-impl Path {
-    pub fn keys(keys: &[&str]) -> Self {
-        Self(keys.iter().map(|k| Segment::Key((*k).to_owned())).collect())
-    }
-
-    /// From a JSON pointer of plain keys, such as `/spec/options`
-    pub fn pointer(pointer: &str) -> Self {
-        Self::keys(&pointer.split('/').skip(1).collect::<Vec<_>>())
-    }
-}
-
-impl Borrow<[Segment]> for Path {
-    fn borrow(&self) -> &[Segment] {
-        &self.0
-    }
-}
-
-impl fmt::Display for Path {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (i, segment) in self.0.iter().enumerate() {
-            match segment {
-                Segment::Key(key) if i == 0 => f.write_str(key)?,
-                Segment::Key(key) => write!(f, ".{key}")?,
-                Segment::Index(index) => write!(f, "[{index}]")?,
-            }
-        }
-        Ok(())
-    }
-}
-
-impl From<&serde_path_to_error::Path> for Path {
-    fn from(path: &serde_path_to_error::Path) -> Self {
-        use serde_path_to_error::Segment as S;
-        Self(
-            path.iter()
-                .map_while(|segment| match segment {
-                    S::Seq { index } => Some(Segment::Index(*index)),
-                    S::Map { key } | S::Enum { variant: key } => Some(Segment::Key(key.clone())),
-                    S::Unknown => None,
-                })
-                .collect(),
-        )
-    }
+/// As far as a deserialization error knows where it happened
+pub fn error_path(path: &serde_path_to_error::Path) -> Path {
+    use serde_path_to_error::Segment as S;
+    Path(
+        path.iter()
+            .map_while(|segment| match segment {
+                S::Seq { index } => Some(Segment::Index(*index)),
+                S::Map { key } | S::Enum { variant: key } => Some(Segment::Key(key.clone())),
+                S::Unknown => None,
+            })
+            .collect(),
+    )
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

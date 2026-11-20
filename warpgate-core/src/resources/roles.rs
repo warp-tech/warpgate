@@ -6,7 +6,7 @@ use sea_orm::{
 use uuid::Uuid;
 use warpgate_common::RoleId;
 use warpgate_db_entities::{Role, TargetRoleAssignment, UserRoleAssignment};
-use warpgate_gitops::types::ResourceKind;
+use warpgate_resources::ResourceKind;
 
 use super::{Actor, OwnedEntity, ResourceError, check_name, name_taken};
 

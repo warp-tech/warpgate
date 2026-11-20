@@ -9,7 +9,7 @@ pub mod targets;
 use sea_orm::prelude::Expr;
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect};
 use warpgate_common::{ProviderId, RowId, UserSessionId, WarpgateError};
-use warpgate_gitops::types::ResourceKind;
+use warpgate_resources::ResourceKind;
 
 use crate::db::is_unique_violation;
 

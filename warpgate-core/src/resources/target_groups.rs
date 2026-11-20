@@ -8,7 +8,7 @@ use uuid::Uuid;
 use warpgate_common::TargetGroupId;
 use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
 use warpgate_db_entities::{Target, TargetGroup};
-use warpgate_gitops::types::ResourceKind;
+use warpgate_resources::ResourceKind;
 
 use super::{Actor, OwnedEntity, ResourceError, check_name, name_taken};
 

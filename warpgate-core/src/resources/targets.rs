@@ -8,7 +8,7 @@ use warpgate_common::{ProviderId, RoleId, StoredSecrets, TargetId, TargetOptions
 use warpgate_db_entities::{
     KnownHost, Target, TargetRoleAssignment, TargetSession, Ticket, TicketRequest,
 };
-use warpgate_gitops::types::ResourceKind;
+use warpgate_resources::ResourceKind;
 
 use super::{Actor, AdmittedSessions, OwnedEntity, ResourceError, check_name, name_taken};
 use crate::db::is_unique_violation;

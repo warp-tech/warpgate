@@ -11,10 +11,10 @@ use warpgate_common::{
     WarpgateError,
 };
 use warpgate_db_entities::{Role, SshClientKey, Target, TargetGroup, TargetRoleAssignment};
-use warpgate_gitops::plan::{Change, Current, Plan, References, Row, plan};
-use warpgate_gitops::types::{
-    Manifest, OptionReferences, Resource, ResourceKind, RoleSpec, SshClientKeySpec,
-    TargetGroupSpec, TargetSpec,
+use warpgate_gitops::plan::{Change, Current, Plan, References, plan};
+use warpgate_gitops::types::{Manifest, Resource};
+use warpgate_resources::{
+    OptionReferences, ResourceKind, RoleSpec, Row, SshClientKeySpec, TargetGroupSpec, TargetSpec,
 };
 
 use super::roles::{self, RoleDataRequest};

@@ -1,30 +1,18 @@
 //! What applying a fileset would change. Pure: the caller loads the current
 //! rows, so every case is a test on plain values.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
-use serde::Serialize;
-use serde_json::{Value, json};
 use uuid::Uuid;
-use warpgate_common::{
-    MaybeSecretRef, ProviderId, StoredSecrets, TargetOptions, public_key_of_pem,
-};
+use warpgate_common::{ProviderId, TargetOptions};
 use warpgate_db_entities::ProviderSync::{PlanAction, PlannedChange, PlannedField, SyncPlan};
-
-use crate::diagnostic::{Path, Segment};
-use crate::types::{
-    Resource, ResourceKind, RoleSpec, SshClientKeySpec, TargetGroupSpec, TargetSpec,
+use warpgate_resources::{
+    Comparable, Compared, FieldChange, ResourceKind, RoleSpec, Row, SshClientKeySpec,
+    TargetGroupSpec, TargetSpec, ValueChange, compare_target, key_identity,
 };
 
-/// A row as it is in the database, with its references by name
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Row<S> {
-    pub id: Uuid,
-    pub name: String,
-    pub provider: Option<ProviderId>,
-    pub live: S,
-}
+use crate::types::Resource;
 
 #[derive(Clone, Debug, Default)]
 pub struct Current {
@@ -32,22 +20,6 @@ pub struct Current {
     pub roles: Vec<Row<RoleSpec>>,
     pub targets: Vec<Row<TargetSpec>>,
     pub ssh_client_keys: Vec<Row<SshClientKeySpec>>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ValueChange {
-    Value {
-        from: Value,
-        to: Value,
-    },
-    /// The values of a credential are never part of a plan
-    Credential,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FieldChange {
-    pub path: Path,
-    pub change: ValueChange,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -193,13 +165,6 @@ impl Plan {
     }
 }
 
-/// A row, or a resource, reduced to what the diff compares
-struct Compared {
-    value: Value,
-    credentials: HashSet<Path>,
-    protocol: Option<String>,
-}
-
 struct LiveRow<'a> {
     id: Uuid,
     name: &'a str,
@@ -211,16 +176,13 @@ pub fn plan(provider: ProviderId, desired: &[Resource], current: &Current, prune
     let references = References::new(desired, current);
     let ssh_targets = ssh_target_names(desired, current);
     let rows: HashMap<ResourceKind, Vec<LiveRow<'_>>> = [
-        (ResourceKind::TargetGroup, live_rows(&current.groups, plain)),
-        (ResourceKind::Role, live_rows(&current.roles, plain)),
+        (ResourceKind::TargetGroup, live_rows(&current.groups)),
+        (ResourceKind::Role, live_rows(&current.roles)),
         (
             ResourceKind::SshClientKey,
-            live_rows(&current.ssh_client_keys, compare_client_key),
+            live_rows(&current.ssh_client_keys),
         ),
-        (
-            ResourceKind::Target,
-            live_rows(&current.targets, |s| compare_target(s, None)),
-        ),
+        (ResourceKind::Target, live_rows(&current.targets)),
     ]
     .into_iter()
     .collect();
@@ -279,7 +241,7 @@ pub fn plan(provider: ProviderId, desired: &[Resource], current: &Current, prune
         };
 
         let wanted = compare_resource(resource, &references);
-        if wanted.protocol != row.compared.protocol {
+        if wanted.protocol() != row.compared.protocol() {
             changes.push(Change::Blocked {
                 kind,
                 name: name.clone(),
@@ -289,15 +251,7 @@ pub fn plan(provider: ProviderId, desired: &[Resource], current: &Current, prune
             continue;
         }
 
-        let credentials = &wanted.credentials | &row.compared.credentials;
-        let mut fields = Vec::new();
-        diff(
-            &row.compared.value,
-            &wanted.value,
-            &mut Vec::new(),
-            &credentials,
-            &mut fields,
-        );
+        let fields = row.compared.changes_to(&wanted);
         changes.push(match (adopting, fields.is_empty()) {
             (true, _) => Change::Adopt {
                 id: row.id,
@@ -369,17 +323,13 @@ const fn apply_order(kind: ResourceKind) -> u8 {
     }
 }
 
-fn live_rows<S>(rows: &[Row<S>], compare: impl Fn(&S) -> Compared) -> Vec<LiveRow<'_>> {
+fn live_rows<S: Comparable>(rows: &[Row<S>]) -> Vec<LiveRow<'_>> {
     rows.iter()
-        .map(|row| {
-            let mut compared = compare(&row.live);
-            set_name(&mut compared.value, &row.name);
-            LiveRow {
-                id: row.id,
-                name: &row.name,
-                provider: row.provider,
-                compared,
-            }
+        .map(|row| LiveRow {
+            id: row.id,
+            name: &row.name,
+            provider: row.provider,
+            compared: row.compared(),
         })
         .collect()
 }
@@ -554,83 +504,18 @@ fn unresolved_reference(
 }
 
 fn compare_resource(resource: &Resource, references: &References) -> Compared {
-    let mut compared = match resource {
-        Resource::Target(m) => compare_target(&m.spec, Some(references)),
-        Resource::TargetGroup(m) => plain(&m.spec),
-        Resource::Role(m) => plain(&m.spec),
-        Resource::SshClientKey(m) => compare_client_key(&m.spec),
+    let compared = match resource {
+        Resource::Target(m) => compare_target(&m.spec, |kind, name| {
+            references
+                .resolve(kind, name)
+                .map_or(name, |referent| referent.name)
+                .to_owned()
+        }),
+        Resource::TargetGroup(m) => m.spec.compared(),
+        Resource::Role(m) => m.spec.compared(),
+        Resource::SshClientKey(m) => m.spec.compared(),
     };
-    set_name(&mut compared.value, &resource.metadata().name);
-    compared
-}
-
-fn plain<S: Serialize>(spec: &S) -> Compared {
-    Compared {
-        value: json!({ "spec": to_value(spec) }),
-        credentials: HashSet::new(),
-        protocol: None,
-    }
-}
-
-fn compare_target(spec: &TargetSpec, references: Option<&References>) -> Compared {
-    let resolve = |kind: ResourceKind, name: &String| {
-        references
-            .and_then(|references| references.resolve(kind, name))
-            .map_or(name.as_str(), |referent| referent.name)
-            .to_owned()
-    };
-    let mut spec = spec.clone();
-    spec.group = spec
-        .group
-        .as_ref()
-        .map(|group| resolve(ResourceKind::TargetGroup, group));
-    let roles: BTreeSet<String> = spec
-        .roles
-        .iter()
-        .map(|role| resolve(ResourceKind::Role, role))
-        .collect();
-    spec.roles = roles.into_iter().collect();
-    spec.references.jump_host = spec
-        .references
-        .jump_host
-        .as_ref()
-        .map(|target| resolve(ResourceKind::Target, target));
-    spec.references.client_key = spec
-        .references
-        .client_key
-        .as_ref()
-        .map(|key| resolve(ResourceKind::SshClientKey, key));
-
-    let options = to_value(&spec.options);
-    let mut value = to_value(&spec);
-    spec.references.put(&mut value);
-    Compared {
-        credentials: credential_paths(&spec.options),
-        protocol: options.as_object().and_then(|o| o.keys().next().cloned()),
-        value: json!({ "spec": value }),
-    }
-}
-
-/// A literal key compares by its public key, so the same key in another
-/// format is no change; a reference compares as written. Null if a literal
-/// isn't a private key.
-fn key_identity(spec: &SshClientKeySpec) -> Value {
-    match &spec.private_key {
-        MaybeSecretRef::Inline(secret) => secret
-            .reveal()
-            .ok()
-            .and_then(|pem| public_key_of_pem(pem.expose_secret()).ok())
-            .map_or(Value::Null, Value::String),
-        other => to_value(other),
-    }
-}
-
-fn compare_client_key(spec: &SshClientKeySpec) -> Compared {
-    Compared {
-        value: json!({ "spec": { "private_key": key_identity(spec), "is_default": spec.is_default } }),
-        credentials: HashSet::from([Path::keys(&["spec", "private_key"])]),
-        protocol: None,
-    }
+    compared.named(&resource.metadata().name)
 }
 
 /// The row that a client key resource renames. It is this provider's row
@@ -652,84 +537,8 @@ fn renamed_client_key<'r, 'a>(
     rows.iter().find(|row| {
         row.provider == Some(provider)
             && !taken(row.id)
-            && row.compared.value.pointer("/spec/private_key") == Some(&key)
+            && row.compared.pointer("/spec/private_key") == Some(&key)
     })
-}
-
-/// Paths of every credential field, found as the fields that redaction
-/// changes. The plan hides what the API hides.
-fn credential_paths(options: &TargetOptions) -> HashSet<Path> {
-    let mut redacted = options.clone();
-    redacted.redact();
-    changed_paths(options, &redacted).into_iter().collect()
-}
-
-/// Paths from the resource's root at which `altered` differs from `options`,
-/// in key order
-pub(crate) fn changed_paths(options: &TargetOptions, altered: &TargetOptions) -> Vec<Path> {
-    let mut changes = Vec::new();
-    let mut prefix = vec![Segment::Key("spec".into()), Segment::Key("options".into())];
-    diff(
-        &to_value(options),
-        &to_value(altered),
-        &mut prefix,
-        &HashSet::new(),
-        &mut changes,
-    );
-    changes.into_iter().map(|change| change.path).collect()
-}
-
-fn set_name(value: &mut Value, name: &str) {
-    if let Value::Object(object) = value {
-        object.insert("name".into(), Value::String(name.to_owned()));
-    }
-}
-
-fn to_value<T: Serialize>(value: &T) -> Value {
-    // cannot fail for these types
-    serde_json::to_value(value).unwrap_or_default()
-}
-
-fn diff(
-    from: &Value,
-    to: &Value,
-    path: &mut Vec<Segment>,
-    credentials: &HashSet<Path>,
-    out: &mut Vec<FieldChange>,
-) {
-    if from == to {
-        return;
-    }
-    let here = Path(path.clone());
-    if credentials.contains(&here) {
-        out.push(FieldChange {
-            path: here,
-            change: ValueChange::Credential,
-        });
-        return;
-    }
-    if let (Value::Object(a), Value::Object(b)) = (from, to) {
-        let keys: BTreeSet<&String> = a.keys().chain(b.keys()).collect();
-        for key in keys {
-            path.push(Segment::Key(key.clone()));
-            diff(
-                a.get(key).unwrap_or(&Value::Null),
-                b.get(key).unwrap_or(&Value::Null),
-                path,
-                credentials,
-                out,
-            );
-            path.pop();
-        }
-        return;
-    }
-    out.push(FieldChange {
-        path: here,
-        change: ValueChange::Value {
-            from: from.clone(),
-            to: to.clone(),
-        },
-    });
 }
 
 fn collision_reason(owner: Option<ProviderId>) -> String {
@@ -856,23 +665,9 @@ impl From<&Change> for PlannedChange {
     }
 }
 
-impl From<&FieldChange> for PlannedField {
-    fn from(field: &FieldChange) -> Self {
-        let (credential, from, to) = match &field.change {
-            ValueChange::Value { from, to } => (false, Some(from.clone()), Some(to.clone())),
-            ValueChange::Credential => (true, None, None),
-        };
-        Self {
-            path: field.path.to_string(),
-            credential,
-            from,
-            to,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use serde_json::{Value, json};
     use warpgate_common::SshHostKeyKind;
 
     use super::*;

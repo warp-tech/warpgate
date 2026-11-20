@@ -10,7 +10,7 @@ use warpgate_common::{
     pkcs8_pem_string, public_key_line, public_key_of_pem,
 };
 use warpgate_db_entities::SshClientKey;
-use warpgate_gitops::types::ResourceKind;
+use warpgate_resources::ResourceKind;
 
 use super::{Actor, OwnedEntity, ResourceError, check_name, name_taken};
 
