@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.30.3-54-g9cb74775-modified"
+    "version": "v0.30.6-62-g5f540d14-modified"
   },
   "servers": [
     {
@@ -2650,6 +2650,10 @@
           },
           "external_host": {
             "type": "string"
+          },
+          "default_http_path": {
+            "type": "string",
+            "description": "Initial HTTP path, query and fragment, omitted for the bare root path."
           },
           "group": {
             "$ref": "#/components/schemas/GroupInfo"
