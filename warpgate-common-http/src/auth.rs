@@ -1,3 +1,5 @@
+use warpgate_common::UserId;
+use warpgate_common::TargetId;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -35,37 +37,49 @@ pub async fn web_reauth_required(
     ctx: &AuthenticatedRequestContext,
     session: &Session,
 ) -> Result<bool, WarpgateError> {
-    if !matches!(
-        ctx.auth,
-        RequestAuthorization::Session(SessionAuthorization::User { .. })
-    ) {
-        return Ok(false);
-    }
-
     let Some(max_age) = ctx.parameters().await?.web_auth_max_age_seconds else {
         return Ok(false);
     };
 
-    let Some(auth_time) = session.get::<u64>(AUTH_TIME_SESSION_KEY) else {
-        return Ok(true);
-    };
+    Ok(login_too_old(
+        &ctx.auth,
+        session.get::<u64>(AUTH_TIME_SESSION_KEY),
+        now_unix(),
+        max_age.cast_unsigned(),
+    ))
+}
 
-    Ok(now_unix() - auth_time >= max_age.cast_unsigned())
+fn login_too_old(
+    auth: &RequestAuthorization,
+    auth_time: Option<u64>,
+    now: u64,
+    max_age: u64,
+) -> bool {
+    match auth {
+        RequestAuthorization::Session(SessionAuthorization::User { .. }) => {
+            auth_time.is_none_or(|auth_time| now.saturating_sub(auth_time) >= max_age)
+        }
+        // token has no session age and always fails
+        RequestAuthorization::UserToken { .. } => true,
+        RequestAuthorization::Session(SessionAuthorization::Ticket { .. })
+        | RequestAuthorization::AdminToken
+        | RequestAuthorization::ClusterPeer => false,
+    }
 }
 
 /// Represents the source of authentication of a session
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum SessionAuthorization {
     User {
-        user_id: Uuid,
+        user_id: UserId,
         username: String,
     },
     Ticket {
-        user_id: Uuid,
+        user_id: UserId,
         username: String,
         /// The row the ticket was issued for. Pinned by id so a rename — or a
         /// new target claiming the old name — can't redirect the session.
-        target_id: Uuid,
+        target_id: TargetId,
         #[serde(default)]
         ticket_id: Option<Uuid>,
     },
@@ -78,7 +92,7 @@ impl SessionAuthorization {
         }
     }
 
-    pub const fn user_id(&self) -> Uuid {
+    pub const fn user_id(&self) -> UserId {
         match self {
             Self::User { user_id, .. } | Self::Ticket { user_id, .. } => *user_id,
         }
@@ -90,7 +104,7 @@ impl SessionAuthorization {
 pub enum RequestAuthorization {
     Session(SessionAuthorization),
     UserToken {
-        user_id: Uuid,
+        user_id: UserId,
         username: String,
     },
     AdminToken,
@@ -217,7 +231,7 @@ impl Deref for AuthenticatedRequestContext {
 pub struct FullUserAuthorization(AuthStateUserInfo);
 
 impl FullUserAuthorization {
-    pub const fn user_id(&self) -> Uuid {
+    pub const fn user_id(&self) -> UserId {
         self.0.id
     }
 
@@ -235,6 +249,10 @@ impl RequestAuthorization {
         matches!(self, Self::ClusterPeer)
     }
 
+    pub const fn is_session(&self) -> bool {
+        matches!(self, Self::Session(_))
+    }
+
     /// Returns a username if one is present (admin token has none)
     pub const fn username(&self) -> Option<&String> {
         match self {
@@ -245,11 +263,11 @@ impl RequestAuthorization {
     }
 
     /// Returns a user ID if present in the authorization context or nil UUID
-    pub const fn user_id(&self) -> Uuid {
+    pub const fn user_id(&self) -> UserId {
         match self {
             Self::Session(auth) => auth.user_id(),
             Self::UserToken { user_id, .. } => *user_id,
-            Self::AdminToken | Self::ClusterPeer => Uuid::nil(),
+            Self::AdminToken | Self::ClusterPeer => UserId(Uuid::nil()),
         }
     }
 
@@ -310,37 +328,81 @@ mod tests {
     }
 
     use uuid::Uuid;
+    use warpgate_common::{TargetId, UserId};
 
     use super::{RequestAuthorization, SessionAuthorization};
+
+    fn ticket() -> RequestAuthorization {
+        RequestAuthorization::Session(SessionAuthorization::Ticket {
+            user_id: UserId(Uuid::nil()),
+            username: "alice".into(),
+            target_id: TargetId(Uuid::nil()),
+            ticket_id: None,
+        })
+    }
+
+    fn user_session() -> RequestAuthorization {
+        RequestAuthorization::Session(SessionAuthorization::User {
+            user_id: UserId(Uuid::nil()),
+            username: "alice".into(),
+        })
+    }
+
+    fn user_token() -> RequestAuthorization {
+        RequestAuthorization::UserToken {
+            user_id: UserId(Uuid::nil()),
+            username: "alice".into(),
+        }
+    }
 
     #[test]
     fn only_full_accounts_are_full_users() {
         // A ticket is scoped to a single target: it must never resolve to a
         // full account, or credential/token/admin endpoints would be reachable
         // with it.
-        let ticket = RequestAuthorization::Session(SessionAuthorization::Ticket {
-            user_id: Uuid::nil(),
-            username: "alice".into(),
-            target_id: Uuid::nil(),
-            ticket_id: None,
-        });
-        assert!(ticket.as_full_user().is_none());
+        assert!(ticket().as_full_user().is_none());
 
-        // A user session and a user's API token are full accounts.
-        let user = RequestAuthorization::Session(SessionAuthorization::User {
-            user_id: Uuid::nil(),
-            username: "alice".into(),
-        });
-        assert!(user.as_full_user().is_some());
-
-        let token = RequestAuthorization::UserToken {
-            user_id: Uuid::nil(),
-            username: "alice".into(),
-        };
-        assert!(token.as_full_user().is_some());
+        assert!(user_session().as_full_user().is_some());
+        assert!(user_token().as_full_user().is_some());
 
         // Machine tokens carry no user identity.
         assert!(RequestAuthorization::AdminToken.as_full_user().is_none());
         assert!(RequestAuthorization::ClusterPeer.as_full_user().is_none());
+    }
+
+    #[test]
+    fn only_cookie_sessions_are_sessions() {
+        assert!(user_session().is_session());
+        assert!(ticket().is_session());
+        assert!(!user_token().is_session());
+        assert!(!RequestAuthorization::AdminToken.is_session());
+        assert!(!RequestAuthorization::ClusterPeer.is_session());
+    }
+
+    #[test]
+    fn login_age_policy() {
+        use super::login_too_old;
+
+        assert!(!login_too_old(&user_session(), Some(100), 200, 3600));
+        assert!(login_too_old(&user_session(), Some(100), 3700, 3600));
+        assert!(login_too_old(&user_session(), None, 100, 3600));
+
+        // A token has no login time, so it can never satisfy the policy.
+        assert!(login_too_old(&user_token(), Some(100), 100, 3600));
+
+        // A ticket is exempt.
+        assert!(!login_too_old(&ticket(), None, 100, 3600));
+        assert!(!login_too_old(
+            &RequestAuthorization::AdminToken,
+            None,
+            100,
+            3600
+        ));
+        assert!(!login_too_old(
+            &RequestAuthorization::ClusterPeer,
+            None,
+            100,
+            3600
+        ));
     }
 }

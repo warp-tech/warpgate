@@ -1,4 +1,4 @@
-use russh::keys::{Algorithm, HashAlg, PrivateKey, encode_pkcs8_pem};
+use russh::keys::{Algorithm, HashAlg, PrivateKey, decode_secret_key, encode_pkcs8_pem};
 
 use crate::WarpgateError;
 use crate::helpers::rng::get_crypto_rng;
@@ -40,4 +40,22 @@ pub fn pkcs8_pem_string(key: &PrivateKey) -> Result<String, WarpgateError> {
     let mut buf = Vec::new();
     encode_pkcs8_pem(key, &mut buf)?;
     Ok(String::from_utf8(buf)?)
+}
+
+/// `<algo> <base64>` only — the OpenSSH comment is dropped so that the same
+/// key always serializes identically for de-duplication.
+pub fn public_key_line(key: &PrivateKey) -> Result<String, WarpgateError> {
+    Ok(key
+        .public_key()
+        .to_openssh()
+        .map_err(russh::keys::Error::from)?
+        .split_whitespace()
+        .take(2)
+        .collect::<Vec<_>>()
+        .join(" "))
+}
+
+/// The [`public_key_line`] of a private key in OpenSSH or PKCS#8 PEM format
+pub fn public_key_of_pem(pem: &str) -> Result<String, WarpgateError> {
+    public_key_line(&decode_secret_key(pem, None)?)
 }

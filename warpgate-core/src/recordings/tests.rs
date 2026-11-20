@@ -10,12 +10,13 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::{ConnectionTrait, Database, IntoActiveModel};
 use tokio::io::AsyncReadExt;
 use warpgate_aws::{S3Credentials, S3Storage, S3StorageConfig, StaticCredentials};
+use warpgate_common::TargetId;
 use warpgate_db_entities::Parameters::{
     self, ConfigMigrationValues, RecordingsStorageConfig, set_config_migration_values,
 };
 use warpgate_db_migrations::migrate_database;
 
-use super::storage::RecordingSink;
+use super::storage::{RecordingSink, RemoteUpload};
 use super::*;
 
 /// A recording made of two files, like a terminal recording's data + index.
@@ -51,10 +52,19 @@ struct FakeS3 {
     failed_completes: Vec<String>,
     completed: Vec<String>,
     aborted: Vec<String>,
+    /// (key suffix, body) of objects that HEAD and GET can read.
+    objects: Vec<(String, Vec<u8>)>,
 }
 
 impl FakeS3 {
-    fn handle(&mut self, method: &Method, path: &str, query: &str, len: usize) -> Response {
+    fn handle(
+        &mut self,
+        method: &Method,
+        path: &str,
+        query: &str,
+        range: Option<&str>,
+        len: usize,
+    ) -> Response {
         let part = query
             .split('&')
             .find_map(|pair| pair.strip_prefix("partNumber="))
@@ -99,6 +109,29 @@ impl FakeS3 {
                     "<CompleteMultipartUploadResult><ETag>\"e\"</ETag></CompleteMultipartUploadResult>",
                 )
             }
+            (&Method::HEAD | &Method::GET, None) => {
+                let Some((_, body)) = self.objects.iter().find(|(key, _)| path.ends_with(key))
+                else {
+                    return Response::builder().status(StatusCode::NOT_FOUND).body("");
+                };
+                if method == Method::HEAD {
+                    return Response::builder()
+                        .header("Content-Length", body.len())
+                        .body(());
+                }
+                let start = range
+                    .and_then(|r| r.strip_prefix("bytes="))
+                    .and_then(|r| r.strip_suffix('-'))
+                    .and_then(|r| r.parse::<usize>().ok())
+                    .unwrap_or(0);
+                Response::builder()
+                    .status(StatusCode::PARTIAL_CONTENT)
+                    .header(
+                        "Content-Range",
+                        format!("bytes {start}-{}/{}", body.len() - 1, body.len()),
+                    )
+                    .body(body[start..].to_vec())
+            }
             (&Method::DELETE, _) => {
                 self.aborted.push(path.into());
                 Response::builder().status(StatusCode::NO_CONTENT).body("")
@@ -140,9 +173,10 @@ impl Harness {
                 prefix: String::new(),
                 credentials: S3Credentials::Static(StaticCredentials {
                     access_key_id: "test".into(),
-                    secret_access_key: Some("test".into()),
+                    secret_access_key: Some(String::from("test").into()),
                 }),
                 scratch_path: Some(root.join("scratch").to_string_lossy().into_owned()),
+                serve_through_warpgate: false,
             })
         } else {
             None
@@ -167,7 +201,7 @@ impl Harness {
             id: Set(session_id),
             user_session_id: Set(warpgate_common::UserSessionId(Uuid::new_v4())),
             target_snapshot: Set("{}".into()),
-            target_id: Set(Uuid::new_v4()),
+            target_id: Set(TargetId(Uuid::new_v4())),
             started: Set(OffsetDateTime::now_utc()),
             ..Default::default()
         }
@@ -247,10 +281,12 @@ async fn serve(s3: Arc<std::sync::Mutex<FakeS3>>) -> std::net::SocketAddr {
                 .map(|b| b.len())
                 .unwrap_or_default();
             let uri = request.uri();
+            let range = request.headers().get("range").and_then(|v| v.to_str().ok());
             s3.lock().unwrap().handle(
                 request.method(),
                 uri.path(),
                 uri.query().unwrap_or_default(),
+                range,
                 len,
             )
         }
@@ -394,11 +430,13 @@ async fn a_failed_local_write_does_not_end() {
     std::fs::create_dir_all(scratch.parent().unwrap()).unwrap();
     std::fs::write(&scratch, b"").unwrap();
     let s3 = S3Storage::new(h.s3_config.as_ref().unwrap()).await.unwrap();
-    let sink = RecordingSink::S3 {
+    let sink = RecordingSink::Remote {
         // Read-only, so writing to it fails.
         scratch: tokio::fs::File::open(&scratch).await.unwrap(),
         scratch_path: scratch.clone(),
-        upload: Some(s3.start_multipart("broken/data.ndjson").await.unwrap()),
+        upload: Some(RemoteUpload::S3(
+            s3.start_multipart("broken/data.ndjson").await.unwrap(),
+        )),
     };
     let writer = RawRecordingWriter::new(
         sink,
@@ -569,4 +607,24 @@ async fn a_recorder_cancelled_while_opening_its_files_does_not_end() {
     );
     assert_eq!(h.ended().await, None);
     assert!(exists(&h.scratch(RecordingFile::NDJsonData).await));
+}
+
+#[tokio::test]
+async fn s3_reads_from_an_offset_and_reports_the_size() {
+    let h = Harness::new(Some(FakeS3::default())).await;
+    h.s3.lock()
+        .unwrap()
+        .objects
+        .push(("rec.bin".into(), b"0123456789".to_vec()));
+    let s3 = S3Storage::new(h.s3_config.as_ref().unwrap()).await.unwrap();
+
+    assert_eq!(s3.len("rec.bin").await.unwrap(), 10);
+    let mut body = Vec::new();
+    s3.get_reader_from("rec.bin", 4)
+        .await
+        .unwrap()
+        .read_to_end(&mut body)
+        .await
+        .unwrap();
+    assert_eq!(body, b"456789");
 }

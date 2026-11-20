@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use sea_orm::sea_query::Expr;
+use sea_orm::sea_query::{Expr, ExprTrait};
 use sea_orm::{
     ColumnTrait, ConnectOptions, Database, DatabaseConnection, DbErr, EntityOrSelect, EntityTrait,
     QueryFilter, QuerySelect, SqlErr,
@@ -118,6 +118,10 @@ pub async fn migrate_all(connection: &DatabaseConnection) -> Result<()> {
     Ok(())
 }
 
+pub async fn has_pending_migrations(connection: &DatabaseConnection) -> Result<bool> {
+    Ok(warpgate_db_migrations::has_pending_migrations(connection).await?)
+}
+
 /// Apply `steps` pending migrations.
 pub async fn migrate_up(connection: &DatabaseConnection, steps: u32) -> Result<()> {
     migrate_database_up(connection, steps).await?;
@@ -137,12 +141,17 @@ pub async fn cleanup_db(
     audit_retention: &Duration,
 ) -> Result<()> {
     use warpgate_db_entities::{
-        LogEntry, Recording, SessionApprovalRequest, Ticket, TicketRequest,
+        LogEntry, ProviderSync, Recording, SessionApprovalRequest, Ticket, TicketRequest,
     };
     let audit_cutoff = OffsetDateTime::now_utc() - time::Duration::try_from(*audit_retention)?;
     let recording_cutoff = OffsetDateTime::now_utc() - time::Duration::try_from(*retention)?;
 
     SessionApprovalRequest::delete_all_before(db, audit_cutoff).await?;
+
+    ProviderSync::Entity::delete_many()
+        .filter(Expr::col(ProviderSync::Column::CheckedAt).lt(audit_cutoff))
+        .exec(db)
+        .await?;
 
     LogEntry::Entity::delete_many()
         .filter(Expr::col(LogEntry::Column::Target).eq("audit"))
@@ -255,6 +264,7 @@ mod tests {
     use sea_orm::ActiveValue::Set;
     use sea_orm::{Database, EntityTrait, PaginatorTrait};
     use uuid::Uuid;
+    use warpgate_common::UserId;
     use warpgate_db_entities::HttpSession;
     use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
     use warpgate_db_migrations::migrate_database;
@@ -262,13 +272,13 @@ mod tests {
     use super::*;
 
     async fn open_session(db: &DatabaseConnection, node_id: Option<Uuid>) -> Uuid {
-        open_session_for_user(db, node_id, Uuid::new_v4()).await
+        open_session_for_user(db, node_id, UserId(Uuid::new_v4())).await
     }
 
     async fn open_session_for_user(
         db: &DatabaseConnection,
         node_id: Option<Uuid>,
-        user_id: Uuid,
+        user_id: UserId,
     ) -> Uuid {
         let id = Uuid::new_v4();
         UserSession::Entity::insert(UserSession::ActiveModel {

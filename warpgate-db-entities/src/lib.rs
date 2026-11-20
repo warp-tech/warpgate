@@ -21,6 +21,7 @@ macro_rules! with_every_entity {
             OtpCredential,
             Parameters,
             PasswordCredential,
+            ProviderSync,
             PublicKeyCredential,
             Recording,
             Role,

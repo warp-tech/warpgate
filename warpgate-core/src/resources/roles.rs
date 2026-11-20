@@ -1,12 +1,21 @@
 use poem_openapi::Object;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, ModelTrait, QueryFilter, Set,
-    TransactionTrait,
+    TransactionSession, TransactionTrait,
 };
 use uuid::Uuid;
+use warpgate_common::RoleId;
 use warpgate_db_entities::{Role, TargetRoleAssignment, UserRoleAssignment};
+use warpgate_gitops::types::ResourceKind;
 
-use super::{ResourceError, check_name, name_taken};
+use super::{Actor, OwnedEntity, ResourceError, check_name, name_taken};
+
+impl OwnedEntity for Role::Entity {
+    type Id = RoleId;
+    const KIND: ResourceKind = ResourceKind::Role;
+    const ID: Self::Column = Role::Column::Id;
+    const PROVIDER: Self::Column = Role::Column::Provider;
+}
 
 #[derive(Object)]
 pub struct RoleDataRequest {
@@ -25,12 +34,14 @@ fn set_data(model: &mut Role::ActiveModel, data: &RoleDataRequest) {
 
 pub async fn create<C: ConnectionTrait>(
     db: &C,
+    actor: Actor,
     data: &RoleDataRequest,
 ) -> Result<Role::Model, ResourceError> {
     check_name(&data.name)?;
     let mut model = Role::ActiveModel {
-        id: Set(Uuid::new_v4()),
+        id: Set(RoleId(Uuid::new_v4())),
         is_default: Set(false),
+        provider: Set(actor.provider_id()),
         ..Default::default()
     };
     set_data(&mut model, data);
@@ -39,7 +50,8 @@ pub async fn create<C: ConnectionTrait>(
 
 pub async fn update<C: ConnectionTrait>(
     db: &C,
-    id: Uuid,
+    actor: Actor,
+    id: RoleId,
     data: &RoleDataRequest,
 ) -> Result<Role::Model, ResourceError> {
     check_name(&data.name)?;
@@ -47,6 +59,7 @@ pub async fn update<C: ConnectionTrait>(
         .one(db)
         .await?
         .ok_or(ResourceError::NotFound)?;
+    actor.may_write(role.provider)?;
 
     let mut model: Role::ActiveModel = role.into();
     set_data(&mut model, data);
@@ -56,13 +69,15 @@ pub async fn update<C: ConnectionTrait>(
 /// Also removes every assignment of the role, including revoked ones
 pub async fn delete<C: ConnectionTrait + TransactionTrait>(
     db: &C,
-    id: Uuid,
+    actor: Actor,
+    id: RoleId,
 ) -> Result<(), ResourceError> {
     let txn = db.begin().await?;
     let role = Role::Entity::find_by_id(id)
         .one(&txn)
         .await?
         .ok_or(ResourceError::NotFound)?;
+    actor.may_write(role.provider)?;
 
     UserRoleAssignment::Entity::delete_many()
         .filter(UserRoleAssignment::Column::RoleId.eq(id))

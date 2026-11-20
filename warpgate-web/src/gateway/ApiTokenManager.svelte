@@ -95,9 +95,9 @@
                     {#if token.expiry.getTime() < now}
                         <Badge color="danger" class="ms-2">Expired</Badge>
                     {:else}
-                        <Badge color="success" class="ms-2"
-                            >{token.expiry.toLocaleDateString()}</Badge
-                        >
+                        <Badge color="success" class="ms-2">
+                            {token.expiry.toLocaleDateString()}
+                        </Badge>
                     {/if}
                     <span class="ms-auto"></span>
                     <Button

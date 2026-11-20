@@ -15,7 +15,6 @@ fn index_name(table: &str) -> String {
 
 async fn hash_column(manager: &SchemaManager<'_>, table_name: &str) -> Result<(), DbErr> {
     let db = manager.get_connection();
-    let backend = db.get_database_backend();
 
     let table = Alias::new(table_name);
     let id_col = Alias::new("id");
@@ -28,7 +27,7 @@ async fn hash_column(manager: &SchemaManager<'_>, table_name: &str) -> Result<()
         .from(table.clone())
         .to_owned();
 
-    for row in db.query_all(backend.build(&select)).await? {
+    for row in db.query_all(&select).await? {
         let id: Uuid = row.try_get("", "id")?;
         let secret: String = row.try_get("", "secret")?;
         let hash = HEXLOWER.encode(&Sha256::digest(secret.as_bytes()));
@@ -38,7 +37,7 @@ async fn hash_column(manager: &SchemaManager<'_>, table_name: &str) -> Result<()
             .value(secret_col.clone(), hash)
             .and_where(Expr::col(id_col.clone()).eq(id))
             .to_owned();
-        db.execute(backend.build(&update)).await?;
+        db.execute(&update).await?;
     }
 
     manager
@@ -139,7 +138,7 @@ mod tests {
                 "2026-01-01 00:00:00".into(),
             ])
             .to_owned();
-        db.execute(backend.build(&insert)).await.unwrap();
+        db.execute(&insert).await.unwrap();
 
         Migrator::up(&db, None).await.unwrap();
 
@@ -147,7 +146,7 @@ mod tests {
             .column(Alias::new("secret_hash"))
             .from(Alias::new("tickets"))
             .to_owned();
-        let row = db.query_one(backend.build(&select)).await.unwrap().unwrap();
+        let row = db.query_one(&select).await.unwrap().unwrap();
         let hash: String = row.try_get("", "secret_hash").unwrap();
         assert_eq!(
             hash,
@@ -159,7 +158,7 @@ mod tests {
         // DoS surface rather than just a slow query.
         for table in ["tickets", "api_tokens"] {
             let plan = db
-                .query_one(Statement::from_string(
+                .query_one_raw(Statement::from_string(
                     backend,
                     format!("EXPLAIN QUERY PLAN SELECT id FROM {table} WHERE secret_hash = 'x'"),
                 ))

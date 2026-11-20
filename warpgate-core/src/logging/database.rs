@@ -1,8 +1,10 @@
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 
 use sea_orm::query::JsonValue;
-use sea_orm::{ActiveModelTrait, DatabaseConnection};
+use sea_orm::{ActiveModelTrait, DatabaseConnection, DbErr};
 use time::OffsetDateTime;
+use tokio::sync::Mutex;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tracing::{Subscriber, error};
 use tracing_subscriber::Layer;
 use tracing_subscriber::registry::LookupSpan;
@@ -13,41 +15,56 @@ use warpgate_db_entities::LogEntry;
 use super::layer::ValuesLogLayer;
 use super::values::SerializedRecordValues;
 
-static LOG_SENDER: OnceLock<tokio::sync::broadcast::Sender<LogEntry::ActiveModel>> =
-    OnceLock::new();
+/// Entries wait here until [`install_database_logger`] or
+/// [`flush_database_logger`] stores them. An audit entry is never dropped.
+// ponytail: unbounded, so it grows while the database is slower than the
+// logging; bound it and count the drops if that ever shows up
+struct Queue {
+    sender: UnboundedSender<LogEntry::ActiveModel>,
+    receiver: Mutex<UnboundedReceiver<LogEntry::ActiveModel>>,
+}
+
+static QUEUE: LazyLock<Queue> = LazyLock::new(|| {
+    let (sender, receiver) = unbounded_channel();
+    Queue {
+        sender,
+        receiver: Mutex::new(receiver),
+    }
+});
 
 pub fn make_database_logger_layer<S>() -> impl Layer<S>
 where
     S: Subscriber + for<'a> LookupSpan<'a>,
 {
-    let _ = LOG_SENDER.set(tokio::sync::broadcast::channel(1024).0);
     ValuesLogLayer::new(|values, target| {
-        if let Some(sender) = LOG_SENDER.get()
-            && let Some(entry) = values_to_log_entry_data(values, target)
-        {
-            let _ = sender.send(entry);
+        if let Some(entry) = values_to_log_entry_data(values, target) {
+            let _ = QUEUE.sender.send(entry);
         }
     })
 }
 
 pub fn install_database_logger(database: DatabaseConnection) {
     tokio::spawn(async move {
-        #[allow(clippy::expect_used)]
-        let mut receiver = LOG_SENDER
-            .get()
-            .expect("Log sender not ready yet")
-            .subscribe();
-        loop {
-            match receiver.recv().await {
-                Err(_) => break,
-                Ok(log_entry) => {
-                    if let Err(error) = log_entry.insert(&database).await {
-                        error!(?error, "Failed to store log entry");
-                    }
-                }
+        let mut receiver = QUEUE.receiver.lock().await;
+        while let Some(entry) = receiver.recv().await {
+            if let Err(error) = entry.insert(&database).await {
+                error!(?error, "Failed to store log entry");
             }
         }
     });
+}
+
+/// Stores the entries logged so far, for a command that exits without running
+/// [`install_database_logger`].
+pub async fn flush_database_logger(database: &DatabaseConnection) -> Result<(), DbErr> {
+    // The logger task holds the lock for good and stores the entries itself
+    let Ok(mut receiver) = QUEUE.receiver.try_lock() else {
+        return Ok(());
+    };
+    while let Ok(entry) = receiver.try_recv() {
+        entry.insert(database).await?;
+    }
+    Ok(())
 }
 
 fn values_to_log_entry_data(
@@ -94,4 +111,27 @@ fn values_to_log_entry_data(
         related_admin_roles: Set(related_admin_roles),
         timestamp: Set(OffsetDateTime::now_utc()),
     })
+}
+
+#[cfg(all(test, feature = "sqlite"))]
+mod tests {
+    use sea_orm::{EntityTrait, PaginatorTrait};
+
+    use super::*;
+    use crate::resources::tests::db;
+
+    #[tokio::test]
+    async fn flush_stores_every_queued_entry() {
+        let db = db().await;
+        for _ in 0..2000 {
+            let mut values = SerializedRecordValues::new();
+            values.insert("message", "event".into());
+            QUEUE
+                .sender
+                .send(values_to_log_entry_data(values, "audit".into()).unwrap())
+                .unwrap();
+        }
+        flush_database_logger(&db).await.unwrap();
+        assert_eq!(LogEntry::Entity::find().count(&db).await.unwrap(), 2000);
+    }
 }

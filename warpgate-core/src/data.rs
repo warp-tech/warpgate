@@ -2,14 +2,16 @@ use poem_openapi::Object;
 use serde::Serialize;
 use time::OffsetDateTime;
 use uuid::Uuid;
-use warpgate_common::{NodeId, StoredSecrets, Target, TargetSessionId, UserSessionId};
+use warpgate_common::{
+    NodeId, StoredSecrets, Target, TargetId, TargetSessionId, UserId, UserSessionId,
+};
 use warpgate_db_entities::{SessionApprovalRequest, TargetSession, UserSession};
 
 #[derive(Serialize, Object)]
 pub struct UserSessionSnapshot {
     pub id: UserSessionId,
     pub username: Option<String>,
-    pub user_id: Option<Uuid>,
+    pub user_id: Option<UserId>,
     pub started: OffsetDateTime,
     pub ended: Option<OffsetDateTime>,
     pub protocol: String,
@@ -44,9 +46,9 @@ impl From<UserSession::Model> for UserSessionSnapshot {
 #[derive(Serialize, Object)]
 pub struct SessionApprovalRequestSnapshot {
     pub resolved_by_username: Option<String>,
-    pub resolved_by_user_id: Option<Uuid>,
+    pub resolved_by_user_id: Option<UserId>,
     pub resolved_at: Option<OffsetDateTime>,
-    pub target_id: Option<Uuid>,
+    pub target_id: Option<TargetId>,
     pub target: String,
     pub status: SessionApprovalRequest::ApprovalRequestStatus,
 }
@@ -69,7 +71,7 @@ pub struct TargetSessionSnapshot {
     pub id: TargetSessionId,
     /// `None` only when the stored snapshot fails to parse.
     pub target: Option<Target>,
-    pub target_id: Uuid,
+    pub target_id: TargetId,
     pub started: OffsetDateTime,
     pub ended: Option<OffsetDateTime>,
     pub ticket_id: Option<Uuid>,
@@ -104,7 +106,7 @@ impl From<TargetSession::Model> for TargetSessionSnapshot {
 mod tests {
     use time::OffsetDateTime;
     use uuid::Uuid;
-    use warpgate_common::{TargetSessionId, UserSessionId};
+    use warpgate_common::{TargetId, TargetSessionId, UserSessionId};
     use warpgate_db_entities::TargetSession;
 
     use super::TargetSessionSnapshot;
@@ -125,7 +127,7 @@ mod tests {
             id: TargetSessionId(Uuid::nil()),
             user_session_id: UserSessionId(Uuid::nil()),
             target_snapshot: target.to_string(),
-            target_id: Uuid::nil(),
+            target_id: TargetId(Uuid::nil()),
             started: OffsetDateTime::UNIX_EPOCH,
             ended: None,
             ticket_id: None,

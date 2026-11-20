@@ -31,6 +31,7 @@ macro_rules! with_every_table_in_order {
             HttpSession,
             LogEntry,
             CertificateRevocation,
+            ProviderSync,
             // Referencing the tables above
             Ticket,
             UserSession,

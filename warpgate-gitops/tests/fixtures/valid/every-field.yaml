@@ -1,0 +1,248 @@
+# Every field of every resource kind, target protocol and auth kind
+apiVersion: warpgate/v1
+kind: Role
+metadata:
+  name: dba
+spec:
+  description: Database admins
+  is_default: false
+---
+apiVersion: warpgate/v1
+kind: TargetGroup
+metadata:
+  name: prod
+spec:
+  description: Production
+  color: Danger
+---
+apiVersion: warpgate/v1
+kind: SshClientKey
+metadata:
+  name: deploy-key
+spec:
+  is_default: true
+  private_key: |
+    -----BEGIN OPENSSH PRIVATE KEY-----
+    b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+    QyNTUxOQAAACCidMSX3i76yXjvz13guDEtoHqYWMmXRQlibkXFsiG4nwAAAIiewO28nsDt
+    vAAAAAtzc2gtZWQyNTUxOQAAACCidMSX3i76yXjvz13guDEtoHqYWMmXRQlibkXFsiG4nw
+    AAAEAMXZFKTAkbDoIpTpbFRlF7NDbFcJHUrGuASnDU5Dd4HqJ0xJfeLvrJeO/PXeC4MS2g
+    ephYyZdFCWJuRcWyIbifAAAAAAECAwQF
+    -----END OPENSSH PRIVATE KEY-----
+---
+apiVersion: warpgate/v1
+kind: SshClientKey
+metadata:
+  name: vault-key
+spec:
+  private_key: secret://vault/kv/ssh#private_key
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: ssh-password
+  adopt_existing: true
+spec:
+  description: Bastion
+  group: prod
+  roles: [dba]
+  rate_limit_bytes_per_second: 1048576
+  ticket_max_duration_seconds: 3600
+  ticket_requests_disabled: false
+  ticket_require_approval: true
+  require_approval: true
+  ticket_max_uses: 5
+  options:
+    ssh:
+      host: 10.0.1.10
+      port: 22
+      username: deploy
+      allow_insecure_algos: false
+      jump_host: ssh-iam
+      auth:
+        kind: password
+        password: secret://vault/kv/ssh#password
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: ssh-publickey
+spec:
+  options:
+    ssh:
+      host: 10.0.1.11
+      auth:
+        kind: publickey
+        key_id: deploy-key
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: ssh-certificate
+spec:
+  options:
+    ssh:
+      host: 10.0.1.12
+      auth:
+        kind: certificate
+        backend: vault
+        mount: ssh
+        role: deploy
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: ssh-iam
+spec:
+  options:
+    ssh:
+      host: 10.0.1.13
+      auth:
+        kind: iam_role
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: grafana
+spec:
+  options:
+    http:
+      url: https://grafana.internal:3000
+      external_host: grafana.example.com
+      headers:
+        X-Forwarded-User: warpgate
+      tls:
+        mode: required
+        verify: true
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: k8s-token
+spec:
+  options:
+    kubernetes:
+      cluster_url: https://k8s.internal:6443
+      tls:
+        mode: required
+        verify: true
+      auth:
+        kind: token
+        token: secret://vault/kv/k8s#token
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: k8s-certificate
+spec:
+  options:
+    kubernetes:
+      cluster_url: https://k8s.internal:6443
+      auth:
+        kind: certificate
+        certificate: "-----BEGIN CERTIFICATE-----"
+        private_key: secret://vault/kv/k8s#key
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: k8s-iam
+spec:
+  options:
+    kubernetes:
+      cluster_url: https://eks.internal
+      auth:
+        kind: iam_role
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: mysql
+spec:
+  options:
+    mysql:
+      host: mysql.internal
+      port: 3306
+      username: app
+      default_database_name: app
+      tls:
+        mode: preferred
+        verify: false
+      auth:
+        kind: password
+        password: secret://vault/kv/mysql#password
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: mysql-iam
+spec:
+  options:
+    mysql:
+      host: rds.internal
+      auth:
+        kind: iam_role
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: postgres
+spec:
+  options:
+    postgres:
+      host: db.internal
+      port: 5432
+      username: app
+      default_database_name: app
+      idle_timeout: 10m
+      protocol_version: "3.2"
+      tls:
+        mode: disabled
+        verify: false
+      auth:
+        kind: password
+        password: secret://vault/kv/db#password
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: vnc
+spec:
+  options:
+    vnc:
+      host: vnc.internal
+      port: 5900
+      auth:
+        kind: none
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: vnc-password
+spec:
+  options:
+    vnc:
+      host: vnc.internal
+      auth:
+        kind: password
+        password: secret://vault/kv/vnc#password
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: rdp
+spec:
+  options:
+    rdp:
+      host: rdp.internal
+      port: 3389
+      username: Administrator
+      domain: CORP
+      kdc_url: tcp://dc.corp:88
+      verify_tls: false
+      compression: graphics_pipeline
+      interactive_logon: false
+      tls_security: tls_1_2
+      auth:
+        kind: password
+        password: secret://vault/kv/rdp#password

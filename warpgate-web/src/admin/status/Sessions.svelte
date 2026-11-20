@@ -118,11 +118,11 @@
             cell: durationCell,
             class: 'ms-3',
         },
+        { id: 'spacer', spacer: true },
         {
             id: 'startTime',
             label: 'Start time',
             cell: startTimeCell,
-            grow: true,
             class: 'text-end',
         },
     ]

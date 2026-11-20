@@ -395,17 +395,38 @@
         target_container?: string
         command: string
         tty: string
-        response_status: string
+        /** Absent if the cluster sent no response. */
+        response_status?: string
     }
 
-    interface KubernetesPodCreated1 extends KubernetesEvent {
-        _type: 'KubernetesPodCreated1'
+    /** Pod creation and pod update events have the same fields. */
+    interface KubernetesPodWrite extends KubernetesEvent {
         images: string
         node_name?: string
         host_pid: string
         host_network: string
         privileged: string
-        response_status: string
+        response_status?: string
+    }
+
+    interface KubernetesPodCreated1 extends KubernetesPodWrite {
+        _type: 'KubernetesPodCreated1'
+    }
+
+    interface KubernetesPodUpdated1 extends KubernetesPodWrite {
+        _type: 'KubernetesPodUpdated1'
+    }
+
+    interface KubernetesUnknownRequest1 extends Omit<KubernetesEvent, 'pod'> {
+        _type: 'KubernetesUnknownRequest1'
+        /** Absent for a request against the pod collection. */
+        pod?: string
+        method: string
+        path: string
+        content_type?: string
+        body_length: string
+        reason: string
+        response_status?: string
     }
 
     type RichLogEntry =
@@ -430,6 +451,8 @@
         | KubernetesStreamRejected1
         | KubernetesDebugContainerCreated1
         | KubernetesPodCreated1
+        | KubernetesPodUpdated1
+        | KubernetesUnknownRequest1
 
     function richLogType(entry: LogEntry): string {
         return String(entry.values?._type ?? '').replace(/^"|"$/g, '')
@@ -456,6 +479,8 @@
         'KubernetesStreamRejected1',
         'KubernetesDebugContainerCreated1',
         'KubernetesPodCreated1',
+        'KubernetesPodUpdated1',
+        'KubernetesUnknownRequest1',
     ])
 
     function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
@@ -938,20 +963,26 @@
                                         />
                                     </div>
                                 {:else if richEntry?._type ===
-                                    'KubernetesPodCreated1'}
+                                    'KubernetesPodCreated1' ||
+                                    richEntry?._type ===
+                                        'KubernetesPodUpdated1'}
                                     <div class="rich-entry">
                                         <UserBadge
                                             id={richEntry.user_id}
                                             name={richEntry.username}
                                         />
-                                        created pod
+                                        {richEntry._type ===
+                                        'KubernetesPodCreated1'
+                                            ? 'created'
+                                            : 'updated'}
+                                        pod
                                         <strong
                                             >{richEntry.namespace}/{richEntry.pod}</strong
                                         >
                                         ({formatJsonList(
                                             richEntry.images,
                                             ', ',
-                                        )})
+                                        ) || 'no images named'})
                                         {#if richEntry.node_name}
                                             on node
                                             <strong
@@ -978,6 +1009,39 @@
                                                 hostNetwork
                                             </span>
                                         {/if}
+                                        <span class="badge bg-secondary">
+                                            {richEntry.response_status ??
+                                                'no response'}
+                                        </span>
+                                    </div>
+                                {:else if richEntry?._type ===
+                                    'KubernetesUnknownRequest1'}
+                                    <div class="rich-entry">
+                                        <UserBadge
+                                            id={richEntry.user_id}
+                                            name={richEntry.username}
+                                        />
+                                        sent
+                                        <strong
+                                            >{richEntry.method}
+                                            {richEntry.path}</strong
+                                        >
+                                        with a body Warpgate could not read ({richEntry.content_type ??
+                                            'no content type'},
+                                        {richEntry.body_length}
+                                        bytes:
+                                        {richEntry.reason}) on
+                                        <TargetBadge
+                                            id={richEntry.target_id}
+                                            name={richEntry.target_name}
+                                        />
+                                        <span class="badge bg-warning">
+                                            not audited in detail
+                                        </span>
+                                        <span class="badge bg-secondary">
+                                            {richEntry.response_status ??
+                                                'no response'}
+                                        </span>
                                     </div>
                                 {:else}
                                     <span class="text">

@@ -100,7 +100,7 @@ impl MigrationTrait for Migration {
         let db = manager.get_connection();
         let backend = db.get_database_backend();
         let user_count: i64 = db
-            .query_one(Statement::from_string(
+            .query_one_raw(Statement::from_string(
                 backend,
                 "SELECT COUNT(*) FROM users".to_owned(),
             ))
@@ -114,7 +114,7 @@ impl MigrationTrait for Migration {
                 .table(parameters::Entity)
                 .value(Alias::new("login_protection_enabled"), false)
                 .to_owned();
-            db.execute(backend.build(&stmt)).await?;
+            db.execute(&stmt).await?;
         }
 
         Ok(())

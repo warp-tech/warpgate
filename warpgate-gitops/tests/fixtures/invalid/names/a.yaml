@@ -1,0 +1,12 @@
+apiVersion: warpgate/v1
+kind: Role
+metadata:
+  name: dba
+spec: {}
+---
+# Same name as the Role, but a different kind
+apiVersion: warpgate/v1
+kind: TargetGroup
+metadata:
+  name: dba
+spec: {}

@@ -6,6 +6,7 @@
         type SSHClientKeyKind,
         type SSHKnownHost,
     } from 'admin/lib/api'
+    import ManagedObjectStatus from 'admin/lib/ManagedObjectStatus.svelte'
     import { adminPermissions } from 'admin/lib/store'
     import CopyableTextArea from 'common/CopyableTextArea.svelte'
     import { stringifyError } from 'common/errors'
@@ -121,7 +122,7 @@
     <div class="list-group list-group-flush">
         {#each clientKeys as key (key.id)}
             <div class="list-group-item px-0">
-                <div class="d-flex align-items-center gap-2">
+                <div class="d-flex align-items-center gap-2 mb-2">
                     <strong>{key.label}</strong>
                     {#if key.isDefault}
                         <Badge color="primary">Default</Badge>
@@ -135,7 +136,15 @@
                             {key.secretBackend}
                         </Badge>
                     {/if}
-                    {#if $adminPermissions.configEdit}
+                    <ManagedObjectStatus
+                        class="ms-auto"
+                        provider={key.provider}
+                        release={async () => {
+                            await api.releaseSshOwnKey(key)
+                            await load()
+                        }}
+                    />
+                    {#if $adminPermissions.configEdit && !key.provider}
                         <Button
                             class="ms-auto"
                             color="link px-0"

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 cd ..
-rm target/llvm-cov-target/* || true
+rm -f target/llvm-cov-target/*.profraw target/llvm-cov-target/*.profdata
 cargo llvm-cov clean --workspace
 cargo llvm-cov --no-cfg-coverage-nightly --no-report --workspace --all-features -- --skip agent
 # The warpgate binary the e2e nodes run. Built up front: built from a pytest
