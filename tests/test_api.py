@@ -1671,7 +1671,8 @@ spec:
         [granted] = [e for e in entries if e["_type"] == "TargetRoleAdded1"]
         assert (granted["target_name"], granted["role_name"]) == (name, name)
         role_id = next(r.id for r in admin_client.get_roles() if r.name == name)
-        assert granted["related_access_roles"] == f"${role_id}$"
+        by_role = admin_client.get_logs(sdk.GetLogsRequest(related_access_roles=role_id, limit=500))
+        assert granted in [e.values for e in by_role], "the role's log lists the grant"
 
         again = admin_client.sync_gitops(sdk.SyncGitopsRequest())
         assert again.id == head.id, "an unchanged sync extends the latest row"
