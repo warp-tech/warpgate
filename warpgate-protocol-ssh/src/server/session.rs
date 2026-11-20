@@ -186,8 +186,8 @@ pub struct ServerSession {
     allowed_auth_methods: MethodSet,
     /// Track the state of a client snooping around pre-auth
     probe: ProbeState,
-    /// Closes the client connection at teardown so it ends with the session
-    /// rather than with russh's inactivity timer. `None` once used.
+    /// Closes the client connection at teardown. Without it the connection
+    /// would last until russh's inactivity timer. `None` once used
     client_closer: Option<ClientCloser>,
 }
 

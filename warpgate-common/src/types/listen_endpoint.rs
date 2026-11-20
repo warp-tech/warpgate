@@ -182,8 +182,7 @@ mod tests {
         drop(client);
         drop(listener);
 
-        // Windows lets a plain bind through TIME_WAIT, so there is no
-        // precondition to check there.
+        // Windows allows a plain bind during TIME_WAIT
         #[cfg(not(windows))]
         {
             let plain = Socket::new(Domain::IPV4, Type::STREAM, None).unwrap();

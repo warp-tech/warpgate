@@ -77,8 +77,6 @@ async fn _handle_connection(
 ) -> Result<()> {
     let (session_handle, session_handle_rx) = SSHSessionHandle::new();
 
-    // Ends the connection even while russh is parked in a write the client
-    // never drains; see `ClientCloser`.
     let client_closer = ClientCloser::default();
 
     let (server_handle, wrapped_stream) = State::register_user_session_with_stream(
@@ -92,7 +90,8 @@ async fn _handle_connection(
     )
     .await
     .context("registering session")?;
-    // Outermost, so a write held back by the rate limiter is released too.
+    // The guard is outermost. Closing must also release a write that the
+    // rate limiter is delaying
     let wrapped_stream = client_closer.guard(wrapped_stream);
 
     let id = server_handle.lock().await.user_session_id();

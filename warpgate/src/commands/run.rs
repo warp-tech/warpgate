@@ -314,9 +314,8 @@ pub async fn command(params: &GlobalParams, enable_admin_token: bool) -> Result<
     Ok(())
 }
 
-/// The OS requests that stop the server: SIGINT/SIGTERM on Unix,
-/// Ctrl+C/Ctrl+Break/console close/system shutdown on Windows. Not logoff:
-/// a service receives that whenever any user logs off and must keep running.
+/// The OS requests that stop the server. Windows logoff is not one of them:
+/// a service receives it whenever any user logs off
 struct ShutdownSignals {
     #[cfg(unix)]
     interrupt: tokio::signal::unix::Signal,

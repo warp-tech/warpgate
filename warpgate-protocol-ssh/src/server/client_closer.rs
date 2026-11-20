@@ -9,35 +9,33 @@ use tokio_util::sync::CancellationToken;
 
 /// Ends a client connection from outside russh.
 ///
-/// Everything else Warpgate can say to a client goes through russh, which
-/// cannot act on any of it while its loop is parked in a write the client
-/// never drains. [`ClientCloser::close`] ends the [`CancellableStream`]
-/// russh runs on, even while it is parked: reads then see the end of the
-/// stream and writes fail with `BrokenPipe`, as after `shutdown(2)` on the
-/// socket. russh's session then ends cleanly and drops (closes) the socket.
+/// russh cannot send anything while its loop is parked in a write that the
+/// client never drains. Closing wakes that write: reads return end of
+/// stream and writes fail with `BrokenPipe`. russh then ends the session
+/// and drops the socket
 #[derive(Default)]
 pub struct ClientCloser {
     cancel: CancellationToken,
 }
 
 impl ClientCloser {
-    /// Wraps the stream russh runs on so that [`ClientCloser::close`] ends it.
+    /// Wraps the stream russh runs on. [`ClientCloser::close`] ends it
     pub fn guard<S>(&self, stream: S) -> CancellableStream<S> {
         CancellableStream::new(stream, self.cancel.clone())
     }
 
-    /// Idempotent.
+    /// Idempotent
     pub fn close(&self) {
         self.cancel.cancel();
     }
 }
 
 /// A stream that ends once its token is cancelled, even while a read or a
-/// write is parked on the inner stream.
+/// write is parked on the inner stream
 pub struct CancellableStream<S> {
     inner: S,
-    // One per direction, so a read and a write parked in different tasks
-    // are both woken.
+    // A future holds one waker. Each direction has its own so that a read
+    // and a write parked in different tasks are both woken
     read_cancelled: BoxFuture<'static, ()>,
     write_cancelled: BoxFuture<'static, ()>,
 }
@@ -89,11 +87,14 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for CancellableStream<S> {
         Pin::new(&mut self.inner).poll_flush(cx)
     }
 
+    /// A cancelled stream still shuts the inner stream down and fails if
+    /// that would block. `Ok` always means the shutdown happened
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        if self.write_cancelled.poll_unpin(cx).is_ready() {
-            return Poll::Ready(Ok(()));
+        let cancelled = self.write_cancelled.poll_unpin(cx).is_ready();
+        match Pin::new(&mut self.inner).poll_shutdown(cx) {
+            Poll::Pending if cancelled => Poll::Ready(Err(closed())),
+            other => other,
         }
-        Pin::new(&mut self.inner).poll_shutdown(cx)
     }
 }
 
@@ -116,8 +117,7 @@ mod tests {
         (server, client)
     }
 
-    /// A write parked on a client that never reads fails once the client is
-    /// closed; that wake-up is what ends a stalled client.
+    /// Session teardown depends on this to cut a client that never reads
     #[tokio::test]
     async fn close_releases_parked_write() {
         let (server, _client) = connected_pair().await;
@@ -141,11 +141,19 @@ mod tests {
             .expect("write still parked after close")
             .unwrap();
         assert_eq!(error.kind(), ErrorKind::BrokenPipe);
-        closer.close();
     }
 
-    /// A read parked on a silent client sees the end of the stream once the
-    /// client is closed.
+    #[tokio::test]
+    async fn shutdown_after_close_sends_fin() {
+        let (server, mut client) = connected_pair().await;
+        let closer = ClientCloser::default();
+        let mut server = closer.guard(server);
+
+        closer.close();
+        server.shutdown().await.unwrap();
+        assert_eq!(client.read(&mut [0u8; 1]).await.unwrap(), 0);
+    }
+
     #[tokio::test]
     async fn close_releases_parked_read() {
         let (server, _client) = connected_pair().await;

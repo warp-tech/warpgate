@@ -24,6 +24,9 @@ warpgate-ca = { path = "../warpgate-ca", default-features = false }
 warpgate-common = { path = "../warpgate-common", default-features = false }
 warpgate-db-entities = { path = "../warpgate-db-entities" }
 
+[dev-dependencies]
+tempfile = "3"
+
 [features]
 postgres = ["sea-orm/sqlx-postgres"]
 mysql = ["sea-orm/sqlx-mysql"]

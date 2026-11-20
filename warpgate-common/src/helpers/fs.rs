@@ -6,8 +6,6 @@ use std::path::Path;
 
 use tracing::error;
 
-use crate::GlobalParams;
-
 #[cfg(unix)]
 fn maybe_apply_permissions<P: AsRef<Path>>(path: P, mode: u32) -> std::io::Result<()> {
     let permissions = std::fs::Permissions::from_mode(mode);
@@ -28,15 +26,22 @@ fn maybe_apply_permissions<P: AsRef<Path>>(path: P, mode: u32) -> std::io::Resul
     Ok(())
 }
 
-// Windows has no mode bits and setting ACLs is not implemented yet.
-// `ensure_files_can_be_secured` refuses to run unless `--skip-securing-files`
-// says access is restricted some other way, so there is nothing to do here.
+// Setting ACLs is not implemented. An unsecured file keeps its inherited
+// ACL, which under ProgramData lets every local user read it
 #[cfg(windows)]
 #[allow(
     clippy::unnecessary_wraps,
     reason = "same signature as the Unix version"
 )]
 fn maybe_apply_permissions<P: AsRef<Path>>(_path: P, _mode: u32) -> std::io::Result<()> {
+    static WARNED: std::sync::Once = std::sync::Once::new();
+    WARNED.call_once(|| {
+        tracing::warn!(
+            "Warpgate cannot restrict access to its files on Windows yet. Restrict the config \
+             and data directories to SYSTEM, Administrators and the service account, then pass \
+             --skip-securing-files to silence this warning"
+        );
+    });
     Ok(())
 }
 
@@ -57,50 +62,4 @@ pub fn secure_directory<P: AsRef<Path>>(path: P) -> std::io::Result<()> {
 
 pub fn secure_file<P: AsRef<Path>>(path: P) -> std::io::Result<()> {
     maybe_apply_permissions(path.as_ref(), 0o600).inspect_err(warn_failure)
-}
-
-/// Fails where Warpgate cannot restrict access to its own files, unless
-/// `--skip-securing-files` says that is taken care of.
-#[cfg(unix)]
-#[allow(
-    clippy::unnecessary_wraps,
-    reason = "same signature as the Windows version"
-)]
-pub fn ensure_files_can_be_secured(_params: &GlobalParams) -> anyhow::Result<()> {
-    Ok(())
-}
-
-// Without ACLs the files would keep the ACL they inherit: under ProgramData,
-// read access for every local user. Refuse rather than run like that.
-#[cfg(windows)]
-pub fn ensure_files_can_be_secured(params: &GlobalParams) -> anyhow::Result<()> {
-    if !params.should_secure_files() {
-        return Ok(());
-    }
-    anyhow::bail!(
-        "Warpgate cannot restrict access to its files on Windows yet. Restrict the config \
-         and data directories to SYSTEM, Administrators and the service account, then run: \
-         warpgate --skip-securing-files <command>"
-    )
-}
-
-#[cfg(all(test, windows))]
-mod tests {
-    use std::path::PathBuf;
-
-    use super::ensure_files_can_be_secured;
-    use crate::GlobalParams;
-
-    #[test]
-    fn refuses_unsecured_files_unless_skipped() {
-        let config = PathBuf::from(r"C:\ProgramData\warpgate\warpgate.yaml");
-        let params = GlobalParams::new(config.clone(), true).unwrap();
-        let error = ensure_files_can_be_secured(&params)
-            .unwrap_err()
-            .to_string();
-        assert!(error.ends_with("warpgate --skip-securing-files <command>"));
-
-        let params = GlobalParams::new(config, false).unwrap();
-        ensure_files_can_be_secured(&params).unwrap();
-    }
 }

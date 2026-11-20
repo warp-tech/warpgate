@@ -352,10 +352,8 @@ mod tests {
     #[tokio::test]
     async fn sqlite_migrations_run_through_a_pool() {
         set_config_migration_values(ConfigMigrationValues::default());
-        let path = std::env::temp_dir().join(format!(
-            "warpgate-migrations-{}.sqlite3",
-            std::process::id()
-        ));
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db.sqlite3");
         let mut opt = ConnectOptions::new(format!("sqlite://{}?mode=rwc", path.display()));
         opt.max_connections(100);
         let db = Database::connect(opt).await.unwrap();
@@ -365,10 +363,5 @@ mod tests {
         migrate_database_up(&db, 1).await.unwrap();
 
         db.close().await.unwrap();
-        // Only the temp file's cleanup: Windows may still hold it just after close().
-        let removed = std::fs::remove_file(path);
-        if cfg!(not(windows)) {
-            removed.unwrap();
-        }
     }
 }

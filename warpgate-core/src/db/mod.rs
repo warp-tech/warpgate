@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Result;
-use percent_encoding::percent_decode_str;
+use percent_encoding::{AsciiSet, CONTROLS, percent_decode_str, utf8_percent_encode};
 use sea_orm::sea_query::{Expr, ExprTrait};
 use sea_orm::{
     ColumnTrait, ConnectOptions, Database, DatabaseConnection, DbErr, EntityOrSelect, EntityTrait,
@@ -58,12 +58,9 @@ pub async fn connect_to_db(
     Ok(connection)
 }
 
-/// The database file for a `sqlite:` URL: the URL path, percent-decoded once
-/// (as sqlx does), resolved against `relative_to`, plus `db.sqlite3`.
-///
-/// The path is handed to SQLite as is, never through another URL, so it may
-/// hold anything the OS allows (spaces, `%`, non-ASCII, Windows drive paths).
-/// As in any URL, a `?` or `#` in the path must be written as `%3F` or `%23`.
+/// The database file for a `sqlite:` URL. The path is percent-decoded here
+/// and must reach SQLite as a filename. Passing it through another URL
+/// would decode it a second time
 fn sqlite_db_path(url: &url::Url, relative_to: &Path) -> Result<PathBuf> {
     let path = percent_decode_str(url.path()).decode_utf8()?;
     let mut abs_path = relative_to.to_path_buf();
@@ -72,35 +69,31 @@ fn sqlite_db_path(url: &url::Url, relative_to: &Path) -> Result<PathBuf> {
     Ok(abs_path)
 }
 
-/// The `sqlite:` URL for a database in `dir`, which `connect_to_db` opens as
-/// `dir/db.sqlite3`. Escapes `%`, `?` and `#`, which a URL would otherwise
-/// read as an escape, the query and the fragment.
+/// Characters a URL parser changes: `%` starts an escape, `?` and `#` end
+/// the path, and spaces and control characters are trimmed or dropped
+const SQLITE_URL_ESCAPED: &AsciiSet = &CONTROLS.add(b' ').add(b'%').add(b'?').add(b'#');
+
+/// The `sqlite:` URL for the database that `connect_to_db` opens at
+/// `dir/db.sqlite3`
 pub fn sqlite_url(dir: &Path) -> String {
-    let dir = dir
-        .to_string_lossy()
-        .replace('%', "%25")
-        .replace('?', "%3F")
-        .replace('#', "%23");
-    format!("sqlite:{dir}")
+    format!(
+        "sqlite:{}",
+        utf8_percent_encode(&dir.to_string_lossy(), SQLITE_URL_ESCAPED)
+    )
 }
 
 /// WAL mode required to allow multiple concurrent writes to wait for each other
 /// instead of failing
 #[cfg(feature = "sqlite")]
-fn sqlite_connect_options(path: &Path) -> sea_orm::sqlx::sqlite::SqliteConnectOptions {
-    use sea_orm::sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode};
+async fn connect_to_sqlite(path: &Path) -> Result<DatabaseConnection> {
+    use sea_orm::SqlxSqliteConnector;
+    use sea_orm::sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 
-    SqliteConnectOptions::new()
+    let connect_options = SqliteConnectOptions::new()
         .filename(path)
         .create_if_missing(true)
         .journal_mode(SqliteJournalMode::Wal)
-        .busy_timeout(Duration::from_secs(30))
-}
-
-#[cfg(feature = "sqlite")]
-async fn connect_to_sqlite(path: &Path) -> Result<DatabaseConnection> {
-    use sea_orm::SqlxSqliteConnector;
-    use sea_orm::sqlx::sqlite::SqlitePoolOptions;
+        .busy_timeout(Duration::from_secs(30));
 
     let pool = SqlitePoolOptions::new()
         .max_connections(100)
@@ -108,7 +101,7 @@ async fn connect_to_sqlite(path: &Path) -> Result<DatabaseConnection> {
         .acquire_timeout(Duration::from_secs(8))
         .idle_timeout(Duration::from_secs(8))
         .max_lifetime(Duration::from_secs(8))
-        .connect_with(sqlite_connect_options(path))
+        .connect_with(connect_options)
         .await?;
 
     Ok(SqlxSqliteConnector::from_sqlx_sqlite_pool(pool))
@@ -359,8 +352,6 @@ mod tests {
         assert_eq!(HttpSession::Entity::find().count(&db).await.unwrap(), 0);
     }
 
-    /// Database directories setup may write, relative to the config directory
-    /// or absolute.
     fn sqlite_dirs() -> Vec<PathBuf> {
         let mut dirs = vec![
             "data/db",
@@ -372,6 +363,8 @@ mod tests {
             "caf\u{e9}/\u{65e5}\u{672c}",
             "a/b/c/d",
             "../data/db",
+            " padded /db ",
+            "tab\tbed/line\nbreak",
         ];
         if cfg!(windows) {
             dirs.extend([
@@ -387,8 +380,6 @@ mod tests {
         dirs.into_iter().map(PathBuf::from).collect()
     }
 
-    /// The URL setup writes for a directory opens and secures exactly the
-    /// database file in that directory.
     #[test]
     fn sqlite_url_round_trip() {
         let base = if cfg!(windows) {
@@ -400,15 +391,11 @@ mod tests {
             let database_url = sqlite_url(&dir);
             let url = url::Url::parse(&database_url).unwrap();
             let expected = base.join(&dir).join("db.sqlite3");
-            let secured = sqlite_db_path(&url, base).unwrap();
-            assert_eq!(secured, expected, "{database_url:?}");
-            let options = sqlite_connect_options(&secured);
-            assert_eq!(options.get_filename(), expected, "{database_url:?}");
+            let resolved = sqlite_db_path(&url, base).unwrap();
+            assert_eq!(resolved, expected, "{database_url:?}");
         }
     }
 
-    /// The same on disk: `connect_to_db` creates and secures the database
-    /// where setup configured it.
     #[tokio::test]
     async fn connect_to_db_creates_the_configured_file() {
         let tmp = tempfile::tempdir().unwrap();

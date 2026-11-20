@@ -144,7 +144,10 @@ impl Answers {
             #[cfg(target_os = "macos")]
             let default_data_path = "/usr/local/var/lib/warpgate";
             #[cfg(windows)]
-            let default_data_path = r"C:\ProgramData\warpgate";
+            let default_data_path = format!(
+                r"{}\warpgate",
+                std::env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".into())
+            );
             dialoguer::Input::with_theme(&theme)
                 .default(default_data_path.to_string())
                 .with_prompt("Directory to store app data (up to a few MB) in")
@@ -337,9 +340,9 @@ fn config_dir(params: &GlobalParams) -> &Path {
     }
 }
 
-/// Creates the directory first, as `canonicalize` fails for a path that does
-/// not exist yet. `dunce` leaves out the verbatim `\\?\` prefix Windows would
-/// otherwise add, which would end up in the config.
+/// `canonicalize` fails on a missing path, so the directory is created
+/// first. `dunce` omits the `\\?\` prefix that Windows adds, which would
+/// otherwise be written to the config
 fn resolve_data_path(config_dir: &Path, data_path: &str) -> Result<PathBuf> {
     let data_path = config_dir.join(data_path);
     create_dir_all(&data_path)?;
@@ -587,9 +590,8 @@ mod tests {
 
     use crate::{Cli, Commands};
 
-    /// Setup creates a data directory that does not exist yet, and the
-    /// database URL it writes opens the database in it, whatever characters
-    /// the path holds.
+    /// The data path has a space, a non-ASCII character and a `#`. The
+    /// database URL that setup writes must still open it
     #[tokio::test]
     async fn unattended_setup_creates_a_new_data_dir() {
         let tmp = tempfile::tempdir().unwrap();
