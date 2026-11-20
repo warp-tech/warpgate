@@ -20,6 +20,7 @@ console = { version = "0.16", default-features = false }
 data-encoding.workspace = true
 dialoguer.workspace = true
 dotenv = "0.15.0"
+dunce = "1.0"
 enum_dispatch.workspace = true
 futures.workspace = true
 humantime = { version = "2.1", default-features = false }

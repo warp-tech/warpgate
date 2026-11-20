@@ -1,6 +1,8 @@
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Result;
+use percent_encoding::{AsciiSet, CONTROLS, percent_decode_str, utf8_percent_encode};
 use sea_orm::sea_query::{Expr, ExprTrait};
 use sea_orm::{
     ColumnTrait, ConnectOptions, Database, DatabaseConnection, DbErr, EntityOrSelect, EntityTrait,
@@ -25,26 +27,16 @@ pub async fn connect_to_db(
     config: &WarpgateConfig,
     params: &GlobalParams,
 ) -> Result<DatabaseConnection> {
-    let mut url = url::Url::parse(&config.store.database_url.expose_secret()[..])?;
+    let url = url::Url::parse(&config.store.database_url.expose_secret()[..])?;
 
     if url.scheme() == "sqlite" {
-        let path = url.path();
-        let mut abs_path = params.paths_relative_to().clone();
-        abs_path.push(path);
-        abs_path.push("db.sqlite3");
+        let abs_path = sqlite_db_path(&url, params.paths_relative_to())?;
 
         if let Some(parent) = abs_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
 
-        url.set_path(
-            abs_path
-                .to_str()
-                .ok_or_else(|| anyhow::anyhow!("Failed to convert database path to string"))?,
-        );
-        url.set_query(Some("mode=rwc"));
-
-        let connection = connect_to_sqlite(url.as_str()).await?;
+        let connection = connect_to_sqlite(&abs_path).await?;
 
         if params.should_secure_files() {
             secure_file(&abs_path)?;
@@ -66,16 +58,39 @@ pub async fn connect_to_db(
     Ok(connection)
 }
 
+/// The database file for a `sqlite:` URL. The path is percent-decoded here
+/// and must reach SQLite as a filename. Passing it through another URL
+/// would decode it a second time
+fn sqlite_db_path(url: &url::Url, relative_to: &Path) -> Result<PathBuf> {
+    let path = percent_decode_str(url.path()).decode_utf8()?;
+    let mut abs_path = relative_to.to_path_buf();
+    abs_path.push(&*path);
+    abs_path.push("db.sqlite3");
+    Ok(abs_path)
+}
+
+/// Characters a URL parser changes: `%` starts an escape, `?` and `#` end
+/// the path, and spaces and control characters are trimmed or dropped
+const SQLITE_URL_ESCAPED: &AsciiSet = &CONTROLS.add(b' ').add(b'%').add(b'?').add(b'#');
+
+/// The `sqlite:` URL for the database that `connect_to_db` opens at
+/// `dir/db.sqlite3`
+pub fn sqlite_url(dir: &Path) -> String {
+    format!(
+        "sqlite:{}",
+        utf8_percent_encode(&dir.to_string_lossy(), SQLITE_URL_ESCAPED)
+    )
+}
+
 /// WAL mode required to allow multiple concurrent writes to wait for each other
 /// instead of failing
 #[cfg(feature = "sqlite")]
-async fn connect_to_sqlite(url: &str) -> Result<DatabaseConnection> {
-    use std::str::FromStr;
-
+async fn connect_to_sqlite(path: &Path) -> Result<DatabaseConnection> {
     use sea_orm::SqlxSqliteConnector;
     use sea_orm::sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 
-    let connect_options = SqliteConnectOptions::from_str(url)?
+    let connect_options = SqliteConnectOptions::new()
+        .filename(path)
         .create_if_missing(true)
         .journal_mode(SqliteJournalMode::Wal)
         .busy_timeout(Duration::from_secs(30));
@@ -93,7 +108,7 @@ async fn connect_to_sqlite(url: &str) -> Result<DatabaseConnection> {
 }
 
 #[cfg(not(feature = "sqlite"))]
-async fn connect_to_sqlite(_url: &str) -> Result<DatabaseConnection> {
+async fn connect_to_sqlite(_path: &Path) -> Result<DatabaseConnection> {
     anyhow::bail!("SQLite support is not enabled in this build")
 }
 
@@ -337,14 +352,80 @@ mod tests {
         assert_eq!(HttpSession::Entity::find().count(&db).await.unwrap(), 0);
     }
 
+    fn sqlite_dirs() -> Vec<PathBuf> {
+        let mut dirs = vec![
+            "data/db",
+            "my data/db",
+            "x#y/db",
+            "100%/db",
+            "%25/db",
+            "q?r/db",
+            "caf\u{e9}/\u{65e5}\u{672c}",
+            "a/b/c/d",
+            "../data/db",
+            " padded /db ",
+            "tab\tbed/line\nbreak",
+        ];
+        if cfg!(windows) {
+            dirs.extend([
+                r"data\db",
+                r"C:\ProgramData\warpgate\db",
+                r"D:\my data\wg #1\db",
+                r"\\?\C:\ProgramData\warpgate\db",
+                r"\\server\share\warpgate\db",
+            ]);
+        } else {
+            dirs.extend(["/var/lib/warpgate/db", "/srv/my data/caf\u{e9}/db"]);
+        }
+        dirs.into_iter().map(PathBuf::from).collect()
+    }
+
+    #[test]
+    fn sqlite_url_round_trip() {
+        let base = if cfg!(windows) {
+            Path::new(r"C:\etc\warpgate")
+        } else {
+            Path::new("/etc/warpgate")
+        };
+        for dir in sqlite_dirs() {
+            let database_url = sqlite_url(&dir);
+            let url = url::Url::parse(&database_url).unwrap();
+            let expected = base.join(&dir).join("db.sqlite3");
+            let resolved = sqlite_db_path(&url, base).unwrap();
+            assert_eq!(resolved, expected, "{database_url:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn connect_to_db_creates_the_configured_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
+        let params = GlobalParams::new(base.join("warpgate.yaml"), true).unwrap();
+        for dir in ["my data/db", "caf\u{e9}/db", "%25/x#y"] {
+            for dir in [PathBuf::from(dir), base.join(dir)] {
+                let config = WarpgateConfig {
+                    store: warpgate_common::WarpgateConfigStore {
+                        database_url: warpgate_common::Secret::new(sqlite_url(&dir)),
+                        ..Default::default()
+                    },
+                };
+                let db = connect_to_db(&config, &params).await.unwrap();
+                db.close().await.unwrap();
+                let expected = base.join(&dir).join("db.sqlite3");
+                assert!(expected.is_file(), "no {expected:?}");
+            }
+        }
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn parallel_target_deletes_all_succeed() {
         use crate::resources::{Actor, targets};
 
         set_config_migration_values(ConfigMigrationValues::default());
         let dir = tempfile::tempdir().unwrap();
-        let url = format!("sqlite://{}/db.sqlite3?mode=rwc", dir.path().display());
-        let db = connect_to_sqlite(&url).await.unwrap();
+        let db = connect_to_sqlite(dir.path().join("db.sqlite3").as_path())
+            .await
+            .unwrap();
         migrate_database(&db).await.unwrap();
 
         let mut ids = vec![];

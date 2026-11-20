@@ -9,9 +9,9 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
 use warpgate_common::{LogFormat, WarpgateConfig};
-use warpgate_core::logging::{
-    make_database_logger_layer, make_json_console_logger_layer, make_socket_logger_layer,
-};
+#[cfg(unix)]
+use warpgate_core::logging::make_socket_logger_layer;
+use warpgate_core::logging::{make_database_logger_layer, make_json_console_logger_layer};
 
 use crate::Cli;
 
@@ -48,9 +48,21 @@ pub async fn init_logging(config: Option<&WarpgateConfig>, cli: &Cli) -> Result<
 
     let registry = tracing_subscriber::registry();
 
+    #[cfg(unix)]
     let socket_layer = match config {
         Some(config) => Some(make_socket_logger_layer(config).await),
         None => None,
+    };
+    // Log forwarding uses a Unix datagram socket. Ignoring `log.send_to`
+    // would silently drop those logs
+    #[cfg(windows)]
+    let socket_layer = {
+        if config.is_some_and(|config| config.store.log.send_to.is_some()) {
+            anyhow::bail!(
+                "log.send_to is not supported on Windows (log forwarding uses a Unix datagram socket); remove it from the config"
+            );
+        }
+        None::<tracing_subscriber::layer::Identity>
     };
 
     // Create JSON console layer (only active when format is JSON)

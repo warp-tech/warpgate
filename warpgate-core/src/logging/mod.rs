@@ -2,6 +2,7 @@ mod database;
 mod events;
 mod json_console;
 pub(crate) mod layer;
+#[cfg(unix)]
 mod socket;
 mod values;
 
@@ -12,4 +13,5 @@ pub use events::{
     AuditEvent, CredentialChange, CredentialChangedVia, KubernetesAuditSubject, SessionApprovalStep,
 };
 pub use json_console::make_json_console_logger_layer;
+#[cfg(unix)]
 pub use socket::make_socket_logger_layer;
