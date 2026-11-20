@@ -75,6 +75,16 @@ ignore = [
     "RUSTSEC-2024-0449", # unsafe-libyaml is unmaintained - serde_yaml (config) and poem still depend on it
     "RUSTSEC-2026-0441", # pin-utils is unmaintained (transitive dependency with no safe upgrade)
     "RUSTSEC-2026-0542", # humantime is unmaintained (transitive dependency)
+    "RUSTSEC-2026-0543", # chrono is unmaintained (transitive via oauth2/openidconnect)
+    "RUSTSEC-2026-0574", # heapless <0.9.4 unsound (pinned by iso7816/transitive)
+    "RUSTSEC-2026-0575", # heapless <0.9.4 unsound (pinned by iso7816/transitive)
+    "RUSTSEC-2026-0576", # heapless <0.9.4 unsound (pinned by iso7816/transitive)
+    "RUSTSEC-2026-0577", # heapless <0.9.4 unsound (pinned by iso7816/transitive)
+    "RUSTSEC-2026-0578", # heapless <0.9.4 unsound (pinned by iso7816/transitive)
+    "RUSTSEC-2026-0579", # heapless <0.9.4 unsound (pinned by iso7816/transitive)
+    "RUSTSEC-2026-0580", # heapless <0.9.4 unsound (pinned by iso7816/transitive)
+    "RUSTSEC-2026-0581", # heapless <0.9.4 unsound (pinned by iso7816/transitive)
+    "RUSTSEC-2026-0582", # heapless <0.9.4 unsound (pinned by iso7816/transitive)
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
