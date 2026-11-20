@@ -6,7 +6,7 @@ use uuid::Uuid;
 pub use warpgate_common::TargetDataRequest;
 use warpgate_common::{ProviderId, RoleId, StoredSecrets, TargetId, TargetOptions, WarpgateError};
 use warpgate_db_entities::{
-    KnownHost, Target, TargetRoleAssignment, TargetSession, Ticket, TicketRequest,
+    KnownHost, Target, TargetRoleAssignment, TargetSession, Ticket, TicketRequest, begin_write,
 };
 use warpgate_gitops::types::ResourceKind;
 
@@ -86,7 +86,7 @@ pub async fn delete<C: ConnectionTrait + TransactionTrait>(
     actor: Actor,
     id: TargetId,
 ) -> Result<AdmittedSessions, ResourceError> {
-    let txn = db.begin().await?;
+    let txn = begin_write(db).await?;
     let target = Target::Entity::find_by_id(id)
         .one(&txn)
         .await?
