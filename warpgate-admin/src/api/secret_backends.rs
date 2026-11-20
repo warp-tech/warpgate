@@ -6,19 +6,23 @@ use std::str::FromStr;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi, Union};
-use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryOrder, Set};
+use sea_orm::{
+    ActiveModelTrait, ConnectionTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryOrder, Set,
+};
+use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::secrets::validate_backend_name;
 use warpgate_common::{
     AdminPermission, BackendType, SecretError, SecretRef, SecretResolver as _, StoredSecret,
     StoredSecrets, VaultAuthConfig, WarpgateError,
 };
+use warpgate_core::resources::audit::{self, Audited, ComparableValues, RowKind, Subject};
 use warpgate_db_entities::{SecretBackend, SshClientKey, Target};
 
 use super::AdminContext;
 use crate::api::common::is_unique_violation;
 
-#[derive(Object)]
+#[derive(Serialize, Object)]
 #[oai(rename = "SecretBackend")]
 pub struct SecretBackendModel {
     pub id: Uuid,
@@ -45,6 +49,33 @@ impl From<SecretBackend::Model> for SecretBackendModel {
         }
     }
 }
+
+/// The audit log compares the fields of `SecretBackendModel`, with the stored
+/// `auth` secret as a credential
+struct Audit<'a>(&'a SecretBackend::Model);
+
+impl Audited for Audit<'_> {
+    fn subject(&self) -> Subject {
+        Subject::Row(RowKind::SecretBackend, self.0.id)
+    }
+
+    fn name(&self) -> String {
+        self.0.name.clone()
+    }
+
+    async fn compared<C: ConnectionTrait>(
+        &self,
+        _db: &C,
+    ) -> Result<ComparableValues, WarpgateError> {
+        let redacted = SecretBackendModel::from(self.0.clone());
+        let stored = SecretBackendModel {
+            auth: self.0.auth.clone(),
+            ..self.0.clone().into()
+        };
+        audit::columns(&stored, &redacted)
+    }
+}
+
 #[derive(Object)]
 #[oai(rename = "SecretBackendSummary")]
 pub struct SecretBackendSummary {
@@ -379,7 +410,10 @@ impl Api {
         };
         update_active_model(&mut model, &body, None)?;
         match model.insert(db).await {
-            Ok(model) => Ok(CreateSecretBackendResponse::Created(Json(model.into()))),
+            Ok(model) => {
+                audit::created(db, admin.changed_by(), &Audit(&model)).await;
+                Ok(CreateSecretBackendResponse::Created(Json(model.into())))
+            }
             Err(e) if is_unique_violation(&e) => Ok(CreateSecretBackendResponse::Conflict(Json(
                 NAME_TAKEN.into(),
             ))),
@@ -435,7 +469,10 @@ impl Api {
         let mut model: SecretBackend::ActiveModel = existing.clone().into();
         update_active_model(&mut model, &body, Some(&existing))?;
         match model.update(db).await {
-            Ok(model) => Ok(UpdateSecretBackendResponse::Ok(Json(model.into()))),
+            Ok(model) => {
+                audit::updated(db, admin.changed_by(), &Audit(&existing), &Audit(&model)).await;
+                Ok(UpdateSecretBackendResponse::Ok(Json(model.into())))
+            }
             Err(e) if is_unique_violation(&e) => Ok(UpdateSecretBackendResponse::Conflict(Json(
                 NAME_TAKEN.into(),
             ))),
@@ -465,7 +502,8 @@ impl Api {
                 &found,
             ))));
         }
-        model.delete(db).await?;
+        model.clone().delete(db).await?;
+        audit::deleted(admin.changed_by(), &Audit(&model));
         Ok(DeleteSecretBackendResponse::Deleted)
     }
 

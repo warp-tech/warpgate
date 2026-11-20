@@ -13,6 +13,7 @@ members = [
     "warpgate-core",
     "warpgate-desktop-auth",
     "warpgate-gitops",
+    "warpgate-resources",
     "warpgate-db-migrations",
     "warpgate-db-entities",
     "warpgate-database-protocols",
@@ -31,15 +32,17 @@ members = [
     "warpgate-web-desktop",
     "warpgate-web-ssh",
 ]
-# Vendored IronRDP forks (path deps / patches). They are excluded from the workspace so
+# Vendored forks (path deps / patches). They are excluded from the workspace so
 # Cranky's deny lints don't apply to their upstream code. Each carries a PATCHES.md
 # describing the fork and a warpgate.patch reproducing it. ironrdp-server is a git snapshot
-# (no release builds against the current crate generation); the other two add the
-# credential-less CredSSP mode interactive-logon targets need.
+# (no release builds against the current crate generation); the other two IronRDP crates
+# add the credential-less CredSSP mode interactive-logon targets need. vnc-rs adds an
+# end-of-update event
 exclude = [
     "vendor/ironrdp-async",
     "vendor/ironrdp-connector",
     "vendor/ironrdp-server",
+    "vendor/vnc-rs",
 ]
 default-members = ["warpgate"]
 resolver = "2"
@@ -48,6 +51,7 @@ resolver = "2"
 ironrdp-async = { path = "vendor/ironrdp-async" }
 ironrdp-connector = { path = "vendor/ironrdp-connector" }
 ironrdp-server = { path = "vendor/ironrdp-server" }
+vnc-rs = { path = "vendor/vnc-rs" }
 
 [workspace.dependencies]
 aes-gcm = { version = "0.11", default-features = false, features = [

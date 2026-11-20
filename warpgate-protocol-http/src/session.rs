@@ -12,7 +12,7 @@ use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::get_client_socket_addr;
 use warpgate_common_http::{SessionAuthorization, SessionKeepalive};
 use warpgate_core::{State, UserSessionStateInit, WarpgateServerHandle};
-use warpgate_db_entities::{HttpSession, UserSession};
+use warpgate_db_entities::HttpSession;
 
 use crate::common::{PROTOCOL_NAME, SessionExt};
 use crate::middleware::ticket::{TicketSessionKey, ticket_session_key};
@@ -313,7 +313,7 @@ impl SessionStore {
                         // A cluster-wide logout, not just a local detach: the
                         // stored browser sessions are what keep the login
                         // valid on every node.
-                        if let Err(error) = UserSession::revoke(&db, id).await {
+                        if let Err(error) = warpgate_core::user_sessions::revoke(&db, id).await {
                             error!(%id, %error, "Could not revoke the closed HTTP session");
                         }
                         info!(%id, "Removed HTTP session");

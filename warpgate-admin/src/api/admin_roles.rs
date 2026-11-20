@@ -5,6 +5,7 @@ use sea_orm::{ActiveModelTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, AdminRole as AdminRoleConfig, WarpgateError};
 use warpgate_common_http::errors::invalid_field;
+use warpgate_core::resources::audit;
 use warpgate_db_entities::{AdminRole, User};
 
 use super::AdminContext;
@@ -171,7 +172,10 @@ impl ListApi {
         };
 
         match values.insert(db).await {
-            Ok(role) => Ok(CreateAdminRoleResponse::Created(Json(role.into()))),
+            Ok(role) => {
+                audit::created(db, admin.changed_by(), &role).await;
+                Ok(CreateAdminRoleResponse::Created(Json(role.into())))
+            }
             Err(err) if is_unique_violation(&err) => Err(WarpgateError::NameTaken),
             Err(err) => Err(err.into()),
         }
@@ -230,7 +234,7 @@ impl DetailApi {
             return Ok(UpdateAdminRoleResponse::Forbidden);
         }
 
-        let mut model: AdminRole::ActiveModel = role.into();
+        let mut model: AdminRole::ActiveModel = role.clone().into();
         model.name = Set(body.name.clone());
         model.description = Set(body.description.clone().unwrap_or_default());
         model.targets_create = Set(body.targets_create);
@@ -253,7 +257,10 @@ impl DetailApi {
         model.admin_roles_manage = Set(body.admin_roles_manage);
         model.ticket_requests_manage = Set(body.ticket_requests_manage);
         match model.update(db).await {
-            Ok(role) => Ok(UpdateAdminRoleResponse::Ok(Json(role.into()))),
+            Ok(updated) => {
+                audit::updated(db, admin.changed_by(), &role, &updated).await;
+                Ok(UpdateAdminRoleResponse::Ok(Json(updated.into())))
+            }
             Err(err) if is_unique_violation(&err) => Err(WarpgateError::NameTaken),
             Err(err) => Err(err.into()),
         }
@@ -280,7 +287,9 @@ impl DetailApi {
             return Ok(DeleteAdminRoleResponse::Forbidden);
         }
 
-        role.delete(db).await?;
+        role.clone().delete(db).await?;
+        audit::deleted(admin.changed_by(), &role);
+
         Ok(DeleteAdminRoleResponse::Deleted)
     }
 

@@ -251,7 +251,9 @@ impl State {
         // ending anything, and ending the row is the whole point of the call.
         self.user_sessions.remove(&id);
 
-        if let Err(error) = UserSession::mark_ended_including_target_sessions(&self.db, id).await {
+        if let Err(error) =
+            crate::user_sessions::mark_ended_including_target_sessions(&self.db, id).await
+        {
             error!(%error, %id, "Could not end user session in the DB");
         }
 
@@ -322,7 +324,7 @@ impl SessionsFilter {
     }
 
     pub async fn revoke(&self, db: &DatabaseConnection) -> Result<(), WarpgateError> {
-        UserSession::revoke_open_matching(db, self.condition()).await?;
+        crate::user_sessions::revoke_open_matching(db, self.condition()).await?;
         Ok(())
     }
 }
@@ -444,7 +446,7 @@ mod tests {
         let parent_id = parent.lock().await.user_session_id();
 
         // Closed elsewhere in the cluster: only the row changes here.
-        UserSession::mark_ended_including_target_sessions(&db, parent_id)
+        crate::user_sessions::mark_ended_including_target_sessions(&db, parent_id)
             .await
             .unwrap();
 
@@ -496,9 +498,8 @@ mod tests {
             &access_target,
             None,
             None,
-            &user_info,
         );
-        let ending = UserSession::mark_ended_including_target_sessions(&db, parent_id);
+        let ending = crate::user_sessions::mark_ended_including_target_sessions(&db, parent_id);
         let (opened, ended) = tokio::join!(opening, ending);
 
         ended.unwrap();
@@ -819,7 +820,7 @@ mod tests {
         KubernetesSession::claim(&db, "ended", ended, now, None)
             .await
             .unwrap();
-        UserSession::mark_ended_including_target_sessions(&db, ended)
+        crate::user_sessions::mark_ended_including_target_sessions(&db, ended)
             .await
             .unwrap();
 

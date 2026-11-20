@@ -7,8 +7,9 @@ use sea_orm::ConnectionTrait;
 use warpgate_common::version::{repository_file_url, warpgate_version};
 use warpgate_common::{ProviderId, WarpgateError};
 use warpgate_gitops::emit::to_yaml;
-use warpgate_gitops::plan::{Prune, Row, format_errors, plan};
-use warpgate_gitops::types::{ApiVersion, Manifest, Metadata, Resource, ResourceKind};
+use warpgate_gitops::plan::{Prune, format_errors, plan};
+use warpgate_gitops::types::{ApiVersion, Manifest, Metadata, Resource};
+use warpgate_resources::{ResourceKind, Row};
 
 use super::reconcile::load_current;
 use crate::consts::BUILTIN_ADMIN_ROLE_NAME;
@@ -119,7 +120,8 @@ mod tests {
                 },
             )
             .await
-            .unwrap();
+            .unwrap()
+            .skip_audit();
         }
 
         let yaml = unmanaged(&db).await.unwrap();
@@ -140,7 +142,8 @@ mod tests {
         ] {
             targets::create(&db, Actor::Admin, &target(name, json!({ "ssh": ssh })))
                 .await
-                .unwrap();
+                .unwrap()
+                .skip_audit();
         }
 
         let yaml = unmanaged(&db).await.unwrap();

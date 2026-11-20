@@ -6,18 +6,20 @@ use sea_orm::{
 };
 use uuid::Uuid;
 use warpgate_common::{
-    MaybeSecretRef, SecretRef, SecretResolver, SshClientKeyId, StoredSecret, WarpgateError,
+    MaybeSecretRef, RowId, SecretRef, SecretResolver, SshClientKeyId, StoredSecret, WarpgateError,
     pkcs8_pem_string, public_key_line, public_key_of_pem,
 };
 use warpgate_db_entities::SshClientKey;
-use warpgate_gitops::types::ResourceKind;
+use warpgate_resources::{Comparable, ComparableValues, ResourceKind, Row, SshClientKeySpec};
 
-use super::{Actor, OwnedEntity, ResourceError, check_name, name_taken};
+use super::audit::{Audited, Subject, Unaudited};
+use super::{Actor, OwnedEntity, ResourceError, check_name, name_taken, reveal_inline};
 
 impl OwnedEntity for SshClientKey::Entity {
     type Id = SshClientKeyId;
     const KIND: ResourceKind = ResourceKind::SshClientKey;
     const ID: Self::Column = SshClientKey::Column::Id;
+    const NAME: Self::Column = SshClientKey::Column::Label;
     const PROVIDER: Self::Column = SshClientKey::Column::Provider;
 }
 
@@ -91,12 +93,43 @@ impl KeyMaterial {
     }
 }
 
+/// An inline key comes back decrypted, so the result must not be logged
+pub(super) fn row(mut key: SshClientKey::Model) -> Result<Row<SshClientKeySpec>, WarpgateError> {
+    reveal_inline(&mut key.secret_key)?;
+    Ok(Row {
+        id: key.id.uuid(),
+        name: key.label,
+        provider: key.provider,
+        live: SshClientKeySpec {
+            private_key: key.secret_key,
+            is_default: key.is_default,
+        },
+    })
+}
+
+impl Audited for SshClientKey::Model {
+    fn subject(&self) -> Subject {
+        Subject::of::<SshClientKey::Entity>(self.id)
+    }
+
+    fn name(&self) -> String {
+        self.label.clone()
+    }
+
+    async fn compared<C: ConnectionTrait>(
+        &self,
+        _db: &C,
+    ) -> Result<ComparableValues, WarpgateError> {
+        Ok(row(self.clone())?.live.compared())
+    }
+}
+
 pub async fn create<C: ConnectionTrait>(
     db: &C,
     actor: Actor,
     data: &SshClientKeyDataRequest,
     material: KeyMaterial,
-) -> Result<SshClientKey::Model, ResourceError> {
+) -> Result<Unaudited<SshClientKey::Model>, ResourceError> {
     check_name(&data.label)?;
     material.check_unique(db, None).await?;
     let mut model = SshClientKey::ActiveModel {
@@ -107,7 +140,8 @@ pub async fn create<C: ConnectionTrait>(
         ..Default::default()
     };
     material.set(&mut model);
-    model.insert(db).await.map_err(name_taken)
+    let key = model.insert(db).await.map_err(name_taken)?;
+    Ok(Unaudited::created(key))
 }
 
 /// Replaces the key itself only when `material` is given
@@ -117,22 +151,23 @@ pub async fn update<C: ConnectionTrait>(
     id: SshClientKeyId,
     data: &SshClientKeyDataRequest,
     material: Option<KeyMaterial>,
-) -> Result<SshClientKey::Model, ResourceError> {
+) -> Result<Unaudited<SshClientKey::Model>, ResourceError> {
     check_name(&data.label)?;
-    let key = SshClientKey::Entity::find_by_id(id)
+    let before = SshClientKey::Entity::find_by_id(id)
         .one(db)
         .await?
         .ok_or(ResourceError::NotFound)?;
-    actor.may_write(key.provider)?;
+    actor.may_write(before.provider)?;
 
-    let mut model: SshClientKey::ActiveModel = key.into();
+    let mut model: SshClientKey::ActiveModel = before.clone().into();
     model.label = Set(data.label.clone());
     model.is_default = Set(data.is_default);
     if let Some(material) = material {
         material.check_unique(db, Some(id)).await?;
         material.set(&mut model);
     }
-    model.update(db).await.map_err(name_taken)
+    let after = model.update(db).await.map_err(name_taken)?;
+    Ok(Unaudited::updated(before, after))
 }
 
 /// Targets that used the key fall back to the default keys
@@ -140,7 +175,7 @@ pub async fn delete<C: ConnectionTrait>(
     db: &C,
     actor: Actor,
     id: SshClientKeyId,
-) -> Result<(), ResourceError> {
+) -> Result<Unaudited<SshClientKey::Model>, ResourceError> {
     let key = SshClientKey::Entity::find_by_id(id)
         .one(db)
         .await?
@@ -149,8 +184,8 @@ pub async fn delete<C: ConnectionTrait>(
     if SshClientKey::Entity::find().count(db).await? <= 1 {
         return Err(ResourceError::LastClientKey);
     }
-    key.delete(db).await?;
-    Ok(())
+    key.clone().delete(db).await?;
+    Ok(Unaudited::deleted(key))
 }
 
 /// Stores the public key that a referenced key resolves to after a rotation
@@ -199,7 +234,8 @@ mod tests {
             KeyMaterial::inline(&key).unwrap(),
         )
         .await
-        .unwrap();
+        .unwrap()
+        .skip_audit();
         assert_eq!(deploy.provider, Some(ProviderId::GITOPS));
 
         let result = create(
@@ -241,7 +277,8 @@ mod tests {
             Some(KeyMaterial::inline(&new_key()).unwrap()),
         )
         .await
-        .unwrap();
+        .unwrap()
+        .skip_audit();
         assert_ne!(rotated.public_key, deploy.public_key);
         let result = delete(&db, gitops, deploy.id).await;
         assert!(

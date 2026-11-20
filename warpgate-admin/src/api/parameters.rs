@@ -4,7 +4,7 @@ use poem_openapi::types::{ParseError, ParseFromJSON, ParseResult};
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::ActiveValue::NotSet;
 use sea_orm::sea_query::Expr;
-use sea_orm::{EntityTrait, IntoActiveModel, Set};
+use sea_orm::{ConnectionTrait, EntityTrait, IntoActiveModel, Set};
 use serde::Serialize;
 use serde_json::Value;
 use warpgate_aws::S3Storage;
@@ -13,6 +13,7 @@ use warpgate_common::{
     AdminPermission, PasswordPolicy, StoredSecret, StoredSecrets, UserRequireCredentialsPolicy,
     WarpgateError,
 };
+use warpgate_core::resources::audit::{self, Audited, ComparableValues, RowKind, Subject};
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::{GitopsSource, RecordingsStorageConfig};
 
@@ -141,6 +142,117 @@ struct ParameterValues {
     pub gitops_prune: bool,
 }
 
+impl ParameterValues {
+    /// Credentials are as stored. Call [`StoredSecrets::redact`] before
+    /// returning the result
+    fn stored(parameters: &Parameters::Model) -> Result<Self, WarpgateError> {
+        Ok(Self {
+            allow_own_credential_management: parameters.allow_own_credential_management,
+            rate_limit_bytes_per_second: parameters.rate_limit_bytes_per_second.map(|x| x as u32),
+            ssh_client_auth_publickey: parameters.ssh_client_auth_publickey,
+            ssh_client_auth_password: parameters.ssh_client_auth_password,
+            ssh_client_auth_keyboard_interactive: parameters.ssh_client_auth_keyboard_interactive,
+            ssh_host_key_verification: parameters.ssh_host_key_verification,
+            password_login_mode: parameters.password_login_mode,
+            mfa_enforcement: parameters.mfa_enforcement,
+            mfa_policy_exempt_sso_users: parameters.mfa_policy_exempt_sso_users,
+            default_credential_policy: parameters.default_credential_policy()?,
+            ticket_self_service_enabled: parameters.ticket_self_service_enabled,
+            ticket_auto_approve_existing_access: parameters.ticket_auto_approve_existing_access,
+            ticket_max_duration_seconds: parameters.ticket_max_duration_seconds,
+            ticket_max_uses: parameters.ticket_max_uses,
+            ticket_require_description: parameters.ticket_require_description,
+            ticket_request_show_all_targets: parameters.ticket_request_show_all_targets,
+            target_click_action: parameters.target_click_action,
+            open_targets_in_new_tab: parameters.open_targets_in_new_tab,
+            show_session_menu: parameters.show_session_menu,
+            password_policy: parameters.password_policy(),
+            max_api_token_duration_seconds: parameters.max_api_token_duration_seconds,
+            record_scp: parameters.record_scp,
+            record_desktop_keyboard_input: parameters.record_desktop_keyboard_input,
+            login_protection_enabled: parameters.login_protection_enabled,
+            login_protection_retention_seconds: parameters.login_protection_retention_seconds,
+            lp_ip_max_attempts: parameters.lp_ip_max_attempts,
+            lp_ip_time_window_seconds: parameters.lp_ip_time_window_seconds,
+            lp_ip_base_block_duration_seconds: parameters.lp_ip_base_block_duration_seconds,
+            lp_ip_block_duration_multiplier: parameters.lp_ip_block_duration_multiplier,
+            lp_ip_max_block_duration_seconds: parameters.lp_ip_max_block_duration_seconds,
+            lp_ip_cooldown_reset_seconds: parameters.lp_ip_cooldown_reset_seconds,
+            lp_user_max_attempts: parameters.lp_user_max_attempts,
+            lp_user_time_window_seconds: parameters.lp_user_time_window_seconds,
+            lp_user_auto_unlock: parameters.lp_user_auto_unlock,
+            lp_user_lockout_duration_seconds: parameters.lp_user_lockout_duration_seconds,
+            lp_user_exempt_admins: parameters.lp_user_exempt_admins,
+            banner: parameters.banner.clone(),
+            logo_etag: parameters.logo_etag(),
+            web_clients_enabled: parameters.web_clients_enabled,
+            web_auth_max_age_seconds: parameters.web_auth_max_age_seconds,
+            web_approval_grace_period_seconds: parameters.web_approval_grace_period_seconds,
+            admin_approval_timeout_seconds: parameters.admin_approval_timeout_seconds,
+            admin_approval_grace_period_seconds: parameters.admin_approval_grace_period_seconds,
+            analytics_consent: parameters.analytics_consent,
+            analytics_normal: parameters.analytics_normal,
+            recordings_enable: parameters.recordings_enable,
+            recordings_storage: parameters.recordings_storage_config()?,
+            gitops_git_password_set: matches!(
+                &parameters.gitops_source,
+                Some(GitopsSource::Git(git)) if git.password.as_inline().is_some_and(|p| !p.stored_value().is_empty())
+            ),
+            gitops_source: parameters.gitops_source.clone(),
+            gitops_sync_interval_seconds: parameters.gitops_sync_interval_seconds,
+            gitops_sync_on_startup: parameters.gitops_sync_on_startup,
+            gitops_webhook_secret_set: parameters.gitops_webhook_secret.is_some(),
+            gitops_prune: parameters.gitops_prune,
+        })
+    }
+}
+
+impl StoredSecrets for ParameterValues {
+    fn stored_secrets_mut(&mut self) -> Vec<&mut StoredSecret> {
+        let mut secrets = self.recordings_storage.stored_secrets_mut();
+        if let Some(source) = &mut self.gitops_source {
+            secrets.extend(source.stored_secrets_mut());
+        }
+        secrets
+    }
+}
+
+/// The API view plus the webhook secret, which the API never returns
+#[derive(Serialize)]
+struct AuditedParameters {
+    #[serde(flatten)]
+    values: ParameterValues,
+    gitops_webhook_secret: Option<StoredSecret>,
+}
+
+struct Audit<'a>(&'a Parameters::Model);
+
+impl Audited for Audit<'_> {
+    fn subject(&self) -> Subject {
+        Subject::Row(RowKind::Parameters, self.0.id)
+    }
+
+    fn name(&self) -> String {
+        String::new()
+    }
+
+    async fn compared<C: ConnectionTrait>(
+        &self,
+        _db: &C,
+    ) -> Result<ComparableValues, WarpgateError> {
+        let stored = AuditedParameters {
+            values: ParameterValues::stored(self.0)?,
+            gitops_webhook_secret: self.0.gitops_webhook_secret.clone(),
+        };
+        let mut redacted = AuditedParameters {
+            values: ParameterValues::stored(self.0)?,
+            gitops_webhook_secret: None,
+        };
+        redacted.values.redact();
+        audit::columns(&stored, &redacted)
+    }
+}
+
 #[derive(Serialize, Object)]
 struct ParameterUpdate {
     pub allow_own_credential_management: Option<bool>,
@@ -242,10 +354,14 @@ struct LogoUpdate {
 
 /// `None` removes the logo.
 async fn store_logo(admin: &AdminContext, logo: Option<String>) -> Result<(), WarpgateError> {
+    let db = &admin.services().db;
+    let before = Parameters::Entity::get(db).await?;
     Parameters::Entity::update_many()
         .col_expr(Parameters::Column::Logo, Expr::value(logo))
-        .exec(&admin.services().db)
+        .exec(db)
         .await?;
+    let after = Parameters::Entity::get(db).await?;
+    audit::updated(db, admin.changed_by(), &Audit(&before), &Audit(&after)).await;
     Ok(())
 }
 
@@ -299,68 +415,9 @@ enum TestRecordingsStorageResponse {
 impl Api {
     #[oai(path = "/parameters", method = "get", operation_id = "get_parameters")]
     async fn api_get(&self, admin: AdminContext) -> Result<GetParametersResponse, WarpgateError> {
-        let parameters = admin.parameters().await?.clone();
-        let recordings_storage = parameters.recordings_storage_config()?.redacted();
-        let logo_etag = parameters.logo_etag();
-
-        Ok(GetParametersResponse::Ok(Json(ParameterValues {
-            allow_own_credential_management: parameters.allow_own_credential_management,
-            rate_limit_bytes_per_second: parameters.rate_limit_bytes_per_second.map(|x| x as u32),
-            ssh_client_auth_publickey: parameters.ssh_client_auth_publickey,
-            ssh_client_auth_password: parameters.ssh_client_auth_password,
-            ssh_client_auth_keyboard_interactive: parameters.ssh_client_auth_keyboard_interactive,
-            ssh_host_key_verification: parameters.ssh_host_key_verification,
-            password_login_mode: parameters.password_login_mode,
-            mfa_enforcement: parameters.mfa_enforcement,
-            mfa_policy_exempt_sso_users: parameters.mfa_policy_exempt_sso_users,
-            default_credential_policy: parameters.default_credential_policy()?,
-            ticket_self_service_enabled: parameters.ticket_self_service_enabled,
-            ticket_auto_approve_existing_access: parameters.ticket_auto_approve_existing_access,
-            ticket_max_duration_seconds: parameters.ticket_max_duration_seconds,
-            ticket_max_uses: parameters.ticket_max_uses,
-            ticket_require_description: parameters.ticket_require_description,
-            ticket_request_show_all_targets: parameters.ticket_request_show_all_targets,
-            target_click_action: parameters.target_click_action,
-            open_targets_in_new_tab: parameters.open_targets_in_new_tab,
-            show_session_menu: parameters.show_session_menu,
-            password_policy: parameters.password_policy(),
-            max_api_token_duration_seconds: parameters.max_api_token_duration_seconds,
-            record_scp: parameters.record_scp,
-            record_desktop_keyboard_input: parameters.record_desktop_keyboard_input,
-            login_protection_enabled: parameters.login_protection_enabled,
-            login_protection_retention_seconds: parameters.login_protection_retention_seconds,
-            lp_ip_max_attempts: parameters.lp_ip_max_attempts,
-            lp_ip_time_window_seconds: parameters.lp_ip_time_window_seconds,
-            lp_ip_base_block_duration_seconds: parameters.lp_ip_base_block_duration_seconds,
-            lp_ip_block_duration_multiplier: parameters.lp_ip_block_duration_multiplier,
-            lp_ip_max_block_duration_seconds: parameters.lp_ip_max_block_duration_seconds,
-            lp_ip_cooldown_reset_seconds: parameters.lp_ip_cooldown_reset_seconds,
-            lp_user_max_attempts: parameters.lp_user_max_attempts,
-            lp_user_time_window_seconds: parameters.lp_user_time_window_seconds,
-            lp_user_auto_unlock: parameters.lp_user_auto_unlock,
-            lp_user_lockout_duration_seconds: parameters.lp_user_lockout_duration_seconds,
-            lp_user_exempt_admins: parameters.lp_user_exempt_admins,
-            banner: parameters.banner,
-            logo_etag,
-            web_clients_enabled: parameters.web_clients_enabled,
-            web_auth_max_age_seconds: parameters.web_auth_max_age_seconds,
-            web_approval_grace_period_seconds: parameters.web_approval_grace_period_seconds,
-            admin_approval_timeout_seconds: parameters.admin_approval_timeout_seconds,
-            admin_approval_grace_period_seconds: parameters.admin_approval_grace_period_seconds,
-            analytics_consent: parameters.analytics_consent,
-            analytics_normal: parameters.analytics_normal,
-            recordings_enable: parameters.recordings_enable,
-            recordings_storage,
-            gitops_git_password_set: matches!(
-                &parameters.gitops_source,
-                Some(GitopsSource::Git(git)) if git.password.as_inline().is_some_and(|p| !p.stored_value().is_empty())
-            ),
-            gitops_source: parameters.gitops_source.map(|source| source.redacted()),
-            gitops_sync_interval_seconds: parameters.gitops_sync_interval_seconds,
-            gitops_sync_on_startup: parameters.gitops_sync_on_startup,
-            gitops_webhook_secret_set: parameters.gitops_webhook_secret.is_some(),
-            gitops_prune: parameters.gitops_prune,
-        })))
+        let mut values = ParameterValues::stored(&*admin.parameters().await?)?;
+        values.redact();
+        Ok(GetParametersResponse::Ok(Json(values)))
     }
 
     #[oai(
@@ -420,7 +477,7 @@ impl Api {
             Some(None) => Set(None),
             None => NotSet,
         };
-        let mut parameters = current.into_active_model();
+        let mut parameters = current.clone().into_active_model();
 
         parameters.allow_own_credential_management =
             body.allow_own_credential_management.map_or(NotSet, Set);
@@ -510,7 +567,8 @@ impl Api {
         parameters.gitops_webhook_secret = gitops_webhook_secret;
         parameters.gitops_prune = body.gitops_prune.map_or(NotSet, Set);
 
-        Parameters::Entity::update(parameters).exec(db).await?;
+        let updated = Parameters::Entity::update(parameters).exec(db).await?;
+        audit::updated(db, admin.changed_by(), &Audit(&current), &Audit(&updated)).await;
 
         warpgate_core::rate_limiting::apply_new_rate_limits(
             &services.rate_limiter_registry,
@@ -596,16 +654,20 @@ impl Api {
 #[cfg(test)]
 mod tests {
     use poem_openapi::types::ParseFromJSON;
+    use sea_orm::Database;
     use serde_json::json;
     use warpgate_aws::{S3Credentials, S3StorageConfig, StaticCredentials};
     use warpgate_azure::{AzureBlobConfig, AzureCredentials, ServicePrincipalCredentials};
     use warpgate_common::StoredSecrets;
     use warpgate_common::encryption::{env_keyring, is_envelope};
-    use warpgate_db_entities::Parameters::GitopsSource;
+    use warpgate_db_entities::Parameters::{
+        ConfigMigrationValues, GitopsSource, set_config_migration_values,
+    };
+    use warpgate_db_migrations::migrate_database;
 
     use super::{
-        LogoUpdate, ParameterUpdate, RecordingsStorageConfig, merge_git_password, merge_secret,
-        storage_to_save,
+        Audit, Audited, LogoUpdate, ParameterUpdate, Parameters, RecordingsStorageConfig,
+        merge_git_password, merge_secret, storage_to_save,
     };
 
     fn git(url: &str, password: &str) -> GitopsSource {
@@ -624,6 +686,28 @@ mod tests {
             panic!()
         };
         git.password.inline_mut().unwrap().stored_value().to_owned()
+    }
+
+    #[tokio::test]
+    async fn a_git_source_that_appears_or_goes_is_logged_without_its_credentials() {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+        let unset = Parameters::Entity::get(&db).await.unwrap();
+        let set = Parameters::Model {
+            gitops_source: Some(git("https://git.example.com/a", "hunter2-token")),
+            gitops_webhook_secret: Some(String::from("hunter2-hook").into()),
+            ..unset.clone()
+        };
+        let unset = Audit(&unset).compared(&db).await.unwrap();
+        let set = Audit(&set).compared(&db).await.unwrap();
+
+        for fields in [unset.changes_to(&set), set.changes_to(&unset)] {
+            let fields = format!("{fields:?}");
+            assert!(fields.contains("git.example.com"), "{fields}");
+            assert_eq!(fields.matches("Credential").count(), 2, "{fields}");
+            assert!(!fields.contains("hunter2"), "{fields}");
+        }
     }
 
     #[test]

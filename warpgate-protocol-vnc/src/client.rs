@@ -2,9 +2,11 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc::{Receiver, UnboundedReceiver, channel, unbounded_channel};
+use tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver, channel, unbounded_channel};
 use tracing::{Instrument, debug, error, info_span, warn};
-use vnc::{ClientKeyEvent, PixelFormat, VncConnector, VncEncoding, VncError, VncEvent, X11Event};
+use vnc::{
+    ClientKeyEvent, PixelFormat, VncClient, VncConnector, VncEncoding, VncError, VncEvent, X11Event,
+};
 use warpgate_common::{SecretResolver, TargetVncOptions, VncTargetAuth, WarpgateError};
 use warpgate_core::{
     AdmittedTarget, DESKTOP_CONNECT_TIMEOUT, DESKTOP_HANDSHAKE_TIMEOUT,
@@ -216,43 +218,53 @@ async fn run(
         .await
         .ok();
 
-    // Ask for an initial full frame.
-    client.input(X11Event::FullRefresh).await.ok();
+    let result = pump(&client, &event_tx, &mut input_rx, &mut abort_rx).await;
+    client.close().await.ok();
+    result
+}
 
-    'session: loop {
+async fn pump(
+    client: &VncClient,
+    event_tx: &Sender<DesktopEvent>,
+    input_rx: &mut Receiver<DesktopInput>,
+    abort_rx: &mut UnboundedReceiver<()>,
+) -> Result<(), DesktopConnectionError> {
+    // Awaiting the send inline would stall input while the viewer is slow. The decoder
+    // is not read while an event waits here, so backpressure still reaches the target
+    let mut outgoing: Option<DesktopEvent> = None;
+
+    loop {
         tokio::select! {
-            event = client.poll_event() => {
-                match event {
-                    Ok(Some(event)) => {
-                        if let Some(mapped) = map_event(event) {
-                            if let DesktopEvent::Resize { width, height } = mapped {
-                                check_desktop_size(width, height)?;
-                            }
-                            if event_tx.send(mapped).await.is_err() {
-                                break;
-                            }
-                        }
-                        // Keep the framebuffer flowing.
-                        client.input(X11Event::Refresh).await.ok();
-                    }
-                    Ok(None) => {}
+            permit = event_tx.reserve(), if outgoing.is_some() => {
+                let Ok(permit) = permit else { break };
+                if let Some(event) = outgoing.take() {
+                    permit.send(event);
+                }
+            }
+            event = client.recv_event(), if outgoing.is_none() => {
+                let event = match event {
+                    Ok(event) => event,
                     Err(error) => {
                         warn!(%error, "VNC poll error");
                         break;
                     }
+                };
+                // RFB flow control: the target sends one update per request
+                if matches!(event, VncEvent::FramebufferUpdateEnd) {
+                    client.input(X11Event::Refresh).await.ok();
+                }
+                outgoing = map_event(event);
+                if let Some(DesktopEvent::Resize { width, height }) = outgoing {
+                    check_desktop_size(width, height)?;
                 }
             }
             input = input_rx.recv() => {
-                match input {
-                    Some(input) => {
-                        for event in map_input(input) {
-                            if let Err(error) = client.input(event).await {
-                                warn!(%error, "VNC input error");
-                                break 'session;
-                            }
-                        }
+                let Some(input) = input else { break };
+                for event in map_input(input) {
+                    if let Err(error) = client.input(event).await {
+                        warn!(%error, "VNC input error");
+                        return Ok(());
                     }
-                    None => break,
                 }
             }
             _ = abort_rx.recv() => {
@@ -261,8 +273,6 @@ async fn run(
             }
         }
     }
-
-    client.close().await.ok();
     Ok(())
 }
 
@@ -315,11 +325,15 @@ fn map_event(event: VncEvent) -> Option<DesktopEvent> {
 
 #[cfg(test)]
 mod tests {
-    use vnc::VncEvent;
-    use warpgate_common::UserFacingReason;
-    use warpgate_core::DesktopEvent;
+    use std::time::Duration;
 
-    use super::map_event;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
+    use tokio::sync::mpsc::{channel, unbounded_channel};
+    use vnc::{PixelFormat, VncConnector, VncEncoding, VncError, VncEvent};
+    use warpgate_common::UserFacingReason;
+    use warpgate_core::{DesktopEvent, DesktopInput};
+
+    use super::{map_event, pump};
 
     #[test]
     fn a_decoder_error_is_not_shown_verbatim() {
@@ -330,5 +344,119 @@ mod tests {
             other => format!("{other:?}"),
         };
         assert_eq!(shown, "The target session failed");
+    }
+
+    const RECTS: u16 = 8;
+
+    /// No-auth RFB 3.8 server. Sends one update of `RECTS` raw rectangles and returns
+    /// the (full, incremental) request counts seen before the first pointer event
+    async fn fake_server(mut s: DuplexStream) -> (usize, usize) {
+        let mut buf = [0u8; 64];
+        s.write_all(b"RFB 003.008\n").await.unwrap();
+        s.read_exact(&mut buf[..12]).await.unwrap();
+        s.write_all(&[1, 1]).await.unwrap();
+        s.read_exact(&mut buf[..1]).await.unwrap();
+        s.write_all(&[0; 4]).await.unwrap();
+        s.read_exact(&mut buf[..1]).await.unwrap();
+        // 16x16, a 16-byte pixel format the client overrides, empty name
+        let mut init = vec![0, 16, 0, 16];
+        init.extend([32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0]);
+        init.extend([0; 4]);
+        s.write_all(&init).await.unwrap();
+
+        let mut update = vec![0, 0];
+        update.extend(RECTS.to_be_bytes());
+        for _ in 0..RECTS {
+            update.extend([0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 2, 3, 4]);
+        }
+        s.write_all(&update).await.unwrap();
+
+        let (mut full, mut incremental) = (0, 0);
+        loop {
+            match s.read_u8().await.unwrap() {
+                0 => drop(s.read_exact(&mut buf[..19]).await.unwrap()),
+                2 => {
+                    s.read_u8().await.unwrap();
+                    for _ in 0..s.read_u16().await.unwrap() {
+                        s.read_u32().await.unwrap();
+                    }
+                }
+                3 => {
+                    s.read_exact(&mut buf[..9]).await.unwrap();
+                    if buf[0] == 0 {
+                        full += 1;
+                    } else {
+                        incremental += 1;
+                    }
+                }
+                5 => return (full, incremental),
+                // An unknown message type fails the count assertions
+                _ => return (usize::MAX, usize::MAX),
+            }
+        }
+    }
+
+    /// (full, incremental) request counts from [`fake_server`]
+    async fn request_counts(viewer_reads: bool) -> (usize, usize) {
+        let (ours, theirs) = tokio::io::duplex(1 << 16);
+        let server = tokio::spawn(fake_server(theirs));
+
+        let client = VncConnector::new(ours)
+            .set_auth_method(async { Ok::<_, VncError>(String::new()) })
+            .add_encoding(VncEncoding::Raw)
+            .set_pixel_format(PixelFormat::bgra())
+            .build()
+            .unwrap()
+            .try_start()
+            .await
+            .unwrap()
+            .finish()
+            .unwrap();
+
+        let (event_tx, mut event_rx) = channel(1);
+        let (input_tx, mut input_rx) = channel(1);
+        let (_abort_tx, mut abort_rx) = unbounded_channel();
+        let session =
+            tokio::spawn(
+                async move { pump(&client, &event_tx, &mut input_rx, &mut abort_rx).await },
+            );
+        let viewer = tokio::spawn(async move {
+            if viewer_reads {
+                while event_rx.recv().await.is_some() {}
+            } else {
+                // A dropped receiver would end the session
+                std::future::pending::<()>().await;
+                drop(event_rx);
+            }
+        });
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        input_tx
+            .send(DesktopInput::Pointer {
+                x: 1,
+                y: 1,
+                buttons: 0,
+            })
+            .await
+            .unwrap();
+
+        // Times out if input is stuck behind undelivered frames
+        let counts = tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .unwrap()
+            .unwrap();
+        session.abort();
+        viewer.abort();
+        counts
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn input_reaches_the_target_while_the_viewer_is_stalled() {
+        assert_eq!(request_counts(false).await, (1, 0));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn one_request_follows_each_complete_update() {
+        assert_eq!(request_counts(true).await, (1, 1));
     }
 }
