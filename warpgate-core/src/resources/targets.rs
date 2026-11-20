@@ -10,7 +10,10 @@ use warpgate_db_entities::{
 };
 use warpgate_gitops::types::ResourceKind;
 
-use super::{Actor, AdmittedSessions, OwnedEntity, ResourceError, check_name, name_taken};
+use super::{
+    Actor, AdmittedSessions, OwnedEntity, ResourceError, begin_write_transaction, check_name,
+    name_taken,
+};
 use crate::db::is_unique_violation;
 
 impl OwnedEntity for Target::Entity {
@@ -86,7 +89,7 @@ pub async fn delete<C: ConnectionTrait + TransactionTrait>(
     actor: Actor,
     id: TargetId,
 ) -> Result<AdmittedSessions, ResourceError> {
-    let txn = db.begin().await?;
+    let txn = begin_write_transaction(db).await?;
     let target = Target::Entity::find_by_id(id)
         .one(&txn)
         .await?

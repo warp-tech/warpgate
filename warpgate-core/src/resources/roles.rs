@@ -8,7 +8,7 @@ use warpgate_common::RoleId;
 use warpgate_db_entities::{Role, TargetRoleAssignment, UserRoleAssignment};
 use warpgate_gitops::types::ResourceKind;
 
-use super::{Actor, OwnedEntity, ResourceError, check_name, name_taken};
+use super::{Actor, OwnedEntity, ResourceError, begin_write_transaction, check_name, name_taken};
 
 impl OwnedEntity for Role::Entity {
     type Id = RoleId;
@@ -72,7 +72,7 @@ pub async fn delete<C: ConnectionTrait + TransactionTrait>(
     actor: Actor,
     id: RoleId,
 ) -> Result<(), ResourceError> {
-    let txn = db.begin().await?;
+    let txn = begin_write_transaction(db).await?;
     let role = Role::Entity::find_by_id(id)
         .one(&txn)
         .await?

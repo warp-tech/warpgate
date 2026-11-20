@@ -7,11 +7,25 @@ pub mod target_groups;
 pub mod targets;
 
 use sea_orm::prelude::Expr;
-use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect,
+    SqliteTransactionMode, TransactionOptions, TransactionTrait,
+};
 use warpgate_common::{ProviderId, RowId, UserSessionId, WarpgateError};
 use warpgate_gitops::types::ResourceKind;
 
 use crate::db::is_unique_violation;
+
+/// Reserve SQLite's writer slot before reading the rows this transaction will
+/// change. Otherwise a concurrent commit can leave the read snapshot too old
+/// to upgrade to a write transaction.
+async fn begin_write_transaction<C: TransactionTrait>(db: &C) -> Result<C::Transaction, DbErr> {
+    db.begin_with_options(TransactionOptions {
+        sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+        ..Default::default()
+    })
+    .await
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ResourceError {
@@ -151,12 +165,14 @@ fn name_taken(err: DbErr) -> ResourceError {
 
 #[cfg(all(test, feature = "sqlite"))]
 pub(crate) mod tests {
-    use sea_orm::{Database, DatabaseConnection, EntityTrait};
+    use std::time::Duration;
+
+    use sea_orm::{ConnectOptions, Database, DatabaseConnection, EntityTrait};
     use serde_json::json;
     use uuid::Uuid;
     use warpgate_common::{ProviderId, TargetId};
     use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
-    use warpgate_db_entities::{Target, TargetRoleAssignment};
+    use warpgate_db_entities::{Role, Target, TargetRoleAssignment};
     use warpgate_db_migrations::migrate_database;
 
     use super::roles::RoleDataRequest;
@@ -273,6 +289,51 @@ pub(crate) mod tests {
         assert_eq!(assignments(&db).await, 0);
         let result = targets::remove_role(&db, Actor::Admin, web.id, dba.id).await;
         assert!(matches!(result, Err(ResourceError::NotFound)));
+    }
+
+    #[tokio::test]
+    async fn role_delete_waits_for_another_sqlite_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db.sqlite3");
+        let mut options = ConnectOptions::new(format!("sqlite://{}?mode=rwc", path.display()));
+        options.min_connections(2).max_connections(2);
+        let db = Database::connect(options).await.unwrap();
+        db.execute_unprepared("PRAGMA journal_mode=WAL")
+            .await
+            .unwrap();
+        set_config_migration_values(ConfigMigrationValues::default());
+        migrate_database(&db).await.unwrap();
+
+        let ops = roles::create(&db, Actor::Admin, &role("ops", None))
+            .await
+            .unwrap();
+        let web = targets::create(&db, Actor::Admin, &ssh("web"))
+            .await
+            .unwrap();
+        let writer = db.begin().await.unwrap();
+        targets::add_role(&writer, Actor::Admin, web.id, ops.id)
+            .await
+            .unwrap();
+
+        // A deferred delete can read the role now but cannot upgrade to a writer.
+        let mut delete = Box::pin(roles::delete(&db, Actor::Admin, ops.id));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), &mut delete)
+                .await
+                .is_err()
+        );
+        writer.commit().await.unwrap();
+        delete.await.unwrap();
+
+        assert!(
+            Role::Entity::find_by_id(ops.id)
+                .one(&db)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(assignments(&db).await, 0);
+        db.close().await.unwrap();
     }
 
     #[tokio::test]

@@ -21,7 +21,9 @@ use super::roles::{self, RoleDataRequest};
 use super::ssh_client_keys::{self, KeyMaterial, SshClientKeyDataRequest};
 use super::target_groups::{self, TargetGroupDataRequest};
 use super::targets::{self, TargetDataRequest};
-use super::{Actor, AdmittedSessions, OwnedEntity, ResourceError, set_owner};
+use super::{
+    Actor, AdmittedSessions, OwnedEntity, ResourceError, begin_write_transaction, set_owner,
+};
 
 /// The rows a plan is computed against, with references by name. Inline
 /// credentials come back decrypted so they compare with a file's literals:
@@ -197,7 +199,7 @@ pub async fn apply<'p, C: ConnectionTrait + TransactionTrait>(
     if confirmed.has_errors() {
         return Err(ApplyError::PlanHasErrors);
     }
-    let txn = db.begin().await?;
+    let txn = begin_write_transaction(db).await?;
     let current = load_current(&txn).await?;
     let fresh = plan(provider, desired, &current, confirmed.prune);
     if fresh != *confirmed {
