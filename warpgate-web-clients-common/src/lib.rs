@@ -7,7 +7,6 @@
 //! Only the message type and the protocol-specific `create_session`/event loop differ,
 //! so those live in each crate; everything here is generic over the message type `M`.
 
-use warpgate_common::UserId;
 use std::collections::{HashMap, VecDeque};
 use std::fmt::{Debug, Display};
 use std::future::Future;
@@ -27,7 +26,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 use warpgate_common::auth::RememberApprovalBy;
-use warpgate_common::{Protocol, UserFacingReason, UserSessionId, WarpgateError};
+use warpgate_common::{Protocol, UserFacingReason, UserId, UserSessionId, WarpgateError};
 use warpgate_common_http::auth::FullUserAuthorization;
 use warpgate_core::approvals::{Admission, GatedConnection, admit_target_session};
 use warpgate_core::{

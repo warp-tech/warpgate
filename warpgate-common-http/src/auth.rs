@@ -1,5 +1,3 @@
-use warpgate_common::UserId;
-use warpgate_common::TargetId;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -11,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
 use uuid::Uuid;
 use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_common::{Protocol, WarpgateError};
+use warpgate_common::{Protocol, TargetId, UserId, WarpgateError};
 use warpgate_core::AuthorizedIdentity;
 use warpgate_db_entities::Parameters;
 
