@@ -1513,7 +1513,15 @@ spec:
     recorded = admin_client.get_gitops_history().items[0]
     assert (recorded.triggered_by, recorded.status) == ("Cli", "Applied")
     assert recorded.stats.create == 4
-    assert len(_audited(admin_client, 5, sync_id=str(recorded.id))) == 5
+    audited = _audited(admin_client, 6, sync_id=str(recorded.id))
+    assert sorted((e["_type"], e.get("kind", "")) for e in audited) == [
+        ("ProviderSynced1", ""),
+        ("ResourceChanged1", "Role"),
+        ("ResourceChanged1", "SshClientKey"),
+        ("ResourceChanged1", "Target"),
+        ("ResourceChanged1", "TargetGroup"),
+        ("TargetRoleAdded1", ""),
+    ]
 
     target = next(t for t in admin_client.get_targets() if t.name == name)
     role = next(r for r in admin_client.get_roles() if r.name == name)
