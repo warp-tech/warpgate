@@ -348,7 +348,7 @@ macro_rules! store {
                 id: Id<Self>,
                 data: $data,
             ) -> Result<(), ResourceError> {
-                $module::update(db, actor, id, &data).await?;
+                let _ = $module::update(db, actor, id, &data).await?;
                 Ok(())
             }
         }

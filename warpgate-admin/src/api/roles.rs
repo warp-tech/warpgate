@@ -196,7 +196,13 @@ impl DetailApi {
         admin.require(AdminPermission::AccessRolesDelete)?;
 
         match store::delete(&admin.services().db, Actor::Admin, id.0).await {
-            Ok(()) => Ok(DeleteRoleResponse::Deleted),
+            Ok(()) => {
+                admin
+                    .services()
+                    .close_sessions_without_role_access()
+                    .await?;
+                Ok(DeleteRoleResponse::Deleted)
+            }
             Err(ResourceError::NotFound) => Ok(DeleteRoleResponse::NotFound),
             Err(err @ ResourceError::OwnedBy(_)) => {
                 Ok(DeleteRoleResponse::Conflict(Json(err.to_string())))

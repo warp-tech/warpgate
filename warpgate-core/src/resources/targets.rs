@@ -4,7 +4,9 @@ use sea_orm::{
 };
 use uuid::Uuid;
 pub use warpgate_common::TargetDataRequest;
-use warpgate_common::{ProviderId, RoleId, StoredSecrets, TargetId, TargetOptions, WarpgateError};
+use warpgate_common::{
+    ProviderId, RoleId, StoredSecret, StoredSecrets, TargetId, TargetOptions, WarpgateError,
+};
 use warpgate_db_entities::{
     KnownHost, Target, TargetRoleAssignment, TargetSession, Ticket, TicketRequest,
 };
@@ -60,12 +62,29 @@ pub async fn create<C: ConnectionTrait>(
     model.insert(db).await.map_err(name_taken)
 }
 
+fn options_changed(old_json: &serde_json::Value, new_options: &TargetOptions) -> bool {
+    let Ok(mut old_options) = serde_json::from_value::<TargetOptions>(old_json.clone()) else {
+        return true;
+    };
+    let mut new_options = new_options.clone();
+    for secret in old_options
+        .stored_secrets_mut()
+        .into_iter()
+        .chain(new_options.stored_secrets_mut())
+    {
+        if let Ok(plain) = secret.reveal() {
+            *secret = StoredSecret::new(plain);
+        }
+    }
+    old_options != new_options
+}
+
 pub async fn update<C: ConnectionTrait>(
     db: &C,
     actor: Actor,
     id: TargetId,
     data: &TargetDataRequest,
-) -> Result<Target::Model, ResourceError> {
+) -> Result<(Target::Model, AdmittedSessions), ResourceError> {
     check_name(&data.name)?;
     let target = Target::Entity::find_by_id(id)
         .one(db)
@@ -76,9 +95,19 @@ pub async fn update<C: ConnectionTrait>(
         return Err(ResourceError::ProtocolChange);
     }
 
+    let should_close_sessions = target.name != data.name
+        || (!target.require_approval && data.require_approval)
+        || options_changed(&target.options, &data.options);
+
     let mut model: Target::ActiveModel = target.into();
     set_data(&mut model, data)?;
-    model.update(db).await.map_err(name_taken)
+    let updated = model.update(db).await.map_err(name_taken)?;
+    let admitted = if should_close_sessions {
+        TargetSession::open_user_sessions_for_target(db, id).await?
+    } else {
+        vec![]
+    };
+    Ok((updated, AdmittedSessions(admitted)))
 }
 
 pub async fn delete<C: ConnectionTrait + TransactionTrait>(
@@ -103,11 +132,7 @@ pub async fn delete<C: ConnectionTrait + TransactionTrait>(
         .exec(&txn)
         .await?;
 
-    let admitted = TargetSession::open_user_sessions_admitted_by_tickets(
-        &txn,
-        Ticket::Column::TargetId.eq(target.id),
-    )
-    .await?;
+    let admitted = TargetSession::open_user_sessions_for_target(&txn, target.id).await?;
     Ticket::Entity::delete_many()
         .filter(Ticket::Column::TargetId.eq(target.id))
         .exec(&txn)

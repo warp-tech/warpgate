@@ -151,12 +151,13 @@ fn name_taken(err: DbErr) -> ResourceError {
 
 #[cfg(all(test, feature = "sqlite"))]
 pub(crate) mod tests {
-    use sea_orm::{Database, DatabaseConnection, EntityTrait};
+    use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, EntityTrait, Set};
     use serde_json::json;
+    use time::OffsetDateTime;
     use uuid::Uuid;
-    use warpgate_common::{ProviderId, TargetId};
+    use warpgate_common::{ProviderId, TargetId, TargetSessionId};
     use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
-    use warpgate_db_entities::{Target, TargetRoleAssignment};
+    use warpgate_db_entities::{Target, TargetRoleAssignment, TargetSession, UserSession};
     use warpgate_db_migrations::migrate_database;
 
     use super::roles::RoleDataRequest;
@@ -239,6 +240,68 @@ pub(crate) mod tests {
         assert_eq!(assignments(&db).await, 0);
         let result = targets::delete(&db, Actor::Admin, web.id).await;
         assert!(matches!(result, Err(ResourceError::NotFound)));
+    }
+
+    #[tokio::test]
+    async fn target_update_and_delete_collect_open_sessions() {
+        let db = db().await;
+        let web = targets::create(&db, Actor::Admin, &ssh("web"))
+            .await
+            .unwrap();
+        let user_session_id = UserSessionId(Uuid::new_v4());
+        UserSession::ActiveModel {
+            id: Set(user_session_id),
+            username: Set(Some("alice".into())),
+            remote_address: Set("127.0.0.1:1234".into()),
+            started: Set(OffsetDateTime::now_utc()),
+            ended: Set(None),
+            protocol: Set("Kubernetes".into()),
+            user_id: Set(None),
+            auth_state_node_id: Set(None),
+            node_id: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        TargetSession::ActiveModel {
+            id: Set(TargetSessionId(Uuid::new_v4())),
+            user_session_id: Set(user_session_id),
+            target_snapshot: Set("{}".into()),
+            target_id: Set(web.id),
+            started: Set(OffsetDateTime::now_utc()),
+            ended: Set(None),
+            ticket_id: Set(None),
+            node_id: Set(None),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        // Non-connection metadata edits keep existing sessions running.
+        let mut metadata_only = ssh("web");
+        metadata_only.description = Some("updated".into());
+        metadata_only.rate_limit_bytes_per_second = Some(2000);
+        let (_, admitted) = targets::update(&db, Actor::Admin, web.id, &metadata_only)
+            .await
+            .unwrap();
+        assert!(admitted.0.is_empty());
+
+        // Changing target options, name, or enabling require_approval returns open sessions to close.
+        let mut changed_options = target("web", json!({"ssh": {"host": "h2"}}));
+        let (_, admitted) = targets::update(&db, Actor::Admin, web.id, &changed_options)
+            .await
+            .unwrap();
+        assert_eq!(admitted.0, vec![user_session_id]);
+
+        changed_options.require_approval = true;
+        let (_, admitted) = targets::update(&db, Actor::Admin, web.id, &changed_options)
+            .await
+            .unwrap();
+        assert_eq!(admitted.0, vec![user_session_id]);
+
+        // Deleting a target also returns open role-admitted sessions.
+        let admitted = targets::delete(&db, Actor::Admin, web.id).await.unwrap();
+        assert_eq!(admitted.0, vec![user_session_id]);
     }
 
     #[tokio::test]
@@ -343,7 +406,7 @@ pub(crate) mod tests {
         targets::add_role(&db, gitops, web.id, dba.id)
             .await
             .unwrap();
-        targets::update(&db, gitops, web.id, &ssh("web2"))
+        let _ = targets::update(&db, gitops, web.id, &ssh("web2"))
             .await
             .unwrap();
         let admitted = targets::delete(&db, gitops, web.id).await.unwrap();
@@ -363,7 +426,7 @@ pub(crate) mod tests {
         ] {
             assert!(matches!(result, Err(ResourceError::Manual)), "{result:?}");
         }
-        targets::update(&db, Actor::Admin, manual.id, &ssh("manual"))
+        let _ = targets::update(&db, Actor::Admin, manual.id, &ssh("manual"))
             .await
             .unwrap();
     }
