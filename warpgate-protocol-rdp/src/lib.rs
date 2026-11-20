@@ -1,4 +1,4 @@
-#![feature(once_cell_try)]
+#![cfg_attr(feature = "openssl-tls", feature(once_cell_try))]
 #![recursion_limit = "256"]
 //! In-workspace RDP integration for Warpgate.
 //!
