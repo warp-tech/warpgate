@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::net::{IpAddr, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 
 use poem::http::{Method, StatusCode, Uri};
 use poem::web::RemoteAddr;
@@ -10,9 +10,8 @@ use warpgate_core::{Services, WarpgateServerHandle};
 
 use crate::request::trusted_client_ip;
 
-/// The peer IP of the connection itself, ignoring any forwarding headers.
-pub fn raw_remote_ip(req: &Request) -> Option<String> {
-    let socket_addr = match req.remote_addr() {
+fn extract_remote_socket_addr(remote_addr: &RemoteAddr) -> Option<SocketAddr> {
+    match remote_addr {
         // An acceptor that learned something during the TLS handshake carries
         // it after the socket address (see `tls_acceptor::annotate_remote_addr`)
         RemoteAddr(Addr::Custom(_, value)) => value
@@ -21,9 +20,16 @@ pub fn raw_remote_ip(req: &Request) -> Option<String> {
             .and_then(|addr| addr.to_socket_addrs().ok())
             .and_then(|mut addrs| addrs.next()),
         other => other.as_socket_addr().copied(),
-    };
+    }
+}
 
-    socket_addr.map(|x| x.ip().to_string())
+fn raw_remote_socket_addr(req: &Request) -> Option<SocketAddr> {
+    extract_remote_socket_addr(req.remote_addr())
+}
+
+/// The peer IP of the connection itself, ignoring any forwarding headers.
+pub fn raw_remote_ip(req: &Request) -> Option<String> {
+    raw_remote_socket_addr(req).map(|x| x.ip().to_string())
 }
 
 pub async fn get_client_ip(req: &Request, services: &Services) -> Option<String> {
@@ -39,6 +45,18 @@ pub async fn get_client_ip_addr(req: &Request, services: &Services) -> Option<Ip
     get_client_ip(req, services)
         .await
         .and_then(|ip| ip.parse().ok())
+}
+
+pub async fn get_client_socket_addr(req: &Request, services: &Services) -> Option<SocketAddr> {
+    let ip = get_client_ip_addr(req, services).await?;
+    let raw = raw_remote_socket_addr(req);
+    if let Some(addr) = raw
+        && addr.ip() == ip
+    {
+        Some(addr)
+    } else {
+        Some(SocketAddr::new(ip, 0))
+    }
 }
 
 pub async fn span_for_request(
@@ -99,6 +117,22 @@ mod tests {
         );
         let plain: Uri = "/app/x?a=1".parse().unwrap();
         assert_eq!(redacted_uri(&plain), "/app/x?a=1");
+    }
+
+    #[test]
+    fn extracts_socket_addr_from_plain_and_annotated_remote_addr() {
+        let socket: SocketAddr = "203.0.113.10:54321".parse().unwrap();
+        assert_eq!(
+            extract_remote_socket_addr(&RemoteAddr(Addr::SocketAddr(socket))),
+            Some(socket)
+        );
+        assert_eq!(
+            extract_remote_socket_addr(&RemoteAddr(Addr::Custom(
+                "tls",
+                "203.0.113.10:54321|foo".into(),
+            ))),
+            Some(socket)
+        );
     }
 }
 
