@@ -423,8 +423,9 @@ mod tests {
 
         set_config_migration_values(ConfigMigrationValues::default());
         let dir = tempfile::tempdir().unwrap();
-        let url = format!("sqlite://{}/db.sqlite3?mode=rwc", dir.path().display());
-        let db = connect_to_sqlite(&url).await.unwrap();
+        let db = connect_to_sqlite(&dir.path().join("db.sqlite3"))
+            .await
+            .unwrap();
         migrate_database(&db).await.unwrap();
 
         let mut ids = vec![];
