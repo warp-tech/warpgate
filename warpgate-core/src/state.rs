@@ -13,7 +13,7 @@ use tokio::sync::{Mutex, broadcast};
 use tracing::error;
 use uuid::Uuid;
 use warpgate_common::auth::AuthStateUserInfo;
-use warpgate_common::{NodeId, Protocol, Target, UserSessionId, WarpgateError};
+use warpgate_common::{NodeId, Protocol, Target, UserId, UserSessionId, WarpgateError};
 use warpgate_db_entities::{SessionApprovalRequest, TargetSession, UserSession};
 
 use crate::rate_limiting::{RateLimiterRegistry, RateLimiterStackHandle};
@@ -296,12 +296,12 @@ pub struct UserSessionState {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionsFilter {
     Sessions { ids: Vec<UserSessionId> },
-    User { user_id: Uuid },
+    User { user_id: UserId },
     All,
 }
 
 impl SessionsFilter {
-    fn includes(&self, id: UserSessionId, user_id: Option<Uuid>) -> bool {
+    fn includes(&self, id: UserSessionId, user_id: Option<UserId>) -> bool {
         match self {
             Self::Sessions { ids } => ids.contains(&id),
             Self::User { user_id: target } => user_id == Some(*target),
@@ -352,7 +352,9 @@ impl UserSessionState {
 #[cfg(all(test, feature = "sqlite"))]
 mod tests {
     use sea_orm::{ColumnTrait, Database, PaginatorTrait, QueryFilter};
-    use warpgate_common::{TargetHTTPOptions, TargetOptions, TargetSessionId, Tls, UserSessionId};
+    use warpgate_common::{
+        TargetHTTPOptions, TargetId, TargetOptions, TargetSessionId, Tls, UserSessionId,
+    };
     use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
     use warpgate_db_migrations::migrate_database;
 
@@ -366,7 +368,7 @@ mod tests {
 
     fn target() -> Target {
         Target {
-            id: Uuid::new_v4(),
+            id: TargetId(Uuid::new_v4()),
             name: "web".into(),
             description: String::new(),
             allow_roles: vec![],
@@ -383,6 +385,7 @@ mod tests {
             ticket_require_approval: false,
             require_approval: false,
             ticket_max_uses: None,
+            provider: None,
         }
     }
 
@@ -429,7 +432,7 @@ mod tests {
         .await
         .unwrap();
         let user_info = AuthStateUserInfo {
-            id: Uuid::new_v4(),
+            id: UserId(Uuid::new_v4()),
             username: "alice".into(),
         };
         parent
@@ -474,7 +477,7 @@ mod tests {
         .await
         .unwrap();
         let user_info = AuthStateUserInfo {
-            id: Uuid::new_v4(),
+            id: UserId(Uuid::new_v4()),
             username: "alice".into(),
         };
         parent
@@ -529,7 +532,7 @@ mod tests {
         .await
         .unwrap();
         let user_info = AuthStateUserInfo {
-            id: Uuid::new_v4(),
+            id: UserId(Uuid::new_v4()),
             username: "alice".into(),
         };
         parent
@@ -585,7 +588,7 @@ mod tests {
         .await
         .unwrap();
         let user_info = AuthStateUserInfo {
-            id: Uuid::new_v4(),
+            id: UserId(Uuid::new_v4()),
             username: "alice".into(),
         };
         parent
@@ -674,7 +677,7 @@ mod tests {
         .await
         .unwrap();
         let user_info = AuthStateUserInfo {
-            id: Uuid::new_v4(),
+            id: UserId(Uuid::new_v4()),
             username: "alice".into(),
         };
         let parent_id: UserSessionId = parent.lock().await.user_session_id();
@@ -848,7 +851,7 @@ mod tests {
         let opener_node = test_state(&db);
         let joining_node = test_state(&db);
         let user_info = AuthStateUserInfo {
-            id: Uuid::new_v4(),
+            id: UserId(Uuid::new_v4()),
             username: "alice".into(),
         };
         let target = target();
@@ -926,7 +929,7 @@ mod tests {
         .await
         .unwrap();
         let user_info = AuthStateUserInfo {
-            id: Uuid::new_v4(),
+            id: UserId(Uuid::new_v4()),
             username: "alice".into(),
         };
         first_parent
@@ -1037,7 +1040,7 @@ mod tests {
         .await
         .unwrap();
         let user_info = AuthStateUserInfo {
-            id: Uuid::new_v4(),
+            id: UserId(Uuid::new_v4()),
             username: "alice".into(),
         };
         parent
@@ -1049,7 +1052,7 @@ mod tests {
         let parent_id = parent.lock().await.user_session_id();
         let target = target();
         let wrong_user = AuthStateUserInfo {
-            id: Uuid::new_v4(),
+            id: UserId(Uuid::new_v4()),
             username: "mallory".into(),
         };
         assert!(

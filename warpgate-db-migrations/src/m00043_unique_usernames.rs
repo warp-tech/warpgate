@@ -36,7 +36,7 @@ impl MigrationTrait for Migration {
                     .await?;
                 }
             }
-            DbBackend::MySql | DbBackend::Sqlite => {
+            _ => {
                 for table in &child_tables {
                     db.execute_unprepared(&format!(
                         "DELETE FROM {table} WHERE user_id NOT IN \
@@ -66,7 +66,7 @@ impl MigrationTrait for Migration {
                 )
                 .await?;
             }
-            DbBackend::Sqlite => {
+            _ => {
                 db.execute_unprepared(
                     "DELETE FROM users WHERE id NOT IN \
                      (SELECT MIN(id) FROM users GROUP BY username)",

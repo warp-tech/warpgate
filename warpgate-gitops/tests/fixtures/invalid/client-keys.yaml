@@ -1,0 +1,28 @@
+apiVersion: warpgate/v1
+kind: SshClientKey
+metadata:
+  name: truncated
+spec:
+  private_key: |
+    -----BEGIN OPENSSH PRIVATE KEY-----
+    b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ
+    -----END OPENSSH PRIVATE KEY-----
+---
+apiVersion: warpgate/v1
+kind: SshClientKey
+metadata:
+  name: no-field
+spec:
+  private_key: secret://vault/kv/ssh
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: web
+spec:
+  options:
+    ssh:
+      host: h
+      auth:
+        kind: publickey
+        key_id: deploy-key

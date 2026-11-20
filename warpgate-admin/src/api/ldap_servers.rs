@@ -5,7 +5,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
 };
 use uuid::Uuid;
-use warpgate_common::{AdminPermission, Secret, WarpgateError};
+use warpgate_common::{AdminPermission, Secret, UserId, WarpgateError};
 use warpgate_common_http::errors::bad_request;
 use warpgate_db_entities::{LdapServer, Parameters};
 use warpgate_ldap::LdapUsernameAttribute;
@@ -69,7 +69,7 @@ impl ImportApi {
                     .await?;
                 if existing.is_none() {
                     let values = warpgate_db_entities::User::ActiveModel {
-                        id: Set(Uuid::new_v4()),
+                        id: Set(UserId(Uuid::new_v4())),
                         username: Set(user.username.clone()),
                         credential_policy: Set(serde_json::to_value(
                             parameters.default_credential_policy()?,
@@ -79,6 +79,7 @@ impl ImportApi {
                         ldap_object_uuid: Set(Some(user.object_uuid)),
                         ldap_server_id: Set(Some(server.id)),
                         allowed_ip_ranges: Set(serde_json::Value::Null),
+                        ..Default::default()
                     };
                     let created = values.insert(db).await?;
                     super::users::on_user_created(db, &created, admin.auth.user_id()).await?;
@@ -128,7 +129,7 @@ impl From<LdapServer::Model> for LdapServerResponse {
             username_attribute: model
                 .username_attribute
                 .as_str()
-                .try_into()
+                .parse()
                 .unwrap_or(LdapUsernameAttribute::Cn),
             ssh_key_attribute: model.ssh_key_attribute,
             uuid_attribute: model.uuid_attribute,

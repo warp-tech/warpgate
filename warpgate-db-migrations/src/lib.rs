@@ -99,8 +99,11 @@ mod m00092_http_session_sso_identity;
 mod m00093_log_session_id_nullable;
 mod m00094_unique_role_names;
 mod m00095_kubernetes_sessions;
-mod m00096_unique_admin_role_names;
-mod m00097_admin_role_builtin;
+mod m00096_resource_provider;
+mod m00097_ssh_client_key_provider;
+mod m00098_gitops_sync;
+mod m00099_unique_admin_role_names;
+mod m00100_admin_role_builtin;
 
 pub(crate) mod helpers;
 
@@ -205,8 +208,11 @@ impl MigratorTrait for Migrator {
             Box::new(m00093_log_session_id_nullable::Migration),
             Box::new(m00094_unique_role_names::Migration),
             Box::new(m00095_kubernetes_sessions::Migration),
-            Box::new(m00096_unique_admin_role_names::Migration),
-            Box::new(m00097_admin_role_builtin::Migration),
+            Box::new(m00096_resource_provider::Migration),
+            Box::new(m00097_ssh_client_key_provider::Migration),
+            Box::new(m00098_gitops_sync::Migration),
+            Box::new(m00099_unique_admin_role_names::Migration),
+            Box::new(m00100_admin_role_builtin::Migration),
         ]
     }
 }
@@ -228,7 +234,7 @@ async fn run_locked<
         DatabaseBackend::Postgres => {
             let lock = connection.begin().await?;
             // lock is tx scoped
-            lock.execute(Statement::from_string(
+            lock.execute_raw(Statement::from_string(
                 DatabaseBackend::Postgres,
                 format!("SELECT pg_advisory_xact_lock({key})"),
             ))
@@ -240,14 +246,14 @@ async fn run_locked<
         DatabaseBackend::MySql => {
             let lock = connection.begin().await?;
             // lock is session scoped
-            lock.execute(Statement::from_string(
+            lock.execute_raw(Statement::from_string(
                 DatabaseBackend::MySql,
                 format!("SELECT GET_LOCK('warpgate_migration_{key}', -1)"),
             ))
             .await?;
             let result = f().await;
             let release = lock
-                .execute(Statement::from_string(
+                .execute_raw(Statement::from_string(
                     DatabaseBackend::MySql,
                     format!("SELECT RELEASE_LOCK('warpgate_migration_{key}')"),
                 ))
@@ -257,6 +263,9 @@ async fn run_locked<
             result
         }
         DatabaseBackend::Sqlite => f().await,
+        backend => Err(DbErr::Migration(format!(
+            "unsupported database backend: {backend:?}"
+        ))),
     }
 }
 
@@ -269,6 +278,12 @@ pub async fn migrate_database(connection: &DatabaseConnection) -> Result<(), DbE
     .await?;
 
     Ok(())
+}
+
+pub async fn has_pending_migrations(connection: &DatabaseConnection) -> Result<bool, DbErr> {
+    Ok(!Migrator::get_pending_migrations(connection)
+        .await?
+        .is_empty())
 }
 
 /// Apply `steps` pending migrations.
@@ -314,6 +329,19 @@ async fn run<'c, C: IntoSchemaManagerConnection<'c>>(
         Direction::Up => Migrator::up(db, steps).await,
         Direction::Down => Migrator::down(db, steps).await,
     }
+}
+
+/// Applies every migration that runs before `name`, so a test can seed the
+/// schema that migration starts from
+#[cfg(all(test, feature = "sqlite"))]
+pub(crate) async fn migrate_up_to(db: &DatabaseConnection, name: &str) {
+    let steps = Migrator::migrations()
+        .iter()
+        .position(|migration| migration.name() == name)
+        .unwrap();
+    Migrator::up(db, Some(steps.try_into().unwrap()))
+        .await
+        .unwrap();
 }
 
 #[cfg(test)]

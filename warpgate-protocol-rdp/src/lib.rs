@@ -1,4 +1,5 @@
 #![feature(once_cell_try)]
+#![recursion_limit = "256"]
 //! In-workspace RDP integration for Warpgate.
 //!
 //! [`client`] drives IronRDP against a target host; [`server`] runs IronRDP's server state
@@ -119,7 +120,8 @@ pub fn connect(
             )
             .await
             {
-                let _ = event_tx.send(DesktopEvent::backend_error(&error)).await;
+                let error = Arc::new(error);
+                let _ = event_tx.send(DesktopEvent::Error(error.clone())).await;
                 error!("RDP client failed: {:#}", anyhow::Error::from(error));
             }
             let _ = event_tx

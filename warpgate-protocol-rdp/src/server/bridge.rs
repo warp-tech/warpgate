@@ -74,8 +74,8 @@ async fn frame_bridge(
                 let _ = server_in.send(ServerInput::Shutdown).await;
                 return;
             }
-            DesktopEvent::Error(message) => {
-                warn!(%message, "RDP target reported an error");
+            DesktopEvent::Error(error) => {
+                warn!(%error, "RDP target reported an error");
                 continue;
             }
             DesktopEvent::State(state @ (DesktopState::Connecting | DesktopState::Connected)) => {

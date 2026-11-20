@@ -2,7 +2,6 @@
 //! valid password (NLA) when the credential policy still needs a TOTP or web approval.
 //! Collects that factor over the live RDP session before the target is dialed.
 
-use std::convert::Infallible;
 use std::future::Future;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -229,7 +228,7 @@ impl HoldPainter {
     async fn paint(
         &mut self,
         server_in_tx: &Sender<ServerInput>,
-        render_frame: impl FnOnce(ui::Screen, u64) -> Result<Vec<u8>, Infallible>,
+        render_frame: impl FnOnce(ui::Screen, u64) -> Vec<u8>,
     ) -> Result<()> {
         if self.screen != self.server_screen {
             Self::send(
@@ -243,7 +242,7 @@ impl HoldPainter {
             self.server_screen = self.screen;
         }
 
-        let rgb = render_frame(self.screen, self.tick).unwrap_or_default();
+        let rgb = render_frame(self.screen, self.tick);
         self.tick = self.tick.wrapping_add(1);
 
         let mut bgra = Vec::with_capacity(rgb.len() / 3 * 4);

@@ -1,16 +1,15 @@
 use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{ColumnTrait, EntityTrait, ExprTrait, QueryFilter, QueryOrder};
 use tracing::warn;
-use uuid::Uuid;
 use warpgate_common::{
-    AdminPermission, Role as RoleConfig, StoredSecrets, Target as TargetConfig, TargetOptions,
-    TargetSSHOptions, WarpgateError,
+    AdminPermission, Role as RoleConfig, RoleId, StoredSecrets, Target as TargetConfig,
+    TargetGroupId, TargetId, TargetOptions, TargetSSHOptions, WarpgateError,
 };
 use warpgate_common_http::errors::invalid_field;
-use warpgate_core::resources::ResourceError;
 use warpgate_core::resources::targets::{self as store, TargetDataRequest};
+use warpgate_core::resources::{Actor, ResourceError};
 use warpgate_db_entities::Target::fuzzy_filter_targets;
 use warpgate_db_entities::{KnownHost, Role, Target, TargetGroup};
 
@@ -52,7 +51,7 @@ impl ListApi {
         &self,
         admin: AdminContext,
         search: Query<Option<String>>,
-        group_id: Query<Option<Uuid>>,
+        group_id: Query<Option<TargetGroupId>>,
     ) -> Result<GetTargetsResponse, WarpgateError> {
         let db = &admin.services().db;
 
@@ -84,7 +83,7 @@ impl ListApi {
     ) -> Result<CreateTargetResponse, WarpgateError> {
         admin.require(AdminPermission::TargetsCreate)?;
 
-        match store::create(&admin.services().db, &body).await {
+        match store::create(&admin.services().db, Actor::Admin, &body).await {
             Ok(target) => Ok(CreateTargetResponse::Created(Json(maybe_redacted_target(
                 &admin, target,
             )?))),
@@ -113,6 +112,8 @@ enum UpdateTargetResponse {
     Ok(Json<TargetConfig>),
     #[oai(status = 400)]
     BadRequest,
+    #[oai(status = 409)]
+    Conflict(Json<String>),
     #[oai(status = 404)]
     NotFound,
 }
@@ -121,6 +122,9 @@ enum UpdateTargetResponse {
 enum DeleteTargetResponse {
     #[oai(status = 204)]
     Deleted,
+
+    #[oai(status = 409)]
+    Conflict(Json<String>),
 
     #[oai(status = 404)]
     NotFound,
@@ -146,7 +150,7 @@ impl DetailApi {
     async fn api_get_target(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<TargetId>,
     ) -> Result<GetTargetResponse, WarpgateError> {
         let db = &admin.services().db;
 
@@ -159,17 +163,31 @@ impl DetailApi {
         )?)))
     }
 
+    #[oai(
+        path = "/targets/:id/release",
+        method = "post",
+        operation_id = "release_target"
+    )]
+    async fn api_release_target(
+        &self,
+        admin: AdminContext,
+        id: Path<TargetId>,
+    ) -> Result<GetTargetResponse, WarpgateError> {
+        super::gitops::release_managed::<Target::Entity>(&admin, id.0).await?;
+        self.api_get_target(admin, id).await
+    }
+
     #[oai(path = "/targets/:id", method = "put", operation_id = "update_target")]
     async fn api_update_target(
         &self,
         admin: AdminContext,
         body: Json<TargetDataRequest>,
-        id: Path<Uuid>,
+        id: Path<TargetId>,
     ) -> Result<UpdateTargetResponse, WarpgateError> {
         admin.require(AdminPermission::TargetsEdit)?;
 
         let services = admin.services();
-        let target = match store::update(&services.db, id.0, &body).await {
+        let target = match store::update(&services.db, Actor::Admin, id.0, &body).await {
             Ok(target) => target,
             Err(ResourceError::EmptyName) => {
                 warn!("Rejecting request: target name is empty");
@@ -180,6 +198,9 @@ impl DetailApi {
                 return Ok(UpdateTargetResponse::BadRequest);
             }
             Err(ResourceError::NotFound) => return Ok(UpdateTargetResponse::NotFound),
+            Err(err @ ResourceError::OwnedBy(_)) => {
+                return Ok(UpdateTargetResponse::Conflict(Json(err.to_string())));
+            }
             Err(err) => return Err(err.into()),
         };
 
@@ -202,17 +223,20 @@ impl DetailApi {
     async fn api_delete_target(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<TargetId>,
     ) -> Result<DeleteTargetResponse, WarpgateError> {
         admin.require(AdminPermission::TargetsDelete)?;
 
         let services = admin.services();
-        match store::delete(&services.db, id.0).await {
+        match store::delete(&services.db, Actor::Admin, id.0).await {
             Ok(admitted) => {
                 services.close_admitted_sessions(admitted).await?;
                 Ok(DeleteTargetResponse::Deleted)
             }
             Err(ResourceError::NotFound) => Ok(DeleteTargetResponse::NotFound),
+            Err(err @ ResourceError::OwnedBy(_)) => {
+                Ok(DeleteTargetResponse::Conflict(Json(err.to_string())))
+            }
             Err(err) => Err(err.into()),
         }
     }
@@ -225,7 +249,7 @@ impl DetailApi {
     async fn get_ssh_target_known_ssh_host_keys(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<TargetId>,
     ) -> Result<TargetKnownSshHostKeysResponse, WarpgateError> {
         admin.require(AdminPermission::TargetsEdit)?;
 
@@ -271,13 +295,17 @@ enum AddTargetRoleResponse {
     #[oai(status = 201)]
     Created,
     #[oai(status = 409)]
-    AlreadyExists,
+    Conflict(Json<String>),
+    #[oai(status = 404)]
+    NotFound,
 }
 
 #[derive(ApiResponse)]
 enum DeleteTargetRoleResponse {
     #[oai(status = 204)]
     Deleted,
+    #[oai(status = 409)]
+    Conflict(Json<String>),
     #[oai(status = 404)]
     NotFound,
 }
@@ -294,7 +322,7 @@ impl RolesApi {
     async fn api_get_target_roles(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<TargetId>,
     ) -> Result<GetTargetRolesResponse, WarpgateError> {
         let db = &admin.services().db;
 
@@ -321,14 +349,17 @@ impl RolesApi {
     async fn api_add_target_role(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
-        role_id: Path<Uuid>,
+        id: Path<TargetId>,
+        role_id: Path<RoleId>,
     ) -> Result<AddTargetRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesAssign)?;
 
-        match store::add_role(&admin.services().db, id.0, role_id.0).await {
+        match store::add_role(&admin.services().db, Actor::Admin, id.0, role_id.0).await {
             Ok(()) => Ok(AddTargetRoleResponse::Created),
-            Err(ResourceError::RoleAlreadyAssigned) => Ok(AddTargetRoleResponse::AlreadyExists),
+            Err(err @ (ResourceError::RoleAlreadyAssigned | ResourceError::OwnedBy(_))) => {
+                Ok(AddTargetRoleResponse::Conflict(Json(err.to_string())))
+            }
+            Err(ResourceError::NotFound) => Ok(AddTargetRoleResponse::NotFound),
             Err(err) => Err(err.into()),
         }
     }
@@ -341,14 +372,17 @@ impl RolesApi {
     async fn api_delete_target_role(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
-        role_id: Path<Uuid>,
+        id: Path<TargetId>,
+        role_id: Path<RoleId>,
     ) -> Result<DeleteTargetRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesAssign)?;
 
-        match store::remove_role(&admin.services().db, id.0, role_id.0).await {
+        match store::remove_role(&admin.services().db, Actor::Admin, id.0, role_id.0).await {
             Ok(()) => Ok(DeleteTargetRoleResponse::Deleted),
             Err(ResourceError::NotFound) => Ok(DeleteTargetRoleResponse::NotFound),
+            Err(err @ ResourceError::OwnedBy(_)) => {
+                Ok(DeleteTargetRoleResponse::Conflict(Json(err.to_string())))
+            }
             Err(err) => Err(err.into()),
         }
     }

@@ -26,16 +26,15 @@ impl MigrationTrait for Migration {
             .await?;
 
         // Names are unique by now, so this marks exactly the built-in role.
-        let db = manager.get_connection();
-        db.execute(
-            db.get_database_backend().build(
+        manager
+            .get_connection()
+            .execute(
                 Query::update()
                     .table(Alias::new(TABLE))
                     .value(Alias::new(COLUMN), true)
                     .and_where(Expr::col(Alias::new("name")).eq(BUILTIN_ADMIN_ROLE_NAME)),
-            ),
-        )
-        .await?;
+            )
+            .await?;
         Ok(())
     }
 

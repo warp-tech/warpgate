@@ -165,7 +165,7 @@
                 {#each permGroups as { category, perms }}
                     <div class="col-6">
                         <h5 class="mt-3">{category}</h5>
-                        {#each perms as { key, label } (key)}
+                        {#each perms as { key, label, dangerous } (key)}
                             <label class="form-check">
                                 <input
                                     class="form-check-input"
@@ -191,9 +191,7 @@
                                 >
                                 <span class="form-check-label">
                                     {label}
-                                    {#if ADMIN_PERMISSIONS.find(
-                                        p => p.key === key,
-                                    )?.dangerous}
+                                    {#if dangerous}
                                         <span
                                             id="warn-{key}"
                                             class="text-warning ms-1"
@@ -205,8 +203,7 @@
                                             animation
                                             delay="250"
                                         >
-                                            Grants the ability to manage admin
-                                            roles; use with care.
+                                            {dangerous}
                                         </Tooltip>
                                     {/if}
                                 </span>

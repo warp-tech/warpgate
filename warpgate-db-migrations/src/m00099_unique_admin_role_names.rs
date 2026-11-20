@@ -41,8 +41,6 @@ const PERMISSIONS: &[&str] = &[
 /// with its name, this picks the one granting the most.
 async fn builtin_admin_role(manager: &SchemaManager<'_>) -> Result<Option<Uuid>, DbErr> {
     let db = manager.get_connection();
-    let backend = db.get_database_backend();
-
     let select = Query::select()
         .column(Alias::new("id"))
         .columns(PERMISSIONS.iter().map(|column| Alias::new(*column)))
@@ -52,7 +50,7 @@ async fn builtin_admin_role(manager: &SchemaManager<'_>) -> Result<Option<Uuid>,
         .to_owned();
 
     let mut builtin: Option<(usize, Uuid)> = None;
-    for row in db.query_all(backend.build(&select)).await? {
+    for row in db.query_all(&select).await? {
         let mut granted = 0;
         for column in PERMISSIONS {
             if row.try_get::<bool>("", column)? {
@@ -70,7 +68,7 @@ async fn builtin_admin_role(manager: &SchemaManager<'_>) -> Result<Option<Uuid>,
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let keep: Vec<Uuid> = builtin_admin_role(manager).await?.into_iter().collect();
-        add_unique_name_index_keeping(manager, TABLE, INDEX, &keep).await
+        add_unique_name_index_keeping(manager, TABLE, "name", INDEX, &keep).await
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
@@ -90,7 +88,7 @@ mod tests {
     use crate::Migrator;
 
     async fn names(db: &DatabaseConnection) -> Vec<(String, String)> {
-        db.query_all(Statement::from_string(
+        db.query_all_raw(Statement::from_string(
             db.get_database_backend(),
             "SELECT id, name FROM admin_roles ORDER BY name",
         ))
@@ -108,13 +106,7 @@ mod tests {
     async fn duplicate_admin_role_names_are_renamed_and_then_rejected() {
         set_config_migration_values(ConfigMigrationValues::default());
         let db = Database::connect("sqlite::memory:").await.unwrap();
-        let before = Migrator::migrations()
-            .iter()
-            .position(|migration| migration.name() == "m00096_unique_admin_role_names")
-            .unwrap();
-        Migrator::up(&db, Some(u32::try_from(before).unwrap()))
-            .await
-            .unwrap();
+        crate::migrate_up_to(&db, "m00099_unique_admin_role_names").await;
 
         // Created by m00032, with every permission and a random id.
         let [(builtin, _)]: [_; 1] = names(&db).await.try_into().unwrap();
@@ -138,11 +130,11 @@ mod tests {
         // A permission-less role under the built-in role's name, with an id that
         // sorts before any other.
         let impostor = Uuid::nil();
-        db.execute(insert(impostor, "warpgate:admin"))
+        db.execute_raw(insert(impostor, "warpgate:admin"))
             .await
             .unwrap();
         for name in ["ops", "ops", "dev"] {
-            db.execute(insert(Uuid::new_v4(), name)).await.unwrap();
+            db.execute_raw(insert(Uuid::new_v4(), name)).await.unwrap();
         }
 
         Migrator::up(&db, None).await.unwrap();
@@ -165,7 +157,7 @@ mod tests {
         assert!(names.contains(&(impostor.to_string(), "warpgate:admin (2)".into())));
 
         let flagged: Vec<Uuid> = db
-            .query_all(Statement::from_string(
+            .query_all_raw(Statement::from_string(
                 backend,
                 "SELECT id FROM admin_roles WHERE builtin",
             ))
@@ -179,7 +171,7 @@ mod tests {
             [builtin]
         );
 
-        db.execute(insert(Uuid::new_v4(), "dev"))
+        db.execute_raw(insert(Uuid::new_v4(), "dev"))
             .await
             .expect_err("the unique index must reject a duplicate admin role name");
     }
