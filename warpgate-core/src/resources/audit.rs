@@ -11,13 +11,13 @@ use uuid::Uuid;
 use warpgate_common::{
     ProviderId, RowId, User as UserConfig, UserId, UserRequireCredentialsPolicy, WarpgateError,
 };
-use warpgate_db_entities::ProviderSync::{PlanAction, PlannedField};
+use warpgate_db_entities::ProviderSync::PlannedField;
 use warpgate_db_entities::{AdminRole, KnownHost, User};
 pub use warpgate_resources::ComparableValues;
 use warpgate_resources::ResourceKind;
 
 use super::OwnedEntity;
-use crate::logging::{AuditEvent, format_related_ids};
+use crate::logging::AuditEvent;
 
 #[derive(Clone, Copy, Debug)]
 pub enum ChangedBy {
@@ -32,7 +32,7 @@ pub enum ChangedBy {
 
 impl ChangedBy {
     /// Sync ID with the provider's label, and the acting admin
-    pub(super) fn origin(self) -> (Option<(Uuid, String)>, Option<UserId>) {
+    pub(crate) fn origin(self) -> (Option<(Uuid, String)>, Option<UserId>) {
         match self {
             Self::Admin(user) => (None, Some(user)),
             Self::Sync {
@@ -64,6 +64,43 @@ pub enum Subject {
 impl Subject {
     pub fn of<E: OwnedEntity>(id: E::Id) -> Self {
         Self::Resource(E::KIND, id.uuid())
+    }
+
+    /// The kind as the log records it. The log viewer matches on these names
+    pub const fn kind(self) -> &'static str {
+        match self {
+            Self::Resource(ResourceKind::Target, _) => "Target",
+            Self::Resource(ResourceKind::TargetGroup, _) => "TargetGroup",
+            Self::Resource(ResourceKind::Role, _) => "Role",
+            Self::Resource(ResourceKind::SshClientKey, _) => "SshClientKey",
+            Self::Row(RowKind::User, _) => "User",
+            Self::Row(RowKind::AdminRole, _) => "AdminRole",
+            Self::Row(RowKind::LdapServer, _) => "LdapServer",
+            Self::Row(RowKind::SecretBackend, _) => "SecretBackend",
+            Self::Row(RowKind::KnownHost, _) => "KnownHost",
+            Self::Row(RowKind::Parameters, _) => "Parameters",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Action {
+    Create,
+    Update,
+    /// An update that also made a provider the row's owner
+    Adopt,
+    Delete,
+}
+
+impl Action {
+    /// The action as the log records it. The log viewer matches on these names
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Create => "Create",
+            Self::Update => "Update",
+            Self::Adopt => "Adopt",
+            Self::Delete => "Delete",
+        }
     }
 }
 
@@ -165,8 +202,8 @@ impl<M: Audited> Unaudited<M> {
     pub async fn deferred<C: ConnectionTrait>(self, db: &C) -> (M, Entry) {
         let entry = match &self.0 {
             Write::Created(row) => creation(db, row).await,
-            Write::Updated { before, after } => update(db, PlanAction::Update, before, after).await,
-            Write::Adopted { before, after } => update(db, PlanAction::Adopt, before, after).await,
+            Write::Updated { before, after } => update(db, Action::Update, before, after).await,
+            Write::Adopted { before, after } => update(db, Action::Adopt, before, after).await,
             Write::Deleted(row) => deletion(row),
         };
         (self.skip_audit(), entry)
@@ -181,7 +218,11 @@ pub struct Entry(Option<ResourceChange>);
 impl Entry {
     pub fn log(&self, by: ChangedBy) {
         if let Some(change) = &self.0 {
-            change.emit(by);
+            AuditEvent::ResourceChanged {
+                change: change.clone(),
+                by,
+            }
+            .emit();
         }
     }
 }
@@ -193,7 +234,7 @@ pub async fn created<A: Audited, C: ConnectionTrait>(db: &C, by: ChangedBy, row:
 
 /// Logs the fields that differ. Logs nothing if none does
 pub async fn updated<A: Audited, C: ConnectionTrait>(db: &C, by: ChangedBy, before: &A, after: &A) {
-    update(db, PlanAction::Update, before, after).await.log(by);
+    update(db, Action::Update, before, after).await.log(by);
 }
 
 pub fn deleted<A: Audited>(by: ChangedBy, row: &A) {
@@ -202,26 +243,26 @@ pub fn deleted<A: Audited>(by: ChangedBy, row: &A) {
 
 async fn creation<A: Audited, C: ConnectionTrait>(db: &C, row: &A) -> Entry {
     let fields = compared(db, row).await.map(|row| row.contents());
-    entry(PlanAction::Create, row, fields)
+    entry(Action::Create, row, fields)
 }
 
 /// An adoption is logged even if no field changed, because the row has a new
 /// owner
 async fn update<A: Audited, C: ConnectionTrait>(
     db: &C,
-    action: PlanAction,
+    action: Action,
     before: &A,
     after: &A,
 ) -> Entry {
     let fields = changes(db, before, after).await;
-    if action == PlanAction::Update && fields.as_ref().is_some_and(Vec::is_empty) {
+    if action == Action::Update && fields.as_ref().is_some_and(Vec::is_empty) {
         return Entry(None);
     }
     entry(action, after, fields)
 }
 
 fn deletion<A: Audited>(row: &A) -> Entry {
-    entry(PlanAction::Delete, row, Some(vec![]))
+    entry(Action::Delete, row, Some(vec![]))
 }
 
 /// `None` if a row can't be compared
@@ -250,7 +291,7 @@ async fn compared<A: Audited, C: ConnectionTrait>(db: &C, row: &A) -> Option<Com
     }
 }
 
-fn entry<A: Audited>(action: PlanAction, row: &A, fields: Option<Vec<PlannedField>>) -> Entry {
+fn entry<A: Audited>(action: Action, row: &A, fields: Option<Vec<PlannedField>>) -> Entry {
     Entry(Some(ResourceChange {
         action,
         subject: row.subject(),
@@ -259,44 +300,15 @@ fn entry<A: Audited>(action: PlanAction, row: &A, fields: Option<Vec<PlannedFiel
     }))
 }
 
-#[derive(Debug)]
-struct ResourceChange {
-    action: PlanAction,
-    subject: Subject,
-    name: String,
-    /// `None` if the rows could not be compared
-    fields: Option<Vec<PlannedField>>,
-}
-
-impl ResourceChange {
-    fn emit(&self, by: ChangedBy) {
-        let (sync, actor) = by.origin();
-        let (kind, id) = match self.subject {
-            Subject::Resource(kind, id) => (format!("{kind:?}"), id),
-            Subject::Row(kind, id) => (format!("{kind:?}"), id),
-        };
-        let user =
-            matches!(self.subject, Subject::Row(RowKind::User, _)).then(|| UserId::from_uuid(id));
-        let users: Vec<UserId> = user.into_iter().chain(actor).collect();
-        AuditEvent::ResourceChanged {
-            action: format!("{:?}", self.action),
-            kind,
-            id,
-            name: self.name.clone(),
-            fields: self
-                .fields
-                .as_ref()
-                .filter(|fields| !fields.is_empty())
-                .and_then(|fields| serde_json::to_string(fields).ok()),
-            sync,
-            related_users: (!users.is_empty()).then(|| format_related_ids(&users)),
-            related_access_roles: matches!(self.subject, Subject::Resource(ResourceKind::Role, _))
-                .then(|| format_related_ids(&[id])),
-            related_admin_roles: matches!(self.subject, Subject::Row(RowKind::AdminRole, _))
-                .then(|| format_related_ids(&[id])),
-        }
-        .emit();
-    }
+/// A written row as the log records it
+#[derive(Clone, Debug)]
+pub struct ResourceChange {
+    pub(crate) action: Action,
+    pub(crate) subject: Subject,
+    pub(crate) name: String,
+    /// The changed fields, or a new row's set fields, without credential
+    /// values. `None` if the rows could not be compared
+    pub(crate) fields: Option<Vec<PlannedField>>,
 }
 
 /// The compared fields of a user. Users have no spec
@@ -505,7 +517,7 @@ mod tests {
 
         let (_, entry) = update().adopted().deferred(&db).await;
         let adoption = entry.0.unwrap();
-        assert_eq!(adoption.action, PlanAction::Adopt);
+        assert_eq!(adoption.action, Action::Adopt);
         assert_eq!(adoption.fields, Some(vec![]));
     }
 

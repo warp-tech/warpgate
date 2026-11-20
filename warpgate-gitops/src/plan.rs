@@ -503,7 +503,7 @@ fn unresolved_reference(
     None
 }
 
-/// A target's protocol is the one key of its options. `None` for the other
+/// A target's protocol is the only key of its options. `None` for the other
 /// kinds
 fn protocol(values: &ComparableValues) -> Option<&String> {
     values.pointer("/spec/options")?.as_object()?.keys().next()

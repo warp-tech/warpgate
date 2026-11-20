@@ -50,7 +50,8 @@ impl Related<super::TargetSession::Entity> for Entity {
 
 impl ActiveModelBehavior for ActiveModel {}
 
-/// What ending a user session ended. The caller settles it after the commit
+/// The target sessions that ended with a user session. After the commit the
+/// caller logs them and closes the session's approval requests
 #[must_use]
 pub struct EndedTargetSessions {
     pub id: UserSessionId,
@@ -88,7 +89,7 @@ pub async fn lock_for_update(
 }
 
 /// Ends a locked user session and all of its target sessions in one
-/// transaction. The caller settles the result after the commit
+/// transaction. The caller logs the result after the commit
 pub async fn mark_ended_in_transaction(
     transaction: &DatabaseTransaction,
     id: UserSessionId,

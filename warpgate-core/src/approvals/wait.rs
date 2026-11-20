@@ -3,15 +3,15 @@ use std::time::Duration;
 use sea_orm::DatabaseConnection;
 use sea_orm::sea_query::IntoCondition;
 use time::OffsetDateTime;
-use tracing::{info, warn};
+use tracing::warn;
 use warpgate_common::auth::ApprovalKind;
-use warpgate_common::helpers::logging::format_related_ids;
 use warpgate_common::{NodeId, UserSessionId, WarpgateError};
 use warpgate_db_entities::SessionApprovalRequest::{
     self, Advertised, ApprovalActor, close_request, mark_consumed, upsert_request,
 };
 
 use super::*;
+use crate::logging::AuditEvent;
 
 // An "owning" close-on-drop guard for an approval
 pub(super) struct PendingApproval {
@@ -249,26 +249,20 @@ pub(super) fn emit_resolved_event(
     actor: &ApprovalActor,
     approved: bool,
 ) {
-    // A user approving their own session is both parties — don't list twice.
-    let mut related = vec![row.user_id];
-
-    if actor.user_id != row.user_id {
-        related.push(actor.user_id);
+    AuditEvent::SessionApprovalResolved {
+        session_id: row.session_id,
+        client_ip: row
+            .remote_address
+            .clone()
+            .unwrap_or_else(|| "<unknown>".into()),
+        user_id: row.user_id,
+        username: row.username.clone(),
+        protocol: row.protocol.clone(),
+        target_name: row.target.clone(),
+        kind: row.kind,
+        resolved_by: actor.username.clone().unwrap_or_else(|| "<unknown>".into()),
+        resolved_by_user_id: actor.user_id,
+        approved,
     }
-
-    info!(
-        target: "audit",
-        _type = "SessionApprovalResolved1",
-        session = %row.session_id,
-        client_ip = %row.remote_address.as_deref().unwrap_or("<unknown>"),
-        user_id = %row.user_id,
-        username = %row.username,
-        protocol = %row.protocol,
-        target = %row.target,
-        kind = ?row.kind,
-        resolved_by = %actor.username.clone().unwrap_or("<unknown>".into()),
-        approved = approved,
-        related_users = %format_related_ids(&related),
-        "Session approval resolved",
-    );
+    .emit();
 }

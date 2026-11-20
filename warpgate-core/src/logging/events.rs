@@ -1,11 +1,25 @@
 use std::fmt::Display;
+use std::net::IpAddr;
 
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tracing::info;
 use uuid::Uuid;
+use warpgate_common::auth::ApprovalKind;
 use warpgate_common::helpers::logging::format_related_ids;
-use warpgate_common::{RoleId, TargetId, UserId};
+use warpgate_common::{RoleId, RowId, TargetId, UserId, UserSessionId};
+use warpgate_resources::ResourceKind;
+
+use crate::resources::audit::{ChangedBy, ResourceChange, RowKind, Subject};
+
+/// What happened to a session's request for an administrator's approval
+#[derive(Clone, Copy)]
+pub enum SessionApprovalStep {
+    Requested,
+    TimedOut,
+    /// Skipped, because an earlier approval is still within its grace period
+    Bypassed,
+}
 
 #[derive(Clone, Copy)]
 pub enum CredentialChange {
@@ -133,9 +147,7 @@ pub enum AuditEvent {
         target_name: String,
         role_id: RoleId,
         role_name: String,
-        /// Sync ID and provider. `None` for an admin's edit
-        sync: Option<(Uuid, String)>,
-        actor_user_id: Option<UserId>,
+        by: ChangedBy,
     },
     // currently used for RDP logon PDU
     TargetLogon {
@@ -282,20 +294,37 @@ pub enum AuditEvent {
     /// An admin or a provider sync created, changed or deleted a resource.
     /// Admin edits of rows that no provider manages use it too
     ResourceChanged {
-        /// `Create`, `Update`, `Adopt` or `Delete`
-        action: String,
-        kind: String,
-        id: Uuid,
-        name: String,
-        /// JSON array of the changed fields, or of a new row's set fields,
-        /// without credential values. `None` if there are none or the rows
-        /// could not be compared
-        fields: Option<String>,
-        /// Sync ID and provider. `None` for an admin's edit
-        sync: Option<(Uuid, String)>,
-        related_users: Option<String>,
-        related_access_roles: Option<String>,
-        related_admin_roles: Option<String>,
+        change: ResourceChange,
+        by: ChangedBy,
+    },
+    SessionApproval {
+        step: SessionApprovalStep,
+        session_id: UserSessionId,
+        client_ip: String,
+        user_id: UserId,
+        username: String,
+        protocol: String,
+        target_name: String,
+    },
+    SessionApprovalResolved {
+        session_id: UserSessionId,
+        client_ip: String,
+        user_id: UserId,
+        username: String,
+        protocol: String,
+        target_name: String,
+        kind: ApprovalKind,
+        resolved_by: String,
+        resolved_by_user_id: UserId,
+        approved: bool,
+    },
+    /// A login that failed before its user was known
+    UserAuthenticationFailed {
+        session_id: UserSessionId,
+        client_ip: Option<IpAddr>,
+        username: String,
+        credentials: String,
+        reason: String,
     },
     /// An admin made a provider's resource editable by hand again
     ProviderResourceReleased {
@@ -498,9 +527,9 @@ impl AuditEvent {
                 target_name,
                 role_id,
                 role_name,
-                sync,
-                actor_user_id,
+                by,
             } => {
+                let (sync, actor_user_id) = by.origin();
                 let (event, message) = if *added {
                     ("TargetRoleAdded1", "Added access role to target")
                 } else {
@@ -867,24 +896,31 @@ impl AuditEvent {
                     "Provider synced"
                 );
             }
-            Self::ResourceChanged {
-                action,
-                kind,
-                id,
-                name,
-                fields,
-                sync,
-                related_users,
-                related_access_roles,
-                related_admin_roles,
-            } => {
+            Self::ResourceChanged { change, by } => {
+                let (sync, actor) = by.origin();
+                let (Subject::Resource(_, id) | Subject::Row(_, id)) = change.subject;
+                let user = matches!(change.subject, Subject::Row(RowKind::User, _))
+                    .then(|| UserId::from_uuid(id));
+                let users: Vec<UserId> = user.into_iter().chain(actor).collect();
+                let related_users = (!users.is_empty()).then(|| format_related_ids(&users));
+                let related_access_roles =
+                    matches!(change.subject, Subject::Resource(ResourceKind::Role, _))
+                        .then(|| format_related_ids(&[id]));
+                let related_admin_roles =
+                    matches!(change.subject, Subject::Row(RowKind::AdminRole, _))
+                        .then(|| format_related_ids(&[id]));
+                let fields = change
+                    .fields
+                    .as_ref()
+                    .filter(|fields| !fields.is_empty())
+                    .and_then(|fields| serde_json::to_string(fields).ok());
                 info!(
                     target: "audit",
                     _type = "ResourceChanged1",
-                    action = %action,
-                    kind = %kind,
+                    action = change.action.name(),
+                    kind = change.subject.kind(),
                     id = %id,
-                    name = %name,
+                    name = %change.name,
                     fields = fields.as_deref(),
                     sync_id = sync.as_ref().map(|(id, _)| id.to_string()),
                     provider = sync.as_ref().map(|(_, provider)| provider.as_str()),
@@ -892,6 +928,94 @@ impl AuditEvent {
                     related_access_roles = related_access_roles.as_deref(),
                     related_admin_roles = related_admin_roles.as_deref(),
                     "Resource changed"
+                );
+            }
+            Self::SessionApproval {
+                step,
+                session_id,
+                client_ip,
+                user_id,
+                username,
+                protocol,
+                target_name,
+            } => {
+                let (event, message) = match step {
+                    SessionApprovalStep::Requested => (
+                        "SessionApprovalRequested1",
+                        "Session is awaiting administrator approval",
+                    ),
+                    SessionApprovalStep::TimedOut => {
+                        ("SessionApprovalTimedOut1", "Session approval timed out")
+                    }
+                    SessionApprovalStep::Bypassed => (
+                        "AdminApprovalBypassed1",
+                        "Administrator approval bypassed within grace period",
+                    ),
+                };
+                info!(
+                    target: "audit",
+                    _type = event,
+                    session = %session_id,
+                    client_ip = %client_ip,
+                    user_id = %user_id,
+                    username = %username,
+                    protocol = %protocol,
+                    target = %target_name,
+                    related_users = %format_related_ids(&[*user_id]),
+                    "{message}",
+                );
+            }
+            Self::SessionApprovalResolved {
+                session_id,
+                client_ip,
+                user_id,
+                username,
+                protocol,
+                target_name,
+                kind,
+                resolved_by,
+                resolved_by_user_id,
+                approved,
+            } => {
+                // A user who approves their own session is listed once
+                let mut related = vec![*user_id];
+                if resolved_by_user_id != user_id {
+                    related.push(*resolved_by_user_id);
+                }
+                info!(
+                    target: "audit",
+                    _type = "SessionApprovalResolved1",
+                    session = %session_id,
+                    client_ip = %client_ip,
+                    user_id = %user_id,
+                    username = %username,
+                    protocol = %protocol,
+                    target = %target_name,
+                    kind = ?kind,
+                    resolved_by = %resolved_by,
+                    approved = approved,
+                    related_users = %format_related_ids(&related),
+                    "Session approval resolved",
+                );
+            }
+            Self::UserAuthenticationFailed {
+                session_id,
+                client_ip,
+                username,
+                credentials,
+                reason,
+            } => {
+                let client_ip =
+                    client_ip.map_or_else(|| "<unknown>".to_string(), |ip| ip.to_string());
+                info!(
+                    target: "audit",
+                    _type = "UserAuthenticationFailed1",
+                    session = %session_id,
+                    client_ip = %client_ip,
+                    username = %username,
+                    credentials = %credentials,
+                    reason = %reason,
+                    "Authentication failed",
                 );
             }
             Self::ProviderResourceReleased {

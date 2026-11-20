@@ -25,18 +25,14 @@ pub fn emit_unknown_authentication_failed_event(
     credentials: &str,
     reason: &str,
 ) {
-    let client_ip = remote_ip.map_or_else(|| "<unknown>".to_string(), |x| x.to_string());
-
-    info!(
-        target: "audit",
-        _type = "UserAuthenticationFailed1",
-        session = %session_id,
-        client_ip = %client_ip,
-        username = %username,
-        credentials = %credentials,
-        reason = %reason,
-        "Authentication failed",
-    );
+    AuditEvent::UserAuthenticationFailed {
+        session_id,
+        client_ip: remote_ip,
+        username: username.to_owned(),
+        credentials: credentials.to_owned(),
+        reason: reason.to_owned(),
+    }
+    .emit();
 }
 
 pub fn audit_own_credential(

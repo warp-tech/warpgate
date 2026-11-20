@@ -1,12 +1,12 @@
 use std::net::IpAddr;
 
-use tracing::info;
 use uuid::Uuid;
 use warpgate_common::auth::{
     ApprovalKind, AuthState, AuthStateUserInfo, RememberApprovalBy, WebApprovalMatchKey,
 };
-use warpgate_common::helpers::logging::format_related_ids;
 use warpgate_common::{Protocol, UserSessionId};
+
+use crate::logging::{AuditEvent, SessionApprovalStep};
 
 #[derive(Debug, Clone)]
 pub(super) struct ApprovalSubject {
@@ -59,47 +59,27 @@ impl ApprovalSubject {
     }
 
     pub(super) fn emit_requested_event(&self) {
-        info!(
-            target: "audit",
-            _type = "SessionApprovalRequested1",
-            session = %self.session_id,
-            client_ip = %self.client_ip_for_logging(),
-            user_id = %self.user_info.id,
-            username = %self.user_info.username,
-            protocol = %self.protocol,
-            target = %self.target_name,
-            related_users = %format_related_ids(&[self.user_info.id]),
-            "Session is awaiting administrator approval",
-        );
+        self.emit(SessionApprovalStep::Requested);
     }
 
     pub(super) fn emit_timed_out_event(&self) {
-        info!(
-            target: "audit",
-            _type = "SessionApprovalTimedOut1",
-            session = %self.session_id,
-            client_ip = %self.client_ip_for_logging(),
-            user_id = %self.user_info.id,
-            username = %self.user_info.username,
-            protocol = %self.protocol,
-            target = %self.target_name,
-            related_users = %format_related_ids(&[self.user_info.id]),
-            "Session approval timed out",
-        );
+        self.emit(SessionApprovalStep::TimedOut);
     }
 
     pub(super) fn emit_bypassed_event(&self) {
-        info!(
-            target: "audit",
-            _type = "AdminApprovalBypassed1",
-            session = %self.session_id,
-            client_ip = %self.client_ip_for_logging(),
-            user_id = %self.user_info.id,
-            username = %self.user_info.username,
-            protocol = %self.protocol,
-            target = %self.target_name,
-            related_users = %format_related_ids(&[self.user_info.id]),
-            "Administrator approval bypassed within grace period",
-        );
+        self.emit(SessionApprovalStep::Bypassed);
+    }
+
+    fn emit(&self, step: SessionApprovalStep) {
+        AuditEvent::SessionApproval {
+            step,
+            session_id: self.session_id,
+            client_ip: self.client_ip_for_logging(),
+            user_id: self.user_info.id,
+            username: self.user_info.username.clone(),
+            protocol: self.protocol.to_string(),
+            target_name: self.target_name.clone(),
+        }
+        .emit();
     }
 }

@@ -7,7 +7,7 @@ use poem::Request;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 use uuid::Uuid;
 use warpgate_aws::EksClusterInfo;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
@@ -18,6 +18,7 @@ use warpgate_common::{
 };
 use warpgate_common_http::authorization_token;
 use warpgate_common_http::logging::get_client_ip_addr;
+use warpgate_core::logging::AuditEvent;
 use warpgate_core::login_protection::FailedAttemptInfo;
 use warpgate_core::{
     AuthorizedIdentity, ConfigProvider, Services, TargetAuthorization, ValidatedTicket,
@@ -101,17 +102,14 @@ fn presented_credential_kind(req: &Request) -> Option<&'static str> {
 /// Emit the shared `UserAuthenticationFailed1` audit event. A failed Kubernetes
 /// auth has no established session, so a fresh id tags this attempt.
 fn emit_authentication_failed(client_ip: Option<IpAddr>, credential_type: &str, reason: &str) {
-    let client_ip = client_ip.map_or_else(|| "<unknown>".to_string(), |ip| ip.to_string());
-    info!(
-        target: "audit",
-        _type = "UserAuthenticationFailed1",
-        session = %Uuid::new_v4(),
-        client_ip = %client_ip,
-        username = "",
-        credentials = %credential_type,
-        reason = %reason,
-        "Authentication failed",
-    );
+    AuditEvent::UserAuthenticationFailed {
+        session_id: UserSessionId(Uuid::new_v4()),
+        client_ip,
+        username: String::new(),
+        credentials: credential_type.to_owned(),
+        reason: reason.to_owned(),
+    }
+    .emit();
 }
 
 /// Resolve and vet the caller's identity from the request's transport credentials

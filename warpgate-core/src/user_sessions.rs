@@ -13,7 +13,7 @@ use warpgate_db_entities::{HttpSession, SessionApprovalRequest, TargetSession, U
 use crate::logging::AuditEvent;
 
 /// Logs the ended target sessions and closes the session's approval requests.
-/// Runs after the transaction that ended them has committed
+/// Call it only after the transaction that ended them has committed
 pub async fn settle(ended: EndedTargetSessions, db: &DatabaseConnection) {
     let id = ended.id;
     if let (Some(user_id), Some(username)) = (ended.user_id, &ended.username) {

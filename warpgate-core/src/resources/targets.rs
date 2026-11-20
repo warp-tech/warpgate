@@ -256,15 +256,13 @@ pub struct RoleAssignmentChange {
 
 impl RoleAssignmentChange {
     pub fn audit(&self, by: ChangedBy) {
-        let (sync, actor_user_id) = by.origin();
         AuditEvent::TargetRoleChanged {
             added: self.added,
             target_id: self.target.id,
             target_name: self.target.name.clone(),
             role_id: self.role.id,
             role_name: self.role.name.clone(),
-            sync,
-            actor_user_id,
+            by,
         }
         .emit();
     }
