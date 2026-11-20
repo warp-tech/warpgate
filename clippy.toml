@@ -1,2 +1,6 @@
 avoid-breaking-exported-api = false
 allow-unwrap-in-tests = true
+disallowed-methods = [
+    { path = "sea_orm::TransactionTrait::begin", reason = "deferred transactions fail under concurrent writes on SQLite; use warpgate_db_entities::begin_write" },
+    { path = "sea_orm::TransactionTrait::transaction", reason = "deferred transactions fail under concurrent writes on SQLite; use warpgate_db_entities::begin_write" },
+]

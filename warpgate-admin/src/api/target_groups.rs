@@ -23,9 +23,6 @@ enum CreateTargetGroupResponse {
     #[oai(status = 201)]
     Created(Json<TargetGroup::Model>),
 
-    #[oai(status = 409)]
-    Conflict(Json<String>),
-
     #[oai(status = 400)]
     BadRequest(Json<String>),
 }
@@ -71,9 +68,6 @@ impl ListApi {
             Err(ResourceError::EmptyName) => Ok(CreateTargetGroupResponse::BadRequest(
                 invalid_field("name", "target group name is empty"),
             )),
-            Err(ResourceError::NameTaken) => Ok(CreateTargetGroupResponse::Conflict(Json(
-                "Name already exists".into(),
-            ))),
             Err(err) => Err(err.into()),
         }
     }
@@ -169,9 +163,6 @@ impl DetailApi {
                 warn!("Rejecting request: target group name is empty");
                 Ok(UpdateTargetGroupResponse::BadRequest)
             }
-            Err(ResourceError::NameTaken) => Ok(UpdateTargetGroupResponse::Conflict(Json(
-                "Name already exists".into(),
-            ))),
             Err(ResourceError::NotFound) => Ok(UpdateTargetGroupResponse::NotFound),
             Err(err @ ResourceError::OwnedBy(_)) => {
                 Ok(UpdateTargetGroupResponse::Conflict(Json(err.to_string())))

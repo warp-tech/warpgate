@@ -56,6 +56,7 @@ impl From<ResourceError> for WarpgateError {
     fn from(err: ResourceError) -> Self {
         match err {
             ResourceError::Other(err) => err,
+            ResourceError::NameTaken => Self::NameTaken,
             err => Self::Other(Box::new(err)),
         }
     }

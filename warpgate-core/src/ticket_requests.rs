@@ -5,7 +5,7 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, TransactionTrait,
+    QueryOrder,
 };
 use time::{Duration, OffsetDateTime};
 use tracing::*;
@@ -13,7 +13,7 @@ use uuid::Uuid;
 use warpgate_common::helpers::hash::{generate_ticket_secret, hash_secret};
 use warpgate_common::{Secret, TargetId, UserId, WarpgateError};
 use warpgate_db_entities::TicketRequest::TicketRequestStatus;
-use warpgate_db_entities::{Parameters, Target, Ticket, TicketRequest};
+use warpgate_db_entities::{Parameters, Target, Ticket, TicketRequest, begin_write};
 
 use crate::logging::AuditEvent;
 use crate::{ConfigProvider, ConfigProviderEnum};
@@ -156,7 +156,7 @@ pub async fn create_ticket_request(
         has_access && policy.ticket_auto_approve_existing_access && !target.ticket_require_approval;
 
     if auto_approve {
-        let txn = db_conn.begin().await?;
+        let txn = begin_write(db_conn).await?;
 
         let (ticket_id, secret) = insert_self_service_ticket(
             &txn,
@@ -389,7 +389,7 @@ pub async fn activate_ticket_request(
         .map(|user| user.username)
         .unwrap_or_default();
 
-    let txn = db_conn.begin().await?;
+    let txn = begin_write(db_conn).await?;
 
     let (ticket_id, secret) = insert_self_service_ticket(
         &txn,

@@ -1,14 +1,14 @@
 //! Ending user sessions, with the audit events and cleanup that follow
 
 use sea_orm::sea_query::IntoCondition;
-use sea_orm::{
-    ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect, TransactionTrait,
-};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect};
 use tracing::error;
 use uuid::Uuid;
 use warpgate_common::{UserId, UserSessionId, WarpgateError};
 use warpgate_db_entities::UserSession::{EndedTargetSessions, mark_ended_in_transaction};
-use warpgate_db_entities::{HttpSession, SessionApprovalRequest, TargetSession, UserSession};
+use warpgate_db_entities::{
+    HttpSession, SessionApprovalRequest, TargetSession, UserSession, begin_write,
+};
 
 use crate::logging::AuditEvent;
 
@@ -52,7 +52,7 @@ pub async fn mark_ended_including_target_sessions(
     db: &DatabaseConnection,
     id: UserSessionId,
 ) -> Result<(), WarpgateError> {
-    let transaction = db.begin().await?;
+    let transaction = begin_write(db).await?;
     let ended = mark_ended_in_transaction(&transaction, id).await?;
     transaction.commit().await?;
     settle(ended, db).await;
@@ -61,7 +61,7 @@ pub async fn mark_ended_including_target_sessions(
 
 /// The definite way to close a session
 pub async fn revoke(db: &DatabaseConnection, id: UserSessionId) -> Result<(), WarpgateError> {
-    let transaction = db.begin().await?;
+    let transaction = begin_write(db).await?;
     let ended = mark_ended_in_transaction(&transaction, id).await?;
     HttpSession::Entity::delete_many()
         .filter(HttpSession::Column::UserSessionId.eq(id))

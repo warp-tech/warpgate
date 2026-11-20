@@ -5,7 +5,7 @@ use sea_orm::{
 };
 use uuid::Uuid;
 use warpgate_common::{RoleId, RowId, WarpgateError};
-use warpgate_db_entities::{Role, TargetRoleAssignment, UserRoleAssignment};
+use warpgate_db_entities::{Role, TargetRoleAssignment, UserRoleAssignment, begin_write};
 use warpgate_resources::{Comparable, ComparableValues, ResourceKind, RoleSpec, Row};
 
 use super::audit::{Audited, Subject, Unaudited};
@@ -105,7 +105,7 @@ pub async fn delete<C: ConnectionTrait + TransactionTrait>(
     actor: Actor,
     id: RoleId,
 ) -> Result<Unaudited<Role::Model>, ResourceError> {
-    let txn = db.begin().await?;
+    let txn = begin_write(db).await?;
     let role = Role::Entity::find_by_id(id)
         .one(&txn)
         .await?

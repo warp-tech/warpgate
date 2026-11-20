@@ -73,6 +73,19 @@ ignore = [
     "RUSTSEC-2026-0194", # quick-xml quadratic time - see above
     "RUSTSEC-2021-0141", # dotenv is unmaintaned - only used for dev
     "RUSTSEC-2024-0449", # unsafe-libyaml is unmaintained - serde_yaml (config) and poem still depend on it
+    "RUSTSEC-2026-0542", # humantime is unmaintained - dependency-free, and config files on disk use its duration grammar
+    "RUSTSEC-2026-0441", # pin-utils is unmaintained - only used by ironrdp
+    "RUSTSEC-2026-0543", # chrono is unmaintained - used by poem, oauth2, pgwire, oidc, sea-orm...
+
+    "RUSTSEC-2026-0574", # heapless unsound, used by gix only
+    "RUSTSEC-2026-0575", # heapless unsound, used by gix only
+    "RUSTSEC-2026-0576", # heapless unsound, used by gix only
+    "RUSTSEC-2026-0577", # heapless unsound, used by gix only
+    "RUSTSEC-2026-0578", # heapless unsound, used by gix only
+    "RUSTSEC-2026-0579", # heapless unsound, used by gix only
+    "RUSTSEC-2026-0580", # heapless race, used by gix only
+    "RUSTSEC-2026-0581", # heapless unsound, used by gix only
+    "RUSTSEC-2026-0582", # heapless unsound, used by gix only
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
@@ -200,6 +213,7 @@ allow = [
     "MPL-2.0",
     "Unlicense",
     "IJG",
+    "Apache-2.0 WITH LLVM-exception",
 ]
 
 [[licenses.clarify]]

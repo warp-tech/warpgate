@@ -4,7 +4,7 @@ use std::time::Duration;
 use sea_orm::sea_query::{ExprTrait, IntoCondition};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, EntityTrait,
-    PaginatorTrait, QueryFilter, SelectExt, Set, TransactionTrait,
+    PaginatorTrait, QueryFilter, SelectExt, Set,
 };
 use time::OffsetDateTime;
 use tracing::{debug, info};
@@ -12,6 +12,7 @@ use uuid::Uuid;
 use warpgate_common::{Protocol, WarpgateError};
 use warpgate_db_entities::{
     FailedLoginAttempt, IpBlock, Parameters, User, UserAdminRoleAssignment, UserLockout,
+    begin_write,
 };
 
 use super::cache::{IpBlockInfo, LoginProtectionCache, UserLockInfo};
@@ -260,7 +261,7 @@ impl LoginProtectionService {
             return Ok(());
         }
 
-        let txn = db.begin().await?;
+        let txn = begin_write(db).await?;
         let now = OffsetDateTime::now_utc();
 
         FailedLoginAttempt::ActiveModel {

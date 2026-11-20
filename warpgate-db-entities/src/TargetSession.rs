@@ -1,14 +1,14 @@
 use warpgate_common::TargetId;
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::{IntoCondition, OnConflict};
-use sea_orm::{QuerySelect, TransactionTrait};
+use sea_orm::QuerySelect;
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::{
     NodeId, StoredSecrets, Target, TargetSessionId, UserSessionId, WarpgateError,
 };
 
-use crate::TargetSession;
+use crate::{TargetSession, begin_write};
 
 /// Target session owned by a [`super::UserSession`] (in DB only, no handle).
 /// One user session can have one or more (for HTTP) target sessions
@@ -88,7 +88,7 @@ pub async fn open_or_lookup(
 ) -> Result<TargetSessionOpenOutcome, WarpgateError> {
     use sea_orm::ActiveValue::Set;
 
-    let transaction = db.begin().await?;
+    let transaction = begin_write(db).await?;
     let Some(parent) = super::UserSession::lock_for_update(&transaction, user_session_id).await?
     else {
         return Err(WarpgateError::UserSessionEnded);

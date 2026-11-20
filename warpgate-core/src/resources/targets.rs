@@ -12,7 +12,7 @@ use warpgate_common::{
 };
 use warpgate_db_entities::{
     KnownHost, Role, SshClientKey, Target, TargetGroup, TargetRoleAssignment, TargetSession,
-    Ticket, TicketRequest,
+    Ticket, TicketRequest, begin_write,
 };
 use warpgate_resources::{
     Comparable, ComparableValues, OptionReferences, ResourceKind, Row, TargetSpec,
@@ -203,7 +203,7 @@ pub async fn delete<C: ConnectionTrait + TransactionTrait>(
     actor: Actor,
     id: TargetId,
 ) -> Result<(Unaudited<Target::Model>, AdmittedSessions), ResourceError> {
-    let txn = db.begin().await?;
+    let txn = begin_write(db).await?;
     let target = Target::Entity::find_by_id(id)
         .one(&txn)
         .await?
