@@ -74,10 +74,7 @@ impl MigrationTrait for Migration {
                 .unwrap(),
             )
             .to_owned();
-        manager
-            .get_connection()
-            .execute(backend.build(&stmt))
-            .await?;
+        manager.get_connection().execute(&stmt).await?;
 
         Ok(())
     }

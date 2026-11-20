@@ -3,18 +3,21 @@ use poem_openapi::payload::Json;
 use poem_openapi::types::{ParseError, ParseFromJSON, ParseResult};
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::ActiveValue::NotSet;
+use sea_orm::sea_query::Expr;
 use sea_orm::{EntityTrait, IntoActiveModel, Set};
 use serde::Serialize;
 use serde_json::Value;
 use warpgate_aws::S3Storage;
 use warpgate_azure::AzureBlobStorage;
 use warpgate_common::{
-    AdminPermission, PasswordPolicy, StoredSecrets, UserRequireCredentialsPolicy, WarpgateError,
+    AdminPermission, PasswordPolicy, StoredSecret, StoredSecrets, UserRequireCredentialsPolicy,
+    WarpgateError,
 };
 use warpgate_db_entities::Parameters;
-use warpgate_db_entities::Parameters::RecordingsStorageConfig;
+use warpgate_db_entities::Parameters::{GitopsSource, RecordingsStorageConfig};
 
 use super::AdminContext;
+use super::limited_json::LimitedJson;
 
 pub struct Api;
 
@@ -47,6 +50,23 @@ fn merge_secret(
                 *secret = stored.clone();
             }
         }
+    }
+    incoming
+}
+
+/// An empty inline password keeps the stored one while the URL is unchanged.
+/// The browser never receives the password, and a stored token must not be
+/// sent to a different host.
+fn merge_git_password(mut incoming: GitopsSource, current: Option<&GitopsSource>) -> GitopsSource {
+    if let GitopsSource::Git(git) = &mut incoming
+        && git
+            .password
+            .inline_mut()
+            .is_some_and(|p| p.stored_value().is_empty())
+        && let Some(GitopsSource::Git(current)) = current
+        && current.url == git.url
+    {
+        git.password = current.password.clone();
     }
     incoming
 }
@@ -111,6 +131,14 @@ struct ParameterValues {
     pub analytics_normal: bool,
     pub recordings_enable: bool,
     pub recordings_storage: RecordingsStorageConfig,
+    pub gitops_source: Option<GitopsSource>,
+    pub gitops_sync_interval_seconds: Option<i64>,
+    pub gitops_sync_on_startup: bool,
+    pub gitops_webhook_secret_set: bool,
+    /// Whether the Git source has a stored password or token. `gitops_source`
+    /// is redacted and can't show it.
+    pub gitops_git_password_set: bool,
+    pub gitops_prune: bool,
 }
 
 #[derive(Serialize, Object)]
@@ -166,17 +194,6 @@ struct ParameterUpdate {
     pub lp_user_lockout_duration_seconds: Option<i32>,
     pub lp_user_exempt_admins: Option<bool>,
     pub banner: Option<String>,
-    /// Only browser-renderable image data URLs are stored: the value is served
-    /// to every visitor as an image, so nothing else must ever end up in it.
-    /// `null` clears the logo. The size cap is mirrored in the Parameters UI.
-    #[oai(
-        deserialize_with = "parse_nullable",
-        validator(
-            max_length = 4_194_304,
-            pattern = r"^data:image/(png|jpeg|gif|webp|svg\+xml);base64,[A-Za-z0-9+/]+={0,2}$"
-        )
-    )]
-    pub logo: Option<Option<String>>,
     pub web_clients_enabled: Option<bool>,
     #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
     pub web_auth_max_age_seconds: Option<Option<i64>>,
@@ -190,6 +207,46 @@ struct ParameterUpdate {
     pub analytics_normal: Option<bool>,
     pub recordings_enable: Option<bool>,
     pub recordings_storage: Option<RecordingsStorageConfig>,
+    #[oai(deserialize_with = "parse_nullable")]
+    pub gitops_source: Option<Option<GitopsSource>>,
+    /// Checked every 15 seconds; `null` syncs at startup and on request only
+    #[oai(deserialize_with = "parse_nullable", validator(minimum(value = "1")))]
+    pub gitops_sync_interval_seconds: Option<Option<i64>>,
+    pub gitops_sync_on_startup: Option<bool>,
+    /// Authenticates pushes to `/@warpgate/api/gitops/webhook`, sent as
+    /// `X-Hub-Signature-256` or `X-Gitlab-Token`. Write-only; `null` turns the
+    /// webhook off
+    #[oai(
+        deserialize_with = "parse_nullable",
+        validator(min_length = 16, max_length = 255)
+    )]
+    pub gitops_webhook_secret: Option<Option<String>>,
+    pub gitops_prune: Option<bool>,
+}
+
+/// Fits the longest `logo` a [`LogoUpdate`] accepts, with room for JSON
+/// escaping of its slashes.
+const LOGO_BODY_LIMIT: usize = 5 * 1024 * 1024;
+
+#[derive(Object)]
+struct LogoUpdate {
+    /// Only browser-renderable image data URLs are stored: the value is served
+    /// to every visitor as an image, so nothing else must ever end up in it.
+    /// The size cap is mirrored in the Parameters UI.
+    #[oai(validator(
+        max_length = 4_194_304,
+        pattern = r"^data:image/(png|jpeg|gif|webp|svg\+xml);base64,[A-Za-z0-9+/]+={0,2}$"
+    ))]
+    logo: String,
+}
+
+/// `None` removes the logo.
+async fn store_logo(admin: &AdminContext, logo: Option<String>) -> Result<(), WarpgateError> {
+    Parameters::Entity::update_many()
+        .col_expr(Parameters::Column::Logo, Expr::value(logo))
+        .exec(&admin.services().db)
+        .await?;
+    Ok(())
 }
 
 #[derive(Serialize, Object)]
@@ -216,6 +273,12 @@ enum GetAnalyticsPreviewResponse {
 enum UpdateParametersResponse {
     #[oai(status = 201)]
     Done,
+}
+
+#[derive(ApiResponse)]
+enum DeleteLogoResponse {
+    #[oai(status = 204)]
+    Deleted,
 }
 
 #[derive(Serialize, Object)]
@@ -288,6 +351,15 @@ impl Api {
             analytics_normal: parameters.analytics_normal,
             recordings_enable: parameters.recordings_enable,
             recordings_storage,
+            gitops_git_password_set: matches!(
+                &parameters.gitops_source,
+                Some(GitopsSource::Git(git)) if git.password.as_inline().is_some_and(|p| !p.stored_value().is_empty())
+            ),
+            gitops_source: parameters.gitops_source.map(|source| source.redacted()),
+            gitops_sync_interval_seconds: parameters.gitops_sync_interval_seconds,
+            gitops_sync_on_startup: parameters.gitops_sync_on_startup,
+            gitops_webhook_secret_set: parameters.gitops_webhook_secret.is_some(),
+            gitops_prune: parameters.gitops_prune,
         })))
     }
 
@@ -324,14 +396,6 @@ impl Api {
     ) -> Result<UpdateParametersResponse, WarpgateError> {
         admin.require(AdminPermission::ConfigEdit)?;
 
-        if let Some(Some(logo)) = &body.logo
-            && Parameters::LogoImage::from_data_url(logo).is_none()
-        {
-            return Err(WarpgateError::InvalidRequest(
-                "logo is not a valid image data URL".into(),
-            ));
-        }
-
         let services = admin.services();
         let db = &services.db;
         let current = admin.parameters().await?.clone();
@@ -341,6 +405,20 @@ impl Api {
                 &current.recordings_storage_config()?,
             )?),
             None => None,
+        };
+        let gitops_source = match body.gitops_source.clone() {
+            Some(Some(incoming)) => {
+                let mut source = merge_git_password(incoming, current.gitops_source.as_ref());
+                source.encrypt_all()?;
+                Set(Some(source))
+            }
+            Some(None) => Set(None),
+            None => NotSet,
+        };
+        let gitops_webhook_secret = match body.gitops_webhook_secret.clone() {
+            Some(Some(secret)) => Set(Some(StoredSecret::encrypted(secret)?)),
+            Some(None) => Set(None),
+            None => NotSet,
         };
         let mut parameters = current.into_active_model();
 
@@ -412,7 +490,6 @@ impl Api {
             body.lp_user_lockout_duration_seconds.map_or(NotSet, Set);
         parameters.lp_user_exempt_admins = body.lp_user_exempt_admins.map_or(NotSet, Set);
         parameters.banner = body.banner.clone().map_or(NotSet, Set);
-        parameters.logo = body.logo.clone().map_or(NotSet, Set);
         parameters.web_clients_enabled = body.web_clients_enabled.map_or(NotSet, Set);
         parameters.web_auth_max_age_seconds = body.web_auth_max_age_seconds.map_or(NotSet, Set);
         parameters.web_approval_grace_period_seconds =
@@ -426,6 +503,12 @@ impl Api {
 
         parameters.recordings_enable = body.recordings_enable.map_or(NotSet, Set);
         parameters.recordings_storage = storage.map_or(NotSet, Set);
+        parameters.gitops_source = gitops_source;
+        parameters.gitops_sync_interval_seconds =
+            body.gitops_sync_interval_seconds.map_or(NotSet, Set);
+        parameters.gitops_sync_on_startup = body.gitops_sync_on_startup.map_or(NotSet, Set);
+        parameters.gitops_webhook_secret = gitops_webhook_secret;
+        parameters.gitops_prune = body.gitops_prune.map_or(NotSet, Set);
 
         Parameters::Entity::update(parameters).exec(db).await?;
 
@@ -436,6 +519,40 @@ impl Api {
         .await?;
 
         Ok(UpdateParametersResponse::Done)
+    }
+
+    /// Replaces the Warpgate logo in the web UI. `GET /@warpgate/api/logo`
+    /// serves it.
+    #[oai(path = "/parameters/logo", method = "put", operation_id = "set_logo")]
+    async fn api_set_logo(
+        &self,
+        admin: AdminContext,
+        body: LimitedJson<LogoUpdate, LOGO_BODY_LIMIT>,
+    ) -> Result<UpdateParametersResponse, WarpgateError> {
+        admin.require(AdminPermission::ConfigEdit)?;
+
+        let LimitedJson(LogoUpdate { logo }) = body;
+        if Parameters::LogoImage::from_data_url(&logo).is_none() {
+            return Err(WarpgateError::InvalidRequest(
+                "logo is not a valid image data URL".into(),
+            ));
+        }
+        store_logo(&admin, Some(logo)).await?;
+        Ok(UpdateParametersResponse::Done)
+    }
+
+    #[oai(
+        path = "/parameters/logo",
+        method = "delete",
+        operation_id = "delete_logo"
+    )]
+    async fn api_delete_logo(
+        &self,
+        admin: AdminContext,
+    ) -> Result<DeleteLogoResponse, WarpgateError> {
+        admin.require(AdminPermission::ConfigEdit)?;
+        store_logo(&admin, None).await?;
+        Ok(DeleteLogoResponse::Deleted)
     }
 
     #[oai(
@@ -484,8 +601,64 @@ mod tests {
     use warpgate_azure::{AzureBlobConfig, AzureCredentials, ServicePrincipalCredentials};
     use warpgate_common::StoredSecrets;
     use warpgate_common::encryption::{env_keyring, is_envelope};
+    use warpgate_db_entities::Parameters::GitopsSource;
 
-    use super::{ParameterUpdate, RecordingsStorageConfig, merge_secret, storage_to_save};
+    use super::{
+        LogoUpdate, ParameterUpdate, RecordingsStorageConfig, merge_git_password, merge_secret,
+        storage_to_save,
+    };
+
+    fn git(url: &str, password: &str) -> GitopsSource {
+        let update = ParameterUpdate::parse_from_json(Some(json!({ "gitops_source": {
+            "kind": "Git", "url": url, "reference": "main", "username": "ci", "password": password,
+        }})));
+        match update.map(|update| update.gitops_source) {
+            Ok(Some(Some(source))) => source,
+            Ok(other) => panic!("{other:?}"),
+            Err(error) => panic!("{}", error.into_message()),
+        }
+    }
+
+    fn password(source: GitopsSource) -> String {
+        let GitopsSource::Git(mut git) = source else {
+            panic!()
+        };
+        git.password.inline_mut().unwrap().stored_value().to_owned()
+    }
+
+    #[test]
+    fn a_blank_git_password_is_kept_only_for_the_same_url() {
+        let stored = merge_git_password(git("https://git.example.com/a", "token"), None);
+        let kept = merge_git_password(git("https://git.example.com/a", ""), Some(&stored));
+        assert_eq!(password(kept), "token");
+        let elsewhere = merge_git_password(git("https://evil.example.com/a", ""), Some(&stored));
+        assert_eq!(password(elsewhere), "");
+    }
+
+    #[test]
+    fn gitops_fields_are_validated() {
+        for invalid in [
+            json!({ "gitops_source": { "kind": "Git", "url": "https://user:pw@git.example.com/a", "reference": "main" } }),
+            json!({ "gitops_source": { "kind": "Git", "url": "http://git.example.com/a", "reference": "main" } }),
+            json!({ "gitops_source": { "kind": "Git", "url": "https://git.example.com/a", "reference": "main", "path": "../etc" } }),
+            json!({ "gitops_source": { "kind": "Git", "url": "https://git.example.com/a", "reference": "main", "path": "/etc" } }),
+            json!({ "gitops_sync_interval_seconds": 0 }),
+            json!({ "gitops_webhook_secret": "short" }),
+        ] {
+            assert!(
+                ParameterUpdate::parse_from_json(Some(invalid.clone())).is_err(),
+                "{invalid}"
+            );
+        }
+        assert!(
+            ParameterUpdate::parse_from_json(Some(json!({
+                "gitops_source": { "kind": "Git", "url": "https://git.example.com/a", "reference": "main", "path": "deploy/warpgate" },
+                "gitops_sync_interval_seconds": null,
+                "gitops_webhook_secret": null,
+            })))
+            .is_ok()
+        );
+    }
 
     fn s3_with_secret(secret: Option<&str>) -> RecordingsStorageConfig {
         RecordingsStorageConfig::S3(S3StorageConfig {
@@ -620,23 +793,23 @@ mod tests {
     #[test]
     fn logo_accepts_only_image_data_urls() {
         for body in [
-            json!({ "logo": null }),
             json!({ "logo": "data:image/png;base64,iVBORw0KGgo=" }),
             json!({ "logo": "data:image/svg+xml;base64,PHN2Zy8+" }),
         ] {
             assert!(
-                ParameterUpdate::parse_from_json(Some(body.clone())).is_ok(),
+                LogoUpdate::parse_from_json(Some(body.clone())).is_ok(),
                 "{body} was rejected"
             );
         }
         for body in [
+            json!({ "logo": null }),
             json!({ "logo": "" }),
             json!({ "logo": "https://example.com/logo.png" }),
             json!({ "logo": "data:text/html;base64,PHNjcmlwdC8+" }),
             json!({ "logo": "data:image/png;base64,not base64!" }),
         ] {
             assert!(
-                ParameterUpdate::parse_from_json(Some(body.clone())).is_err(),
+                LogoUpdate::parse_from_json(Some(body.clone())).is_err(),
                 "{body} was accepted"
             );
         }

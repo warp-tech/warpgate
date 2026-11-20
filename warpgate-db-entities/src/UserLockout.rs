@@ -1,5 +1,5 @@
 use sea_orm::entity::prelude::*;
-use sea_orm::sea_query::{Func, IntoCondition};
+use sea_orm::sea_query::{ExprTrait, Func, IntoCondition};
 use time::OffsetDateTime;
 use uuid::Uuid;
 

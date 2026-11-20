@@ -16,7 +16,7 @@ use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::auth::{AuthState, CredentialKind};
 use warpgate_common::{
-    GlobalParams, Protocol, Secret, UserSessionId, WarpgateConfig, WarpgateError,
+    GlobalParams, Protocol, Secret, TargetId, UserId, UserSessionId, WarpgateConfig, WarpgateError,
 };
 use warpgate_db_entities::Parameters::MfaEnforcement;
 use warpgate_db_entities::{
@@ -144,7 +144,7 @@ impl Services {
     /// holds an active role assignment (not expired, not revoked) that grants
     /// the target. Ticket-admitted sessions are left to the ticket sweep.
     pub async fn close_sessions_without_role_access(&self) -> Result<(), WarpgateError> {
-        let open: Vec<(UserSessionId, Uuid, Option<Uuid>)> = TargetSession::Entity::find()
+        let open: Vec<(UserSessionId, TargetId, Option<UserId>)> = TargetSession::Entity::find()
             .join(
                 JoinType::InnerJoin,
                 TargetSession::Relation::UserSession.def(),
@@ -158,7 +158,7 @@ impl Services {
             .into_tuple()
             .all(&self.db)
             .await?;
-        let mut allowed: HashMap<Uuid, HashSet<Uuid>> = HashMap::new();
+        let mut allowed: HashMap<UserId, HashSet<TargetId>> = HashMap::new();
         let mut lost: HashSet<UserSessionId> = HashSet::new();
         for (session, target, user) in open {
             // Sessions without a user (e.g. the admin token) are not role-admitted.
@@ -368,7 +368,7 @@ impl Services {
         ))
     }
 
-    async fn user_has_sso_credential(&self, user_id: Uuid) -> Result<bool, WarpgateError> {
+    async fn user_has_sso_credential(&self, user_id: UserId) -> Result<bool, WarpgateError> {
         Ok(SsoCredential::Entity::find()
             .filter(SsoCredential::Column::UserId.eq(user_id))
             .count(&self.db)
@@ -376,7 +376,7 @@ impl Services {
             > 0)
     }
 
-    async fn user_has_otp_credential(&self, user_id: Uuid) -> Result<bool, WarpgateError> {
+    async fn user_has_otp_credential(&self, user_id: UserId) -> Result<bool, WarpgateError> {
         Ok(OtpCredential::Entity::find()
             .filter(OtpCredential::Column::UserId.eq(user_id))
             .count(&self.db)
@@ -388,7 +388,7 @@ impl Services {
     pub async fn effective_mfa_enforcement(
         &self,
         parameters: &Parameters::Model,
-        user_id: Uuid,
+        user_id: UserId,
     ) -> Result<MfaEnforcement, WarpgateError> {
         let has_sso = self.user_has_sso_credential(user_id).await?;
         Ok(parameters.effective_mfa_enforcement_for_user(has_sso))
@@ -397,7 +397,7 @@ impl Services {
     pub async fn mfa_required_factor(
         &self,
         parameters: &Parameters::Model,
-        user_id: Uuid,
+        user_id: UserId,
         protocol: Protocol,
     ) -> Result<Option<CredentialKind>, WarpgateError> {
         if parameters.mfa_enforcement == MfaEnforcement::Off {
@@ -412,7 +412,7 @@ impl Services {
     pub async fn mfa_setup_required(
         &self,
         parameters: &Parameters::Model,
-        user_id: Uuid,
+        user_id: UserId,
     ) -> Result<bool, WarpgateError> {
         if self.effective_mfa_enforcement(parameters, user_id).await? == MfaEnforcement::Off {
             return Ok(false);

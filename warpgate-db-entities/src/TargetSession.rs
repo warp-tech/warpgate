@@ -1,3 +1,4 @@
+use warpgate_common::{TargetId, UserId};
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::{IntoCondition, OnConflict};
 use sea_orm::{QuerySelect, TransactionTrait};
@@ -20,7 +21,7 @@ pub struct Model {
     pub id: TargetSessionId,
     pub user_session_id: UserSessionId,
     pub target_snapshot: String,
-    pub target_id: Uuid,
+    pub target_id: TargetId,
     pub started: OffsetDateTime,
     pub ended: Option<OffsetDateTime>,
     pub ticket_id: Option<Uuid>,
@@ -112,7 +113,7 @@ pub async fn open_or_lookup(
     };
 
     insert_unless_already_open(model)
-        .do_nothing()
+        .try_insert()
         .exec_without_returning(&transaction)
         .await?;
     let row = Entity::find()
@@ -157,7 +158,7 @@ fn insert_unless_already_open(model: ActiveModel) -> sea_orm::Insert<ActiveModel
 pub async fn is_open(
     db: &DatabaseConnection,
     user_session_id: UserSessionId,
-    target_id: Uuid,
+    target_id: TargetId,
 ) -> Result<bool, WarpgateError> {
     Ok(Entity::find()
         .filter(Column::UserSessionId.eq(user_session_id))
@@ -186,7 +187,7 @@ pub async fn open_user_sessions_admitted_by_tickets<C: ConnectionTrait>(
 
 pub async fn open_user_sessions_for_target<C: ConnectionTrait>(
     db: &C,
-    target_id: Uuid,
+    target_id: TargetId,
 ) -> Result<Vec<UserSessionId>, WarpgateError> {
     Ok(Entity::find()
         .filter(Column::Ended.is_null())
@@ -199,7 +200,7 @@ pub async fn open_user_sessions_for_target<C: ConnectionTrait>(
         .await?)
 }
 
-pub fn emit_ended_audit_event(session: &TargetSession::Model, user_id: Uuid, username: &str) {
+pub fn emit_ended_audit_event(session: &TargetSession::Model, user_id: UserId, username: &str) {
     let Some(target_name) = serde_json::from_str::<serde_json::Value>(&session.target_snapshot)
         .ok()
         .and_then(|value| {
@@ -238,7 +239,7 @@ mod tests {
             id: Set(TargetSessionId(Uuid::new_v4())),
             user_session_id: Set(UserSessionId(Uuid::new_v4())),
             target_snapshot: Set("{}".into()),
-            target_id: Set(Uuid::new_v4()),
+            target_id: Set(TargetId(Uuid::new_v4())),
             started: Set(OffsetDateTime::now_utc()),
             ended: Set(None),
             ticket_id: Set(None),

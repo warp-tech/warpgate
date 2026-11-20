@@ -3,13 +3,13 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{EntityTrait, ModelTrait, QueryFilter, QueryOrder};
 use tracing::warn;
-use uuid::Uuid;
 use warpgate_common::{
-    AdminPermission, Role as RoleConfig, Target as TargetConfig, User as UserConfig, WarpgateError,
+    AdminPermission, Role as RoleConfig, RoleId, Target as TargetConfig, User as UserConfig,
+    WarpgateError,
 };
 use warpgate_common_http::errors::invalid_field;
-use warpgate_core::resources::ResourceError;
 use warpgate_core::resources::roles::{self as store, RoleDataRequest};
+use warpgate_core::resources::{Actor, ResourceError};
 use warpgate_db_entities::{Role, Target, User};
 
 use super::AdminContext;
@@ -67,7 +67,7 @@ impl ListApi {
     ) -> Result<CreateRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesCreate)?;
 
-        match store::create(&admin.services().db, &body).await {
+        match store::create(&admin.services().db, Actor::Admin, &body).await {
             Ok(role) => Ok(CreateRoleResponse::Created(Json(role.into()))),
             Err(ResourceError::EmptyName) => Ok(CreateRoleResponse::BadRequest(invalid_field(
                 "name",
@@ -105,6 +105,8 @@ enum UpdateRoleResponse {
 enum DeleteRoleResponse {
     #[oai(status = 204)]
     Deleted,
+    #[oai(status = 409)]
+    Conflict(Json<String>),
     #[oai(status = 404)]
     NotFound,
 }
@@ -133,7 +135,7 @@ impl DetailApi {
     async fn api_get_role(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<RoleId>,
     ) -> Result<GetRoleResponse, WarpgateError> {
         let db = &admin.services().db;
 
@@ -145,16 +147,30 @@ impl DetailApi {
         })
     }
 
+    #[oai(
+        path = "/role/:id/release",
+        method = "post",
+        operation_id = "release_role"
+    )]
+    async fn api_release_role(
+        &self,
+        admin: AdminContext,
+        id: Path<RoleId>,
+    ) -> Result<GetRoleResponse, WarpgateError> {
+        super::gitops::release_managed::<Role::Entity>(&admin, id.0).await?;
+        self.api_get_role(admin, id).await
+    }
+
     #[oai(path = "/role/:id", method = "put", operation_id = "update_role")]
     async fn api_update_role(
         &self,
         admin: AdminContext,
         body: Json<RoleDataRequest>,
-        id: Path<Uuid>,
+        id: Path<RoleId>,
     ) -> Result<UpdateRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesEdit)?;
 
-        match store::update(&admin.services().db, id.0, &body).await {
+        match store::update(&admin.services().db, Actor::Admin, id.0, &body).await {
             Ok(role) => Ok(UpdateRoleResponse::Ok(Json(role.into()))),
             Err(ResourceError::EmptyName) => {
                 warn!("Rejecting request: role name is empty");
@@ -164,6 +180,9 @@ impl DetailApi {
                 "Name already exists".into(),
             ))),
             Err(ResourceError::NotFound) => Ok(UpdateRoleResponse::NotFound),
+            Err(err @ ResourceError::OwnedBy(_)) => {
+                Ok(UpdateRoleResponse::Conflict(Json(err.to_string())))
+            }
             Err(err) => Err(err.into()),
         }
     }
@@ -172,11 +191,11 @@ impl DetailApi {
     async fn api_delete_role(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<RoleId>,
     ) -> Result<DeleteRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesDelete)?;
 
-        match store::delete(&admin.services().db, id.0).await {
+        match store::delete(&admin.services().db, Actor::Admin, id.0).await {
             Ok(()) => {
                 admin
                     .services()
@@ -185,6 +204,9 @@ impl DetailApi {
                 Ok(DeleteRoleResponse::Deleted)
             }
             Err(ResourceError::NotFound) => Ok(DeleteRoleResponse::NotFound),
+            Err(err @ ResourceError::OwnedBy(_)) => {
+                Ok(DeleteRoleResponse::Conflict(Json(err.to_string())))
+            }
             Err(err) => Err(err.into()),
         }
     }
@@ -197,7 +219,7 @@ impl DetailApi {
     async fn api_get_role_targets(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<RoleId>,
     ) -> Result<GetRoleTargetsResponse, WarpgateError> {
         let db = &admin.services().db;
 
@@ -223,7 +245,7 @@ impl DetailApi {
     async fn api_get_role_users(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<RoleId>,
     ) -> Result<GetRoleUsersResponse, WarpgateError> {
         let db = &admin.services().db;
 

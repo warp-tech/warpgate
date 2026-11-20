@@ -45,6 +45,10 @@ pub enum WarpgateError {
     /// A request that passed schema validation but is still not acceptable
     #[error("{0}")]
     InvalidRequest(String),
+    #[error("request body too large")]
+    RequestBodyTooLarge,
+    #[error("timed out reading the request body")]
+    RequestBodyTimeout,
     /// Somebody called WarpgateServerHandle::set_user_info twice
     #[error("user session is already attributed to another user")]
     UserSessionAlreadyAttributed,
@@ -138,6 +142,8 @@ impl UserFacingReason for WarpgateError {
             | Self::ExternalHostUnknown
             | Self::NoHostInUrl
             | Self::InvalidRequest(_)
+            | Self::RequestBodyTooLarge
+            | Self::RequestBodyTimeout
             | Self::SessionEnd => self.to_string(),
 
             Self::Sso(e) => e.user_facing_reason(),
@@ -221,6 +227,8 @@ impl ResponseError for WarpgateError {
             | Self::IpAddrNotAllowed(..) => poem::http::StatusCode::UNAUTHORIZED,
             Self::UserAlreadyExists(_) => poem::http::StatusCode::CONFLICT,
             Self::InvalidRequest(_) => poem::http::StatusCode::BAD_REQUEST,
+            Self::RequestBodyTooLarge => poem::http::StatusCode::PAYLOAD_TOO_LARGE,
+            Self::RequestBodyTimeout => poem::http::StatusCode::REQUEST_TIMEOUT,
             Self::NoAdminAccess | Self::NoAdminPermission(_) | Self::TargetUserOutranksAdmin => {
                 poem::http::StatusCode::FORBIDDEN
             }

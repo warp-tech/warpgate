@@ -7,6 +7,7 @@
 //! Only the message type and the protocol-specific `create_session`/event loop differ,
 //! so those live in each crate; everything here is generic over the message type `M`.
 
+use warpgate_common::UserId;
 use std::collections::{HashMap, VecDeque};
 use std::fmt::{Debug, Display};
 use std::future::Future;
@@ -25,7 +26,6 @@ use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
-use uuid::Uuid;
 use warpgate_common::auth::RememberApprovalBy;
 use warpgate_common::{Protocol, UserFacingReason, UserSessionId, WarpgateError};
 use warpgate_common_http::auth::FullUserAuthorization;
@@ -159,7 +159,7 @@ impl<M: Sheddable + From<SessionPhase>> Outbox<M> {
 /// (and `Deref`s to it for the shared surface).
 pub struct WebSession<M> {
     id: UserSessionId,
-    user_id: Uuid,
+    user_id: UserId,
     target_name: String,
     target_kind: TargetKind,
 
@@ -179,7 +179,7 @@ impl<M: Sheddable + From<SessionPhase>> WebSession<M> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: UserSessionId,
-        user_id: Uuid,
+        user_id: UserId,
         target_name: String,
         target_kind: TargetKind,
         server_handle: Arc<Mutex<WarpgateServerHandle>>,
@@ -240,7 +240,7 @@ impl<M: Sheddable + From<SessionPhase>> WebSession<M> {
         self.id
     }
 
-    pub const fn user_id(&self) -> Uuid {
+    pub const fn user_id(&self) -> UserId {
         self.user_id
     }
 
@@ -298,7 +298,7 @@ impl<M: Sheddable + From<SessionPhase>> WebSession<M> {
 /// A live session held by a [`ClientManager`].
 pub trait ManagedSession: Send + Sync + 'static {
     fn id(&self) -> UserSessionId;
-    fn user_id(&self) -> Uuid;
+    fn user_id(&self) -> UserId;
     /// Invoked when the manager drops this session (abort the backend)
     fn on_removed(&self);
 }

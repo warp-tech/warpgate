@@ -1,0 +1,20 @@
+apiVersion: warpgate/v1
+kind: Role
+metadata:
+  name: dba
+spec: {}
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: web
+spec:
+  group: prod
+  roles: [dba, ops]
+  options:
+    ssh:
+      host: h
+      jump_host: bastion
+      auth:
+        kind: publickey
+        key_id: deploy-key

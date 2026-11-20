@@ -30,20 +30,30 @@
         expandAll: () => void
     }
 
-    export interface Column<T> {
+    export interface DataColumn<T> {
         id: string
+        spacer?: false
         // A cell that renders no nodes counts as empty; a column empty in
-        // every row collapses to zero width.
+        // every row collapses to zero width. Whitespace between elements
+        // is a node too, so keep conditional markup inside one block.
         cell: Snippet<[T]>
         // Makes the column user-toggleable from the list menu.
         label?: string
         hiddenByDefault?: boolean
         when?: boolean
-        // Takes the remaining width instead of sizing to its content. With
-        // no growing column enabled, the first one grows.
+        // Takes the remaining width instead of sizing to its content.
         grow?: boolean
         class?: string
     }
+
+    // Absorbs the width that no growing column takes, so the columns after it
+    // stay right-aligned.
+    export interface SpacerColumn {
+        id: string
+        spacer: true
+    }
+
+    export type Column<T> = DataColumn<T> | SpacerColumn
 
     export interface ColumnControls {
         toggleable: { id: string; label: string; shown: boolean }[]
@@ -121,32 +131,35 @@
     const collapsedGroups = viewState<GK[]>('collapsed-groups', [])
 
     function isShown(column: Column<T>): boolean {
-        return column.label
+        return !column.spacer && column.label
             ? ($shownColumns[column.id] ?? !column.hiddenByDefault)
             : true
     }
 
-    const availableColumns = $derived(columns?.filter(c => c.when !== false))
-    const enabledColumns = $derived.by(() => {
-        const shown = availableColumns?.filter(isShown)
-        const fallbackGrow = !shown?.some(c => c.grow)
-        return shown?.map((c, i) => ({
-            ...c,
-            grow: c.grow || (fallbackGrow && i === 0),
-        }))
-    })
+    const availableColumns = $derived(
+        columns?.filter(c => c.spacer || c.when !== false),
+    )
+    const enabledColumns = $derived(availableColumns?.filter(isShown))
+    // Free space goes to `fr` tracks. The grid stretches `auto` tracks only
+    // when there are none, so a spacer takes the free space once every growing
+    // column is toggled off. Content columns are `max-content` and never
+    // stretch.
     const gridTemplate = $derived(
         enabledColumns
-            ?.map(c => (c.grow ? 'minmax(0, 1fr)' : 'auto'))
+            ?.map(c =>
+                c.spacer ? 'auto' : c.grow ? 'minmax(0, 1fr)' : 'max-content',
+            )
             .join(' '),
     )
     const columnControls: ColumnControls = $derived({
         toggleable: (availableColumns ?? []).flatMap(c =>
-            c.label ? [{ id: c.id, label: c.label, shown: isShown(c) }] : [],
+            !c.spacer && c.label
+                ? [{ id: c.id, label: c.label, shown: isShown(c) }]
+                : [],
         ),
         toggle: id => {
             const column = columns?.find(c => c.id === id)
-            if (column) {
+            if (column && !column.spacer) {
                 $shownColumns = { ...$shownColumns, [id]: !isShown(column) }
             }
         },
@@ -270,9 +283,13 @@
 
 {#snippet cells(_item: T)}
     {#each enabledColumns ?? [] as column (column.id)}
-        <div class="item-list-cell {column.class ?? ''}">
-            {@render column.cell(_item)}
-        </div>
+        {#if column.spacer}
+            <div class="item-list-cell"></div>
+        {:else}
+            <div class="item-list-cell {column.class ?? ''}">
+                {@render column.cell(_item)}
+            </div>
+        {/if}
     {/each}
 {/snippet}
 
@@ -283,10 +300,10 @@ widest one anywhere in the list. -->
     {#if enabledColumns}
         <div class="item-list-sizer" aria-hidden="true" inert>
             {#each enabledColumns as column (column.id)}
-                <div class="item-list-cell {column.class ?? ''}">
-                    {#if !column.grow}
+                <div class="item-list-cell">
+                    {#if !column.spacer && !column.grow}
                         {#each list ?? [] as _item, i (i)}
-                            <div class="item-list-probe">
+                            <div class="item-list-probe {column.class ?? ''}">
                                 {@render column.cell(_item)}
                             </div>
                         {/each}

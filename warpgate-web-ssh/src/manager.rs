@@ -154,10 +154,11 @@ async fn relay_events(
                 session.set_phase(LiveSessionPhase::Connected).await;
             }
             RCEvent::Output(channel_id, data) => {
-                session.on_output(channel_id, &data).await;
-                session
-                    .push(ServerMessage::Output { channel_id, data })
-                    .await;
+                if session.on_output(channel_id, &data).await {
+                    session
+                        .push(ServerMessage::Output { channel_id, data })
+                        .await;
+                }
             }
             RCEvent::Eof(channel_id) => {
                 session.push(ServerMessage::Eof { channel_id }).await;

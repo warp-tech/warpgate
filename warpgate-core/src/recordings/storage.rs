@@ -125,6 +125,7 @@ pub enum FileAccess {
 
 /// The destination for a RawRecordingWriter
 /// On remote storage, the scratch file is removed once the recording is marked ended
+#[allow(clippy::large_enum_variant)]
 pub enum RecordingSink {
     Disk(File),
     Remote {

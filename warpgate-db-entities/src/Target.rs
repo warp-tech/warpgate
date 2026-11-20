@@ -1,11 +1,12 @@
+use warpgate_common::TargetGroupId;
+use warpgate_common::TargetId;
 use std::collections::HashMap;
 
 use poem_openapi::{Enum, Object};
 use sea_orm::entity::prelude::*;
 use serde::Serialize;
-use uuid::Uuid;
 use warpgate_common::fuzzy::fuzzy_rank;
-use warpgate_common::{Target, TargetOptions};
+use warpgate_common::{ProviderId, Target, TargetOptions};
 
 use crate::TargetGroup;
 
@@ -47,19 +48,20 @@ impl From<&TargetOptions> for TargetKind {
 #[oai(rename = "Target")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub id: Uuid,
+    pub id: TargetId,
     pub name: String,
     #[sea_orm(column_type = "Text")]
     pub description: String,
     pub kind: TargetKind,
     pub options: serde_json::Value,
     pub rate_limit_bytes_per_second: Option<i64>,
-    pub group_id: Option<Uuid>,
+    pub group_id: Option<TargetGroupId>,
     pub ticket_max_duration_seconds: Option<i64>,
     pub ticket_requests_disabled: bool,
     pub ticket_require_approval: bool,
     pub ticket_max_uses: Option<i16>,
     pub require_approval: bool,
+    pub provider: Option<ProviderId>,
 }
 
 impl Related<super::Role::Entity> for Entity {
@@ -107,6 +109,7 @@ impl TryFrom<Model> for Target {
             ticket_requests_disabled: model.ticket_requests_disabled,
             ticket_require_approval: model.ticket_require_approval,
             ticket_max_uses: model.ticket_max_uses,
+            provider: model.provider,
             require_approval: model.require_approval,
         })
     }
@@ -125,7 +128,7 @@ where
         .iter()
         .filter_map(|x| x.clone().try_into().ok().map(|t| (x, t)))
         .collect::<Vec<_>>();
-    let group_map: HashMap<Uuid, &TargetGroup::Model> = groups.iter().map(|g| (g.id, g)).collect();
+    let group_map: HashMap<TargetGroupId, &TargetGroup::Model> = groups.iter().map(|g| (g.id, g)).collect();
     fuzzy_rank(&targets, query, |(_, t)| {
         let group = t.group_id.and_then(|group_id| group_map.get(&group_id));
         [

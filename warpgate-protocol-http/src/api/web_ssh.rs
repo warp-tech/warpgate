@@ -6,8 +6,7 @@ use poem::web::{Data, RemoteAddr};
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{Object, OpenApi};
-use uuid::Uuid;
-use warpgate_common::UserSessionId;
+use warpgate_common::{TargetId, UserSessionId};
 use warpgate_web_ssh::WebSshClientManager;
 
 use crate::api::auth_scheme::AuthedSession;
@@ -20,7 +19,7 @@ pub struct Api;
 
 #[derive(Object)]
 struct CreateWebSshSessionBody {
-    target_id: Uuid,
+    target_id: TargetId,
 }
 
 #[OpenApi]

@@ -1,0 +1,3 @@
+tests/fixtures/invalid/jump-hosts.yaml:6:31 spec.options.ssh.jump_host: jump hosts must not form a loop
+tests/fixtures/invalid/jump-hosts.yaml:13:31 spec.options.ssh.jump_host: jump hosts must not form a loop
+tests/fixtures/invalid/jump-hosts.yaml:20:31 spec.options.ssh.jump_host: `web` is not an SSH target
