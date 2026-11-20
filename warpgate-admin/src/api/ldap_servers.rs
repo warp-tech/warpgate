@@ -265,9 +265,6 @@ enum CreateLdapServerResponse {
     #[oai(status = 201)]
     Created(Json<LdapServerResponse>),
 
-    #[oai(status = 409)]
-    Conflict(Json<String>),
-
     #[oai(status = 400)]
     BadRequest(Json<String>),
 }
@@ -340,9 +337,7 @@ impl ListApi {
             .await?;
 
         if existing.is_some() {
-            return Ok(CreateLdapServerResponse::Conflict(Json(
-                "Name already exists".into(),
-            )));
+            return Err(WarpgateError::NameTaken);
         }
 
         // Create LDAP config for discovery

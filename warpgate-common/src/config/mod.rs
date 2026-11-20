@@ -190,6 +190,7 @@ pub struct AdminRole {
     pub id: Uuid,
     pub name: String,
     pub description: String,
+    pub builtin: bool,
 
     pub targets_create: bool,
     pub targets_edit: bool,
@@ -345,6 +346,7 @@ mod admin_permission_set_tests {
             id: Uuid::nil(),
             name: String::new(),
             description: String::new(),
+            builtin: false,
             targets_create: false,
             targets_edit: false,
             targets_delete: false,

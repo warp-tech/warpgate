@@ -27,10 +27,13 @@ fn deduplicated_name(taken: &HashSet<String>, name: &str, key: fn(&str) -> Strin
 
 /// Renames rows that would collide, rather than deleting them: these rows carry the
 /// access configuration for a machine, and dropping one silently revokes it.
+/// The rows in `keep` (with distinct names) hold on to their names; the rows they
+/// collide with are renamed instead.
 async fn deduplicate_names(
     manager: &SchemaManager<'_>,
     table: &str,
     column: &str,
+    keep: &[Uuid],
 ) -> Result<(), DbErr> {
     let db = manager.get_connection();
     let backend = db.get_database_backend();
@@ -58,11 +61,17 @@ async fn deduplicate_names(
         str::to_owned
     };
 
+    let rows = db.query_all(&select).await?;
     let mut taken: HashSet<String> = HashSet::new();
-    for row in db.query_all(&select).await? {
+    for row in &rows {
+        if keep.contains(&row.try_get("", "id")?) {
+            taken.insert(key(&row.try_get::<String>("", column)?));
+        }
+    }
+    for row in rows {
         let id: Uuid = row.try_get("", "id")?;
         let name: String = row.try_get("", column)?;
-        if taken.insert(key(&name)) {
+        if keep.contains(&id) || taken.insert(key(&name)) {
             continue;
         }
 
@@ -86,7 +95,18 @@ pub async fn add_unique_name_index(
     column: &str,
     index: &str,
 ) -> Result<(), DbErr> {
-    deduplicate_names(manager, table, column).await?;
+    add_unique_name_index_keeping(manager, table, column, index, &[]).await
+}
+
+/// [`add_unique_name_index`], with the rows in `keep` keeping their names.
+pub async fn add_unique_name_index_keeping(
+    manager: &SchemaManager<'_>,
+    table: &str,
+    column: &str,
+    index: &str,
+    keep: &[Uuid],
+) -> Result<(), DbErr> {
+    deduplicate_names(manager, table, column, keep).await?;
 
     // CREATE UNIQUE INDEX rather than ALTER COLUMN so that this works on SQLite,
     // which does not support altering column constraints.

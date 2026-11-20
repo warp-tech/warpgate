@@ -1284,7 +1284,10 @@ def test_admin_api_permission_enforcement(
     if case.permission:
         denied_role = _create_admin_role(
             admin_client,
-            {k: not v if isinstance(v, bool) else v for k, v in allow_payload.items()},
+            {
+                **{k: not v if isinstance(v, bool) else v for k, v in allow_payload.items()},
+                "name": f"denied-{uuid4()}",
+            },
         )
         denied_user = _create_user_with_role(admin_client, denied_role.id)
     else:
@@ -1805,6 +1808,34 @@ def test_update_target_rejects_empty_name(admin_client: sdk.DefaultApi):
         admin_client.update_target(target.id, _ssh_target_request(""))
     assert err.value.status == 400
     assert admin_client.get_target(target.id).name == target.name
+
+
+# https://github.com/warp-tech/warpgate/issues/2875
+def test_admin_role_names_must_be_unique_and_non_empty(admin_client: sdk.DefaultApi):
+    first = _create_admin_role(admin_client, make_limited_admin_role_payload())
+    second = _create_admin_role(admin_client, make_limited_admin_role_payload())
+
+    def request(name):
+        return sdk.AdminRoleDataRequest(**make_limited_admin_role_payload(name=name))
+
+    for name, status in [(first.name, 409), ("warpgate:admin", 409), ("", 400)]:
+        with pytest.raises(sdk.ApiException) as err:
+            admin_client.create_admin_role(request(name))
+        assert err.value.status == status, name
+        with pytest.raises(sdk.ApiException) as err:
+            admin_client.update_admin_role(second.id, request(name))
+        assert err.value.status == status, name
+        assert admin_client.get_admin_role(second.id).name == second.name
+
+    # Saving a role under the name it already has is not a conflict.
+    assert admin_client.update_admin_role(second.id, request(second.name)).name == second.name
+
+    [builtin] = [r for r in admin_client.get_admin_roles() if r.builtin]
+    assert builtin.name == "warpgate:admin"
+    with pytest.raises(sdk.ApiException) as err:
+        admin_client.update_admin_role(builtin.id, request(f"renamed-{uuid4()}"))
+    assert err.value.status == 403
+    assert admin_client.get_admin_role(builtin.id).name == "warpgate:admin"
 
 
 HTTP_HEADER_SECRET = "Bearer s3cr3t-upstream"

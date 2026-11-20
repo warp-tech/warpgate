@@ -260,7 +260,7 @@ impl DatabaseConfigProvider {
             error!(
                 "Cannot auto-create SSO user with username {preferred_username} because it already exists and does not have a matching SSO credential."
             );
-            return Err(WarpgateError::UserAlreadyExists(preferred_username));
+            return Err(WarpgateError::NameTaken);
         }
 
         let default_credential_policy = match default_credential_policy {
