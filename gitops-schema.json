@@ -160,6 +160,63 @@
       "type": "object",
       "unevaluatedProperties": false
     },
+    "PortKnock": {
+      "properties": {
+        "port": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "protocol": {
+          "$ref": "#/$defs/PortKnockProtocol",
+          "default": "tcp"
+        }
+      },
+      "required": [
+        "port"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "PortKnockProtocol": {
+      "description": "Transport of a single port knock",
+      "enum": [
+        "tcp",
+        "udp"
+      ],
+      "type": "string"
+    },
+    "PortKnocking": {
+      "description": "Packets sent to the target host, in order, before each connection to it",
+      "properties": {
+        "delay_ms": {
+          "default": 100,
+          "description": "Pause between two knocks, in milliseconds",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sequence": {
+          "items": {
+            "$ref": "#/$defs/PortKnock"
+          },
+          "type": "array"
+        },
+        "wait_after_ms": {
+          "default": 500,
+          "description": "Pause between the last knock and the connection, in milliseconds",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sequence"
+      ],
+      "type": "object",
+      "unevaluatedProperties": false
+    },
     "PostgresProtocolVersion": {
       "enum": [
         "3.0",
@@ -542,6 +599,17 @@
           "minimum": 1,
           "type": "integer"
         },
+        "port_knocking": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PortKnocking"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "tls": {
           "$ref": "#/$defs/Tls",
           "default": {
@@ -679,6 +747,17 @@
           "minimum": 1,
           "type": "integer"
         },
+        "port_knocking": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PortKnocking"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "protocol_version": {
           "$ref": "#/$defs/PostgresProtocolVersion",
           "default": "3.2"
@@ -744,6 +823,17 @@
           "minimum": 1,
           "type": "integer"
         },
+        "port_knocking": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PortKnocking"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "tls_security": {
           "$ref": "#/$defs/RdpTlsSecurity",
           "default": "tls_1_2"
@@ -790,6 +880,17 @@
           "maximum": 65535,
           "minimum": 1,
           "type": "integer"
+        },
+        "port_knocking": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PortKnocking"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "username": {
           "default": "root",
@@ -907,6 +1008,17 @@
           "maximum": 65535,
           "minimum": 1,
           "type": "integer"
+        },
+        "port_knocking": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PortKnocking"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "type": "object",
