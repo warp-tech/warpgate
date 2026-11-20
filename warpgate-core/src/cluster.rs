@@ -42,6 +42,12 @@ pub enum ClusterNotification {
         session_id: UserSessionId,
         user_id: UserId,
     },
+    LoginProtectionIpUnblocked {
+        ip: IpAddr,
+    },
+    LoginProtectionUserUnlocked {
+        username: String,
+    },
 }
 
 pub struct RemoteNode {
@@ -630,6 +636,31 @@ mod tests {
         assert_eq!(plain, r#"{"type":"sessions_changed"}"#);
         let back: ClusterNotification = serde_json::from_str(&plain).unwrap();
         assert!(matches!(back, ClusterNotification::SessionsChanged));
+
+        let ip_msg = ClusterNotification::LoginProtectionIpUnblocked {
+            ip: "10.0.0.1".parse().unwrap(),
+        };
+        let ip_json = serde_json::to_value(&ip_msg).unwrap();
+        assert_eq!(ip_json["type"], "login_protection_ip_unblocked");
+        assert_eq!(ip_json["ip"], "10.0.0.1");
+        let ip_back: ClusterNotification = serde_json::from_value(ip_json).unwrap();
+        assert!(matches!(
+            ip_back,
+            ClusterNotification::LoginProtectionIpUnblocked { ip }
+                if ip == "10.0.0.1".parse::<IpAddr>().unwrap()
+        ));
+
+        let user_msg = ClusterNotification::LoginProtectionUserUnlocked {
+            username: "alice".to_string(),
+        };
+        let user_json = serde_json::to_value(&user_msg).unwrap();
+        assert_eq!(user_json["type"], "login_protection_user_unlocked");
+        assert_eq!(user_json["username"], "alice");
+        let user_back: ClusterNotification = serde_json::from_value(user_json).unwrap();
+        assert!(matches!(
+            user_back,
+            ClusterNotification::LoginProtectionUserUnlocked { ref username } if username == "alice"
+        ));
     }
 
     #[tokio::test]

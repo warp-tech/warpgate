@@ -1,4 +1,5 @@
 use std::net::IpAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use sea_orm::sea_query::{ExprTrait, IntoCondition};
@@ -15,6 +16,7 @@ use warpgate_db_entities::{
 };
 
 use super::cache::{IpBlockInfo, LoginProtectionCache, UserLockInfo};
+use crate::cluster::{Cluster, ClusterNotification};
 
 /// IP rate-limiting thresholds, read from the `parameters` table. All durations
 /// are stored as seconds.
@@ -90,6 +92,7 @@ pub struct CleanupStats {
 pub struct LoginProtectionService {
     db: DatabaseConnection,
     cache: LoginProtectionCache,
+    cluster: Option<Arc<Cluster>>,
 }
 
 impl LoginProtectionService {
@@ -155,7 +158,32 @@ impl LoginProtectionService {
                 cache.load_from_db(db_conn).await?;
             }
         }
-        Ok(Self { db, cache })
+        Ok(Self {
+            db,
+            cache,
+            cluster: None,
+        })
+    }
+
+    #[must_use]
+    pub fn with_cluster(mut self, cluster: Arc<Cluster>) -> Self {
+        self.cluster = Some(cluster);
+        self
+    }
+
+    pub async fn invalidate_ip_block_cache(&self, ip: &IpAddr) {
+        self.cache.unblock_ip(&ip.to_canonical()).await;
+    }
+
+    pub async fn invalidate_user_lockout_cache(&self, username: &str) {
+        self.cache.unlock_user(username).await;
+    }
+
+    pub async fn reload_cache(&self) -> Result<(), WarpgateError> {
+        if Self::read_config(&self.db).await?.enabled {
+            self.cache.load_from_db(&self.db).await?;
+        }
+        Ok(())
     }
 
     /// Check whether `ip` is currently blocked.
@@ -489,7 +517,12 @@ impl LoginProtectionService {
             .exec(db)
             .await?;
 
-        self.cache.unblock_ip(&ip.to_canonical()).await;
+        let canonical = ip.to_canonical();
+        self.cache.unblock_ip(&canonical).await;
+        if let Some(cluster) = &self.cluster {
+            cluster
+                .notify_global(ClusterNotification::LoginProtectionIpUnblocked { ip: canonical });
+        }
         info!(ip = %ip, "IP unblocked by admin");
         Ok(())
     }
@@ -507,6 +540,11 @@ impl LoginProtectionService {
             .await?;
 
         self.cache.unlock_user(username).await;
+        if let Some(cluster) = &self.cluster {
+            cluster.notify_global(ClusterNotification::LoginProtectionUserUnlocked {
+                username: username.to_string(),
+            });
+        }
         info!(username = %username, "User unlocked by admin");
         Ok(())
     }
@@ -802,5 +840,62 @@ mod db_tests {
             .await
             .unwrap();
         assert!(!blocked(&lp, "10.0.0.1").await);
+    }
+
+    #[tokio::test]
+    async fn cache_invalidation_and_reload_clear_stale_entries() {
+        let lp = service(1).await;
+        let ip: IpAddr = "10.0.0.2".parse().unwrap();
+        let future = OffsetDateTime::now_utc() + time::Duration::hours(1);
+
+        lp.cache
+            .block_ip(
+                ip,
+                IpBlockInfo {
+                    ip_address: ip,
+                    blocked_at: OffsetDateTime::now_utc(),
+                    expires_at: future,
+                    block_count: 1,
+                    reason: "test".into(),
+                },
+            )
+            .await;
+        lp.cache
+            .lock_user(
+                "alice".into(),
+                UserLockInfo {
+                    username: "alice".into(),
+                    locked_at: OffsetDateTime::now_utc(),
+                    expires_at: None,
+                    reason: "test".into(),
+                },
+            )
+            .await;
+
+        assert!(blocked(&lp, "10.0.0.2").await);
+        assert!(lp.check_user_locked("alice").await.unwrap().is_some());
+
+        lp.invalidate_ip_block_cache(&"::ffff:10.0.0.2".parse().unwrap())
+            .await;
+        lp.invalidate_user_lockout_cache("ALICE").await;
+
+        assert!(!blocked(&lp, "10.0.0.2").await);
+        assert!(lp.check_user_locked("alice").await.unwrap().is_none());
+
+        lp.cache
+            .lock_user(
+                "bob".into(),
+                UserLockInfo {
+                    username: "bob".into(),
+                    locked_at: OffsetDateTime::now_utc(),
+                    expires_at: None,
+                    reason: "test".into(),
+                },
+            )
+            .await;
+        assert!(lp.check_user_locked("bob").await.unwrap().is_some());
+
+        lp.reload_cache().await.unwrap();
+        assert!(lp.check_user_locked("bob").await.unwrap().is_none());
     }
 }

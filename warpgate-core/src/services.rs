@@ -194,7 +194,11 @@ impl Services {
 
         let config_provider = Arc::new(DatabaseConfigProvider::new(&db).into());
 
-        let login_protection = Arc::new(LoginProtectionService::new(db.clone()).await?);
+        let login_protection = Arc::new(
+            LoginProtectionService::new(db.clone())
+                .await?
+                .with_cluster(cluster.clone()),
+        );
 
         let auth_state_store = Arc::new(Mutex::new(AuthStateStore::new(ApprovalRequestSink {
             db: db.clone(),
@@ -273,6 +277,34 @@ impl Services {
                             | broadcast::error::TryRecvError::Closed)
                     ) {}
                     cluster.notify_global(ClusterNotification::SessionsChanged);
+                }
+            });
+        }
+
+        {
+            let mut rx = services.cluster.subscribe();
+            let login_protection = services.login_protection.clone();
+            tokio::spawn(async move {
+                loop {
+                    match rx.recv().await {
+                        Ok(ClusterNotification::LoginProtectionIpUnblocked { ip }) => {
+                            login_protection.invalidate_ip_block_cache(&ip).await;
+                        }
+                        Ok(ClusterNotification::LoginProtectionUserUnlocked { username }) => {
+                            login_protection
+                                .invalidate_user_lockout_cache(&username)
+                                .await;
+                        }
+                        Ok(_) => {}
+                        Err(broadcast::error::RecvError::Lagged(_)) => {
+                            if let Err(error) = login_protection.reload_cache().await {
+                                warn!(
+                                    "Failed to reload login protection cache after cluster notification lag: {error}"
+                                );
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    }
                 }
             });
         }
