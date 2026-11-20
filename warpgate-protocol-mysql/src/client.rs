@@ -6,6 +6,7 @@ use rsa::{Oaep, RsaPublicKey};
 use sha1::Sha1;
 use tokio::net::TcpStream;
 use tracing::{debug, info};
+use warpgate_common::helpers::port_knock;
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{SecretResolver, TargetMySqlOptions, WarpgateError};
 use warpgate_core::AdmittedTarget;
@@ -44,6 +45,9 @@ impl MySqlClient {
         secrets: &dyn SecretResolver,
     ) -> Result<Self, MySqlError> {
         let target = approved.specific_target().options().clone();
+        if let Some(port_knocking) = &target.port_knocking {
+            port_knock::knock(&target.host, port_knocking).await?;
+        }
         let stream = TcpStream::connect((target.host.clone(), target.port)).await?;
         stream.set_nodelay(true)?;
 
