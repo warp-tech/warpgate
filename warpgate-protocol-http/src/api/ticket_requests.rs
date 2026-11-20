@@ -4,7 +4,7 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder};
 use time::OffsetDateTime;
 use uuid::Uuid;
-use warpgate_common::{Secret, Target as TargetConfig, WarpgateError};
+use warpgate_common::{Secret, Target as TargetConfig, TargetId, UserId, WarpgateError};
 use warpgate_common_http::SessionAuthorization;
 use warpgate_common_http::auth::AuthenticatedRequestContext;
 use warpgate_common_http::errors::bad_request;
@@ -75,13 +75,13 @@ struct TicketRequestResponse {
 #[derive(Object)]
 struct TicketRequestModel {
     pub id: Uuid,
-    pub user_id: Uuid,
-    pub target_id: Uuid,
+    pub user_id: UserId,
+    pub target_id: TargetId,
     pub target_name: String,
     pub requested_duration_seconds: Option<i64>,
     pub description: String,
     pub status: warpgate_db_entities::TicketRequest::TicketRequestStatus,
-    pub resolved_by_user_id: Option<Uuid>,
+    pub resolved_by_user_id: Option<UserId>,
     pub ticket_id: Option<Uuid>,
     pub created: OffsetDateTime,
     pub resolved_at: Option<OffsetDateTime>,

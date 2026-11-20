@@ -4,8 +4,8 @@ use time::OffsetDateTime;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::AdminPermission;
 use crate::helpers::logging::format_related_ids;
+use crate::{AdminPermission, RoleId, TargetId, UserId};
 
 #[derive(Clone)]
 pub enum CredentialChangedVia {
@@ -27,9 +27,9 @@ impl Display for CredentialChangedVia {
 #[derive(Clone)]
 pub struct KubernetesAuditSubject {
     pub session_id: Uuid,
-    pub user_id: Uuid,
+    pub user_id: UserId,
     pub username: String,
-    pub target_id: Uuid,
+    pub target_id: TargetId,
     pub target_name: String,
 }
 
@@ -39,168 +39,168 @@ pub enum AuditEvent {
         credential_type: String,
         credential_name: Option<String>,
         via: CredentialChangedVia,
-        user_id: Uuid,
+        user_id: UserId,
         username: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     CredentialUpdated {
         credential_type: String,
         credential_name: Option<String>,
         via: CredentialChangedVia,
-        user_id: Uuid,
+        user_id: UserId,
         username: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     CredentialDeleted {
         credential_type: String,
         credential_name: Option<String>,
         via: CredentialChangedVia,
-        user_id: Uuid,
+        user_id: UserId,
         username: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     UserCreated {
-        user_id: Uuid,
+        user_id: UserId,
         username: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     UserUpdated {
-        user_id: Uuid,
+        user_id: UserId,
         username: String,
         credential_policy: String,
         allowed_ip_ranges: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     UserDeleted {
-        user_id: Uuid,
+        user_id: UserId,
         username: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     TargetSessionStarted {
         session_id: Uuid,
         target_name: String,
-        target_id: Uuid,
-        user_id: Uuid,
+        target_id: TargetId,
+        user_id: UserId,
         username: String,
     },
     TargetSessionEnded {
         session_id: Uuid,
         target_name: String,
-        target_id: Uuid,
-        user_id: Uuid,
+        target_id: TargetId,
+        user_id: UserId,
         username: String,
     },
     AccessRoleGranted {
-        grantee_id: Uuid,
+        grantee_id: UserId,
         grantee_username: String,
-        role_id: Uuid,
+        role_id: RoleId,
         role_name: String,
         /// `None` for a permanent grant
         expires_at: Option<OffsetDateTime>,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
         related_access_roles: String,
     },
     AccessRoleRevoked {
-        grantee_id: Uuid,
+        grantee_id: UserId,
         grantee_username: String,
-        role_id: Uuid,
+        role_id: RoleId,
         role_name: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
         related_access_roles: String,
     },
     AdminRoleGranted {
-        grantee_id: Uuid,
+        grantee_id: UserId,
         grantee_username: String,
         admin_role_id: Uuid,
         admin_role_name: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
         related_admin_roles: String,
     },
     AdminRoleRevoked {
-        grantee_id: Uuid,
+        grantee_id: UserId,
         grantee_username: String,
         admin_role_id: Uuid,
         admin_role_name: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
         related_admin_roles: String,
     },
     /// Covers renewals, which also clear a revocation.
     AccessRoleExpiryChanged {
-        grantee_id: Uuid,
+        grantee_id: UserId,
         grantee_username: String,
-        role_id: Uuid,
+        role_id: RoleId,
         role_name: String,
         expires_at: Option<OffsetDateTime>,
         revocation_cleared: bool,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     AdminRoleCreated {
         admin_role_id: Uuid,
         admin_role_name: String,
         permissions: Vec<AdminPermission>,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     AdminRoleUpdated {
         admin_role_id: Uuid,
         admin_role_name: String,
         permissions: Vec<AdminPermission>,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     AdminRoleDeleted {
         admin_role_id: Uuid,
         admin_role_name: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     RoleCreated {
-        role_id: Uuid,
+        role_id: RoleId,
         role_name: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     RoleUpdated {
-        role_id: Uuid,
+        role_id: RoleId,
         role_name: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     RoleDeleted {
-        role_id: Uuid,
+        role_id: RoleId,
         role_name: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     TargetCreated {
-        target_id: Uuid,
+        target_id: TargetId,
         target_name: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     TargetUpdated {
-        target_id: Uuid,
+        target_id: TargetId,
         target_name: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     TargetDeleted {
-        target_id: Uuid,
+        target_id: TargetId,
         target_name: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     TargetRoleAdded {
-        target_id: Uuid,
+        target_id: TargetId,
         target_name: String,
-        role_id: Uuid,
+        role_id: RoleId,
         role_name: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     TargetRoleRemoved {
-        target_id: Uuid,
+        target_id: TargetId,
         target_name: String,
-        role_id: Uuid,
+        role_id: RoleId,
         role_name: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     // currently used for RDP logon PDU
     TargetLogon {
         session_id: Uuid,
         target_name: String,
-        target_id: Uuid,
-        user_id: Uuid,
+        target_id: TargetId,
+        user_id: UserId,
         username: String,
         /// for RPD, DOMAIN\user
         target_account: Option<String>,
@@ -208,17 +208,17 @@ pub enum AuditEvent {
     },
     TicketCreated {
         ticket_id: Uuid,
-        user_id: Uuid,
+        user_id: UserId,
         username: String,
         target: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     TicketDeleted {
         ticket_id: Uuid,
-        user_id: Uuid,
+        user_id: UserId,
         username: String,
         target: String,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     SecretResolved {
         backend: String,
@@ -232,7 +232,8 @@ pub enum AuditEvent {
         key_id: String,
         success: bool,
     },
-    /// `kubectl exec` — a command run inside an existing container.
+    /// A command run inside an existing container: `kubectl exec`, or a kubelet
+    /// `/run` through the node proxy.
     KubernetesExecStarted {
         subject: KubernetesAuditSubject,
         namespace: String,
@@ -265,9 +266,10 @@ pub enum AuditEvent {
         /// and an empty list would read as "no ports", which is not the same.
         ports: Option<String>,
     },
-    /// The cluster refused a streaming request — typically RBAC. Recorded
-    /// separately because a denied attempt is exactly as interesting as a
-    /// successful one, and the `...Started` event alone cannot say which it was.
+    /// The cluster refused a streaming request or a kubelet `/run` — typically
+    /// RBAC. Recorded separately because a denied attempt is exactly as
+    /// interesting as a successful one, and the `...Started` event alone cannot
+    /// say which it was.
     KubernetesStreamRejected {
         subject: KubernetesAuditSubject,
         namespace: String,
@@ -289,13 +291,13 @@ pub enum AuditEvent {
         /// argv as a JSON array.
         command: String,
         tty: bool,
-        response_status: u16,
+        /// `None` if the cluster sent no response. The container may still
+        /// have been added.
+        response_status: Option<u16>,
     },
-    /// A `Pod` object was created directly — how `kubectl debug node/...` and
-    /// `kubectl debug --copy-to` land a debug workload. Pods that a workload
-    /// object (Deployment, DaemonSet, Job) creates on the user's behalf are
-    /// not summarised; only the generic request log records those.
-    KubernetesPodCreated {
+    /// Logged as `KubernetesPodCreated1` or `KubernetesPodUpdated1`.
+    KubernetesPodWritten {
+        created: bool,
         subject: KubernetesAuditSubject,
         namespace: String,
         pod: String,
@@ -305,7 +307,23 @@ pub enum AuditEvent {
         host_pid: bool,
         host_network: bool,
         privileged: bool,
-        response_status: u16,
+        response_status: Option<u16>,
+    },
+    KubernetesUnknownRequest {
+        subject: KubernetesAuditSubject,
+        method: String,
+        path: String,
+        namespace: String,
+        /// `None` for a request against the pod collection.
+        pod: Option<String>,
+        content_type: Option<String>,
+        body_length: usize,
+        /// Fixed strings only. A parser's error message would quote the body,
+        /// which can hold secrets.
+        reason: &'static str,
+        /// `None` if the cluster sent no response. The write may still have
+        /// been applied.
+        response_status: Option<u16>,
     },
     /// A provider synced from its source. A sync that applies nothing and
     /// repeats the previous outcome is not logged.
@@ -317,7 +335,7 @@ pub enum AuditEvent {
         source: String,
         revision: Option<String>,
         /// The admin who requested the sync
-        actor_user_id: Option<Uuid>,
+        actor_user_id: Option<UserId>,
     },
     /// A resource that a provider sync created, changed or deleted
     ManagedResourceChanged {
@@ -330,17 +348,17 @@ pub enum AuditEvent {
         name: String,
         /// The changed fields as a JSON array, without credential values
         fields: Option<String>,
-        actor_user_id: Option<Uuid>,
+        actor_user_id: Option<UserId>,
     },
     /// An admin made a provider's resource editable by hand again
     ProviderResourceReleased {
         provider: String,
         kind: String,
         id: Uuid,
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
     UnmanagedResourcesExported {
-        actor_user_id: Uuid,
+        actor_user_id: UserId,
     },
 }
 
@@ -1009,12 +1027,13 @@ impl AuditEvent {
                     target_container = target_container.as_deref(),
                     command = %command,
                     tty = %tty,
-                    response_status = %response_status,
+                    response_status = response_status.map(tracing::field::display),
                     "Kubernetes debug container"
                 );
             }
-            Self::KubernetesPodCreated {
+            Self::KubernetesPodWritten {
                 subject,
+                created,
                 namespace,
                 pod,
                 images,
@@ -1024,9 +1043,14 @@ impl AuditEvent {
                 privileged,
                 response_status,
             } => {
+                let (event_type, message) = if *created {
+                    ("KubernetesPodCreated1", "Kubernetes pod created")
+                } else {
+                    ("KubernetesPodUpdated1", "Kubernetes pod updated")
+                };
                 info!(
                     target: "audit",
-                    _type = "KubernetesPodCreated1",
+                    _type = event_type,
                     session = %subject.session_id,
                     user_id = %subject.user_id,
                     username = %subject.username,
@@ -1040,8 +1064,39 @@ impl AuditEvent {
                     host_pid = %host_pid,
                     host_network = %host_network,
                     privileged = %privileged,
-                    response_status = %response_status,
-                    "Kubernetes pod created"
+                    response_status = response_status.map(tracing::field::display),
+                    "{message}"
+                );
+            }
+            Self::KubernetesUnknownRequest {
+                subject,
+                method,
+                path,
+                namespace,
+                pod,
+                content_type,
+                body_length,
+                reason,
+                response_status,
+            } => {
+                info!(
+                    target: "audit",
+                    _type = "KubernetesUnknownRequest1",
+                    session = %subject.session_id,
+                    user_id = %subject.user_id,
+                    username = %subject.username,
+                    target_id = %subject.target_id,
+                    target_name = %subject.target_name,
+                    related_users = %format_related_ids(&[subject.user_id]),
+                    method = %method,
+                    path = %path,
+                    namespace = %namespace,
+                    pod = pod.as_deref(),
+                    content_type = content_type.as_deref(),
+                    body_length = %body_length,
+                    reason = %reason,
+                    response_status = response_status.map(tracing::field::display),
+                    "Kubernetes request with an unparseable body"
                 );
             }
             Self::ProviderSynced {

@@ -885,6 +885,20 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
         expected_statuses={201},
     ),
     AdminApiTestCase(
+        id="set_logo",
+        permission="config_edit",
+        call=lambda api, r: api.set_logo_with_http_info(
+            sdk.LogoUpdate(logo="data:image/png;base64,iVBORw0KGgo=")
+        ),
+        expected_statuses={201},
+    ),
+    AdminApiTestCase(
+        id="delete_logo",
+        permission="config_edit",
+        call=lambda api, r: api.delete_logo_with_http_info(),
+        expected_statuses={204},
+    ),
+    AdminApiTestCase(
         id="test_recordings_storage",
         permission="config_edit",
         call=lambda api, r: api.test_recordings_storage_with_http_info(
@@ -1632,9 +1646,10 @@ spec:
         assert len(audited(head.id, 4)) == 3, "an unchanged sync is not audited again"
 
         webhook = f"https://localhost:{pg_wg.http_port}/@warpgate/api/gitops/webhook"
+
         body = b'{"ref": "refs/heads/main"}'
 
-        def deliver(secret: bytes) -> int:
+        def deliver(secret: bytes, body: bytes = body) -> int:
             signature = hmac.new(secret, body, hashlib.sha256).hexdigest()
             return requests.post(
                 webhook,
@@ -1654,7 +1669,8 @@ spec:
         )
         assert deliver(b"wrong-secret-0123") == 401
         third = commit(2200)
-        assert deliver(secret) == 202
+        # A push with many commits is far over the body limit of other routes.
+        assert deliver(secret, b"x" * 1_000_000) == 202
         deadline = time.monotonic() + 30
         while (latest := admin_client.get_gitops_history().items[0]).triggered_by != "Webhook":
             assert time.monotonic() < deadline, "the webhook never synced"

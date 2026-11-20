@@ -19,6 +19,9 @@ use subtle::ConstantTimeEq;
 use warpgate_common::WarpgateError;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 
+/// Relative to the `/@warpgate` mount
+pub const PATH: &str = "/api/gitops/webhook";
+
 /// GitHub's own cap on a delivery
 const MAX_BODY: usize = 25 * 1024 * 1024;
 

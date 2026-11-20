@@ -4,7 +4,7 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{PaginatorTrait, QuerySelect};
 use time::OffsetDateTime;
 use uuid::Uuid;
-use warpgate_common::{AdminPermission, ProviderId, WarpgateError};
+use warpgate_common::{AdminPermission, ProviderId, RowId, WarpgateError};
 use warpgate_common_http::errors::bad_request;
 use warpgate_core::logging::AuditEvent;
 use warpgate_core::resources::sync::{
@@ -14,26 +14,31 @@ use warpgate_core::resources::{OwnedEntity, export, release};
 use warpgate_db_entities::ProviderSync::{self, PlanStats, SyncStatus, SyncTrigger};
 
 use super::AdminContext;
+use super::limited_json::LimitedJson;
 use super::pagination::PaginatedResponse;
 
 pub struct Api;
 
 pub(super) async fn release_managed<E: OwnedEntity>(
     admin: &AdminContext,
-    id: Uuid,
+    id: E::Id,
 ) -> Result<(), WarpgateError> {
     admin.require(AdminPermission::ConfigEdit)?;
     if let Some(provider) = release::<E, _>(&admin.services().db, id).await? {
         AuditEvent::ProviderResourceReleased {
             provider: provider.label(),
             kind: format!("{:?}", E::KIND),
-            id,
+            id: id.uuid(),
             actor_user_id: admin.auth.user_id(),
         }
         .emit();
     }
     Ok(())
 }
+
+/// Room for the `yaml` of a [`SyncGitopsRequest`], whose line breaks and
+/// quotes take two bytes each in JSON.
+const SYNC_BODY_LIMIT: usize = 32 * 1024 * 1024;
 
 #[derive(Object)]
 struct SyncGitopsRequest {
@@ -136,11 +141,11 @@ impl Api {
     async fn api_sync(
         &self,
         admin: AdminContext,
-        body: Json<SyncGitopsRequest>,
+        body: LimitedJson<SyncGitopsRequest, SYNC_BODY_LIMIT>,
     ) -> Result<SyncGitopsResponse, WarpgateError> {
         admin.require(AdminPermission::ConfigEdit)?;
 
-        let Json(SyncGitopsRequest { force_prune, yaml }) = body;
+        let LimitedJson(SyncGitopsRequest { force_prune, yaml }) = body;
         let request = SyncRequest::Admin {
             user_id: admin.auth.user_id(),
             force_prune,
@@ -163,11 +168,11 @@ impl Api {
     async fn api_dry_run(
         &self,
         admin: AdminContext,
-        body: Json<SyncGitopsRequest>,
+        body: LimitedJson<SyncGitopsRequest, SYNC_BODY_LIMIT>,
     ) -> Result<DryRunGitopsResponse, WarpgateError> {
         admin.require(AdminPermission::ConfigEdit)?;
 
-        let Json(SyncGitopsRequest { force_prune, yaml }) = body;
+        let LimitedJson(SyncGitopsRequest { force_prune, yaml }) = body;
         let services = admin.services();
         let request = SyncRequest::Admin {
             user_id: admin.auth.user_id(),

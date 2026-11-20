@@ -8,7 +8,7 @@ use time::OffsetDateTime;
 use tracing::warn;
 use uuid::Uuid;
 use warpgate_common::{
-    AdminPermission, AdminRole as AdminRoleConfig, User as UserConfig,
+    AdminPermission, AdminRole as AdminRoleConfig, RoleId, User as UserConfig, UserId,
     UserRequireCredentialsPolicy, WarpgateError,
 };
 use warpgate_common_http::errors::{bad_request, invalid_field};
@@ -106,7 +106,7 @@ impl ListApi {
         }
 
         let values = User::ActiveModel {
-            id: Set(Uuid::new_v4()),
+            id: Set(UserId(Uuid::new_v4())),
             username: Set(body.username.clone()),
             credential_policy: Set(serde_json::to_value(
                 admin.parameters().await?.default_credential_policy()?,
@@ -129,7 +129,7 @@ impl ListApi {
 pub(crate) async fn on_user_created(
     db: &sea_orm::DatabaseConnection,
     user: &User::Model,
-    actor_user_id: Uuid,
+    actor_user_id: UserId,
 ) -> Result<(), WarpgateError> {
     let default_roles = Role::Entity::grant_default_roles(db, user.id).await?;
 
@@ -180,7 +180,7 @@ enum UpdateUserResponse {
 async fn username_taken(
     db: &sea_orm::DatabaseConnection,
     username: &str,
-    excluding: Option<Uuid>,
+    excluding: Option<UserId>,
 ) -> Result<bool, WarpgateError> {
     let mut query = User::Entity::find().filter(User::Entity::username_eq_ci(username));
     if let Some(id) = excluding {
@@ -232,7 +232,7 @@ impl DetailApi {
     async fn api_get_user(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<UserId>,
     ) -> Result<GetUserResponse, WarpgateError> {
         let db = &admin.services().db;
 
@@ -253,7 +253,7 @@ impl DetailApi {
         &self,
         admin: AdminContext,
         body: Json<UserDataRequest>,
-        id: Path<Uuid>,
+        id: Path<UserId>,
     ) -> Result<UpdateUserResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
 
@@ -334,7 +334,7 @@ impl DetailApi {
     async fn api_delete_user(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<UserId>,
     ) -> Result<DeleteUserResponse, WarpgateError> {
         admin.require(AdminPermission::UsersDelete)?;
 
@@ -380,7 +380,7 @@ impl DetailApi {
     async fn api_unlink_user_from_ldap(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<UserId>,
     ) -> Result<UnlinkUserFromLdapResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
 
@@ -413,7 +413,7 @@ impl DetailApi {
     async fn api_auto_link_user_to_ldap(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<UserId>,
     ) -> Result<AutoLinkUserToLdapResponse, WarpgateError> {
         use warpgate_db_entities::LdapServer;
 
@@ -483,7 +483,7 @@ impl DetailApi {
 #[derive(Object, Clone, Debug)]
 struct UserRoleAssignmentResponse {
     /// Role ID
-    id: Uuid,
+    id: RoleId,
     /// Role name
     name: String,
     /// Role description
@@ -608,7 +608,7 @@ impl RolesApi {
     async fn api_get_user_roles(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<UserId>,
     ) -> Result<GetUserRolesResponse, WarpgateError> {
         let db = &admin.services().db;
 
@@ -641,8 +641,8 @@ impl RolesApi {
     async fn api_get_user_role(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
-        role_id: Path<Uuid>,
+        id: Path<UserId>,
+        role_id: Path<RoleId>,
     ) -> Result<GetUserRoleResponse, WarpgateError> {
         let db = &admin.services().db;
 
@@ -675,8 +675,8 @@ impl RolesApi {
     async fn api_add_user_role(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
-        role_id: Path<Uuid>,
+        id: Path<UserId>,
+        role_id: Path<RoleId>,
         body: Json<Option<AddUserRoleRequest>>,
     ) -> Result<AddUserRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesAssign)?;
@@ -722,8 +722,8 @@ impl RolesApi {
     async fn api_delete_user_role(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
-        role_id: Path<Uuid>,
+        id: Path<UserId>,
+        role_id: Path<RoleId>,
     ) -> Result<DeleteUserRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesAssign)?;
 
@@ -780,8 +780,8 @@ impl RolesApi {
     async fn api_update_user_role(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
-        role_id: Path<Uuid>,
+        id: Path<UserId>,
+        role_id: Path<RoleId>,
         body: Json<UpdateUserRoleRequest>,
     ) -> Result<UpdateUserRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AccessRolesAssign)?;
@@ -836,7 +836,7 @@ impl RolesApi {
     async fn api_get_user_admin_roles(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<UserId>,
     ) -> Result<GetUserAdminRolesResponse, WarpgateError> {
         let db = &admin.services().db;
 
@@ -864,7 +864,7 @@ impl RolesApi {
     async fn api_add_user_admin_role(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<UserId>,
         role_id: Path<Uuid>,
     ) -> Result<AddUserAdminRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AdminRolesManage)?;
@@ -921,7 +921,7 @@ impl RolesApi {
     async fn api_delete_user_admin_role(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<UserId>,
         role_id: Path<Uuid>,
     ) -> Result<DeleteUserAdminRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AdminRolesManage)?;

@@ -1,3 +1,4 @@
+use warpgate_common::UserId;
 use std::str::FromStr;
 
 use ipnet::IpNet;
@@ -19,7 +20,7 @@ use crate::{
 #[oai(rename = "User")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub id: Uuid,
+    pub id: UserId,
     #[sea_orm(unique)]
     pub username: String,
     pub credential_policy: serde_json::Value,
@@ -148,6 +149,8 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl Entity {
     pub fn username_eq_ci(username: &str) -> impl IntoCondition {
+        // Imported here because `ExprTrait::is_null` shadows `serde_json::Value::is_null`.
+        use sea_orm::sea_query::ExprTrait;
         Expr::expr(Func::lower(Expr::col(Column::Username))).eq(username.to_lowercase())
     }
 }

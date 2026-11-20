@@ -82,21 +82,19 @@ tokio-stream = { version = "0.1.17", features = [
     "net",
 ], default-features = false }
 tokio-rustls = { version = "0.26", default-features = false }
-tls-listener = { version = "0.11.2", features = [
-    "rustls-core",
-], default-features = false }
 enum_dispatch = { version = "0.3.13", default-features = false }
 rustls = { version = "0.23", default-features = false, features = ["tls12"] }
-sqlx = { version = "0.8", features = [
-    "tls-rustls-aws-lc-rs",
+sqlx = { version = "0.9", features = [
+    "tls-rustls-aws-lc-rs-native-roots",
 ], default-features = false }
-sea-orm = { version = "1.0", default-features = false, features = [
+sea-orm = { version = "2.0", default-features = false, features = [
     "runtime-tokio",
     "macros",
     "with-time",
     "with-uuid",
+    "postgres-use-serial-pk",
 ] }
-sea-orm-migration = { version = "1.0", default-features = false }
+sea-orm-migration = { version = "2.0", default-features = false }
 poem = { version = "3.1", features = [
     "cookie",
     "session",
@@ -193,6 +191,7 @@ debug = "line-tables-only"
 [profile.release]
 lto = "thin"
 strip = "debuginfo"
+trim-paths = "object"
 
 [profile.release-no-lto]
 inherits = "release"

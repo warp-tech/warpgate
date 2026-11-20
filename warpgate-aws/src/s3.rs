@@ -154,7 +154,7 @@ impl S3Storage {
     }
 
     fn prefix_no_trailing_slash(&self) -> &str {
-        self.prefix.strip_suffix('/').unwrap_or(&self.prefix)
+        self.prefix.trim_suffix('/')
     }
 
     fn key(&self, path: &str) -> String {

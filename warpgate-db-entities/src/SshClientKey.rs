@@ -1,6 +1,6 @@
+use warpgate_common::SshClientKeyId;
 use sea_orm::entity::prelude::*;
 use sea_orm::{ColumnTrait, QueryFilter, QueryOrder};
-use uuid::Uuid;
 use warpgate_common::{MaybeSecretRef, ProviderId};
 
 /// An SSH private key Warpgate uses to authenticate against targets.
@@ -10,7 +10,7 @@ use warpgate_common::{MaybeSecretRef, ProviderId};
 #[sea_orm(table_name = "ssh_client_keys")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub id: Uuid,
+    pub id: SshClientKeyId,
     pub label: String,
     /// PKCS#8 PEM (encrypted at rest), or a reference to a secret backend
     #[sea_orm(column_type = "Text")]

@@ -1,8 +1,8 @@
+use warpgate_common::{TargetId, UserId};
 use sea_orm::entity::prelude::*;
-use sea_orm::sea_query::{OnConflict, Query};
+use sea_orm::sea_query::{ExprTrait, OnConflict, Query};
 use sea_orm::{Condition, Set};
 use time::OffsetDateTime;
-use uuid::Uuid;
 use warpgate_common::{TargetSessionId, UserSessionId, WarpgateError};
 
 /// Cluster-wide claim on a Kubernetes correlation key: the user session that
@@ -54,7 +54,7 @@ impl ActiveModelBehavior for ActiveModel {}
 /// `credential` names the transport credential the session was admitted for
 /// (see `TransportCredential::key_segment`), so another credential of the same
 /// user from the same address gets a session of its own.
-pub fn key(user_id: Uuid, target_id: Uuid, ip: Option<&str>, credential: &str) -> String {
+pub fn key(user_id: UserId, target_id: TargetId, ip: Option<&str>, credential: &str) -> String {
     format!(
         "{user_id}|{target_id}|{}|{credential}",
         ip.unwrap_or_default(),
@@ -95,7 +95,7 @@ pub async fn claim(
         created: Set(created),
         target_session_id: Set(None),
     })
-    .do_nothing()
+    .try_insert()
     .exec_without_returning(db)
     .await?;
 
@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn keys_separate_credentials_and_unknown_ips() {
-        let (user, target) = (Uuid::new_v4(), Uuid::new_v4());
+        let (user, target) = (UserId(Uuid::new_v4()), TargetId(Uuid::new_v4()));
         let token_a = key(user, target, Some("10.0.0.1"), "token:a");
         assert_ne!(token_a, key(user, target, Some("10.0.0.1"), "token:b"));
         assert_ne!(token_a, key(user, target, Some("10.0.0.1"), "ticket:a"));

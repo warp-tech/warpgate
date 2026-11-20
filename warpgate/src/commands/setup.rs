@@ -16,7 +16,7 @@ use warpgate_common::helpers::fs::{secure_directory, secure_file};
 use warpgate_common::version::{repository_file_url, warpgate_version};
 use warpgate_common::{
     GlobalParams, HttpConfig, KubernetesConfig, ListenEndpoint, MySqlConfig, PostgresConfig,
-    RdpConfig, Secret, SshConfig, SshHostKeyVerificationMode, VncConfig, WarpgateConfig,
+    RdpConfig, RoleId, Secret, SshConfig, SshHostKeyVerificationMode, VncConfig, WarpgateConfig,
     WarpgateConfigStore,
 };
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
@@ -210,7 +210,7 @@ impl Answers {
     fn config(&self, db_path: &Path) -> WarpgateConfigStore {
         let database_url = self.database_url.clone().unwrap_or_else(|| {
             let db_path = db_path.to_string_lossy();
-            format!("sqlite:{}", db_path.strip_suffix("./").unwrap_or(&db_path))
+            format!("sqlite:{}", db_path.trim_suffix("./"))
         });
         let mut store = WarpgateConfigStore {
             database_url: Secret::new(database_url),
@@ -401,7 +401,7 @@ async fn bootstrap_database(
         Some(role) => role,
         None => {
             Role::ActiveModel {
-                id: Set(Uuid::new_v4()),
+                id: Set(RoleId(Uuid::new_v4())),
                 name: Set(BUILTIN_ADMIN_USERNAME.to_string()),
                 description: Set("".to_string()),
                 is_default: Set(false),

@@ -474,7 +474,7 @@ async fn cluster_request_authorization(
     let Some(user_id) = header.to_str().ok().and_then(|s| s.parse::<Uuid>().ok()) else {
         return Ok(None);
     };
-    Ok(User::Entity::find_by_id(user_id)
+    Ok(User::Entity::find_by_id(warpgate_common::UserId(user_id))
         .one(&ctx.services().db)
         .await
         .map_err(poem::error::InternalServerError)?

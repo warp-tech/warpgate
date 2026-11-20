@@ -15,7 +15,7 @@ use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 use uuid::Uuid;
-use warpgate_common::{ProviderId, SecretResolver, WarpgateError};
+use warpgate_common::{ProviderId, SecretResolver, UserId, WarpgateError};
 use warpgate_db_entities::Parameters::{self, GitopsSource};
 use warpgate_db_entities::ProviderSync::{self, PlannedChange, SyncPlan, SyncStatus, SyncTrigger};
 use warpgate_gitops::format_text;
@@ -79,7 +79,7 @@ pub enum SyncRequest {
     Webhook,
     /// `force_prune` deletes what the source dropped, past the mass-deletion guard
     Admin {
-        user_id: Uuid,
+        user_id: UserId,
         force_prune: bool,
     },
 }
@@ -94,7 +94,7 @@ impl SyncRequest {
         }
     }
 
-    const fn admin(self) -> Option<Uuid> {
+    const fn admin(self) -> Option<UserId> {
         match self {
             Self::Admin { user_id, .. } => Some(user_id),
             Self::Startup | Self::Interval | Self::Webhook => None,
@@ -136,7 +136,7 @@ struct Attempt {
     /// The history row's ID
     id: Uuid,
     /// The admin who requested the sync
-    admin: Option<Uuid>,
+    admin: Option<UserId>,
     reached: Reached,
 }
 
@@ -217,7 +217,7 @@ async fn current_config(
 struct Outcome {
     row: ProviderSync::Model,
     /// The admin who requested the sync
-    admin: Option<Uuid>,
+    admin: Option<UserId>,
 }
 
 impl Outcome {
@@ -285,7 +285,7 @@ async fn sync_locked(
     Ok((outcome, admitted))
 }
 
-fn audit_sync(row: &ProviderSync::Model, admin: Option<Uuid>) {
+fn audit_sync(row: &ProviderSync::Model, admin: Option<UserId>) {
     AuditEvent::ProviderSynced {
         sync_id: row.id,
         provider: PROVIDER.label(),
@@ -298,7 +298,7 @@ fn audit_sync(row: &ProviderSync::Model, admin: Option<Uuid>) {
     .emit();
 }
 
-fn audit_changes(sync_id: Uuid, admin: Option<Uuid>, applied: &Applied<'_>) {
+fn audit_changes(sync_id: Uuid, admin: Option<UserId>, applied: &Applied<'_>) {
     for (change, id) in &applied.changes {
         let change = PlannedChange::from(*change);
         let fields = (!change.fields.is_empty())
@@ -724,7 +724,7 @@ mod tests {
         assert_eq!(rows(&db).await, 1);
 
         let admin = SyncRequest::Admin {
-            user_id: Uuid::nil(),
+            user_id: UserId(Uuid::nil()),
             force_prune: false,
         };
         let manual = sync(&db, admin, None).await.unwrap();
@@ -830,7 +830,7 @@ mod tests {
         fs::write(dir.path().join("roles.yaml"), dba_only).unwrap();
         assert_eq!(run(&db).await.status, SyncStatus::Unchanged);
         let force = SyncRequest::Admin {
-            user_id: Uuid::nil(),
+            user_id: UserId(Uuid::nil()),
             force_prune: true,
         };
         let forced = sync(&db, force, None).await.unwrap();

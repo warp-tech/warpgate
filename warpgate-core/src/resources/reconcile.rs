@@ -1,10 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
-use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, TransactionTrait};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, TransactionSession,
+    TransactionTrait,
+};
 use uuid::Uuid;
 use warpgate_common::{
-    MaybeSecretRef, ProviderId, SSHTargetAuth, SecretResolver, StoredSecret,
-    Target as TargetConfig, TargetOptions, TargetSecrets, WarpgateError,
+    MaybeSecretRef, ProviderId, RoleId, RowId, SSHTargetAuth, SecretResolver, SshClientKeyId,
+    StoredSecret, Target as TargetConfig, TargetGroupId, TargetId, TargetOptions, TargetSecrets,
+    WarpgateError,
 };
 use warpgate_db_entities::{Role, SshClientKey, Target, TargetGroup, TargetRoleAssignment};
 use warpgate_gitops::plan::{Change, Current, Plan, References, Row, plan};
@@ -25,10 +29,11 @@ use super::{Actor, AdmittedSessions, OwnedEntity, ResourceError, set_owner};
 pub async fn load_current<C: ConnectionTrait>(db: &C) -> Result<Current, WarpgateError> {
     let groups = TargetGroup::Entity::find().all(db).await?;
     let roles = Role::Entity::find().all(db).await?;
-    let group_names: HashMap<Uuid, &str> = groups.iter().map(|g| (g.id, g.name.as_str())).collect();
-    let role_names: HashMap<Uuid, &str> = roles.iter().map(|r| (r.id, r.name.as_str())).collect();
+    let group_names: HashMap<TargetGroupId, &str> =
+        groups.iter().map(|g| (g.id, g.name.as_str())).collect();
+    let role_names: HashMap<RoleId, &str> = roles.iter().map(|r| (r.id, r.name.as_str())).collect();
 
-    let mut target_roles: HashMap<Uuid, Vec<String>> = HashMap::new();
+    let mut target_roles: HashMap<TargetId, Vec<String>> = HashMap::new();
     for assignment in TargetRoleAssignment::Entity::find().all(db).await? {
         if let Some(name) = role_names.get(&assignment.role_id) {
             target_roles
@@ -39,9 +44,10 @@ pub async fn load_current<C: ConnectionTrait>(db: &C) -> Result<Current, Warpgat
     }
 
     let keys = SshClientKey::Entity::find().all(db).await?;
-    let key_names: HashMap<Uuid, String> = keys.iter().map(|k| (k.id, k.label.clone())).collect();
+    let key_names: HashMap<SshClientKeyId, String> =
+        keys.iter().map(|k| (k.id, k.label.clone())).collect();
     let models = Target::Entity::find().all(db).await?;
-    let target_names: HashMap<Uuid, String> =
+    let target_names: HashMap<TargetId, String> =
         models.iter().map(|t| (t.id, t.name.clone())).collect();
     let mut targets = Vec::new();
     for model in models {
@@ -67,7 +73,7 @@ pub async fn load_current<C: ConnectionTrait>(db: &C) -> Result<Current, Warpgat
             reveal_inline(slot)?;
         }
         targets.push(Row {
-            id: target.id,
+            id: target.id.uuid(),
             name: target.name,
             provider: target.provider,
             live: TargetSpec {
@@ -93,7 +99,7 @@ pub async fn load_current<C: ConnectionTrait>(db: &C) -> Result<Current, Warpgat
         groups: groups
             .into_iter()
             .map(|group| Row {
-                id: group.id,
+                id: group.id.uuid(),
                 name: group.name,
                 provider: group.provider,
                 live: TargetGroupSpec {
@@ -105,7 +111,7 @@ pub async fn load_current<C: ConnectionTrait>(db: &C) -> Result<Current, Warpgat
         roles: roles
             .into_iter()
             .map(|role| Row {
-                id: role.id,
+                id: role.id.uuid(),
                 name: role.name,
                 provider: role.provider,
                 live: RoleSpec {
@@ -120,7 +126,7 @@ pub async fn load_current<C: ConnectionTrait>(db: &C) -> Result<Current, Warpgat
             .map(|mut key| {
                 reveal_inline(&mut key.secret_key)?;
                 Ok(Row {
-                    id: key.id,
+                    id: key.id.uuid(),
                     name: key.label,
                     provider: key.provider,
                     live: SshClientKeySpec {
@@ -235,12 +241,14 @@ pub async fn apply<'p, C: ConnectionTrait + TransactionTrait>(
             adopt,
         };
         let result = match desired {
-            Resource::TargetGroup(manifest) => write.group(manifest).await,
-            Resource::Role(manifest) => write.role(manifest).await,
+            Resource::TargetGroup(manifest) => write.group(manifest).await.map(RowId::uuid),
+            Resource::Role(manifest) => write.role(manifest).await.map(RowId::uuid),
             // ponytail: resolves a reference while the transaction is open;
             // resolve before it if backend latency starts holding locks too long
-            Resource::SshClientKey(manifest) => write.client_key(manifest, secrets).await,
-            Resource::Target(manifest) => write.target(manifest, &ids).await,
+            Resource::SshClientKey(manifest) => {
+                write.client_key(manifest, secrets).await.map(RowId::uuid)
+            }
+            Resource::Target(manifest) => write.target(manifest, &ids).await.map(RowId::uuid),
         };
         let id = result.map_err(|source| ApplyError::Resource {
             kind: change.kind(),
@@ -261,12 +269,16 @@ pub async fn apply<'p, C: ConnectionTrait + TransactionTrait>(
             continue;
         };
         let result = match kind {
-            ResourceKind::Target => targets::delete(&txn, actor, *id)
+            ResourceKind::Target => targets::delete(&txn, actor, TargetId(*id))
                 .await
                 .map(|sessions| admitted.extend(sessions.0)),
-            ResourceKind::SshClientKey => ssh_client_keys::delete(&txn, actor, *id).await,
-            ResourceKind::Role => roles::delete(&txn, actor, *id).await,
-            ResourceKind::TargetGroup => target_groups::delete(&txn, actor, *id).await,
+            ResourceKind::SshClientKey => {
+                ssh_client_keys::delete(&txn, actor, SshClientKeyId(*id)).await
+            }
+            ResourceKind::Role => roles::delete(&txn, actor, RoleId(*id)).await,
+            ResourceKind::TargetGroup => {
+                target_groups::delete(&txn, actor, TargetGroupId(*id)).await
+            }
         };
         result.map_err(|source| ApplyError::Resource {
             kind: *kind,
@@ -302,15 +314,18 @@ trait Store {
         db: &C,
         actor: Actor,
         data: Self::Data,
-    ) -> Result<Uuid, ResourceError>;
+    ) -> Result<Id<Self>, ResourceError>;
 
     async fn update<C: ConnectionTrait>(
         db: &C,
         actor: Actor,
-        id: Uuid,
+        id: Id<Self>,
         data: Self::Data,
     ) -> Result<(), ResourceError>;
 }
+
+/// The ID type of the rows that a spec is stored as
+type Id<S> = <<S as Store>::Entity as OwnedEntity>::Id;
 
 /// For a resource module whose `create` and `update` take just the request
 macro_rules! store {
@@ -323,14 +338,14 @@ macro_rules! store {
                 db: &C,
                 actor: Actor,
                 data: $data,
-            ) -> Result<Uuid, ResourceError> {
+            ) -> Result<Id<Self>, ResourceError> {
                 Ok($module::create(db, actor, &data).await?.id)
             }
 
             async fn update<C: ConnectionTrait>(
                 db: &C,
                 actor: Actor,
-                id: Uuid,
+                id: Id<Self>,
                 data: $data,
             ) -> Result<(), ResourceError> {
                 $module::update(db, actor, id, &data).await?;
@@ -357,7 +372,7 @@ impl Store for SshClientKeySpec {
         db: &C,
         actor: Actor,
         (data, material): Self::Data,
-    ) -> Result<Uuid, ResourceError> {
+    ) -> Result<Id<Self>, ResourceError> {
         Ok(ssh_client_keys::create(db, actor, &data, material)
             .await?
             .id)
@@ -366,7 +381,7 @@ impl Store for SshClientKeySpec {
     async fn update<C: ConnectionTrait>(
         db: &C,
         actor: Actor,
-        id: Uuid,
+        id: Id<Self>,
         (data, material): Self::Data,
     ) -> Result<(), ResourceError> {
         ssh_client_keys::update(db, actor, id, &data, Some(material)).await?;
@@ -376,8 +391,8 @@ impl Store for SshClientKeySpec {
 
 impl<C: ConnectionTrait> Write<'_, C> {
     /// Creates the row, or updates it after taking it over for an adoption
-    async fn save<S: Store>(&self, data: S::Data) -> Result<Uuid, ResourceError> {
-        let Some(id) = self.id else {
+    async fn save<S: Store>(&self, data: S::Data) -> Result<Id<S>, ResourceError> {
+        let Some(id) = self.id.map(Id::<S>::from_uuid) else {
             return S::create(self.db, self.actor, data).await;
         };
         if self.adopt {
@@ -387,7 +402,10 @@ impl<C: ConnectionTrait> Write<'_, C> {
         Ok(id)
     }
 
-    async fn group(&self, manifest: &Manifest<TargetGroupSpec>) -> Result<Uuid, ResourceError> {
+    async fn group(
+        &self,
+        manifest: &Manifest<TargetGroupSpec>,
+    ) -> Result<TargetGroupId, ResourceError> {
         let TargetGroupSpec { description, color } = &manifest.spec;
         let data = TargetGroupDataRequest {
             name: manifest.metadata.name.clone(),
@@ -397,7 +415,7 @@ impl<C: ConnectionTrait> Write<'_, C> {
         self.save::<TargetGroupSpec>(data).await
     }
 
-    async fn role(&self, manifest: &Manifest<RoleSpec>) -> Result<Uuid, ResourceError> {
+    async fn role(&self, manifest: &Manifest<RoleSpec>) -> Result<RoleId, ResourceError> {
         let RoleSpec {
             description,
             is_default,
@@ -414,7 +432,7 @@ impl<C: ConnectionTrait> Write<'_, C> {
         &self,
         manifest: &Manifest<SshClientKeySpec>,
         secrets: &dyn SecretResolver,
-    ) -> Result<Uuid, ResourceError> {
+    ) -> Result<SshClientKeyId, ResourceError> {
         let SshClientKeySpec {
             private_key,
             is_default,
@@ -431,7 +449,7 @@ impl<C: ConnectionTrait> Write<'_, C> {
         &self,
         manifest: &Manifest<TargetSpec>,
         ids: &Ids<'_>,
-    ) -> Result<Uuid, ResourceError> {
+    ) -> Result<TargetId, ResourceError> {
         let spec = &manifest.spec;
         let OptionReferences {
             jump_host,
@@ -441,19 +459,19 @@ impl<C: ConnectionTrait> Write<'_, C> {
         if let TargetOptions::Ssh(ssh) = &mut options {
             ssh.jump_host = jump_host
                 .as_deref()
-                .map(|name| ids.find(ResourceKind::Target, name))
+                .map(|name| ids.find::<TargetSpec>(name))
                 .transpose()?;
             if let SSHTargetAuth::PublicKey(auth) = &mut ssh.auth {
                 auth.key_id = client_key
                     .as_deref()
-                    .map(|name| ids.find(ResourceKind::SshClientKey, name))
+                    .map(|name| ids.find::<SshClientKeySpec>(name))
                     .transpose()?;
             }
         }
         let group_id = spec
             .group
             .as_deref()
-            .map(|group| ids.find(ResourceKind::TargetGroup, group))
+            .map(|group| ids.find::<TargetGroupSpec>(group))
             .transpose()?;
         let data = spec.data_request(&manifest.metadata.name, options, group_id);
         let id = self.save::<TargetSpec>(data).await?;
@@ -461,9 +479,9 @@ impl<C: ConnectionTrait> Write<'_, C> {
         let wanted = spec
             .roles
             .iter()
-            .map(|role| ids.find(ResourceKind::Role, role))
+            .map(|role| ids.find::<RoleSpec>(role))
             .collect::<Result<HashSet<_>, _>>()?;
-        let assigned: HashSet<Uuid> = TargetRoleAssignment::Entity::find()
+        let assigned: HashSet<RoleId> = TargetRoleAssignment::Entity::find()
             .filter(TargetRoleAssignment::Column::TargetId.eq(id))
             .all(self.db)
             .await?
@@ -527,7 +545,8 @@ struct Ids<'a> {
 }
 
 impl Ids<'_> {
-    fn find(&self, kind: ResourceKind, name: &str) -> Result<Uuid, ResourceError> {
+    fn find<S: Store>(&self, name: &str) -> Result<Id<S>, ResourceError> {
+        let kind = S::Entity::KIND;
         self.references
             .resolve(kind, name)
             .and_then(|referent| {
@@ -535,6 +554,7 @@ impl Ids<'_> {
                     .id
                     .or_else(|| self.written.get(&(kind, referent.name.to_owned())).copied())
             })
+            .map(Id::<S>::from_uuid)
             .ok_or(ResourceError::NotFound)
     }
 }

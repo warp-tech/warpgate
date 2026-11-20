@@ -93,11 +93,7 @@ jobs:
           use-cross: ${{ matrix.cargo-cross }}
           args: --all-features --release --target ${{ matrix.target }}
         env:
-          ENV SOURCE_DATE_EPOCH: "0" # for rust-embed determinism
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
-          CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
-          CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
+          SOURCE_DATE_EPOCH: "0" # for rust-embed determinism
 
       - name: Generate Rust BOM
         run: |
@@ -149,7 +145,7 @@ jobs:
           fi
 
       - name: Upload release
-        uses: softprops/action-gh-release@v3.0.3
+        uses: softprops/action-gh-release@v3.0.4
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           draft: true

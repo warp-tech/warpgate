@@ -12,7 +12,7 @@ use tracing::*;
 use uuid::Uuid;
 use warpgate_common::audit::AuditEvent;
 use warpgate_common::helpers::hash::{generate_ticket_secret, hash_secret};
-use warpgate_common::{Secret, WarpgateError};
+use warpgate_common::{Secret, TargetId, UserId, WarpgateError};
 use warpgate_db_entities::TicketRequest::TicketRequestStatus;
 use warpgate_db_entities::{Parameters, Target, Ticket, TicketRequest};
 
@@ -31,7 +31,7 @@ pub struct ActivatedTicket {
 }
 
 pub struct CreateTicketRequestParams {
-    pub user_id: Uuid,
+    pub user_id: UserId,
     pub username: String,
     pub target_name: String,
     pub duration_seconds: Option<i64>,
@@ -234,7 +234,7 @@ pub async fn create_ticket_request(
 
 /// A self-service ticket is a working credential, so it is audited like an admin-issued one;
 /// the user it was issued to is the actor. Emitted only after the minting transaction commits.
-fn audit_self_service_ticket(ticket_id: Uuid, user_id: Uuid, username: String, target: String) {
+fn audit_self_service_ticket(ticket_id: Uuid, user_id: UserId, username: String, target: String) {
     AuditEvent::TicketCreated {
         ticket_id,
         user_id,
@@ -247,8 +247,8 @@ fn audit_self_service_ticket(ticket_id: Uuid, user_id: Uuid, username: String, t
 
 async fn insert_self_service_ticket(
     db_conn: &impl ConnectionTrait,
-    user_id: Uuid,
-    target_id: Uuid,
+    user_id: UserId,
+    target_id: TargetId,
     duration_seconds: Option<i64>,
     uses: Option<i16>,
     description: &str,
@@ -276,7 +276,7 @@ async fn insert_self_service_ticket(
 pub async fn approve_ticket_request(
     db: &sea_orm::DatabaseConnection,
     request_id: Uuid,
-    admin_user_id: Option<Uuid>,
+    admin_user_id: Option<UserId>,
 ) -> Result<Option<TicketRequest::Model>, WarpgateError> {
     let db_conn = db;
 
@@ -341,7 +341,7 @@ impl From<sea_orm::DbErr> for ActivateTicketRequestError {
 pub async fn activate_ticket_request(
     db: &sea_orm::DatabaseConnection,
     request_id: Uuid,
-    user_id: Uuid,
+    user_id: UserId,
 ) -> Result<ActivatedTicket, ActivateTicketRequestError> {
     let db_conn = db;
 
@@ -436,7 +436,7 @@ pub async fn activate_ticket_request(
 pub async fn deny_ticket_request(
     db: &sea_orm::DatabaseConnection,
     request_id: Uuid,
-    admin_user_id: Option<Uuid>,
+    admin_user_id: Option<UserId>,
     reason: Option<String>,
 ) -> Result<Option<TicketRequest::Model>, WarpgateError> {
     let db_conn = db;

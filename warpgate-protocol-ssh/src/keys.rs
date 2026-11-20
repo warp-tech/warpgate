@@ -4,11 +4,10 @@ use russh::keys::{Algorithm, HashAlg, PrivateKey, decode_secret_key, load_secret
 use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use tracing::*;
-use uuid::Uuid;
 use warpgate_common::helpers::rng::get_crypto_rng;
 use warpgate_common::{
-    MaybeSecretRef, SecretRef, SecretResolver, SshHostKeyKind, StoredSecret, WarpgateError,
-    public_key_line,
+    MaybeSecretRef, SecretRef, SecretResolver, SshClientKeyId, SshHostKeyKind, StoredSecret,
+    WarpgateError, public_key_line,
 };
 use warpgate_core::resources::ssh_client_keys::{self, KeyMaterial, SshClientKeyDataRequest};
 use warpgate_core::resources::{Actor, ResourceError};
@@ -162,7 +161,7 @@ async fn default_client_keys(
 /// set (e.g. after the key was deleted, or on a node that hasn't synced it).
 pub async fn load_client_keys(
     db: &DatabaseConnection,
-    key_id: Option<Uuid>,
+    key_id: Option<SshClientKeyId>,
     secret_backend: &dyn SecretResolver,
 ) -> Result<Vec<PrivateKey>, WarpgateError> {
     let models = match key_id {

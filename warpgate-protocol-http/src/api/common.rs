@@ -5,7 +5,9 @@ use sea_orm::{DatabaseConnection, EntityTrait};
 use tracing::info;
 use uuid::Uuid;
 use warpgate_admin::api::cluster_proxy::{Owner, forward_websocket};
-use warpgate_common::{Protocol, TargetOptions, UserSessionId, WarpgateConfig, WarpgateError};
+use warpgate_common::{
+    Protocol, TargetId, TargetOptions, UserSessionId, WarpgateConfig, WarpgateError,
+};
 use warpgate_common_http::auth::{
     AuthenticatedRequestContext, FullUserAuthorization, web_reauth_required,
 };
@@ -55,6 +57,7 @@ pub fn logout(session: &Session, session_middleware: &mut SessionStore) {
 
 /// Outcome of the checks that guard the in-browser clients. Each endpoint maps
 /// it onto its own `ApiResponse` enum.
+#[allow(clippy::large_enum_variant)]
 pub enum WebClientTargetAccess {
     Authorized(TargetAuthorization),
     ReauthRequired,
@@ -67,7 +70,7 @@ pub enum WebClientTargetAccess {
 pub async fn authorize_web_client_target(
     ctx: &AuthenticatedRequestContext,
     session: &Session,
-    target_id: Uuid,
+    target_id: TargetId,
 ) -> poem::Result<WebClientTargetAccess> {
     // A ticket is authorized for exactly one target; it must not be able to open
     // an in-browser client to any target the *user* can reach. Requiring a

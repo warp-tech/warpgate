@@ -6,7 +6,7 @@ use sea_orm::{
 };
 use time::OffsetDateTime;
 use uuid::Uuid;
-use warpgate_common::{AdminPermission, UserPublicKeyCredential, WarpgateError};
+use warpgate_common::{AdminPermission, UserId, UserPublicKeyCredential, WarpgateError};
 use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
 use warpgate_db_entities::{PublicKeyCredential, User};
 
@@ -14,7 +14,7 @@ use super::{AdminContext, guard_user_mutation};
 
 async fn check_user_ldap_linked(
     db: &DatabaseConnection,
-    user_id: Uuid,
+    user_id: UserId,
 ) -> Result<bool, WarpgateError> {
     use warpgate_db_entities::User;
 
@@ -25,7 +25,10 @@ async fn check_user_ldap_linked(
 
 /// Checks if a user is LDAP-linked and returns an error message if they are.
 /// Returns Ok(()) if the user is not LDAP-linked, or a formatted error string if they are.
-async fn verify_user_not_ldap_linked(db: &DatabaseConnection, user_id: Uuid) -> Result<(), String> {
+async fn verify_user_not_ldap_linked(
+    db: &DatabaseConnection,
+    user_id: UserId,
+) -> Result<(), String> {
     if check_user_ldap_linked(db, user_id).await.unwrap_or(false) {
         Err("Cannot manage SSH keys for LDAP-linked users. Keys are synced from LDAP.".to_string())
     } else {
@@ -113,7 +116,7 @@ impl ListApi {
     async fn api_get_all(
         &self,
         admin: AdminContext,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
     ) -> Result<GetPublicKeyCredentialsResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
 
@@ -139,7 +142,7 @@ impl ListApi {
         &self,
         admin: AdminContext,
         body: Json<NewPublicKeyCredential>,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
     ) -> Result<CreatePublicKeyCredentialResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
 
@@ -207,7 +210,7 @@ impl DetailApi {
         &self,
         admin: AdminContext,
         body: Json<NewPublicKeyCredential>,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
         id: Path<Uuid>,
     ) -> Result<UpdatePublicKeyCredentialResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
@@ -268,7 +271,7 @@ impl DetailApi {
     async fn api_delete(
         &self,
         admin: AdminContext,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
         id: Path<Uuid>,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;

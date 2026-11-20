@@ -8,8 +8,7 @@ pub mod targets;
 
 use sea_orm::prelude::Expr;
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect};
-use uuid::Uuid;
-use warpgate_common::{ProviderId, UserSessionId, WarpgateError};
+use warpgate_common::{ProviderId, RowId, UserSessionId, WarpgateError};
 use warpgate_gitops::types::ResourceKind;
 
 use crate::db::is_unique_violation;
@@ -93,6 +92,7 @@ pub struct AdmittedSessions(pub Vec<UserSessionId>);
 
 /// A table whose rows a provider can own
 pub trait OwnedEntity: EntityTrait {
+    type Id: RowId + Into<sea_orm::Value>;
     const KIND: ResourceKind;
     const ID: Self::Column;
     const PROVIDER: Self::Column;
@@ -103,7 +103,7 @@ pub trait OwnedEntity: EntityTrait {
 /// a resource that sets `metadata.adopt_existing`.
 pub(crate) async fn set_owner<E: OwnedEntity, C: ConnectionTrait>(
     db: &C,
-    id: Uuid,
+    id: E::Id,
     owner: Option<ProviderId>,
 ) -> Result<(), ResourceError> {
     E::update_many()
@@ -118,7 +118,7 @@ pub(crate) async fn set_owner<E: OwnedEntity, C: ConnectionTrait>(
 /// Returns the previous provider, or `None` if the row is gone or had none.
 pub async fn release<E: OwnedEntity, C: ConnectionTrait>(
     db: &C,
-    id: Uuid,
+    id: E::Id,
 ) -> Result<Option<ProviderId>, ResourceError> {
     let owner: Option<Option<ProviderId>> = E::find()
         .select_only()
@@ -154,7 +154,7 @@ pub(crate) mod tests {
     use sea_orm::{Database, DatabaseConnection, EntityTrait};
     use serde_json::json;
     use uuid::Uuid;
-    use warpgate_common::ProviderId;
+    use warpgate_common::{ProviderId, TargetId};
     use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
     use warpgate_db_entities::{Target, TargetRoleAssignment};
     use warpgate_db_migrations::migrate_database;
@@ -221,7 +221,8 @@ pub(crate) mod tests {
         let http = target("web", json!({"http": {"url": "https://web"}}));
         let result = targets::update(&db, Actor::Admin, web.id, &http).await;
         assert!(matches!(result, Err(ResourceError::ProtocolChange)));
-        let result = targets::update(&db, Actor::Admin, Uuid::new_v4(), &ssh("other")).await;
+        let result =
+            targets::update(&db, Actor::Admin, TargetId(Uuid::new_v4()), &ssh("other")).await;
         assert!(matches!(result, Err(ResourceError::NotFound)));
 
         let dba = roles::create(&db, Actor::Admin, &role("dba", None))

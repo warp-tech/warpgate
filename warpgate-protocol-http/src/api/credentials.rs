@@ -5,8 +5,8 @@ use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QuerySelect, Set,
-    TransactionTrait,
+    ActiveModelTrait, ColumnTrait, EntityTrait, ExprTrait, ModelTrait, QueryFilter, QuerySelect,
+    Set, TransactionTrait,
 };
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -432,7 +432,7 @@ impl Api {
         Ok(DeleteCredentialResponse::Deleted)
     }
 
-    // Path allowlisted in the MFA setup gate (`is_mfa_setup_allowed`)
+    // Path allowlisted in the MFA setup gate (`is_mfa_setup_path`)
     #[oai(
         path = "/profile/credentials/otp",
         method = "post",
@@ -559,7 +559,7 @@ impl Api {
             warpgate_ca::deserialize_ca(&params.ca_certificate_pem, &params.ca_private_key_pem)?;
         let public_key_pem = body.public_key_pem.trim();
         let client_cert =
-            warpgate_ca::issue_client_certificate(&ca, &user.username, public_key_pem, user.id)?;
+            warpgate_ca::issue_client_certificate(&ca, &user.username, public_key_pem, user.id.0)?;
         let client_cert_pem = warpgate_ca::certificate_to_pem(&client_cert)?;
 
         let object = CertificateCredential::ActiveModel {

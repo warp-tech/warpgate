@@ -6,9 +6,8 @@ use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use russh::keys::{Algorithm, HashAlg, PrivateKey};
 use sea_orm::EntityTrait;
 use serde::Serialize;
-use uuid::Uuid;
 use warpgate_common::helpers::rng::get_crypto_rng;
-use warpgate_common::{AdminPermission, ProviderId, SecretRef, WarpgateError};
+use warpgate_common::{AdminPermission, ProviderId, SecretRef, SshClientKeyId, WarpgateError};
 use warpgate_common_http::errors::bad_request;
 use warpgate_core::resources::ssh_client_keys::{self, KeyMaterial, SshClientKeyDataRequest};
 use warpgate_core::resources::{Actor, ResourceError};
@@ -20,7 +19,7 @@ pub struct Api;
 
 #[derive(Serialize, Object)]
 struct SSHClientKey {
-    pub id: Uuid,
+    pub id: SshClientKeyId,
     pub label: String,
     pub kind: String,
     pub public_key: String,
@@ -248,7 +247,7 @@ impl Api {
     async fn api_update_client_key(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<SshClientKeyId>,
         body: Json<UpdateSSHClientKeyRequest>,
     ) -> Result<UpdateSSHClientKeyResponse, WarpgateError> {
         admin.require(AdminPermission::ConfigEdit)?;
@@ -279,7 +278,7 @@ impl Api {
     async fn api_release_client_key(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<SshClientKeyId>,
     ) -> Result<ReleaseSSHClientKeyResponse, WarpgateError> {
         super::gitops::release_managed::<SshClientKey::Entity>(&admin, id.0).await?;
         Ok(
@@ -301,7 +300,7 @@ impl Api {
     async fn api_delete_client_key(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<SshClientKeyId>,
     ) -> Result<DeleteSSHClientKeyResponse, WarpgateError> {
         admin.require(AdminPermission::ConfigEdit)?;
 
