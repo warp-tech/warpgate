@@ -5,10 +5,13 @@ use sea_orm::{DatabaseConnection, EntityTrait};
 use tracing::info;
 use uuid::Uuid;
 use warpgate_admin::api::cluster_proxy::{Owner, forward_websocket};
-use warpgate_common::{Protocol, TargetOptions, UserSessionId, WarpgateConfig, WarpgateError};
+use warpgate_common::{
+    Protocol, TargetId, TargetOptions, UserId, UserSessionId, WarpgateConfig, WarpgateError,
+};
 use warpgate_common_http::auth::{
     AuthenticatedRequestContext, FullUserAuthorization, web_reauth_required,
 };
+use warpgate_core::logging::{AuditEvent, CredentialChange, CredentialChangedVia};
 use warpgate_core::{ConfigProvider, TargetAuthorization, authorize_for_target};
 use warpgate_db_entities as entities;
 
@@ -22,18 +25,33 @@ pub fn emit_unknown_authentication_failed_event(
     credentials: &str,
     reason: &str,
 ) {
-    let client_ip = remote_ip.map_or_else(|| "<unknown>".to_string(), |x| x.to_string());
+    AuditEvent::UserAuthenticationFailed {
+        session_id,
+        client_ip: remote_ip,
+        username: username.to_owned(),
+        credentials: credentials.to_owned(),
+        reason: reason.to_owned(),
+    }
+    .emit();
+}
 
-    info!(
-        target: "audit",
-        _type = "UserAuthenticationFailed1",
-        session = %session_id,
-        client_ip = %client_ip,
-        username = %username,
-        credentials = %credentials,
-        reason = %reason,
-        "Authentication failed",
-    );
+pub fn audit_own_credential(
+    change: CredentialChange,
+    credential_type: &str,
+    credential_name: Option<&str>,
+    user_id: UserId,
+    username: &str,
+) {
+    AuditEvent::CredentialChanged {
+        change,
+        credential_type: credential_type.to_owned(),
+        credential_name: credential_name.map(str::to_owned),
+        via: CredentialChangedVia::SelfService,
+        user_id,
+        username: username.to_owned(),
+        actor_user_id: user_id,
+    }
+    .emit();
 }
 
 pub fn local_logout_disabled(session: &Session, config: &WarpgateConfig) -> bool {
@@ -55,6 +73,7 @@ pub fn logout(session: &Session, session_middleware: &mut SessionStore) {
 
 /// Outcome of the checks that guard the in-browser clients. Each endpoint maps
 /// it onto its own `ApiResponse` enum.
+#[allow(clippy::large_enum_variant)]
 pub enum WebClientTargetAccess {
     Authorized(TargetAuthorization),
     ReauthRequired,
@@ -67,7 +86,7 @@ pub enum WebClientTargetAccess {
 pub async fn authorize_web_client_target(
     ctx: &AuthenticatedRequestContext,
     session: &Session,
-    target_id: Uuid,
+    target_id: TargetId,
 ) -> poem::Result<WebClientTargetAccess> {
     // A ticket is authorized for exactly one target; it must not be able to open
     // an in-browser client to any target the *user* can reach. Requiring a

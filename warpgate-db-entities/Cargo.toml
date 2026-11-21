@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-db-entities"
-version = "0.30.2"
+version = "0.31.0-beta.1"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -11,6 +11,7 @@ data-encoding.workspace = true
 data-url = "0.3.2"
 ipnet.workspace = true
 poem-openapi.workspace = true
+schemars.workspace = true
 sea-orm = { workspace = true, features = ["macros", "with-uuid", "with-json"] }
 serde.workspace = true
 serde_json.workspace = true
@@ -20,6 +21,7 @@ time.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 warpgate-aws = { path = "../warpgate-aws" }
+warpgate-azure = { path = "../warpgate-azure" }
 warpgate-common = { path = "../warpgate-common", default-features = false }
 warpgate-ldap = { path = "../warpgate-ldap", default-features = false }
 warpgate-tls = { path = "../warpgate-tls", default-features = false }

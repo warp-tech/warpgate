@@ -1,10 +1,39 @@
 use sea_orm::prelude::Expr;
-use sea_orm::sea_query::{Alias, Func, IntoCondition, SimpleExpr};
+use sea_orm::sea_query::{Alias, ExprTrait, Func, IntoCondition, SimpleExpr};
 use sea_orm::{ColumnTrait, Condition, DbBackend, EntityTrait, ModelTrait};
 use warpgate_common::{AdminPermission, AdminPermissionSet, WarpgateError};
 pub use warpgate_common_http::RequestAuthorization;
 pub use warpgate_core::db::is_unique_violation;
+use warpgate_core::logging::{AuditEvent, CredentialChange, CredentialChangedVia};
+use warpgate_core::resources::audit::{Audited, Unaudited};
 use warpgate_db_entities::{AdminRole, User};
+
+use super::AdminContext;
+
+pub async fn audited<M: Audited>(admin: &AdminContext, write: Unaudited<M>) -> M {
+    write
+        .audited(&admin.services().db, admin.changed_by())
+        .await
+}
+
+pub fn audit_credential(
+    admin: &AdminContext,
+    change: CredentialChange,
+    credential_type: &str,
+    credential_name: Option<&str>,
+    user: &User::Model,
+) {
+    AuditEvent::CredentialChanged {
+        change,
+        credential_type: credential_type.to_owned(),
+        credential_name: credential_name.map(str::to_owned),
+        via: CredentialChangedVia::Admin,
+        user_id: user.id,
+        username: user.username.clone(),
+        actor_user_id: admin.auth.user_id(),
+    }
+    .emit();
+}
 
 /// The admin permissions the request's principal holds — the single place that resolves the
 /// permission model from the DB. `has_admin_permission`, `is_user_admin` and the `/info` UI
@@ -22,8 +51,14 @@ pub async fn admin_permission_set(
         return Ok(AdminPermissionSet::none());
     };
 
-    let db = &ctx.services().db;
-    let Some(user_model) = User::Entity::find_by_id(full.user_id()).one(db).await? else {
+    user_admin_permission_set(&ctx.services().db, full.user_id()).await
+}
+
+pub async fn user_admin_permission_set(
+    db: &sea_orm::DatabaseConnection,
+    user_id: warpgate_common::UserId,
+) -> Result<AdminPermissionSet, WarpgateError> {
+    let Some(user_model) = User::Entity::find_by_id(user_id).one(db).await? else {
         return Ok(AdminPermissionSet::none());
     };
 
@@ -76,7 +111,7 @@ where
     C: ColumnTrait,
     I: IntoIterator<Item = C>,
 {
-    case_insensitive_search_expr(search, columns.into_iter().map(|c| Expr::col(c).into()))
+    case_insensitive_search_expr(search, columns.into_iter().map(Expr::col))
 }
 
 /// [`case_insensitive_search`] over arbitrary expressions, for columns that need
@@ -102,6 +137,6 @@ where
 pub fn json_as_text<C: ColumnTrait>(backend: DbBackend, column: C) -> SimpleExpr {
     Expr::col(column).cast_as(match backend {
         DbBackend::MySql => Alias::new("char"),
-        DbBackend::Postgres | DbBackend::Sqlite => Alias::new("text"),
+        _ => Alias::new("text"),
     })
 }

@@ -61,9 +61,7 @@
             </FormGroup>
 
             <Loadable promise={api.getSsoProviders()}>
-                {#snippet children(
-                    providers,
-                )}
+                {#snippet children(providers)}
                     {#if !providers.length}
                         <Alert color="warning">
                             You don't have any SSO providers configured. Add

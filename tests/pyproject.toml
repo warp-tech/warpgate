@@ -19,6 +19,9 @@ deepmerge = ">=2,<4"
 openapi-client = { path = "./api_sdk", develop = true }
 aiohttp = "^3.11.18"
 boto3 = "^1.35"
+azure-storage-blob = "^12.23"
+azure-identity = "^1.19"
+websockets = ">=14,<18"
 cryptography = ">=46,<51"
 
 [tool.poetry.dev-dependencies]
@@ -26,7 +29,7 @@ flake8 = "^7.4.1"
 black = "^26"
 
 [tool.poetry.group.dev.dependencies]
-pytest-asyncio = ">=0.26,<1.5"
+pytest-asyncio = ">=0.26,<1.6"
 pytest-timeout = "^2.4.0"
 pyright = "^1.1.408"
 pytest-xdist = "^3.6"

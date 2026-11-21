@@ -4,23 +4,55 @@
     $background,
     $border,
     $color: color-contrast($background),
-    $hover-background: if($color == $color-contrast-dark, shade-color($background, $btn-hover-bg-shade-amount), tint-color($background, $btn-hover-bg-tint-amount)),
-    $hover-border: if($color == $color-contrast-dark, shade-color($border, $btn-hover-border-shade-amount), tint-color($border, $btn-hover-border-tint-amount)),
+    $hover-background: if(
+        $color == $color-contrast-dark,
+        shade-color($background, $btn-hover-bg-shade-amount),
+        tint-color($background, $btn-hover-bg-tint-amount)
+    ),
+    $hover-border: if(
+        $color == $color-contrast-dark,
+        shade-color($border, $btn-hover-border-shade-amount),
+        tint-color($border, $btn-hover-border-tint-amount)
+    ),
     $hover-color: color-contrast($hover-background),
-    $active-background: if($color == $color-contrast-dark, shade-color($background, $btn-active-bg-shade-amount), tint-color($background, $btn-active-bg-tint-amount)),
-    $active-border: if($color == $color-contrast-dark, shade-color($border, $btn-active-border-shade-amount), tint-color($border, $btn-active-border-tint-amount)),
+    $active-background: if(
+        $color == $color-contrast-dark,
+        shade-color($background, $btn-active-bg-shade-amount),
+        tint-color($background, $btn-active-bg-tint-amount)
+    ),
+    $active-border: if(
+        $color == $color-contrast-dark,
+        shade-color($border, $btn-active-border-shade-amount),
+        tint-color($border, $btn-active-border-tint-amount)
+    ),
     $active-color: color-contrast($active-background),
     $disabled-background: $background,
     $disabled-border: $border,
     $disabled-color: $btn-disabled-color,
-    $text-color: if($color == $color-contrast-light, shade-color($background, $btn-color-shade-amount), tint-color($background, $btn-color-tint-amount))
+    $text-color: if(
+        $color == $color-contrast-light,
+        shade-color($background, $btn-color-shade-amount),
+        tint-color($background, $btn-color-tint-amount)
+    )
 ) {
-    $real-background: if($color == $color-contrast-dark, shade-color($background, $btn-bg-shade-amount), tint-color($background, $btn-bg-tint-amount));
-    $real-color: if($color == $color-contrast-light, shade-color($background, $btn-color-shade-amount), tint-color($background, $btn-color-tint-amount));
+    $real-background: if(
+        $color == $color-contrast-dark,
+        shade-color($background, $btn-bg-shade-amount),
+        tint-color($background, $btn-bg-tint-amount)
+    );
+    $real-color: if(
+        $color == $color-contrast-light,
+        shade-color($background, $btn-color-shade-amount),
+        tint-color($background, $btn-color-tint-amount)
+    );
     --color-rgb: #{to-rgb($real-color)};
     --#{$prefix}btn-color: #{$real-color};
     --#{$prefix}btn-bg: #{$real-background};
-    --#{$prefix}btn-border-color: #{if($color == $color-contrast-dark, shade-color($background, $btn-border-shade-amount), tint-color($background, $btn-border-tint-amount))};
+    --#{$prefix}btn-border-color: #{if(
+        $color == $color-contrast-dark,
+        shade-color($background, $btn-border-shade-amount),
+        tint-color($background, $btn-border-tint-amount)
+    )};
     --#{$prefix}btn-hover-color: #{$hover-color};
     --#{$prefix}btn-hover-bg: #{$hover-background};
     --#{$prefix}btn-hover-border-color: #{$hover-border};
@@ -31,8 +63,8 @@
     --#{$prefix}btn-active-shadow: #{$btn-active-box-shadow};
     --#{$prefix}btn-disabled-color: #{$disabled-color};
     --#{$prefix}btn-disabled-bg: #{$real-background};
-        text-decoration-line: underline;
-        text-decoration-color: rgba(var(--color-rgb), 0.5);
+    text-decoration-line: underline;
+    text-decoration-color: rgba(var(--color-rgb), 0.5);
 }
 
 // Layout & components
@@ -68,7 +100,7 @@ $form-validation-states: map.remove($form-validation-states, "valid");
 // @import "bootstrap/scss/popover";
 // @import "bootstrap/scss/carousel";
 @import "bootstrap/scss/spinners";
-// @import "bootstrap/scss/offcanvas";
+@import "bootstrap/scss/offcanvas";
 // @import "bootstrap/scss/placeholders";
 
 // Helpers
@@ -77,8 +109,20 @@ $form-validation-states: map.remove($form-validation-states, "valid");
 // Utilities
 @import "bootstrap/scss/utilities/api";
 
-$font-family-os: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", "Liberation Sans", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji" !default;
-
+$font-family-os:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    "Noto Sans",
+    "Liberation Sans",
+    Arial,
+    sans-serif,
+    "Apple Color Emoji",
+    "Segoe UI Emoji",
+    "Segoe UI Symbol",
+    "Noto Color Emoji" !default;
 
 #app {
     display: block;
@@ -93,7 +137,7 @@ $font-family-os: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
     gap: 1rem;
 
     h1 {
-        font-family: 'Poppins';
+        font-family: "Poppins", sans-serif;
         font-weight: 700;
         // 1.75rem on phones up to the original 2.5rem on desktop
         font-size: clamp(1.75rem, 1.25rem + 2vw, 2.5rem);
@@ -125,9 +169,9 @@ $font-family-os: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
 footer {
     display: flex;
     align-items: center;
-    padding: .5rem 0;
+    padding: 0.5rem 0;
     margin: 2rem 0 1rem;
-    border-top: 1px solid rgba($body-color, .2);
+    border-top: 1px solid rgba($body-color, 0.2);
 }
 
 input:-webkit-autofill {
@@ -151,11 +195,11 @@ input:-webkit-autofill:focus {
 }
 
 // Fix placeholder text with floating FormGroup labels
-.form-floating>.form-control::placeholder {
+.form-floating > .form-control::placeholder {
     color: revert;
 }
 
-.form-floating>.form-control:not(:focus)::placeholder {
+.form-floating > .form-control:not(:focus)::placeholder {
     color: transparent;
 }
 
@@ -169,11 +213,11 @@ a {
     text-decoration-color: var(--wg-link-underline-color);
     text-underline-offset: 2px;
 
-    &:hover, &.active {
+    &:hover,
+    &.active {
         text-decoration-color: var(--wg-link-hover-underline-color);
     }
 }
-
 
 // Make these vars reusable from everywhere
 body {
@@ -202,11 +246,20 @@ body {
 @each $theme-color, $value in $theme-colors {
     .text-bg-#{$theme-color} {
         $color: color-contrast($value);
-        $real-background: if($color == $color-contrast-dark, shade-color($value, $btn-bg-shade-amount), tint-color($value, $btn-bg-tint-amount));
-        $real-color: if($color == $color-contrast-light, shade-color($value, $btn-color-shade-amount), tint-color($value, $btn-color-tint-amount));
+        $real-background: if(
+            $color == $color-contrast-dark,
+            shade-color($value, $btn-bg-shade-amount),
+            tint-color($value, $btn-bg-tint-amount)
+        );
+        $real-color: if(
+            $color == $color-contrast-light,
+            shade-color($value, $btn-color-shade-amount),
+            tint-color($value, $btn-color-tint-amount)
+        );
 
         color: $real-color if($enable-important-utilities, !important, null);
-        background-color: $real-background if($enable-important-utilities, !important, null);
+        background-color: $real-background
+            if($enable-important-utilities, !important, null);
     }
 }
 
@@ -228,7 +281,7 @@ ul.pagination {
 }
 
 .modal-content {
-    box-shadow: 0 0 10px rgba(0, 0, 0, .25);
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.25);
 }
 
 .modal-header {
@@ -295,9 +348,10 @@ ul.pagination {
         background: var(--#{$prefix}btn-bg);
         color: var(--#{$prefix}btn-color);
 
-
-        &:active, &.active {
+        &:active,
+        &.active {
             background: var(--bs-list-group-action-active-bg);
+
             .title {
                 color: var(--bs-list-group-action-active-color);
             }
@@ -309,4 +363,7 @@ code {
     background: $code-bg;
     padding: 0.2rem 0.4rem;
     border-radius: 5px;
+}
+.input-group .form-floating + .form-select {
+    border-width: 1px;
 }

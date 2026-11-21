@@ -1,0 +1,14 @@
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: web
+  label: {}
+spec:
+  options:
+    ssh:
+      host: 10.0.0.1
+      usrname: deploy
+      auth:
+        kind: password
+        password: secret://vault/kv/web#password
+        passwrod: x

@@ -11,11 +11,14 @@
         type BootstrapThemeColor,
         type TargetGroup,
     } from 'admin/lib/api'
+    import ManagedObjectStatus from 'admin/lib/ManagedObjectStatus.svelte'
     import { adminPermissions } from 'admin/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
     import GroupColorIcon from 'common/GroupColorIcon.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import StickyActionBar from 'common/StickyActionBar.svelte'
+    import { setCurrentSidebarSubtitle } from 'common/sidebarState.svelte'
     import { replace } from 'svelte-spa-router'
     import { VALID_CHOICES } from './common'
 
@@ -27,6 +30,7 @@
     let groupId = $derived(params.id)
 
     let group: TargetGroup | undefined = $state()
+    setCurrentSidebarSubtitle(() => group?.name)
     let error: string | undefined = $state()
     let saving = $state(false)
 
@@ -73,6 +77,10 @@
         }
     }
 
+    async function release() {
+        group = await api.releaseTargetGroup({ id: groupId })
+    }
+
     async function remove() {
         if (!group || !confirm(`Delete target group "${group.name}"?`)) {
             return
@@ -81,7 +89,7 @@
         try {
             await api.deleteTargetGroup({ id: groupId })
             // Redirect to groups list
-            replace('/config/target-groups')
+            replace('/manage/target-groups')
         } catch (e) {
             error = await stringifyError(e)
             throw e
@@ -98,7 +106,10 @@
             <div class="page-summary-bar">
                 <div>
                     <h1>{group.name}</h1>
-                    <div class="text-muted">Target group</div>
+                    <div class="text-muted d-flex align-items-center gap-2">
+                        Target group
+                    </div>
+                    <ManagedObjectStatus provider={group.provider} {release} />
                 </div>
             </div>
 
@@ -108,69 +119,72 @@
                     update()
                 }}
             >
-                <FormGroup>
-                    <Label for="name">Name</Label>
-                    <Input
-                        id="name"
-                        bind:value={name}
-                        required
-                        disabled={saving}
-                    />
-                </FormGroup>
+                <fieldset disabled={!!group.provider}>
+                    <FormGroup>
+                        <Label for="name">Name</Label>
+                        <Input
+                            id="name"
+                            bind:value={name}
+                            required
+                            disabled={saving}
+                        />
+                    </FormGroup>
 
-                <FormGroup>
-                    <Label for="description">Description</Label>
-                    <Input
-                        id="description"
-                        type="textarea"
-                        bind:value={description}
-                        disabled={saving}
-                    />
-                </FormGroup>
+                    <FormGroup>
+                        <Label for="description">Description</Label>
+                        <Input
+                            id="description"
+                            type="textarea"
+                            bind:value={description}
+                            disabled={saving}
+                        />
+                    </FormGroup>
 
-                <FormGroup>
-                    <Label for="color">Color</Label>
-                    <small class="form-text text-muted">
-                        Optional Bootstrap theme color for visual organization
-                    </small>
-                    <div class="color-picker">
-                        {#each VALID_CHOICES as value (value)}
-                            <button
-                                type="button"
-                                class="btn btn-secondary gap-2 d-flex align-items-center"
-                                class:active={color === value}
-                                disabled={saving}
-                                onclick={e => {
-                                    e.preventDefault()
-                                    color = value
-                                }}
-                                title={value || 'None'}
-                            >
-                                <GroupColorIcon color={value} />
-                                <span>{value || 'None'}</span>
-                            </button>
-                        {/each}
-                    </div>
-                </FormGroup>
-
-                <div class="d-flex gap-2 mt-5">
-                    <AsyncButton
-                        click={update}
-                        color="primary"
-                        disabled={!$adminPermissions.targetsEdit}
-                    >
-                        Update
-                    </AsyncButton>
-                    <Button
-                        color="danger"
-                        onclick={remove}
-                        disabled={!$adminPermissions.targetsDelete}
-                    >
-                        Remove
-                    </Button>
-                </div>
+                    <FormGroup>
+                        <Label for="color">Color</Label>
+                        <small class="form-text text-muted">
+                            Optional Bootstrap theme color for visual
+                            organization
+                        </small>
+                        <div class="color-picker">
+                            {#each VALID_CHOICES as value (value)}
+                                <button
+                                    type="button"
+                                    class="btn btn-secondary gap-2 d-flex align-items-center"
+                                    class:active={color === value}
+                                    disabled={saving}
+                                    onclick={e => {
+                                        e.preventDefault()
+                                        color = value
+                                    }}
+                                    title={value || 'None'}
+                                >
+                                    <GroupColorIcon color={value} />
+                                    <span>{value || 'None'}</span>
+                                </button>
+                            {/each}
+                        </div>
+                    </FormGroup>
+                </fieldset>
             </form>
         </div>
+
+        <StickyActionBar>
+            <AsyncButton
+                click={update}
+                color="primary"
+                disabled={!$adminPermissions.targetsEdit || !!group.provider}
+            >
+                Update
+            </AsyncButton>
+            <Button
+                color="danger"
+                onclick={remove}
+                disabled={!$adminPermissions.targetsDelete || !!group.provider}
+            >
+                Remove
+            </Button>
+        </StickyActionBar>
     {/if}
 </Loadable>
 

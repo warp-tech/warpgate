@@ -16,7 +16,7 @@
                     username,
                 },
             })
-            replace(`/config/users/${user.id}`)
+            replace(`/manage/users/${user.id}`)
         } catch (err) {
             error = await stringifyError(err)
         }

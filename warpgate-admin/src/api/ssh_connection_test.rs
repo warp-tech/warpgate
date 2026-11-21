@@ -2,7 +2,7 @@ use poem_openapi::payload::{Json, PlainText};
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use russh::keys::PublicKeyBase64;
 use uuid::Uuid;
-use warpgate_common::{AdminPermission, UserSessionId, WarpgateError};
+use warpgate_common::{AdminPermission, TargetId, UserSessionId, WarpgateError};
 use warpgate_protocol_ssh::{RCCommand, RCEvent, RemoteClient, resolve_ssh_chain_for_admin};
 
 use super::AdminContext;
@@ -11,7 +11,7 @@ pub struct Api;
 
 #[derive(Object)]
 struct CheckSshHostKeyRequest {
-    target_id: Uuid,
+    target_id: TargetId,
 }
 
 #[derive(Object)]

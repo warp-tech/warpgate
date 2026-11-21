@@ -6,7 +6,7 @@ use poem::{Endpoint, Middleware, Request};
 use serde::Deserialize;
 use tracing::warn;
 use uuid::Uuid;
-use warpgate_common::Secret;
+use warpgate_common::{Secret, TargetId, UserId};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::get_client_ip;
 use warpgate_common_http::{SessionAuthorization, X_WARPGATE_TICKET, authorization_token};
@@ -25,7 +25,7 @@ pub(crate) struct TemporaryTicketSession;
 /// What consecutive header-ticket requests are recognised by. The database id
 /// distinguishes separate tickets issued to the same user for the same target
 /// without keeping the secret around to key on.
-pub(crate) type TicketSessionKey = (Uuid, Uuid, Option<Uuid>);
+pub(crate) type TicketSessionKey = (UserId, TargetId, Option<Uuid>);
 
 /// The ticket identity of a request that carries a header-borne ticket, or
 /// `None` for anything cookie-backed.
@@ -166,8 +166,8 @@ mod tests {
 
     #[test]
     fn temporary_ticket_sessions_are_keyed_by_ticket_id() {
-        let user_id = Uuid::new_v4();
-        let target_id = Uuid::new_v4();
+        let user_id = UserId(Uuid::new_v4());
+        let target_id = TargetId(Uuid::new_v4());
         let first_ticket_id = Uuid::new_v4();
         let second_ticket_id = Uuid::new_v4();
         let mut req = Request::builder().finish();

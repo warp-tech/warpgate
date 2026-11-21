@@ -1,0 +1,3 @@
+tests/fixtures/invalid/api-constraints.yaml:11:19 spec.options.postgres.auth.password: not a valid secret://backend/mount/path#field reference
+tests/fixtures/invalid/api-constraints.yaml:24:16 spec.options.ssh.auth.mount: must satisfy pattern("^[A-Za-z0-9_-]+$")
+tests/fixtures/invalid/api-constraints.yaml:35:16 spec.options.rdp.kdc_url: must satisfy pattern("^$|^(tcp|udp|https?)://.+")

@@ -1,0 +1,2 @@
+tests/fixtures/invalid/names/b.yaml:4:9 metadata.name: duplicate Role name `DBA`, first defined at tests/fixtures/invalid/names/a.yaml:4:9
+tests/fixtures/invalid/names/b.yaml:19:9 metadata.name: duplicate Target name `web`, first defined at tests/fixtures/invalid/names/b.yaml:10:9

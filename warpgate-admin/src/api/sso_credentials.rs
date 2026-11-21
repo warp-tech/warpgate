@@ -3,11 +3,12 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, Set};
 use uuid::Uuid;
-use warpgate_common::{AdminPermission, UserSsoCredential, WarpgateError};
-use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
+use warpgate_common::{AdminPermission, UserId, UserSsoCredential, WarpgateError};
+use warpgate_core::logging::CredentialChange;
 use warpgate_db_entities::{SsoCredential, User};
 
-use super::AdminContext;
+use super::common::audit_credential;
+use super::{AdminContext, guard_user_mutation};
 
 #[derive(Object)]
 struct ExistingSsoCredential {
@@ -75,7 +76,7 @@ impl ListApi {
     async fn api_get_all(
         &self,
         admin: AdminContext,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
     ) -> Result<GetSsoCredentialsResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
 
@@ -94,13 +95,14 @@ impl ListApi {
     #[oai(
         path = "/users/:user_id/credentials/sso",
         method = "post",
-        operation_id = "create_sso_credential"
+        operation_id = "create_sso_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_create(
         &self,
         admin: AdminContext,
         body: Json<NewSsoCredential>,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
     ) -> Result<CreateSsoCredentialResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
 
@@ -120,15 +122,13 @@ impl ListApi {
         };
 
         let credential_name = body.email.clone();
-        AuditEvent::CredentialCreated {
-            credential_type: "sso".to_string(),
-            credential_name: Some(credential_name),
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username: user.username,
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        audit_credential(
+            &admin,
+            CredentialChange::Created,
+            "sso",
+            Some(&credential_name),
+            &user,
+        );
 
         Ok(CreateSsoCredentialResponse::Created(Json(object.into())))
     }
@@ -149,18 +149,23 @@ impl DetailApi {
     #[oai(
         path = "/users/:user_id/credentials/sso/:id",
         method = "put",
-        operation_id = "update_sso_credential"
+        operation_id = "update_sso_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_update(
         &self,
         admin: AdminContext,
         body: Json<NewSsoCredential>,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
         id: Path<Uuid>,
     ) -> Result<UpdateSsoCredentialResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
 
         let db = &admin.services().db;
+
+        let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
+            return Ok(UpdateSsoCredentialResponse::NotFound);
+        };
 
         let updated = SsoCredential::Entity::update_many()
             .set(SsoCredential::ActiveModel::from(UserSsoCredential::from(
@@ -178,18 +183,27 @@ impl DetailApi {
             return Ok(UpdateSsoCredentialResponse::NotFound);
         };
 
+        audit_credential(
+            &admin,
+            CredentialChange::Updated,
+            "sso",
+            Some(&model.email),
+            &user,
+        );
+
         Ok(UpdateSsoCredentialResponse::Updated(Json(model.into())))
     }
 
     #[oai(
         path = "/users/:user_id/credentials/sso/:id",
         method = "delete",
-        operation_id = "delete_sso_credential"
+        operation_id = "delete_sso_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_delete(
         &self,
         admin: AdminContext,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
         id: Path<Uuid>,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
@@ -212,15 +226,13 @@ impl DetailApi {
 
         role.delete(db).await?;
 
-        AuditEvent::CredentialDeleted {
-            credential_type: "sso".to_string(),
-            credential_name: Some(credential_name.clone()),
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username: user.username.clone(),
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        audit_credential(
+            &admin,
+            CredentialChange::Deleted,
+            "sso",
+            Some(&credential_name),
+            &user,
+        );
 
         Ok(DeleteCredentialResponse::Deleted)
     }

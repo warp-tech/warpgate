@@ -44,6 +44,13 @@ def echo_server_port():
         return response
 
 
+    @app.route("/page/<int:size>")
+    def page(size):
+        head = b"<html><head></head><body>"
+        response = make_response(head + b"x" * (size - len(head)))
+        response.headers["Content-Type"] = "text/html"
+        return response
+
     @sock.route("/socket")
     def ws_echo(ws):
         while True:

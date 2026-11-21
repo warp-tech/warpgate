@@ -3,13 +3,14 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
-use anyhow::{Context as _, Result, bail};
 use ironrdp_core::impl_as_any;
 use ironrdp_dvc::{DvcMessage, DvcProcessor, DvcServerProcessor};
 use ironrdp_echo::server::EchoServer;
+use ironrdp_error::ResultExt as _;
 use ironrdp_pdu::PduResult;
 use tokio::sync::mpsc;
 
+use crate::error::{ServerError, ServerErrorExt as _, ServerErrorKind, ServerResult};
 use crate::server::ServerEvent;
 
 #[derive(Debug, Clone)]
@@ -55,14 +56,14 @@ impl EchoServerHandle {
     /// Sends a runtime ECHO request.
     ///
     /// The payload must be at least one byte, as required by MS-RDPEECO section 3.1.5.1.
-    pub fn send_request(&self, payload: Vec<u8>) -> Result<()> {
+    pub fn send_request(&self, payload: Vec<u8>) -> ServerResult<()> {
         if payload.is_empty() {
-            bail!("echoRequest payload must be at least one byte");
+            return Err(ServerError::reason("echo request", "payload must be at least one byte"));
         }
 
         self.sender
             .send(ServerEvent::Echo(EchoServerMessage::SendRequest { payload }))
-            .map_err(|_error| anyhow::anyhow!("send ECHO request event"))
+            .map_err(|_error| ServerError::channel("send ECHO request event"))
     }
 
     /// Drains collected RTT measurements.
@@ -151,6 +152,6 @@ impl DvcProcessor for EchoDvcBridge {
 
 impl DvcServerProcessor for EchoDvcBridge {}
 
-pub(crate) fn build_echo_request(payload: Vec<u8>) -> Result<DvcMessage> {
-    EchoServer::request_message(payload).context("build ECHO request message")
+pub(crate) fn build_echo_request(payload: Vec<u8>) -> ServerResult<DvcMessage> {
+    EchoServer::request_message(payload).map_err_kind("build ECHO request message", ServerErrorKind::Pdu)
 }

@@ -56,6 +56,12 @@ impl<E> EventIntake<E> {
     pub const fn take_slot(&mut self) -> Option<OwnedSemaphorePermit> {
         self.slot.take()
     }
+
+    /// Returns the slot of a deferred event before the event is replayed.
+    /// Releases a slot already claimed for the next event
+    pub fn restore_slot(&mut self, slot: OwnedSemaphorePermit) {
+        self.slot = Some(slot);
+    }
 }
 
 #[cfg(test)]

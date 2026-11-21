@@ -112,9 +112,7 @@
 
 {#key gen}
     <ItemList {load} showSearch={false}>
-        {#snippet item(
-            backend,
-        )}
+        {#snippet item(backend)}
             {const probe = $derived(health.get(backend.id))}
             <div class="list-group-item px-0">
                 <div class="d-flex align-items-center gap-2">

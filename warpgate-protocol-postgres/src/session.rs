@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -43,12 +42,10 @@ pub struct PostgresSession<S: AsyncRead + AsyncWrite + Send + Unpin> {
     services: Services,
     remote_address: SocketAddr,
     decode_context: DecodeContext,
-    /// Used to remap cancel keys when the target uses protocol 3.2
-    /// but the client only supports 3.0
-    cancel_key_downgrade_map: HashMap<SecretKey, SecretKey>,
-    /// Used to remap cancel keys when the target uses protocol 3.0
-    /// but the client already supports 3.2
-    cancel_key_upgrade_map: HashMap<SecretKey, SecretKey>,
+    /// (key sent to the client, target's key). Set when the client and the
+    /// target use different cancel key formats. The target can repeat
+    /// `BackendKeyData` without limit, so only the latest pair is kept
+    cancel_key_remap: Option<(SecretKey, SecretKey)>,
 }
 
 impl<S: AsyncRead + AsyncWrite + Send + Unpin> DbAuthTransport for PostgresSession<S> {
@@ -178,8 +175,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
             id,
             remote_address,
             decode_context: DecodeContext::new(pgwire::messages::ProtocolVersion::PROTOCOL3_2),
-            cancel_key_downgrade_map: HashMap::new(),
-            cancel_key_upgrade_map: HashMap::new(),
+            cancel_key_remap: None,
         }
     }
 
@@ -394,11 +390,14 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
 
         let mut last_activity = std::time::Instant::now();
         let check_interval = Duration::from_secs(5); // Check idle timeout every 5 seconds
+        // A running query sends nothing until it completes, so a session is
+        // not idle between the client starting a query and ReadyForQuery.
+        let mut query_in_progress = false;
 
         loop {
             // With the idle timeout disabled we still wake up on check_interval
             // to re-poll the sockets, but never close the connection ourselves.
-            let select_timeout = match idle_timeout {
+            let select_timeout = match idle_timeout.filter(|_| !query_in_progress) {
                 Some(timeout) => {
                     let elapsed = last_activity.elapsed();
                     if elapsed > timeout {
@@ -428,8 +427,11 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                     match c_to_s {
                         Ok(Ok(Some(mut msg))) => {
                             last_activity = std::time::Instant::now(); // Update activity on client message
+                            if starts_query(&msg.0) {
+                                query_in_progress = true;
+                            }
                             Self::maybe_log_client_msg(&msg.0);
-                            msg = self.maybe_transform_client_msg(msg, &client);
+                            msg = self.maybe_transform_client_msg(msg);
                             client.send(msg).await?;
                         }
                         Ok(Ok(None)) => {
@@ -448,6 +450,9 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
                     match s_to_c {
                         Ok(Some(mut msg)) => {
                             last_activity = std::time::Instant::now(); // Update activity on server message
+                            if matches!(msg.0, PgWireBackendMessage::ReadyForQuery(_)) {
+                                query_in_progress = false;
+                            }
                             Self::maybe_log_server_msg(&msg.0);
                             msg = self.maybe_transform_server_msg(msg);
                             self.stream.push(msg)?;
@@ -472,27 +477,12 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
     fn maybe_transform_client_msg(
         &mut self,
         mut msg: PgWireGenericFrontendMessage,
-        client: &PostgresClient,
     ) -> PgWireGenericFrontendMessage {
-        if let PgWireFrontendMessage::CancelRequest(cancel_request) = &mut msg.0 {
-            // Transform cancel keys back to 3.2 format if needed
-            if let SecretKey::I32(_) = cancel_request.secret_key
-                && let Some(upgraded_key) = self
-                    .cancel_key_downgrade_map
-                    .remove(&cancel_request.secret_key)
-            {
-                cancel_request.secret_key = upgraded_key;
-            }
-            if client.protocol_version() == ProtocolVersion::PROTOCOL3_0 {
-                // Transform cancel keys to 3.0 format if needed
-                if let SecretKey::Bytes(_) = cancel_request.secret_key
-                    && let Some(downgraded_key) = self
-                        .cancel_key_upgrade_map
-                        .remove(&cancel_request.secret_key)
-                {
-                    cancel_request.secret_key = downgraded_key;
-                }
-            }
+        if let PgWireFrontendMessage::CancelRequest(cancel_request) = &mut msg.0
+            && let Some((issued, original)) = &self.cancel_key_remap
+            && cancel_request.secret_key == *issued
+        {
+            cancel_request.secret_key = original.clone();
         }
         msg
     }
@@ -502,25 +492,20 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
         mut msg: PgWireGenericBackendMessage,
     ) -> PgWireGenericBackendMessage {
         if let PgWireBackendMessage::BackendKeyData(key_data) = &mut msg.0 {
-            // Locally issue a 3.0 protocol key in older format and store mapping
-            if self.decode_context.protocol_version == ProtocolVersion::PROTOCOL3_0 {
-                // Locally issue a random key in older format and store mapping
-                if let SecretKey::Bytes(bytes) = &key_data.secret_key {
-                    let downgraded_key = SecretKey::I32(rand::random::<i32>());
-                    self.cancel_key_downgrade_map
-                        .insert(downgraded_key.clone(), SecretKey::Bytes(bytes.clone()));
-                    key_data.secret_key = downgraded_key;
+            let client_version = self.decode_context.protocol_version;
+            let issued = match &key_data.secret_key {
+                // Protocol 3.0 only has 32-bit keys
+                SecretKey::Bytes(_) if client_version == ProtocolVersion::PROTOCOL3_0 => {
+                    Some(SecretKey::I32(rand::random::<i32>()))
                 }
-            }
-            if self.decode_context.protocol_version == ProtocolVersion::PROTOCOL3_2 {
-                // Locally issue a 3.2 protocol key in newer format and store mapping
-                if let SecretKey::I32(_) = key_data.secret_key {
-                    let value = rand::random::<[u8; 32]>();
-                    let upgraded_key = SecretKey::Bytes(Bytes::from_owner(value));
-                    self.cancel_key_upgrade_map
-                        .insert(upgraded_key.clone(), key_data.secret_key.clone());
-                    key_data.secret_key = upgraded_key;
-                }
+                SecretKey::I32(_) if client_version == ProtocolVersion::PROTOCOL3_2 => Some(
+                    SecretKey::Bytes(Bytes::from_owner(rand::random::<[u8; 32]>())),
+                ),
+                _ => None,
+            };
+            if let Some(issued) = issued {
+                let original = std::mem::replace(&mut key_data.secret_key, issued.clone());
+                self.cancel_key_remap = Some((issued, original));
             }
         }
         msg
@@ -548,6 +533,15 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> PostgresSession<S> {
             info!(?error, "PostgreSQL error");
         }
     }
+}
+
+/// Messages after which the server is busy until it sends ReadyForQuery:
+/// a simple Query, or Sync, which ends an extended-protocol batch.
+const fn starts_query(msg: &PgWireFrontendMessage) -> bool {
+    matches!(
+        msg,
+        PgWireFrontendMessage::Query(_) | PgWireFrontendMessage::Sync(_)
+    )
 }
 
 const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_mins(10);
@@ -583,7 +577,23 @@ fn parse_idle_timeout(value: Option<&str>) -> IdlePolicy {
 mod tests {
     use std::time::Duration;
 
-    use super::{DEFAULT_IDLE_TIMEOUT, IdlePolicy, parse_idle_timeout};
+    use pgwire::messages::PgWireFrontendMessage;
+    use pgwire::messages::extendedquery::{Execute, Sync};
+    use pgwire::messages::simplequery::Query;
+
+    use super::{DEFAULT_IDLE_TIMEOUT, IdlePolicy, parse_idle_timeout, starts_query};
+
+    #[test]
+    fn query_and_sync_start_a_query() {
+        assert!(starts_query(&PgWireFrontendMessage::Query(Query::new(
+            "select 1".into()
+        ))));
+        assert!(starts_query(&PgWireFrontendMessage::Sync(Sync::new())));
+        // The server answers Execute without ReadyForQuery, only Sync gets one
+        assert!(!starts_query(&PgWireFrontendMessage::Execute(
+            Execute::new(None, 0)
+        )));
+    }
 
     #[test]
     fn explicit_zero_disables() {

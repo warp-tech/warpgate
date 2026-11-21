@@ -3,7 +3,6 @@ use std::error::Error;
 use poem::error::ResponseError;
 use poem_openapi::ApiResponse;
 use uuid::Uuid;
-use warpgate_aws::AwsError;
 use warpgate_ca::CaError;
 use warpgate_ldap::LdapError;
 use warpgate_sso::SsoError;
@@ -25,8 +24,8 @@ pub enum WarpgateError {
     Other(Box<dyn Error + Send + Sync>),
     #[error("user {0} not found")]
     UserNotFound(String),
-    #[error("user {0} already exists")]
-    UserAlreadyExists(String),
+    #[error("name already exists")]
+    NameTaken,
     #[error("role {0} not found")]
     RoleNotFound(String),
     #[error("failed to parse URL: {0}")]
@@ -46,6 +45,10 @@ pub enum WarpgateError {
     /// A request that passed schema validation but is still not acceptable
     #[error("{0}")]
     InvalidRequest(String),
+    #[error("request body too large")]
+    RequestBodyTooLarge,
+    #[error("timed out reading the request body")]
+    RequestBodyTimeout,
     /// Somebody called WarpgateServerHandle::set_user_info twice
     #[error("user session is already attributed to another user")]
     UserSessionAlreadyAttributed,
@@ -79,8 +82,10 @@ pub enum WarpgateError {
     NoAdminAccess,
     #[error("admin permission required: {0:?}")]
     NoAdminPermission(AdminPermission),
+    #[error("cannot modify a user with admin permissions you do not hold")]
+    TargetUserOutranksAdmin,
     #[error("AWS: {0}")]
-    Aws(AwsError),
+    Aws(Box<dyn Error + Send + Sync>),
     #[error("IP address {0} is not in the allowed range for user {1}")]
     IpAddrNotAllowed(String, String),
     #[error("could not parse IP network address: {0}")]
@@ -102,6 +107,12 @@ pub trait UserFacingReason {
     fn user_facing_reason(&self) -> String;
 }
 
+impl<T: UserFacingReason + ?Sized> UserFacingReason for std::sync::Arc<T> {
+    fn user_facing_reason(&self) -> String {
+        (**self).user_facing_reason()
+    }
+}
+
 pub fn io_connect_reason(error: &std::io::Error) -> &'static str {
     match error.kind() {
         std::io::ErrorKind::ConnectionRefused => "Target refused the connection",
@@ -117,12 +128,13 @@ impl UserFacingReason for WarpgateError {
             | Self::InvalidTarget
             | Self::InvalidCredentialType
             | Self::UserNotFound(_)
-            | Self::UserAlreadyExists(_)
+            | Self::NameTaken
             | Self::SessionNotApproved
             | Self::UserSessionAlreadyAttributed
             | Self::UserSessionEnded
             | Self::NoAdminAccess
             | Self::NoAdminPermission(_)
+            | Self::TargetUserOutranksAdmin
             | Self::IpAddrNotAllowed(..)
             | Self::InvalidNetworkAddress(_)
             | Self::SessionLimitReached
@@ -130,6 +142,8 @@ impl UserFacingReason for WarpgateError {
             | Self::ExternalHostUnknown
             | Self::NoHostInUrl
             | Self::InvalidRequest(_)
+            | Self::RequestBodyTooLarge
+            | Self::RequestBodyTimeout
             | Self::SessionEnd => self.to_string(),
 
             Self::Sso(e) => e.user_facing_reason(),
@@ -211,9 +225,13 @@ impl ResponseError for WarpgateError {
             | Self::UserNotFound(_)
             | Self::RoleNotFound(_)
             | Self::IpAddrNotAllowed(..) => poem::http::StatusCode::UNAUTHORIZED,
-            Self::UserAlreadyExists(_) => poem::http::StatusCode::CONFLICT,
+            Self::NameTaken => poem::http::StatusCode::CONFLICT,
             Self::InvalidRequest(_) => poem::http::StatusCode::BAD_REQUEST,
-            Self::NoAdminAccess | Self::NoAdminPermission(_) => poem::http::StatusCode::FORBIDDEN,
+            Self::RequestBodyTooLarge => poem::http::StatusCode::PAYLOAD_TOO_LARGE,
+            Self::RequestBodyTimeout => poem::http::StatusCode::REQUEST_TIMEOUT,
+            Self::NoAdminAccess | Self::NoAdminPermission(_) | Self::TargetUserOutranksAdmin => {
+                poem::http::StatusCode::FORBIDDEN
+            }
             Self::SessionLimitReached => poem::http::StatusCode::TOO_MANY_REQUESTS,
             Self::SessionNotApproved => poem::http::StatusCode::FORBIDDEN,
             Self::ClusterPeerUnreachable(_) => poem::http::StatusCode::BAD_GATEWAY,

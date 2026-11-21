@@ -5,6 +5,7 @@
     import { stringifyError } from 'common/errors'
     import ItemList, { type PaginatedResponse } from 'common/ItemList.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import { setCurrentSidebarSubtitle } from 'common/sidebarState.svelte'
     import * as rx from 'rxjs'
     import { link, replace } from 'svelte-spa-router'
     import {
@@ -22,15 +23,14 @@
 
     let error: string | null = $state(null)
     let role: AdminRole | undefined = $state()
+    setCurrentSidebarSubtitle(() => role?.name)
     const initPromise = init()
 
     let disabled = $state(false)
 
     async function init() {
         role = await api.getAdminRole({ id: params.id })
-        disabled =
-            role.name === 'warpgate:admin' ||
-            !$adminPermissions.adminRolesManage
+        disabled = role.builtin || !$adminPermissions.adminRolesManage
         return role
     }
 
@@ -137,16 +137,14 @@
         if (!role) return
         if (confirm(`Delete admin role ${role.name}?`)) {
             await api.deleteAdminRole(role)
-            replace('/config/admin-roles')
+            replace('/manage/admin-roles')
         }
     }
 </script>
 
 <div class="container-max-md">
     <Loadable promise={initPromise} bind:value={role}>
-        {#snippet children(
-            role,
-        )}
+        {#snippet children(role)}
             <div class="page-summary-bar">
                 <div>
                     <h1>{role.name}</h1>
@@ -167,7 +165,7 @@
                 {#each permGroups as { category, perms }}
                     <div class="col-6">
                         <h5 class="mt-3">{category}</h5>
-                        {#each perms as { key, label } (key)}
+                        {#each perms as { key, label, dangerous } (key)}
                             <label class="form-check">
                                 <input
                                     class="form-check-input"
@@ -193,9 +191,7 @@
                                 >
                                 <span class="form-check-label">
                                     {label}
-                                    {#if ADMIN_PERMISSIONS.find(
-                                        p => p.key === key,
-                                    )?.dangerous}
+                                    {#if dangerous}
                                         <span
                                             id="warn-{key}"
                                             class="text-warning ms-1"
@@ -207,8 +203,7 @@
                                             animation
                                             delay="250"
                                         >
-                                            Grants the ability to manage admin
-                                            roles; use with care.
+                                            {dangerous}
                                         </Tooltip>
                                     {/if}
                                 </span>
@@ -251,12 +246,10 @@
 
             <h4 class="mt-4">Assigned users</h4>
             <ItemList load={loadUsers}>
-                {#snippet item(
-                    user,
-                )}
+                {#snippet item(user)}
                     <a
                         class="list-group-item list-group-item-action"
-                        href="/config/users/{user.id}"
+                        href="/manage/users/{user.id}"
                         use:link
                     >
                         <div>

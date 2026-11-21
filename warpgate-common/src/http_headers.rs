@@ -39,6 +39,9 @@ pub static X_WARPGATE_CLUSTER_NODE: HeaderName = HeaderName::from_static("x-warp
 /// Acting user ID of intra cluster request
 pub static X_WARPGATE_CLUSTER_IDENTITY: HeaderName =
     HeaderName::from_static("x-warpgate-cluster-identity");
+/// Set when the acting user of an intra cluster request used an API token
+pub static X_WARPGATE_CLUSTER_IDENTITY_TOKEN: HeaderName =
+    HeaderName::from_static("x-warpgate-cluster-identity-token");
 /// Acting origin client IP for intra cluster request
 pub static X_WARPGATE_CLUSTER_CLIENT_IP: HeaderName =
     HeaderName::from_static("x-warpgate-cluster-client-ip");

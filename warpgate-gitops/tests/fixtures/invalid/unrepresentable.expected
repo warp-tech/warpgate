@@ -1,0 +1,3 @@
+tests/fixtures/invalid/unrepresentable.yaml:6:16 spec.color: YAML tags are not supported
+tests/fixtures/invalid/unrepresentable.yaml:7:16 spec.description: YAML aliases are not supported
+tests/fixtures/invalid/unrepresentable.yaml:8:3 spec: mapping keys must be strings
