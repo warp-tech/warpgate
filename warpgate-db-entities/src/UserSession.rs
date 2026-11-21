@@ -1,12 +1,11 @@
+use warpgate_common::UserId;
 use sea_orm::entity::prelude::*;
-use sea_orm::sea_query::{Expr, IntoCondition};
-use sea_orm::{DatabaseTransaction, QuerySelect, TransactionTrait};
+use sea_orm::DatabaseTransaction;
+use sea_orm::sea_query::Expr;
 use time::OffsetDateTime;
-use tracing::error;
-use uuid::Uuid;
 use warpgate_common::{NodeId, UserSessionId, WarpgateError};
 
-use crate::{HttpSession, SessionApprovalRequest, TargetSession};
+use crate::TargetSession;
 
 /// A top level session object, one per protocol login.
 /// This is what WarpgateServerHandle corresponds to
@@ -16,7 +15,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: UserSessionId,
     pub username: Option<String>,
-    pub user_id: Option<Uuid>,
+    pub user_id: Option<UserId>,
     pub remote_address: String,
     pub started: OffsetDateTime,
     pub ended: Option<OffsetDateTime>,
@@ -51,13 +50,14 @@ impl Related<super::TargetSession::Entity> for Entity {
 
 impl ActiveModelBehavior for ActiveModel {}
 
-/// Audit events produced by a committed user-session termination.
+/// The target sessions that ended with a user session. After the commit the
+/// caller logs them and closes the session's approval requests
 #[must_use]
 pub struct EndedTargetSessions {
-    id: UserSessionId,
-    children: Vec<TargetSession::Model>,
-    user_id: Option<Uuid>,
-    username: Option<String>,
+    pub id: UserSessionId,
+    pub children: Vec<TargetSession::Model>,
+    pub user_id: Option<UserId>,
+    pub username: Option<String>,
 }
 
 impl EndedTargetSessions {
@@ -67,19 +67,6 @@ impl EndedTargetSessions {
             children: vec![],
             user_id: None,
             username: None,
-        }
-    }
-
-    /// Emit audit and close approvals
-    pub async fn settle(self, db: &DatabaseConnection) {
-        let id = self.id;
-        if let (Some(user_id), Some(username)) = (self.user_id, &self.username) {
-            for child in &self.children {
-                TargetSession::emit_ended_audit_event(child, user_id, username);
-            }
-        }
-        if let Err(error) = SessionApprovalRequest::abandon_requests_for_session(db, id).await {
-            error!(%error, %id, "Could not close the session's approval requests");
         }
     }
 }
@@ -94,7 +81,7 @@ pub async fn lock_for_update(
     id: UserSessionId,
 ) -> Result<Option<Model>, WarpgateError> {
     Entity::update_many()
-        .col_expr(Column::Started, Expr::col(Column::Started).into())
+        .col_expr(Column::Started, Expr::col(Column::Started))
         .filter(Column::Id.eq(id))
         .exec(transaction)
         .await?;
@@ -102,7 +89,7 @@ pub async fn lock_for_update(
 }
 
 /// Ends a locked user session and all of its target sessions in one
-/// transaction. The returned audit events must only be emitted after commit.
+/// transaction. The caller logs the result after the commit
 pub async fn mark_ended_in_transaction(
     transaction: &DatabaseTransaction,
     id: UserSessionId,
@@ -142,47 +129,4 @@ pub async fn mark_ended_in_transaction(
         user_id: parent.user_id,
         username: parent.username,
     })
-}
-
-pub async fn mark_ended_including_target_sessions(
-    db: &DatabaseConnection,
-    id: UserSessionId,
-) -> Result<(), WarpgateError> {
-    let transaction = db.begin().await?;
-    let ended = mark_ended_in_transaction(&transaction, id).await?;
-    transaction.commit().await?;
-    ended.settle(db).await;
-    Ok(())
-}
-
-/// The definite way to close a session
-pub async fn revoke(db: &DatabaseConnection, id: UserSessionId) -> Result<(), WarpgateError> {
-    let transaction = db.begin().await?;
-    let ended = mark_ended_in_transaction(&transaction, id).await?;
-    HttpSession::Entity::delete_many()
-        .filter(HttpSession::Column::UserSessionId.eq(id))
-        .exec(&transaction)
-        .await?;
-    transaction.commit().await?;
-    ended.settle(db).await;
-    Ok(())
-}
-
-pub async fn revoke_open_matching(
-    db: &DatabaseConnection,
-    filter: impl IntoCondition,
-) -> Result<(), WarpgateError> {
-    let open: Vec<Uuid> = Entity::find()
-        .filter(Column::Ended.is_null())
-        .filter(filter)
-        .select_only()
-        .column(Column::Id)
-        .into_tuple()
-        .all(db)
-        .await?;
-    for id in open {
-        // one at a time to emit audit events
-        revoke(db, UserSessionId(id)).await?;
-    }
-    Ok(())
 }

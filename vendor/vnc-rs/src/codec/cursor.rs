@@ -1,9 +1,8 @@
+use crate::{PixelFormat, Rect, VncError, VncEvent};
 use std::future::Future;
-
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use super::uninit_vec;
-use crate::{PixelFormat, Rect, VncError, VncEvent};
+use super::initialized_vec;
 
 pub struct Decoder {}
 
@@ -24,6 +23,16 @@ impl Decoder {
         F: Fn(VncEvent) -> Fut,
         Fut: Future<Output = Result<(), VncError>>,
     {
+        format.validate()?;
+        if rect.width != 0 && rect.height != 0 {
+            crate::limits::dimensions(rect.width, rect.height)?;
+        }
+        if rect.width == 0 || rect.height == 0 {
+            return output_func(VncEvent::SetCursor(*rect, Vec::new())).await;
+        }
+        if format.bits_per_pixel != 32 || format.true_color_flag == 0 {
+            return Err(VncError::WrongPixelFormat);
+        }
         let _hotx = rect.x;
         let _hoty = rect.y;
         let w = rect.width;
@@ -34,11 +43,11 @@ impl Decoder {
 
         let _bytes = pixels_length + mask_length;
 
-        let mut pixels = uninit_vec(pixels_length);
+        let mut pixels = initialized_vec(pixels_length);
         input.read_exact(&mut pixels).await?;
-        let mut mask = uninit_vec(mask_length);
+        let mut mask = initialized_vec(mask_length);
         input.read_exact(&mut mask).await?;
-        let mut image = uninit_vec(pixels_length);
+        let mut image = initialized_vec(pixels_length);
         let mut pix_idx = 0;
 
         let pixel_mask = ((format.red_max as u32) << format.red_shift)
@@ -50,7 +59,7 @@ impl Decoder {
             0xff_ff_00_ff => 2,
             0xff_00_ff_ff => 1,
             0x00_ff_ff_ff => 0,
-            _ => unreachable!(),
+            _ => return Err(VncError::WrongPixelFormat),
         };
         if format.big_endian_flag == 0 {
             alpha_idx = 3 - alpha_idx;

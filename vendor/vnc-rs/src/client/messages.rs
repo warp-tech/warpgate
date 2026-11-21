@@ -1,11 +1,5 @@
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-
 use crate::{PixelFormat, Rect, VncEncoding, VncError};
-
-/// Warpgate fork: cap the target-driven ServerCutText length before allocating. More
-/// lenient than the Warpgate VNC server's `MAX_CLIPBOARD_LEN` because this only bounds a
-/// recording tee, but still rejects a hostile multi-gigabyte U32 length. See PATCHES.md.
-const MAX_CUT_TEXT_LEN: usize = 1024 * 1024;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 #[derive(Debug)]
 pub(super) enum ClientMsg {
@@ -15,6 +9,8 @@ pub(super) enum ClientMsg {
     KeyEvent(u32, bool),
     PointerEvent(u16, u16, u8),
     ClientCutText(String),
+    #[cfg(not(target_arch = "wasm32"))]
+    SetDesktopSize(crate::DesktopLayout),
 }
 
 impl ClientMsg {
@@ -107,6 +103,27 @@ impl ClientMsg {
                 writer.write_all(&payload).await?;
                 Ok(())
             }
+            #[cfg(not(target_arch = "wasm32"))]
+            ClientMsg::SetDesktopSize(layout) => {
+                layout.validate()?;
+                let mut payload = vec![251, 0];
+                payload.extend_from_slice(&layout.width.to_be_bytes());
+                payload.extend_from_slice(&layout.height.to_be_bytes());
+                payload.extend_from_slice(&[layout.screens.len() as u8, 0]);
+                for screen in layout.screens {
+                    payload.extend_from_slice(&screen.id.to_be_bytes());
+                    payload.extend_from_slice(&screen.x.to_be_bytes());
+                    payload.extend_from_slice(&screen.y.to_be_bytes());
+                    payload.extend_from_slice(&screen.width.to_be_bytes());
+                    payload.extend_from_slice(&screen.height.to_be_bytes());
+                    payload.extend_from_slice(&screen.flags.to_be_bytes());
+                }
+                // Some servers release resize confirmations only with an outstanding
+                // update request. Keep it ordered with the resize and bounded to one pixel.
+                payload.extend_from_slice(&[3, 1, 0, 0, 0, 0, 0, 1, 0, 1]);
+                writer.write_all(&payload).await?;
+                Ok(())
+            }
             ClientMsg::ClientCutText(s) => {
                 //   +--------------+--------------+--------------+
                 //   | No. of bytes | Type [Value] | Description  |
@@ -129,8 +146,7 @@ impl ClientMsg {
 #[derive(Debug)]
 pub(super) enum ServerMsg {
     FramebufferUpdate(u16),
-    // Warpgate fork addition (see PATCHES.md): parsed-and-ignored instead of panicking.
-    SetColorMapEntries,
+    // SetColorMapEntries,
     Bell,
     ServerCutText(String),
 }
@@ -165,18 +181,8 @@ impl ServerMsg {
                 // | 1            |              | padding          |
                 // | 2            | U16          | first-color      |
                 // | 2            | U16          | number-of-colors |
-                // | n*6          | U16 array    | RGB colour value |
                 // +--------------+--------------+------------------+
-                // Warpgate fork change (see PATCHES.md): upstream panics here with
-                // `unimplemented!()`. Since Warpgate only records a decoded truecolor
-                // framebuffer, drain the palette body so a non-truecolor server doesn't
-                // crash the decode task, and ignore it upstream in the decode loop.
-                let _padding = reader.read_u8().await?;
-                let _first_color = reader.read_u16().await?;
-                let number_of_colors = reader.read_u16().await?;
-                let mut colors = vec![0_u8; number_of_colors as usize * 6];
-                reader.read_exact(&mut colors).await?;
-                Ok(ServerMsg::SetColorMapEntries)
+                Err(VncError::WrongServerMessage)
             }
             2 => {
                 // Bell
@@ -199,17 +205,8 @@ impl ServerMsg {
                 // +--------------+--------------+--------------+
                 let mut padding = [0; 3];
                 reader.read_exact(&mut padding).await?;
-                // Warpgate fork: cap the target-driven length before allocating. See PATCHES.md.
-                let len = reader.read_u32().await? as usize;
-                if len > MAX_CUT_TEXT_LEN {
-                    return Err(VncError::General(format!(
-                        "ServerCutText too long ({len} bytes)"
-                    )));
-                }
-                let mut buffer_str = vec![0; len];
-                reader.read_exact(&mut buffer_str).await?;
                 Ok(Self::ServerCutText(
-                    String::from_utf8_lossy(&buffer_str).to_string(),
+                    crate::limits::string(reader, crate::limits::MAX_TEXT).await?,
                 ))
             }
             _ => Err(VncError::WrongServerMessage),

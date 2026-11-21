@@ -3,15 +3,15 @@ use std::time::Duration;
 use sea_orm::DatabaseConnection;
 use sea_orm::sea_query::IntoCondition;
 use time::OffsetDateTime;
-use tracing::{info, warn};
+use tracing::warn;
 use warpgate_common::auth::ApprovalKind;
-use warpgate_common::helpers::logging::format_related_ids;
 use warpgate_common::{NodeId, UserSessionId, WarpgateError};
 use warpgate_db_entities::SessionApprovalRequest::{
     self, Advertised, ApprovalActor, close_request, mark_consumed, upsert_request,
 };
 
 use super::*;
+use crate::logging::AuditEvent;
 
 // An "owning" close-on-drop guard for an approval
 pub(super) struct PendingApproval {
@@ -124,6 +124,55 @@ pub(super) fn row_state(row: &SessionApprovalRequest::Model) -> Result<RowState,
     Ok(RowState::Decided(decision))
 }
 
+pub(super) async fn find_row(
+    db: &DatabaseConnection,
+    session_id: UserSessionId,
+    kind: ApprovalKind,
+    target: &str,
+) -> Result<Option<SessionApprovalRequest::Model>, WarpgateError> {
+    Ok(SessionApprovalRequest::Entity::find()
+        .filter(SessionApprovalRequest::Key::new(session_id, kind, target).into_condition())
+        .one(db)
+        .await?)
+}
+
+/// The decision recorded on the row, if there is one
+pub(super) async fn row_decision(
+    db: &DatabaseConnection,
+    session_id: UserSessionId,
+    kind: ApprovalKind,
+    target: &str,
+) -> Result<Option<ApprovalDecision>, WarpgateError> {
+    let Some(row) = find_row(db, session_id, kind, target).await? else {
+        return Ok(None);
+    };
+    Ok(match row_state(&row)? {
+        RowState::Decided(decision) => Some(decision),
+        RowState::Pending | RowState::Ended => None,
+    })
+}
+
+/// Close the request as timed out. Returns whether this close is what ended
+/// it, in which case the timeout is also audited; `false` means a decision or
+/// another close got there first.
+pub(super) async fn close_timed_out(
+    db: &DatabaseConnection,
+    subject: &ApprovalSubject,
+) -> Result<bool, WarpgateError> {
+    let closed = close_request(
+        db,
+        subject.session_id,
+        ApprovalKind::Admin,
+        &subject.target_name,
+        SessionApprovalRequest::UndecidedApprovalRequestStatus::TimedOut,
+    )
+    .await?;
+    if closed {
+        subject.emit_timed_out_event();
+    }
+    Ok(closed)
+}
+
 pub(super) async fn await_row_decision(
     db: &DatabaseConnection,
     session_id: UserSessionId,
@@ -139,9 +188,7 @@ pub(super) async fn await_row_decision(
             () = tokio::time::sleep_until(deadline) => return Ok(DecisionWaitOutcome::TimedOut),
             // The first tick is immediate
             _ = ticker.tick() => {
-                match SessionApprovalRequest::Entity::find().filter(
-                    SessionApprovalRequest::Key::new(session_id, kind, target).into_condition()
-                ).one(db).await {
+                match find_row(db, session_id, kind, target).await {
                     Ok(Some(row)) => match row_state(&row)? {
                         RowState::Pending => {}
                         RowState::Decided(decision) => {
@@ -177,9 +224,7 @@ pub async fn record_decision(
         ApprovalDecision::Rejected => (ApprovalRequestStatus::Rejected, None),
     };
 
-    let Some(row) = SessionApprovalRequest::Entity::find()
-        .filter(SessionApprovalRequest::Key::new(session_id, kind, target).into_condition())
-        .one(db)
+    let Some(row) = find_row(db, session_id, kind, target)
         .await?
         .filter(|row| row.status == ApprovalRequestStatus::Pending)
     else {
@@ -204,26 +249,20 @@ pub(super) fn emit_resolved_event(
     actor: &ApprovalActor,
     approved: bool,
 ) {
-    // A user approving their own session is both parties — don't list twice.
-    let mut related = vec![row.user_id];
-
-    if actor.user_id != row.user_id {
-        related.push(actor.user_id);
+    AuditEvent::SessionApprovalResolved {
+        session_id: row.session_id,
+        client_ip: row
+            .remote_address
+            .clone()
+            .unwrap_or_else(|| "<unknown>".into()),
+        user_id: row.user_id,
+        username: row.username.clone(),
+        protocol: row.protocol.clone(),
+        target_name: row.target.clone(),
+        kind: row.kind,
+        resolved_by: actor.username.clone().unwrap_or_else(|| "<unknown>".into()),
+        resolved_by_user_id: actor.user_id,
+        approved,
     }
-
-    info!(
-        target: "audit",
-        _type = "SessionApprovalResolved1",
-        session = %row.session_id,
-        client_ip = %row.remote_address.as_deref().unwrap_or("<unknown>"),
-        user_id = %row.user_id,
-        username = %row.username,
-        protocol = %row.protocol,
-        target = %row.target,
-        kind = ?row.kind,
-        resolved_by = %actor.username.clone().unwrap_or("<unknown>".into()),
-        approved = approved,
-        related_users = %format_related_ids(&related),
-        "Session approval resolved",
-    );
+    .emit();
 }

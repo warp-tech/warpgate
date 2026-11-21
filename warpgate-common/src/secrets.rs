@@ -179,6 +179,15 @@ impl fmt::Display for SecretRef {
     }
 }
 
+fn is_valid_kv_segment(seg: &str) -> bool {
+    !seg.is_empty()
+        && seg != "."
+        && seg != ".."
+        && !seg
+            .chars()
+            .any(|c| c.is_control() || matches!(c, '\\' | '?' | '%' | '#'))
+}
+
 impl FromStr for SecretRef {
     type Err = SecretError;
 
@@ -190,7 +199,10 @@ impl FromStr for SecretRef {
 
         let (kv_path, field) = rest.split_once('#').ok_or_else(invalid)?;
         let (mount, path) = kv_path.split_once('/').ok_or_else(invalid)?;
-        if mount.is_empty() || path.is_empty() || field.is_empty() {
+        if !is_valid_kv_segment(mount)
+            || !path.split('/').all(is_valid_kv_segment)
+            || field.is_empty()
+        {
             return Err(invalid());
         }
 
@@ -245,6 +257,13 @@ impl MaybeSecretRef {
         matches!(self, Self::Inline(_))
     }
 
+    pub const fn as_inline(&self) -> Option<&StoredSecret> {
+        match self {
+            Self::Inline(v) => Some(v),
+            Self::Reference(_) | Self::Malformed(_) => None,
+        }
+    }
+
     pub const fn inline_mut(&mut self) -> Option<&mut StoredSecret> {
         match self {
             Self::Inline(v) => Some(v),
@@ -267,7 +286,7 @@ impl MaybeSecretRef {
     /// An already stored value. Unlike [`Self::from_str`], a malformed
     /// reference is kept as [MaybeSecretRef::Malformed]
     pub fn from_stored(s: String) -> Self {
-        Self::from_str(&s).unwrap_or_else(|_| Self::Malformed(s))
+        Self::from_str(&s).unwrap_or(Self::Malformed(s))
     }
 
     fn as_string(&self) -> String {
@@ -367,6 +386,19 @@ impl<'de> Deserialize<'de> for MaybeSecretRef {
 impl Serialize for MaybeSecretRef {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         self.as_string().serialize(s)
+    }
+}
+
+impl schemars::JsonSchema for MaybeSecretRef {
+    fn schema_name() -> Cow<'static, str> {
+        "MaybeSecretRef".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "description": "A literal value, or a reference to one: secret://backend/mount/path#field",
+        })
     }
 }
 
@@ -513,6 +545,15 @@ mod tests {
             "secret://vault-prod/secret",
             "secret://vault-prod/secret/",
             "secret://vault-prod//myapp#password",
+            "secret://vault-prod/secret//myapp#password",
+            "secret://vault-prod/secret/myapp/#password",
+            "secret://vault-prod/secret/./myapp#password",
+            "secret://vault-prod/secret/../myapp#password",
+            "secret://vault-prod/secret/warpgate/../../other#password",
+            "secret://vault-prod/../secret/myapp#password",
+            "secret://vault-prod/secret/my%2fapp#password",
+            "secret://vault-prod/secret/myapp?version=1#password",
+            "secret://vault-prod/secret/my\\app#password",
             "secret://vault-prod/secret/myapp",
             "secret://vault-prod/secret/myapp#",
             "vault://vault-prod/secret/myapp",

@@ -1,16 +1,12 @@
 use std::net::IpAddr;
 use std::sync::Arc;
 
-use sea_orm::sea_query::IntoCondition;
-use sea_orm::{EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
 use tracing::warn;
 use warpgate_common::auth::{ApprovalKind, RememberApprovalBy};
 use warpgate_common::{UserSessionId, WarpgateError};
 use warpgate_db_entities::SessionApprovalRequest;
-use warpgate_db_entities::SessionApprovalRequest::{
-    Advertised, UndecidedApprovalRequestStatus, close_request, mark_consumed,
-};
+use warpgate_db_entities::SessionApprovalRequest::{Advertised, mark_consumed};
 
 use super::*;
 use crate::cluster::ClusterNotification;
@@ -20,6 +16,7 @@ use crate::services::Services;
 use crate::{TargetSessionStart, WarpgateServerHandle};
 
 #[must_use]
+#[allow(clippy::large_enum_variant)]
 pub enum GateOutcome<O = warpgate_common::TargetOptions> {
     Approved(ApprovedTarget<O>),
     Refused,
@@ -38,6 +35,7 @@ impl<O> GateOutcome<O> {
 
 /// Current state of an approval gate
 #[must_use]
+#[allow(clippy::large_enum_variant)]
 pub enum PolledGate<O = warpgate_common::TargetOptions> {
     Approved(ApprovedTarget<O>),
     Refused,
@@ -72,6 +70,7 @@ impl GatedConnection {
 }
 
 #[must_use]
+#[allow(clippy::large_enum_variant)]
 pub enum Admission<O = warpgate_common::TargetOptions> {
     Admitted(AdmittedTarget<O>),
     Refused,
@@ -199,9 +198,29 @@ impl Services {
                 decision
             }
             DecisionWaitOutcome::TimedOut => {
+                // `Expired` ends the session, so the question is closed before
+                // returning rather than by the guard's drop task: a row left
+                // pending past this point could still be approved with nobody
+                // waiting on it.
                 guard.timed_out();
-                subject.emit_timed_out_event();
-                return Ok(GateOutcome::Expired);
+                if close_timed_out(&self.db, &subject).await? {
+                    return Ok(GateOutcome::Expired);
+                }
+                // A decision landed between the last poll and the close
+                match row_decision(
+                    &self.db,
+                    session_id,
+                    ApprovalKind::Admin,
+                    &subject.target_name,
+                )
+                .await?
+                {
+                    Some(decision) => {
+                        guard.decided();
+                        decision
+                    }
+                    None => return Ok(GateOutcome::Expired),
+                }
             }
             DecisionWaitOutcome::Ended => return Ok(GateOutcome::Expired),
         };
@@ -251,11 +270,14 @@ impl Services {
             ApprovalKind::Admin,
             &subject.target_name,
         );
-        let row = SessionApprovalRequest::Entity::find()
-            .filter(key.clone().into_condition())
-            .one(&self.db)
-            .await?;
-        let Some(row) = row else {
+        let Some(row) = find_row(
+            &self.db,
+            subject.session_id,
+            ApprovalKind::Admin,
+            &subject.target_name,
+        )
+        .await?
+        else {
             // A fresh question is paid for by the use taken at authentication,
             // so this cannot come back exhausted; matched anyway so the enum
             // stays honest.
@@ -278,17 +300,7 @@ impl Services {
                 #[allow(clippy::cast_possible_wrap)]
                 let window = time::Duration::seconds(timeout.as_secs() as i64);
                 if time::OffsetDateTime::now_utc() - row.started >= window {
-                    if close_request(
-                        &self.db,
-                        subject.session_id,
-                        ApprovalKind::Admin,
-                        &subject.target_name,
-                        UndecidedApprovalRequestStatus::TimedOut,
-                    )
-                    .await?
-                    {
-                        subject.emit_timed_out_event();
-                    }
+                    close_timed_out(&self.db, &subject).await?;
                     if matches!(
                         self.announce_admin_request(&subject).await?,
                         Advertised::TicketExhausted

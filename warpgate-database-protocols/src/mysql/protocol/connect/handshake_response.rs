@@ -85,18 +85,18 @@ impl Encode<'_, Capabilities> for HandshakeResponse {
 
 impl Decode<'_, &mut Capabilities> for HandshakeResponse {
     fn decode_with(mut buf: Bytes, server_capabilities: &mut Capabilities) -> Result<Self, Error> {
-        let mut capabilities = buf.get_u32_le() as u64;
-        let max_packet_size = buf.get_u32_le();
-        let collation = buf.get_u8();
-        buf.advance(19);
+        let mut capabilities = buf.try_get_u32_le()? as u64;
+        let max_packet_size = buf.try_get_u32_le()?;
+        let collation = buf.try_get_u8()?;
+        buf.skip(19)?;
 
         let partial_cap = Capabilities::from_bits_truncate(capabilities);
 
         if partial_cap.contains(Capabilities::MYSQL) {
             // reserved: string<4>
-            buf.advance(4);
+            buf.skip(4)?;
         } else {
-            capabilities += (buf.get_u32_le() as u64) << 32;
+            capabilities += (buf.try_get_u32_le()? as u64) << 32;
         }
 
         let partial_cap = Capabilities::from_bits_truncate(capabilities);
@@ -113,10 +113,10 @@ impl Decode<'_, &mut Capabilities> for HandshakeResponse {
         let username = buf.get_str_nul()?;
 
         let auth_response = if partial_cap.contains(Capabilities::PLUGIN_AUTH_LENENC_DATA) {
-            Some(buf.get_bytes_lenenc())
+            Some(buf.get_bytes_lenenc()?)
         } else if partial_cap.contains(Capabilities::SECURE_CONNECTION) {
-            let len = buf.get_u8();
-            Some(buf.get_bytes(len as usize))
+            let len = buf.try_get_u8()?;
+            Some(buf.get_bytes(len as usize)?)
         } else {
             Some(buf.get_bytes_nul()?)
         };

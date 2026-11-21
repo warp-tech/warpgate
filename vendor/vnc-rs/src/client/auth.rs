@@ -1,29 +1,6 @@
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-
 use super::security;
 use crate::{VncError, VncVersion};
-
-/// Warpgate fork: cap for RFB failure-reason strings. Comparable to the Warpgate VNC
-/// server's `MAX_STRING_LEN`. See PATCHES.md.
-const MAX_REASON_LEN: usize = 4096;
-
-/// Warpgate fork: read a U32-length-prefixed RFB failure-reason string, rejecting an
-/// over-`MAX_REASON_LEN` length before allocating. Upstream read these with
-/// `read_to_string` (to EOF), letting a hostile target stream forever. See PATCHES.md.
-pub(super) async fn read_reason_string<S>(reader: &mut S) -> Result<String, VncError>
-where
-    S: AsyncRead + Unpin,
-{
-    let len = reader.read_u32().await? as usize;
-    if len > MAX_REASON_LEN {
-        return Err(VncError::General(format!(
-            "VNC failure reason too long ({len} bytes)"
-        )));
-    }
-    let mut buf = vec![0u8; len];
-    reader.read_exact(&mut buf).await?;
-    Ok(String::from_utf8_lossy(&buf).into_owned())
-}
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,15 +18,26 @@ pub(super) enum SecurityType {
     GtkVncSasl = 20,
     Md5Hash = 21,
     ColinDeanXvp = 22,
+    AppleArd = 30,
 }
 
 impl TryFrom<u8> for SecurityType {
     type Error = VncError;
     fn try_from(num: u8) -> Result<Self, Self::Error> {
         match num {
-            0 | 1 | 2 | 5 | 6 | 16 | 17 | 18 | 19 | 20 | 21 | 22 => {
-                Ok(unsafe { std::mem::transmute::<u8, SecurityType>(num) })
-            }
+            0 => Ok(Self::Invalid),
+            1 => Ok(Self::None),
+            2 => Ok(Self::VncAuth),
+            5 => Ok(Self::RA2),
+            6 => Ok(Self::RA2ne),
+            16 => Ok(Self::Tight),
+            17 => Ok(Self::Ultra),
+            18 => Ok(Self::Tls),
+            19 => Ok(Self::VeNCrypt),
+            20 => Ok(Self::GtkVncSasl),
+            21 => Ok(Self::Md5Hash),
+            22 => Ok(Self::ColinDeanXvp),
+            30 => Ok(Self::AppleArd),
             invalid => Err(VncError::InvalidSecurityTyep(invalid)),
         }
     }
@@ -69,9 +57,13 @@ impl SecurityType {
         match version {
             VncVersion::RFB33 => {
                 let security_type = reader.read_u32().await?;
+                if security_type > 2 {
+                    return Err(VncError::ConnectError);
+                }
                 let security_type = (security_type as u8).try_into()?;
                 if let SecurityType::Invalid = security_type {
-                    return Err(VncError::General(read_reason_string(reader).await?));
+                    let err_msg = crate::limits::string(reader, crate::limits::MAX_NAME).await?;
+                    return Err(VncError::General(err_msg));
                 }
                 Ok(vec![security_type])
             }
@@ -86,11 +78,15 @@ impl SecurityType {
                 let num = reader.read_u8().await?;
 
                 if num == 0 {
-                    return Err(VncError::General(read_reason_string(reader).await?));
+                    let err_msg = crate::limits::string(reader, crate::limits::MAX_NAME).await?;
+                    return Err(VncError::General(err_msg));
                 }
                 let mut sec_types = vec![];
                 for _ in 0..num {
-                    sec_types.push(reader.read_u8().await?.try_into()?);
+                    // Ignore unfamiliar advertised mechanisms; only choose a known one.
+                    if let Ok(kind) = reader.read_u8().await?.try_into() {
+                        sec_types.push(kind);
+                    }
                 }
                 tracing::trace!("Server supported security type: {:?}", sec_types);
                 Ok(sec_types)
@@ -114,17 +110,15 @@ pub(super) enum AuthResult {
     Failed = 1,
 }
 
-// Warpgate fork: the SecurityResult word comes straight off an untrusted target socket.
-// Upstream `transmute`d any u32 into this 2-variant enum — instant UB for values != 0/1.
-// Validate with a plain match instead. See PATCHES.md.
 impl TryFrom<u32> for AuthResult {
     type Error = VncError;
+
     fn try_from(num: u32) -> Result<Self, Self::Error> {
         match num {
-            0 => Ok(AuthResult::Ok),
-            1 => Ok(AuthResult::Failed),
-            other => Err(VncError::General(format!(
-                "Unknown VNC SecurityResult value: {other}"
+            0 => Ok(Self::Ok),
+            1 => Ok(Self::Failed),
+            _ => Err(VncError::General(format!(
+                "Unknown authentication result: {num}"
             ))),
         }
     }
@@ -189,28 +183,78 @@ impl AuthHelper {
 mod tests {
     use super::*;
 
-    #[test]
-    fn auth_result_try_from_validates() {
-        assert!(matches!(AuthResult::try_from(0), Ok(AuthResult::Ok)));
-        assert!(matches!(AuthResult::try_from(1), Ok(AuthResult::Failed)));
-        assert!(AuthResult::try_from(2).is_err());
-        assert!(AuthResult::try_from(u32::MAX).is_err());
+    #[tokio::test]
+    async fn authentication_result_is_checked() {
+        for status in [0_u32, 1, 2, 256, u32::MAX] {
+            let (mut server, mut client) = tokio::io::duplex(4);
+            server.write_all(&status.to_be_bytes()).await.unwrap();
+            let auth = AuthHelper {
+                challenge: [0; 16],
+                key: [0; 8],
+            };
+
+            let result = auth.finish(&mut client).await;
+            match status {
+                0 => assert!(matches!(result, Ok(AuthResult::Ok))),
+                1 => assert!(matches!(result, Ok(AuthResult::Failed))),
+                _ => assert!(matches!(result, Err(VncError::General(_)))),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod negotiation_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn security_values_are_not_narrowed_and_unknown_offers_are_skipped() {
+        for value in [3_u32, 257, 258, u32::MAX] {
+            assert!(
+                SecurityType::read(&mut value.to_be_bytes().as_slice(), &VncVersion::RFB33)
+                    .await
+                    .is_err()
+            );
+        }
+        let mut offers = &[3, 250, 2, 1][..];
+        assert_eq!(
+            SecurityType::read(&mut offers, &VncVersion::RFB38)
+                .await
+                .unwrap(),
+            vec![SecurityType::VncAuth, SecurityType::None]
+        );
+        assert!(offers.is_empty());
+        let mut unknown = &[1, 250][..];
+        assert!(SecurityType::read(&mut unknown, &VncVersion::RFB38)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
-    async fn read_reason_string_rejects_over_cap() {
-        let buf = u32::MAX.to_be_bytes();
-        let mut reader: &[u8] = &buf;
-        assert!(read_reason_string(&mut reader).await.is_err());
-    }
-
-    #[tokio::test]
-    async fn read_reason_string_reads_in_cap() {
-        let mut data = Vec::new();
-        data.extend_from_slice(&5u32.to_be_bytes());
-        data.extend_from_slice(b"hello");
-        let mut reader: &[u8] = &data;
-        let s = read_reason_string(&mut reader).await.unwrap();
-        assert_eq!(s, "hello");
+    async fn failure_reason_uses_its_length_and_rejects_oversized_payloads() {
+        for version in [VncVersion::RFB33, VncVersion::RFB37, VncVersion::RFB38] {
+            let mut bytes = if version == VncVersion::RFB33 {
+                vec![0; 4]
+            } else {
+                vec![0]
+            };
+            bytes.extend(2_u32.to_be_bytes());
+            bytes.extend(b"noNEXT");
+            let mut input = bytes.as_slice();
+            assert!(matches!(SecurityType::read(&mut input, &version).await,
+                Err(VncError::General(reason)) if reason == "no"));
+            assert_eq!(input, b"NEXT");
+            let mut bytes = if version == VncVersion::RFB33 {
+                vec![0; 4]
+            } else {
+                vec![0]
+            };
+            bytes.extend(u32::MAX.to_be_bytes());
+            assert!(matches!(
+                SecurityType::read(&mut bytes.as_slice(), &version).await,
+                Err(VncError::General(_))
+            ));
+        }
     }
 }

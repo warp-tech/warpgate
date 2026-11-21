@@ -133,9 +133,9 @@ export function makeTargetURL(opt: ConnectionOptions): string {
     const host = `${opt.targetExternalHost ?? protocolHost(opt, 'http')}:${protocolPort(opt, 'http') ?? 443}`
 
     if (opt.ticketSecret) {
-        return `${location.protocol}//${host}/?warpgate-ticket=${opt.ticketSecret}`
+        return `${location.protocol}//${host}/?warpgate-ticket=${encodeURIComponent(opt.ticketSecret)}`
     }
-    return `${location.protocol}//${host}/?warpgate-target=${opt.targetName}`
+    return `${location.protocol}//${host}/?warpgate-target=${encodeURIComponent(opt.targetName ?? '')}`
 }
 
 export const possibleCredentials: Record<string, Set<CredentialKind>> = {
@@ -267,7 +267,9 @@ export function makeOidcKubeconfig(opt: ConnectionOptions): string {
     for (const s of scopes) {
         args.push(`--oidc-extra-scope=${s}`)
     }
-    const argsYaml = args.map(a => `          - ${a}`).join('\n')
+    const argsYaml = args
+        .map(a => `          - ${JSON.stringify(a)}`)
+        .join('\n')
     return `apiVersion: v1
 kind: Config
 clusters:
@@ -278,7 +280,7 @@ clusters:
 contexts:
 - context:
     cluster: ${JSON.stringify(`warpgate-${opt.targetName ?? 'target'}`)}
-    namespace: ${namespace}
+    namespace: ${JSON.stringify(namespace)}
     user: ${JSON.stringify(context)}
   name: ${JSON.stringify(context)}
 current-context: ${JSON.stringify(context)}

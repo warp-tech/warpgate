@@ -192,8 +192,15 @@ E485B576625E7EC6F44C42E9A63A3620FFFFFFFFFFFFFFFF";
             .await
             .context("reading Apple DH client key")?;
 
+        // Reject degenerate Diffie-Hellman public keys outside (1, p - 1).
+        let client_pub_uint = BigUint::from_bytes_be(&client_pub);
+        let one = BigUint::from(1u8);
+        if client_pub_uint <= one || client_pub_uint >= &prime - &one {
+            bail!("invalid Apple DH client public key");
+        }
+
         // Shared secret -> AES-128 key = MD5(shared secret), both as key_len big-endian.
-        let shared = BigUint::from_bytes_be(&client_pub).modpow(&server_private, &prime);
+        let shared = client_pub_uint.modpow(&server_private, &prime);
         let aes_key = md5_16(&left_pad(&shared.to_bytes_be(), key_len));
 
         // Decrypt: username in [0..64], password in [64..128], each NUL-terminated.
@@ -218,9 +225,8 @@ E485B576625E7EC6F44C42E9A63A3620FFFFFFFFFFFFFFFF";
     /// Decode a fixed-width NUL-terminated C string field. A field with no NUL terminator
     /// (i.e. one that fills the whole width) is malformed — reject it rather than guess.
     fn cstr(bytes: &[u8]) -> Option<String> {
-        let end = bytes.iter().position(|&b| b == 0)?;
-        #[allow(clippy::indexing_slicing, reason = "checked")]
-        Some(String::from_utf8_lossy(&bytes[..end]).into_owned())
+        let (text, _) = bytes.split_once(|&b| b == 0)?;
+        Some(String::from_utf8_lossy(text).into_owned())
     }
 
     fn md5_16(data: &[u8]) -> [u8; 16] {
@@ -262,8 +268,8 @@ where
     let mut pass = vec![0u8; pass_len];
     stream.read_exact(&mut pass).await?;
     Ok((
-        String::from_utf8_lossy(&user).into_owned(),
-        String::from_utf8_lossy(&pass).into_owned(),
+        String::from_utf8_lossy_owned(user),
+        String::from_utf8_lossy_owned(pass),
     ))
 }
 

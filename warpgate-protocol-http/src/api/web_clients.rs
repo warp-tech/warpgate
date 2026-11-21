@@ -8,11 +8,10 @@ use poem::session::Session;
 use poem::{Request, Response};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object};
-use uuid::Uuid;
 use warpgate_admin::api::cluster_proxy::{
     ReparseForwardedResponse, forwarded_error, parse_forwarded_body, proxy_or_serve,
 };
-use warpgate_common::{UserSessionId, WarpgateError};
+use warpgate_common::{TargetId, UserSessionId, WarpgateError};
 use warpgate_core::TargetAuthorization;
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_web_clients_common::{
@@ -69,7 +68,7 @@ pub enum DeleteWebClientSessionResponse {
 pub async fn create_web_client_session<F, Fut>(
     ctx: &AuthedSession,
     session: &Session,
-    target_id: Uuid,
+    target_id: TargetId,
     start: F,
 ) -> poem::Result<CreateWebClientSessionResponse>
 where
@@ -107,10 +106,10 @@ where
 {
     let owner = web_client_session_owner(ctx, session_id).await?;
     proxy_or_serve(ctx, req, owner, None::<&()>, || async {
-        match manager
-            .lookup_user_session(session_id, ctx.auth.user_id())
-            .await
-        {
+        let Some(user) = ctx.auth.as_full_user() else {
+            return Ok(GetWebClientSessionResponse::NotFound);
+        };
+        match manager.lookup_user_session(session_id, &user).await {
             Some(session) => Ok(GetWebClientSessionResponse::Ok(Json(
                 WebClientSessionInfo {
                     target_name: session.target_name().into(),
@@ -131,8 +130,11 @@ pub async fn delete_web_client_session<S: ManagedSession>(
 ) -> poem::Result<DeleteWebClientSessionResponse> {
     let owner = web_client_session_owner(ctx, session_id).await?;
     proxy_or_serve(ctx, req, owner, None::<&()>, || async {
+        let Some(user) = ctx.auth.as_full_user() else {
+            return Ok(DeleteWebClientSessionResponse::NotFound);
+        };
         if manager
-            .lookup_user_session(session_id, ctx.auth.user_id())
+            .lookup_user_session(session_id, &user)
             .await
             .is_none()
         {

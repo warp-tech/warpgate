@@ -61,9 +61,7 @@
             </FormGroup>
 
             <Loadable promise={api.getSsoProviders()}>
-                {#snippet children(
-                    providers,
-                )}
+                {#snippet children(providers)}
                     {#if !providers.length}
                         <Alert color="warning">
                             You don't have any SSO providers configured. Add
@@ -93,7 +91,7 @@
                 Save
             </Button>
 
-            <Button class="modal-button" color="danger" on:click={_cancel}>
+            <Button class="modal-button" color="secondary" on:click={_cancel}>
                 Cancel
             </Button>
         </ModalFooter>

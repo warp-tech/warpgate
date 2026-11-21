@@ -117,23 +117,20 @@ pub enum DesktopEvent {
         src_x: u16,
         src_y: u16,
     },
-    /// The mouse cursor shape changed (BGRA pixels for `rect`).
+    /// The mouse cursor shape changed (BGRA pixels, top row first, for `rect`). As in RFB,
+    /// `rect.x` and `rect.y` are the hotspot rather than a position.
     Cursor { rect: DesktopRect, data: Bytes },
+    /// The mouse cursor reverted to the viewer's own default arrow.
+    CursorDefault,
+    /// The mouse cursor was hidden.
+    CursorHidden,
     /// The remote clipboard contents changed.
     Clipboard(String),
     /// The remote rang the bell.
     Bell,
-    /// A non-fatal error message.
-    Error(String),
-}
-
-impl DesktopEvent {
-    pub fn backend_error(error: &DesktopConnectionError) -> Self {
-        Self::Error(format!(
-            "Target connection failed: {}",
-            error.user_facing_reason()
-        ))
-    }
+    /// The backend failed. Its `Display` may name server-side details, so a viewer is only
+    /// ever shown the [`UserFacingReason`].
+    Error(Arc<DesktopConnectionError>),
 }
 
 /// Deadline for the TCP connect to a desktop target.
@@ -256,37 +253,21 @@ mod tests {
         assert!(!LogonState::logged_on().still_at_logon_screen());
     }
 
-    fn shown(error: &DesktopConnectionError) -> String {
-        match DesktopEvent::backend_error(error) {
-            DesktopEvent::Error(message) => message,
-            other => format!("{other:?}"),
-        }
-    }
-
     #[test]
-    fn backend_error_shows_a_reason_not_the_error_text() {
+    fn user_facing_reason_is_not_the_error_text() {
         let secret = WarpgateError::from(warpgate_common::SecretError::Backend(
             "permission denied on kv/app#token".into(),
         ));
         let error = DesktopConnectionError::from(secret);
         assert!(error.to_string().contains("kv/app"));
-        assert_eq!(
-            shown(&error),
-            "Target connection failed: Secret backend error"
-        );
+        assert_eq!(error.user_facing_reason(), "Secret backend error");
 
         let error = DesktopConnectionError::Io(std::io::ErrorKind::ConnectionRefused.into());
-        assert_eq!(
-            shown(&error),
-            "Target connection failed: Target refused the connection"
-        );
+        assert_eq!(error.user_facing_reason(), "Target refused the connection");
 
         let error = DesktopConnectionError::Session(
             anyhow::anyhow!("vault said: kv/app#token").context("reading PDU"),
         );
-        assert_eq!(
-            shown(&error),
-            "Target connection failed: The target session failed"
-        );
+        assert_eq!(error.user_facing_reason(), "The target session failed");
     }
 }

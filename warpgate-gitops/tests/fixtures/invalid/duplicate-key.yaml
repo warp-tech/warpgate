@@ -1,0 +1,3 @@
+apiVersion: warpgate/v1
+kind: Role
+kind: Target

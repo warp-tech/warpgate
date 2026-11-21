@@ -24,4 +24,8 @@ impl Model {
     pub fn key_openssh(&self) -> String {
         format!("{} {}", self.key_type, self.key_base64)
     }
+
+    pub fn address(&self) -> String {
+        format!("{}:{}", self.host, self.port)
+    }
 }

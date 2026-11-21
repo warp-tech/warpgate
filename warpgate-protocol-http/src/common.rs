@@ -20,17 +20,20 @@ use warpgate_common::auth::{AuthResult, AuthState, AuthStateUserInfo, Credential
 use warpgate_common::helpers::username::username_eq_ci;
 use warpgate_common::{Protocol, UserSessionId, WarpgateError};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
+pub use warpgate_common_http::auth::is_localhost_host;
 use warpgate_common_http::ext::{construct_external_url, is_navigation_request};
 use warpgate_common_http::logging::get_client_ip_addr;
 use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
-    X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_TOKEN, is_cluster_peer_request,
+    X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_IDENTITY_TOKEN, X_WARPGATE_TOKEN,
+    is_cluster_peer_request,
 };
 use warpgate_core::{ConfigProvider, vet_credential_bearer};
 use warpgate_db_entities::User;
 use warpgate_sso::WarpgateIdToken;
 
 use crate::middleware::{assert_mfa_setup_gate, is_session_bootstrap_path, warpgate_surface_path};
+use crate::path_matcher::endpoint_pattern_matches;
 use crate::session::SessionStore;
 use crate::session_storage::SharedSessionStorage;
 
@@ -88,11 +91,6 @@ impl SessionRotation {
     }
 }
 
-/// Check if a host is localhost or 127.x.x.x (for development/testing scenarios)
-pub fn is_localhost_host(host: &str) -> bool {
-    host == "localhost" || host == "127.0.0.1" || host.starts_with("127.")
-}
-
 pub fn host_is_subdomain_of_or_equal(host: &str, base_domain: &str) -> bool {
     let base = base_domain.trim_start_matches('.');
     host == base || host.ends_with(&format!(".{base}"))
@@ -107,7 +105,7 @@ fn session_host_is_authorized(request_host: Option<&str>, base_host: &str) -> bo
         return false;
     };
     host_is_subdomain_of_or_equal(host, base_host)
-        || (is_localhost_host(host) && base_host != "localhost" && base_host != "127.0.0.1")
+        || (is_localhost_host(host) && !is_localhost_host(base_host))
 }
 
 /// Whether a state-changing (or WebSocket) request to Warpgate's own endpoints
@@ -462,8 +460,9 @@ pub async fn authorize_session(
 
 /// Authorization for a request from an authenticated cluster peer. The proxying
 /// node forwards the acting user's id in `x-warpgate-cluster-identity` (see
-/// `cluster_proxy::proxy_or_serve`), so the request runs here as that user;
-/// without the header the peer acts as a bare cluster peer. An id that no
+/// `cluster_proxy::proxy_or_serve`), so the request runs here as that user.
+/// `x-warpgate-cluster-identity-token` marks that user as token-authenticated.
+/// Without the identity header the peer acts as a bare cluster peer. An id that no
 /// longer resolves to a user fails closed (unauthenticated).
 async fn cluster_request_authorization(
     ctx: &UnauthenticatedRequestContext,
@@ -475,15 +474,25 @@ async fn cluster_request_authorization(
     let Some(user_id) = header.to_str().ok().and_then(|s| s.parse::<Uuid>().ok()) else {
         return Ok(None);
     };
-    Ok(User::Entity::find_by_id(user_id)
+    Ok(User::Entity::find_by_id(warpgate_common::UserId(user_id))
         .one(&ctx.services().db)
         .await
         .map_err(poem::error::InternalServerError)?
         .map(|user| {
-            RequestAuthorization::Session(SessionAuthorization::User {
-                user_id: user.id,
-                username: user.username,
-            })
+            if req
+                .headers()
+                .contains_key(&X_WARPGATE_CLUSTER_IDENTITY_TOKEN)
+            {
+                RequestAuthorization::UserToken {
+                    user_id: user.id,
+                    username: user.username,
+                }
+            } else {
+                RequestAuthorization::Session(SessionAuthorization::User {
+                    user_id: user.id,
+                    username: user.username,
+                })
+            }
         }))
 }
 
@@ -511,9 +520,10 @@ async fn user_for_api_token(
         return Ok(None);
     }
 
-    let Some(user) = services.config_provider.validate_api_token(token).await? else {
+    let Some(token) = services.config_provider.validate_api_token(token).await? else {
         return Ok(None);
     };
+    let user = token.user;
 
     if !vet_credential_bearer(&services.login_protection, &user, remote_ip).await? {
         return Ok(None);
@@ -604,6 +614,28 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
         {
             Some(RequestAuthorization::AdminToken)
         } else if let Some(user) = user_for_api_token(&req, &ctx, token_from_header).await? {
+            let endpoint = format!("{} {}", req.method(), req.uri().path());
+            let allowed = ctx
+                .services()
+                .config
+                .lock()
+                .await
+                .store
+                .http
+                .user_api_token_allowed_endpoints
+                .as_ref()
+                .is_none_or(|list| {
+                    list.iter().any(|e| {
+                        endpoint_pattern_matches(e, req.method().as_str(), req.uri().path())
+                    })
+                });
+            if !allowed {
+                tracing::warn!(
+                    session_username = %user.username,
+                    "API token denied for {endpoint}: not in http.user_api_token_allowed_endpoints"
+                );
+                return Err(poem::Error::from_status(StatusCode::FORBIDDEN));
+            }
             Some(RequestAuthorization::UserToken {
                 user_id: user.id,
                 username: user.username,
@@ -616,12 +648,21 @@ pub async fn inject_request_authorization<E: Endpoint + 'static>(
     };
 
     if let Some(auth) = auth {
-        // additional span to include the session_username for token requests
+        // The outer span takes the user and session from this node's live
+        // session handle. A node that has none for this browser session
+        // still logs both
         let span = match &auth {
             RequestAuthorization::UserToken { username, .. } => {
                 tracing::info_span!("API token", session_username = %username)
             }
-            _ => tracing::Span::none(),
+            RequestAuthorization::Session(auth) => tracing::info_span!(
+                "Session",
+                session = session.get_session_id().map(|id| id.to_string()),
+                session_username = %auth.username(),
+            ),
+            RequestAuthorization::AdminToken | RequestAuthorization::ClusterPeer => {
+                tracing::Span::none()
+            }
         };
         // build context and attach it instead of raw authorization
         let actx = ctx.to_authenticated(auth);

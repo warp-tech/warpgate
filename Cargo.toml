@@ -12,6 +12,8 @@ members = [
     "warpgate-tls",
     "warpgate-core",
     "warpgate-desktop-auth",
+    "warpgate-gitops",
+    "warpgate-resources",
     "warpgate-db-migrations",
     "warpgate-db-entities",
     "warpgate-database-protocols",
@@ -30,40 +32,26 @@ members = [
     "warpgate-web-desktop",
     "warpgate-web-ssh",
 ]
-# Vendored third-party forks (path deps / patches). They are excluded from the workspace
-# so Cranky's deny lints don't apply to their upstream code. Each carries a PATCHES.md
-# describing the fork and a warpgate.patch reproducing it.
+# Vendored forks (path deps / patches). They are excluded from the workspace so
+# Cranky's deny lints don't apply to their upstream code. Each carries a PATCHES.md
+# describing the fork and a warpgate.patch reproducing it. ironrdp-server is a git snapshot
+# (no release builds against the current crate generation); the other two IronRDP crates
+# add the credential-less CredSSP mode interactive-logon targets need. vnc-rs adds an
+# end-of-update event
 exclude = [
-    "vendor/vnc-rs",
     "vendor/ironrdp-async",
     "vendor/ironrdp-connector",
-    "vendor/ironrdp-dvc",
-    "vendor/ironrdp-egfx",
-    "vendor/ironrdp-graphics",
-    "vendor/ironrdp-pdu",
     "vendor/ironrdp-server",
-    "vendor/ironrdp-session",
-    "vendor/picky",
-    "vendor/sspi",
+    "vendor/vnc-rs",
 ]
 default-members = ["warpgate"]
 resolver = "2"
 
-# IronRDP's NLA/CredSSP stack pins RustCrypto crates to release candidates that russh
-# resolves via caret requirements, which Cargo cannot satisfy at once. picky and sspi are
-# forked to drop those pins so both stacks share one crypto generation. See PATCHES.md in
-# each vendored crate.
 [patch.crates-io]
 ironrdp-async = { path = "vendor/ironrdp-async" }
 ironrdp-connector = { path = "vendor/ironrdp-connector" }
-ironrdp-dvc = { path = "vendor/ironrdp-dvc" }
-ironrdp-egfx = { path = "vendor/ironrdp-egfx" }
-ironrdp-graphics = { path = "vendor/ironrdp-graphics" }
-ironrdp-pdu = { path = "vendor/ironrdp-pdu" }
 ironrdp-server = { path = "vendor/ironrdp-server" }
-ironrdp-session = { path = "vendor/ironrdp-session" }
-picky = { path = "vendor/picky" }
-sspi = { path = "vendor/sspi" }
+vnc-rs = { path = "vendor/vnc-rs" }
 
 [workspace.dependencies]
 aes-gcm = { version = "0.11", default-features = false, features = [
@@ -72,9 +60,10 @@ aes-gcm = { version = "0.11", default-features = false, features = [
 ] }
 anyhow = { version = "1.0", default-features = false, features = ["std"] }
 async-trait = { version = "0.1", default-features = false }
-argon2 = { version = "0.5", default-features = false, features = [
+argon2 = { version = "0.6", default-features = false, features = [
     "password-hash",
     "alloc",
+    "getrandom",
 ] }
 bytes = { version = "1.4", default-features = false }
 data-encoding = { version = "2.3", default-features = false, features = [
@@ -85,7 +74,7 @@ ipnet = { version = "2", default-features = false }
 jpeg-encoder = { version = "0.7", default-features = false, features = ["std"] }
 serde = { version = "1.0", features = ["derive"], default-features = false }
 serde_json = { version = "1.0", default-features = false }
-russh = { version = "0.63.3", features = [
+russh = { version = "0.65.0", features = [
     "des",
     "dsa",
     "rsa",
@@ -97,21 +86,19 @@ tokio-stream = { version = "0.1.17", features = [
     "net",
 ], default-features = false }
 tokio-rustls = { version = "0.26", default-features = false }
-tls-listener = { version = "0.11.2", features = [
-    "rustls-core",
-], default-features = false }
 enum_dispatch = { version = "0.3.13", default-features = false }
 rustls = { version = "0.23", default-features = false, features = ["tls12"] }
-sqlx = { version = "0.8", features = [
-    "tls-rustls-aws-lc-rs",
+sqlx = { version = "0.9", features = [
+    "tls-rustls-aws-lc-rs-native-roots",
 ], default-features = false }
-sea-orm = { version = "1.0", default-features = false, features = [
+sea-orm = { version = "2.0", default-features = false, features = [
     "runtime-tokio",
     "macros",
     "with-time",
     "with-uuid",
+    "postgres-use-serial-pk",
 ] }
-sea-orm-migration = { version = "1.0", default-features = false }
+sea-orm-migration = { version = "2.0", default-features = false }
 poem = { version = "3.1", features = [
     "cookie",
     "session",
@@ -130,9 +117,6 @@ poem-openapi = { version = "5.1", features = [
     "static-files",
     "cookie",
     "time",
-], default-features = false }
-password-hash = { version = "0.5", features = [
-    "std",
 ], default-features = false }
 delegate = { version = "0.13", default-features = false }
 subtle = { version = "2", default-features = false }
@@ -164,7 +148,7 @@ tokio = { version = "1.52", features = [
     "rt-multi-thread",
     "io-util",
 ], default-features = false }
-tokio-util = { version = "0.7", features = ["rt"] }
+tokio-util = { version = "0.7", features = ["rt", "io"] }
 quick_cache = "0.7.0"
 governor = { version = "0.10.0", default-features = false, features = [
     "std",
@@ -209,8 +193,9 @@ zune-jpeg = "0.5"
 debug = "line-tables-only"
 
 [profile.release]
-lto = true
+lto = "thin"
 strip = "debuginfo"
+trim-paths = "object"
 
 [profile.release-no-lto]
 inherits = "release"

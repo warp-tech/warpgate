@@ -1,5 +1,6 @@
-use sea_orm::{ConnectionTrait, DatabaseTransaction, DbBackend, StatementBuilder, TransactionTrait};
+use sea_orm::{ConnectionTrait, DatabaseTransaction, DbBackend, StatementBuilder};
 use sea_orm_migration::prelude::*;
+use warpgate_db_entities::begin_write;
 
 /// Audit events raised outside a user session (API-token requests) carry no
 /// session id, so `log.session_id` becomes nullable.
@@ -12,7 +13,10 @@ const LOG_TMP: &str = "log_new";
 /// `(index name, columns)` for every index on `log`. SQLite drops them along
 /// with the table it rebuilds, so they are recreated on the replacement.
 const INDEXES: &[(&str, &[&str])] = &[
-    ("log_entry__timestamp_session_id", &["timestamp", "session_id"]),
+    (
+        "log_entry__timestamp_session_id",
+        &["timestamp", "session_id"],
+    ),
     ("log_entry__session_id", &["session_id"]),
     ("log_entry__username", &["username"]),
     ("log_target_timestamp", &["target", "timestamp"]),
@@ -39,13 +43,18 @@ impl MigrationTrait for Migration {
         // rebuilt. Kept on one connection: sea-orm only wraps migrations in a
         // transaction on PostgreSQL, and pooled SQLite connections holding an
         // older schema snapshot reject the statements otherwise.
-        let db = manager.get_connection().begin().await?;
+        let db = begin_write(manager.get_connection()).await?;
 
         exec(
             &db,
             &Table::create()
                 .table(Alias::new(LOG_TMP))
-                .col(ColumnDef::new(Alias::new("id")).uuid().not_null().primary_key())
+                .col(
+                    ColumnDef::new(Alias::new("id"))
+                        .uuid()
+                        .not_null()
+                        .primary_key(),
+                )
                 .col(ColumnDef::new(Alias::new("text")).text().not_null())
                 .col(ColumnDef::new(Alias::new("values")).json().not_null())
                 .col(
@@ -62,8 +71,16 @@ impl MigrationTrait for Migration {
                         .default("warpgate"),
                 )
                 .col(ColumnDef::new(Alias::new("related_users")).string().null())
-                .col(ColumnDef::new(Alias::new("related_access_roles")).string().null())
-                .col(ColumnDef::new(Alias::new("related_admin_roles")).string().null())
+                .col(
+                    ColumnDef::new(Alias::new("related_access_roles"))
+                        .string()
+                        .null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("related_admin_roles"))
+                        .string()
+                        .null(),
+                )
                 .to_owned(),
         )
         .await?;
@@ -122,7 +139,6 @@ impl MigrationTrait for Migration {
 }
 
 async fn exec<S: StatementBuilder>(db: &DatabaseTransaction, stmt: &S) -> Result<(), DbErr> {
-    let statement = db.get_database_backend().build(stmt);
-    db.execute(statement).await?;
+    db.execute(stmt).await?;
     Ok(())
 }

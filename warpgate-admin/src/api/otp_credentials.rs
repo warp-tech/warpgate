@@ -3,11 +3,12 @@ use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, Set};
 use uuid::Uuid;
-use warpgate_common::{AdminPermission, UserTotpCredential, WarpgateError};
-use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
+use warpgate_common::{AdminPermission, UserId, UserTotpCredential, WarpgateError};
+use warpgate_core::logging::CredentialChange;
 use warpgate_db_entities::{OtpCredential, User};
 
-use super::AdminContext;
+use super::common::audit_credential;
+use super::{AdminContext, guard_user_mutation};
 
 #[derive(Object)]
 struct ExistingOtpCredential {
@@ -59,7 +60,7 @@ impl ListApi {
     async fn api_get_all(
         &self,
         admin: AdminContext,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
     ) -> Result<GetOtpCredentialsResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
 
@@ -78,13 +79,14 @@ impl ListApi {
     #[oai(
         path = "/users/:user_id/credentials/otp",
         method = "post",
-        operation_id = "create_otp_credential"
+        operation_id = "create_otp_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_create(
         &self,
         admin: AdminContext,
         body: Json<NewOtpCredential>,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
     ) -> Result<CreateOtpCredentialResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
 
@@ -102,18 +104,9 @@ impl ListApi {
         let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
             return Ok(CreateOtpCredentialResponse::NotFound);
         };
-        let username = user.username.clone();
-        user.require_otp_in_policy(db).await?;
+        user.clone().require_otp_in_policy(db).await?;
 
-        AuditEvent::CredentialCreated {
-            credential_type: "otp".to_string(),
-            credential_name: None,
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username,
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        audit_credential(&admin, CredentialChange::Created, "otp", None, &user);
 
         Ok(CreateOtpCredentialResponse::Created(Json(object.into())))
     }
@@ -134,12 +127,13 @@ impl DetailApi {
     #[oai(
         path = "/users/:user_id/credentials/otp/:id",
         method = "delete",
-        operation_id = "delete_otp_credential"
+        operation_id = "delete_otp_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_delete(
         &self,
         admin: AdminContext,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
         id: Path<Uuid>,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
@@ -160,15 +154,7 @@ impl DetailApi {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
-        AuditEvent::CredentialDeleted {
-            credential_type: "otp".to_string(),
-            credential_name: None,
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username: user.username,
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        audit_credential(&admin, CredentialChange::Deleted, "otp", None, &user);
 
         Ok(DeleteCredentialResponse::Deleted)
     }

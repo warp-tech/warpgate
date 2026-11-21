@@ -195,13 +195,24 @@ fn take_dirty_region(st: &mut RecorderState, out: &mut Vec<u8>) -> Option<Rect> 
     st.fb.copy_region_rgba(rect, out)
 }
 
+/// Keys and pasted text are what a viewer enters a password with, so neither is kept while
+/// the target is at its sign-in screen. Pasted text is otherwise always audited; keys only
+/// when keyboard recording is on.
+fn records_input(input: &DesktopInput, record_keyboard: bool, at_logon_screen: bool) -> bool {
+    match input {
+        DesktopInput::Key { .. } => record_keyboard && !at_logon_screen,
+        DesktopInput::Clipboard(_) => !at_logon_screen,
+        _ => true,
+    }
+}
+
 pub struct DesktopRecorder {
     data_writer: Arc<NDJsonRecordingWriter>,
     index_writer: Arc<NDJsonRecordingWriter>,
     started_at: Instant,
     state: Arc<Mutex<RecorderState>>,
 
-    // we do not record keyboard inputs at windows logon screen
+    // we do not record keyboard/clipboard inputs at windows logon screen
     sign_in: OnceLock<LogonState>,
     record_keyboard: bool,
 }
@@ -211,12 +222,12 @@ impl DesktopRecorder {
         let _ = self.sign_in.set(state);
     }
 
-    fn should_record_keyboard(&self) -> bool {
-        self.record_keyboard
-            && !self
-                .sign_in
-                .get()
-                .is_some_and(LogonState::still_at_logon_screen)
+    fn should_record(&self, input: &DesktopInput) -> bool {
+        let at_logon_screen = self
+            .sign_in
+            .get()
+            .is_some_and(LogonState::still_at_logon_screen);
+        records_input(input, self.record_keyboard, at_logon_screen)
     }
 
     fn get_time(&self) -> f32 {
@@ -361,7 +372,7 @@ impl DesktopRecorder {
                 let rect: RecordingRect = (*rect).into();
                 // Composite into the framebuffer (best-effort) so keyframes stay accurate;
                 // pass the already-compressed JPEG through to the stream unchanged.
-                if let Some((_, _, rgb)) = decode_jpeg_rgb(data) {
+                if let Some(rgb) = decode_jpeg_rgb(data, rect.width, rect.height) {
                     st.fb.blit_rgb(
                         u32::from(rect.x),
                         u32::from(rect.y),
@@ -423,6 +434,8 @@ impl DesktopRecorder {
             // Cursor isn't composited into the framebuffer (server renders the pointer into
             // it); non-visual events carry no pixels.
             DesktopEvent::Cursor { .. }
+            | DesktopEvent::CursorDefault
+            | DesktopEvent::CursorHidden
             | DesktopEvent::State(_)
             | DesktopEvent::Clipboard(_)
             | DesktopEvent::Bell
@@ -510,7 +523,7 @@ impl DesktopRecorder {
     /// Record a viewer input (client -> server) for audit: written to the stream and added
     /// to the index input track. `Refresh` is a redraw request, not a user action.
     pub async fn write_input(&self, input: &DesktopInput) -> Result<()> {
-        if matches!(input, DesktopInput::Key { .. }) && !self.should_record_keyboard() {
+        if !self.should_record(input) {
             return Ok(());
         }
         let time = self.get_time();

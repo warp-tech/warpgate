@@ -14,6 +14,8 @@ use warpgate_common_http::{
     AuthenticatedRequestContext, RequestAuthorization, SessionAuthorization,
 };
 use warpgate_core::ConfigProvider;
+use warpgate_core::resources::sync::{REQUEST_SOURCE, latest_outcome};
+use warpgate_db_entities::ProviderSync::SyncStatus;
 use warpgate_db_entities::{LdapServer, Parameters};
 
 use crate::api::common::local_logout_disabled;
@@ -111,6 +113,14 @@ impl From<AdminPermissionSet> for AdminPermissions {
     }
 }
 
+/// The latest GitOps sync
+#[derive(Serialize, Object)]
+pub struct GitopsSyncInfo {
+    status: SyncStatus,
+    started_at: time::OffsetDateTime,
+    error: Option<String>,
+}
+
 #[derive(Serialize, Object)]
 pub struct Info {
     version: Option<String>,
@@ -146,6 +156,9 @@ pub struct Info {
     show_session_menu: bool,
     logo_etag: Option<String>,
     config_warnings: Option<Vec<String>>,
+    /// For admins, while a GitOps source is configured or files are pushed
+    /// through the API
+    gitops_sync: Option<GitopsSyncInfo>,
 }
 
 #[derive(ApiResponse)]
@@ -287,11 +300,26 @@ impl Api {
         };
 
         // Admin permissions for the UI, from the one shared loader (only if authenticated).
-        let admin_permissions = match &auth_ctx {
-            Some(ctx) => Some(AdminPermissions::from(
-                warpgate_admin::api::admin_permission_set(ctx).await?,
-            )),
+        let permission_set = match &auth_ctx {
+            Some(ctx) => Some(warpgate_admin::api::admin_permission_set(ctx).await?),
             None => None,
+        };
+        let admin_permissions = permission_set.map(AdminPermissions::from);
+
+        // Without a source, only syncs pushed through the API count: an old
+        // failure from a source since removed would never clear
+        let gitops_sync = if permission_set.is_some_and(AdminPermissionSet::is_admin) {
+            latest_outcome(&ctx.services().db)
+                .await
+                .context("loading the latest GitOps sync")?
+                .filter(|sync| parameters.gitops_source.is_some() || sync.source == REQUEST_SOURCE)
+                .map(|sync| GitopsSyncInfo {
+                    status: sync.status,
+                    started_at: sync.started_at,
+                    error: sync.error,
+                })
+        } else {
+            None
         };
 
         let can_edit_config = admin_permissions.as_ref().is_some_and(|p| p.config_edit);
@@ -397,6 +425,7 @@ impl Api {
             logo_etag: parameters.logo_etag(),
             show_session_menu: parameters.show_session_menu,
             config_warnings: can_edit_config.then(warnings),
+            gitops_sync,
         })))
     }
 

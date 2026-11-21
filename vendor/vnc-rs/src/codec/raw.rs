@@ -1,9 +1,8 @@
+use crate::{PixelFormat, Rect, VncError, VncEvent};
 use std::future::Future;
-
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use super::uninit_vec;
-use crate::{PixelFormat, Rect, VncError, VncEvent};
+use super::initialized_vec;
 
 pub struct Decoder {}
 
@@ -24,6 +23,8 @@ impl Decoder {
         F: Fn(VncEvent) -> Fut,
         Fut: Future<Output = Result<(), VncError>>,
     {
+        crate::limits::dimensions(rect.width, rect.height)?;
+        format.validate()?;
         // +----------------------------+--------------+-------------+
         // | No. of bytes               | Type [Value] | Description |
         // +----------------------------+--------------+-------------+
@@ -31,7 +32,7 @@ impl Decoder {
         // +----------------------------+--------------+-------------+
         let bpp = format.bits_per_pixel / 8;
         let buffer_size = bpp as usize * rect.height as usize * rect.width as usize;
-        let mut pixels = uninit_vec(buffer_size);
+        let mut pixels = initialized_vec(buffer_size);
         input.read_exact(&mut pixels).await?;
         output_func(VncEvent::RawImage(*rect, pixels)).await?;
         Ok(())

@@ -1,12 +1,11 @@
+use crate::{PixelFormat, Rect, VncError, VncEvent};
 use std::future::Future;
-
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tracing::error;
 
-use super::uninit_vec_capped;
-use crate::{PixelFormat, Rect, VncError, VncEvent};
+use super::initialized_vec;
 
-async fn read_run_length<S>(reader: &mut S) -> Result<usize, VncError>
+async fn read_run_length<S>(reader: &mut S, remaining: usize) -> Result<usize, VncError>
 where
     S: AsyncRead + Unpin,
 {
@@ -15,6 +14,9 @@ where
     loop {
         run_length_part = reader.read_u8().await?;
         run_length += run_length_part as usize;
+        if run_length > remaining {
+            return Err(VncError::InvalidImageData);
+        }
         if 255 != run_length_part {
             break;
         }
@@ -40,9 +42,18 @@ where
     Ok(())
 }
 
-fn copy_indexed(palette: &[u8], pixels: &mut Vec<u8>, bpp: usize, index: u8) {
+fn copy_indexed(
+    palette: &[u8],
+    pixels: &mut Vec<u8>,
+    bpp: usize,
+    index: u8,
+) -> Result<(), VncError> {
     let start = index as usize * bpp;
-    pixels.extend_from_slice(&palette[start..start + bpp])
+    let pixel = palette
+        .get(start..start + bpp)
+        .ok_or(VncError::InvalidImageData)?;
+    pixels.extend_from_slice(pixel);
+    Ok(())
 }
 
 pub struct Decoder {}
@@ -64,15 +75,23 @@ impl Decoder {
         F: Fn(VncEvent) -> Fut,
         Fut: Future<Output = Result<(), VncError>>,
     {
+        crate::limits::dimensions(rect.width, rect.height)?;
+        format.validate()?;
         let data_len = input.read_u32().await? as usize;
-        // Warpgate fork: cap the target-driven length before allocating. See PATCHES.md.
-        let mut zlib_data = uninit_vec_capped(data_len)?;
+        if data_len > crate::limits::MAX_COMPRESSED {
+            return Err(VncError::InvalidImageData);
+        }
+        let mut zlib_data = initialized_vec(data_len);
         input.read_exact(&mut zlib_data).await?;
 
         let bpp = format.bits_per_pixel as usize / 8;
-        let pixel_mask = ((format.red_max as u32) << format.red_shift)
-            | ((format.green_max as u32) << format.green_shift)
-            | ((format.blue_max as u32) << format.blue_shift);
+        let pixel_mask = if format.true_color_flag != 0 {
+            ((format.red_max as u32) << format.red_shift)
+                | ((format.green_max as u32) << format.green_shift)
+                | ((format.blue_max as u32) << format.blue_shift)
+        } else {
+            0
+        };
 
         let (compressed_bpp, alpha_at_first) =
             if format.bits_per_pixel == 32 && format.true_color_flag > 0 && format.depth <= 24 {
@@ -115,7 +134,7 @@ impl Decoder {
                 let control = input.read_u8().await?;
                 let is_rle = control & 0x80 > 0;
                 let palette_size = control & 0x7f;
-                palette.truncate(0);
+                palette.clear();
 
                 for _ in 0..palette_size {
                     copy_true_color(input, &mut palette, alpha_at_first, compressed_bpp, bpp)
@@ -134,7 +153,7 @@ impl Decoder {
                     (false, 1) => {
                         // Color fill
                         for _ in 0..pixel_count {
-                            copy_indexed(&palette, &mut pixels, bpp, 0)
+                            copy_indexed(&palette, &mut pixels, bpp, 0)?
                         }
                     }
                     (false, 2..=16) => {
@@ -157,7 +176,7 @@ impl Decoder {
                                 }
                                 let idx = (encoded >> shift) & mask;
 
-                                copy_indexed(&palette, &mut pixels, bpp, idx);
+                                copy_indexed(&palette, &mut pixels, bpp, idx)?;
                                 shift -= bits_per_index;
                             }
                             if shift < 8 - bits_per_index && y < height - 1 {
@@ -170,10 +189,10 @@ impl Decoder {
                         let mut count = 0;
                         let mut pixel = Vec::new();
                         while count < pixel_count {
-                            pixel.truncate(0);
+                            pixel.clear();
                             copy_true_color(input, &mut pixel, alpha_at_first, compressed_bpp, bpp)
                                 .await?;
-                            let run_length = read_run_length(input).await?;
+                            let run_length = read_run_length(input, pixel_count - count).await?;
                             for _ in 0..run_length {
                                 pixels.extend(&pixel)
                             }
@@ -188,12 +207,12 @@ impl Decoder {
                             let longer_than_one = control & 0x80 > 0;
                             let index = control & 0x7f;
                             let run_length = if longer_than_one {
-                                read_run_length(input).await?
+                                read_run_length(input, pixel_count - count).await?
                             } else {
                                 1
                             };
                             for _ in 0..run_length {
-                                copy_indexed(&palette, &mut pixels, bpp, index);
+                                copy_indexed(&palette, &mut pixels, bpp, index)?;
                             }
                             count += run_length;
                         }
@@ -219,5 +238,17 @@ impl Decoder {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn run_and_palette_indexes_are_bounded() {
+        assert!(read_run_length(&mut &[255, 255][..], 1).await.is_err());
+        assert_eq!(read_run_length(&mut &[255, 0][..], 256).await.unwrap(), 256);
+        assert!(copy_indexed(&[1, 2, 3, 255], &mut Vec::new(), 4, 1).is_err());
     }
 }

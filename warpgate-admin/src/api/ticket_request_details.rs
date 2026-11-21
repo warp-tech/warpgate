@@ -5,7 +5,7 @@ use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use serde::Serialize;
 use time::OffsetDateTime;
 use uuid::Uuid;
-use warpgate_common::WarpgateError;
+use warpgate_common::{TargetId, UserId, WarpgateError};
 use warpgate_db_entities::TicketRequest::TicketRequestStatus;
 use warpgate_db_entities::{Target, TicketRequest, User};
 
@@ -14,16 +14,16 @@ use warpgate_db_entities::{Target, TicketRequest, User};
 #[oai(rename = "TicketRequest")]
 pub struct TicketRequestDetails {
     pub id: Uuid,
-    pub user_id: Uuid,
+    pub user_id: UserId,
     /// Empty if the user has been deleted
     pub username: Option<String>,
-    pub target_id: Uuid,
+    pub target_id: TargetId,
     /// Empty if the target has been deleted
     pub target_name: Option<String>,
     pub requested_duration_seconds: Option<i64>,
     pub description: String,
     pub status: TicketRequestStatus,
-    pub resolved_by_user_id: Option<Uuid>,
+    pub resolved_by_user_id: Option<UserId>,
     pub resolved_by_username: Option<String>,
     pub ticket_id: Option<Uuid>,
     pub created: OffsetDateTime,
@@ -39,21 +39,21 @@ pub async fn batch_resolve_ticket_request_names(
         return Ok(vec![]);
     }
 
-    let user_ids: HashSet<Uuid> = requests
+    let user_ids: HashSet<UserId> = requests
         .iter()
         .flat_map(|r| [Some(r.user_id), r.resolved_by_user_id])
         .flatten()
         .collect();
-    let target_ids: HashSet<Uuid> = requests.iter().map(|r| r.target_id).collect();
+    let target_ids: HashSet<TargetId> = requests.iter().map(|r| r.target_id).collect();
 
-    let usernames: HashMap<Uuid, String> = User::Entity::find()
+    let usernames: HashMap<UserId, String> = User::Entity::find()
         .filter(User::Column::Id.is_in(user_ids))
         .all(db)
         .await?
         .into_iter()
         .map(|u| (u.id, u.username))
         .collect();
-    let target_names: HashMap<Uuid, String> = Target::Entity::find()
+    let target_names: HashMap<TargetId, String> = Target::Entity::find()
         .filter(Target::Column::Id.is_in(target_ids))
         .all(db)
         .await?

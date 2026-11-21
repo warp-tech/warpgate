@@ -53,7 +53,7 @@ impl TryFrom<&Model> for warpgate_ldap::LdapConfig {
             username_attribute: server
                 .username_attribute
                 .as_str()
-                .try_into()
+                .parse()
                 .unwrap_or(warpgate_ldap::LdapUsernameAttribute::Cn),
             ssh_key_attribute: server.ssh_key_attribute.clone(),
             uuid_attribute: if server.uuid_attribute.is_empty() {

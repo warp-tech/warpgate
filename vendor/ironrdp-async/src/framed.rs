@@ -1,6 +1,7 @@
 use std::io;
 
 use bytes::{Bytes, BytesMut};
+use ironrdp_connector::MonotonicInstant;
 use ironrdp_connector::{ConnectorResult, Sequence, Written};
 use ironrdp_core::WriteBuf;
 use ironrdp_pdu::PduHint;
@@ -56,11 +57,24 @@ pub trait StreamWrapper: Sized {
 pub struct Framed<S> {
     stream: S,
     buf: BytesMut,
+    /// When the most recent socket read completed, if this build observes time.
+    ///
+    /// A PDU served entirely from `buf` arrived at the socket read that filled it,
+    /// not at the moment the caller happened to drain it, so this is the honest
+    /// arrival time for anything `read_by_hint` returns. `None` until the first
+    /// read, and always `None` on a build with no clock.
+    last_read_at: Option<MonotonicInstant>,
 }
 
 impl<S> Framed<S> {
     pub fn peek(&self) -> &[u8] {
         &self.buf
+    }
+
+    /// When the bytes currently buffered last arrived from the socket, or `None`
+    /// if nothing has been read yet or this build cannot observe time.
+    pub fn last_read_at(&self) -> Option<MonotonicInstant> {
+        self.last_read_at
     }
 }
 
@@ -76,6 +90,7 @@ where
         Self {
             stream: S::from_inner(stream),
             buf: leftover,
+            last_read_at: None,
         }
     }
 
@@ -170,11 +185,12 @@ where
         loop {
             match hint.find_size(self.peek()).map_err(io::Error::other)? {
                 Some((matched, length)) => {
-                    // An unmatched zero-length frame can never be skipped past: `read_exact(0)`
-                    // consumes nothing and performs no I/O, so looping on it would spin without
-                    // yielding or ever observing EOF. Any `PduHint` can report `(false, 0)` on a
-                    // malformed header (e.g. a fast-path byte with a zero length field), so this
-                    // is guarded here rather than in every hint.
+                    // Guard against a zero-length unmatched PDU. Skipping it (the `else`
+                    // branch below) consumes nothing via `read_exact(0)` and performs no
+                    // I/O, so the loop would spin forever at 100% CPU — never yielding to
+                    // the runtime and never observing EOF. This is reachable from a single
+                    // malformed frame if any `PduHint` reports `Some((false, 0))`, so fail
+                    // instead of hanging rather than relying on every hint to avoid it.
                     if length == 0 && !matched {
                         return Err(io::Error::new(
                             io::ErrorKind::InvalidData,
@@ -208,7 +224,9 @@ where
     /// `tokio::select!` statement and some other branch
     /// completes first, then it is guaranteed that no data was read.
     async fn read(&mut self) -> io::Result<usize> {
-        self.stream.read(&mut self.buf).await
+        let len = self.stream.read(&mut self.buf).await?;
+        self.last_read_at = Some(monotonic_now());
+        Ok(len)
     }
 }
 
@@ -272,7 +290,7 @@ where
 
         trace!(length = pdu.len(), "PDU received");
 
-        sequence.step(&pdu, buf)
+        sequence.step(&pdu, framed.last_read_at(), buf)
     } else {
         sequence.step_no_input(buf)
     }
@@ -297,4 +315,18 @@ where
     }
 
     Ok(())
+}
+
+/// Reads the driver-owned monotonic clock.
+///
+/// The epoch is the first call; only differences are meaningful.
+///
+/// `web_time::Instant` is `std::time::Instant` everywhere except
+/// `wasm32-unknown-unknown`, where `std`'s panics and this one reads
+/// `Performance.now()` instead. This crate is reached from `ironrdp-web` through
+/// `ironrdp-futures`, so without it the browser build has no clock and every
+/// measurement there is lost.
+fn monotonic_now() -> MonotonicInstant {
+    static EPOCH: std::sync::LazyLock<web_time::Instant> = std::sync::LazyLock::new(web_time::Instant::now);
+    MonotonicInstant::from_millis(u64::try_from(EPOCH.elapsed().as_millis()).unwrap_or(u64::MAX))
 }

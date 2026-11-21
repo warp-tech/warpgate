@@ -15,6 +15,7 @@
         ModalBody,
         ModalFooter,
     } from '@sveltestrap/sveltestrap'
+    import { autosave } from 'common/autosave'
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import { stringifyError } from 'common/errors'
     import { handleReauthError } from 'common/reauth'
@@ -90,19 +91,19 @@
     const FONT_SIZE_MIN = 8
     const FONT_SIZE_MAX = 32
     const FONT_SIZE_STEP = 1
-    let fontSize = $state(
-        parseInt(localStorage.warpgateWebSSHFontSize ?? '14', 10),
-    )
+    let fontSize = autosave('web-ssh:font-size', 14)[0]
 
-    $effect(() => {
-        localStorage.warpgateWebSSHFontSize = String(fontSize)
-    })
+    // Optional user-chosen font (e.g. a locally installed Nerd Font), tried
+    // before the bundled fallback. Stored per browser, like the font size.
+    let fontFamily = autosave('web-ssh:font-family', '')[0]
+    let fontFamilyDraft = $state('')
+    let showFontSettings = $state(false)
 
     function zoomIn() {
-        fontSize = Math.min(FONT_SIZE_MAX, fontSize + FONT_SIZE_STEP)
+        fontSize.set(Math.min(FONT_SIZE_MAX, $fontSize + FONT_SIZE_STEP))
     }
     function zoomOut() {
-        fontSize = Math.max(FONT_SIZE_MIN, fontSize - FONT_SIZE_STEP)
+        fontSize.set(Math.max(FONT_SIZE_MIN, $fontSize - FONT_SIZE_STEP))
     }
 
     let menuOpen = $state(false)
@@ -154,15 +155,22 @@
             return
         }
         switch (msg.type) {
-            case 'state':
+            case 'state': {
+                // the server replays the phase on every attach, so act on transitions only
+                const wasConnected = phase?.phase === 'connected'
                 phase = msg
-                if (msg.phase === 'connected' && channelOrder.length === 0) {
+                if (
+                    msg.phase === 'connected' &&
+                    !wasConnected &&
+                    channelOrder.length === 0
+                ) {
                     requestNewChannel()
                 }
                 if (msg.phase === 'closed') {
                     ws.close()
                 }
                 break
+            }
             case 'channel_opened':
                 openChannel(msg.channel_id)
                 break
@@ -321,7 +329,8 @@
                 <SshTerminalTab
                     bind:this={tabs[id]}
                     active={id === activeChannelId}
-                    {fontSize}
+                    fontSize={$fontSize}
+                    fontFamily={$fontFamily}
                     readOnly={!connected}
                     onInput={data =>
                         send({
@@ -411,7 +420,7 @@
                     <button
                         type="button"
                         class="btn btn-sm btn-secondary"
-                        disabled={fontSize <= FONT_SIZE_MIN}
+                        disabled={$fontSize <= FONT_SIZE_MIN}
                         onclick={() => {
                             zoomOut()
                             menuOpen = true
@@ -421,12 +430,12 @@
                         <Fa icon={faMinus} />
                     </button>
                     <span class="text-nowrap ms-auto me-auto">
-                        {fontSize}px
+                        {$fontSize}px
                     </span>
                     <button
                         type="button"
                         class="btn btn-sm btn-secondary"
-                        disabled={fontSize >= FONT_SIZE_MAX}
+                        disabled={$fontSize >= FONT_SIZE_MAX}
                         onclick={() => {
                             zoomIn()
                             menuOpen = true
@@ -440,6 +449,18 @@
                     <DropdownItem divider />
                     <DropdownItem
                         onclick={() => {
+                            fontFamilyDraft = $fontFamily
+                            showFontSettings = true
+                            menuOpen = false
+                        }}
+                    >
+                        <div>
+                            <div>Terminal font</div>
+                            <div class="small">{$fontFamily}</div>
+                        </div>
+                    </DropdownItem>
+                    <DropdownItem
+                        onclick={() => {
                             showInstructions = true
                             menuOpen = false
                         }}
@@ -451,6 +472,48 @@
         </Dropdown>
     </div>
 </div>
+
+<Modal isOpen={showFontSettings} toggle={() => (showFontSettings = false)}>
+    <form
+        onsubmit={e => {
+            e.preventDefault()
+            fontFamily.set(fontFamilyDraft.trim())
+            showFontSettings = false
+        }}
+    >
+        <ModalBody>
+            <label class="form-label" for="web-ssh-font-family">
+                Terminal font
+            </label>
+            <input
+                id="web-ssh-font-family"
+                class="form-control"
+                type="text"
+                placeholder="e.g. JetBrainsMono Nerd Font Mono"
+                autocomplete="off"
+                spellcheck="false"
+                bind:value={fontFamilyDraft}
+            >
+            <div class="form-text">
+                Name of a monospace font installed on this computer. Leave empty
+                to use the default font. Saved in this browser only.
+            </div>
+        </ModalBody>
+        <ModalFooter>
+            <Button
+                color="secondary"
+                class="modal-button"
+                type="button"
+                onclick={() => (showFontSettings = false)}
+            >
+                Cancel
+            </Button>
+            <Button color="primary" class="modal-button" type="submit">
+                Save
+            </Button>
+        </ModalFooter>
+    </form>
+</Modal>
 
 {#if sessionInfo}
     <Modal

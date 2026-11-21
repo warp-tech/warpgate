@@ -1,10 +1,10 @@
 use std::net::IpAddr;
 use std::time::Duration;
 
-use sea_orm::sea_query::IntoCondition;
+use sea_orm::sea_query::{ExprTrait, IntoCondition};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, EntityTrait,
-    PaginatorTrait, QueryFilter, Set, TransactionTrait,
+    PaginatorTrait, QueryFilter, SelectExt, Set,
 };
 use time::OffsetDateTime;
 use tracing::{debug, info};
@@ -12,6 +12,7 @@ use uuid::Uuid;
 use warpgate_common::{Protocol, WarpgateError};
 use warpgate_db_entities::{
     FailedLoginAttempt, IpBlock, Parameters, User, UserAdminRoleAssignment, UserLockout,
+    begin_write,
 };
 
 use super::cache::{IpBlockInfo, LoginProtectionCache, UserLockInfo};
@@ -163,6 +164,7 @@ impl LoginProtectionService {
         &self,
         ip: &IpAddr,
     ) -> Result<Option<IpBlockInfo>, WarpgateError> {
+        let ip = &ip.to_canonical();
         let db = &self.db;
         if !Self::read_config(db).await?.enabled {
             return Ok(None);
@@ -252,19 +254,20 @@ impl LoginProtectionService {
         &self,
         attempt: FailedAttemptInfo,
     ) -> Result<(), WarpgateError> {
+        let remote_ip = attempt.remote_ip.to_canonical();
         let db = &self.db;
         let config = Self::read_config(db).await?;
         if !config.enabled {
             return Ok(());
         }
 
-        let txn = db.begin().await?;
+        let txn = begin_write(db).await?;
         let now = OffsetDateTime::now_utc();
 
         FailedLoginAttempt::ActiveModel {
             id: Set(Uuid::new_v4()),
             username: Set(attempt.username.clone()),
-            remote_ip: Set(attempt.remote_ip.to_string()),
+            remote_ip: Set(remote_ip.to_string()),
             protocol: Set(attempt.protocol.name().to_owned()),
             credential_type: Set(attempt.credential_type.clone()),
             timestamp: Set(now),
@@ -275,12 +278,12 @@ impl LoginProtectionService {
         let ip_window_start =
             now - time::Duration::seconds(i64::from(config.ip_rate_limit.time_window_seconds));
         let ip_count = FailedLoginAttempt::Entity::find()
-            .filter(FailedLoginAttempt::Column::RemoteIp.eq(attempt.remote_ip.to_string()))
+            .filter(FailedLoginAttempt::Column::RemoteIp.eq(remote_ip.to_string()))
             .filter(FailedLoginAttempt::Column::Timestamp.gte(ip_window_start))
             .count(&txn)
             .await?;
         let new_block = if ip_count >= u64::from(config.ip_rate_limit.max_attempts) {
-            Some(Self::create_or_update_ip_block(&txn, &attempt.remote_ip, now, &config).await?)
+            Some(Self::create_or_update_ip_block(&txn, &remote_ip, now, &config).await?)
         } else {
             None
         };
@@ -319,14 +322,14 @@ impl LoginProtectionService {
 
         // Reflect the new state in the cache without a full reload.
         if let Some(info) = new_block {
-            self.cache.block_ip(attempt.remote_ip, info).await;
+            self.cache.block_ip(remote_ip, info).await;
         }
         if let Some(info) = new_lock {
             self.cache.lock_user(attempt.username.clone(), info).await;
         }
 
         info!(
-            ip = %attempt.remote_ip,
+            ip = %remote_ip,
             username = %attempt.username,
             protocol = %attempt.protocol,
             ip_attempt_count = ip_count,
@@ -454,6 +457,7 @@ impl LoginProtectionService {
         ip: &IpAddr,
         username: &str,
     ) -> Result<(), WarpgateError> {
+        let ip = &ip.to_canonical();
         let db = &self.db;
         if !Self::read_config(db).await?.enabled {
             return Ok(());
@@ -461,7 +465,7 @@ impl LoginProtectionService {
 
         FailedLoginAttempt::Entity::delete_many()
             .filter(
-                Condition::any()
+                Condition::all()
                     .add(FailedLoginAttempt::Column::RemoteIp.eq(ip.to_string()))
                     .add(FailedLoginAttempt::Entity::username_eq_ci(username).into_condition()),
             )
@@ -475,16 +479,18 @@ impl LoginProtectionService {
     /// Admin: unblock an IP and clear its attempt history.
     pub async fn unblock_ip(&self, ip: &IpAddr) -> Result<(), WarpgateError> {
         let db = &self.db;
+        // Stored rows may hold the ::ffff:-mapped form of a v4 address.
+        let forms = [ip.to_string(), ip.to_canonical().to_string()];
         IpBlock::Entity::delete_many()
-            .filter(IpBlock::Column::IpAddress.eq(ip.to_string()))
+            .filter(IpBlock::Column::IpAddress.is_in(forms.clone()))
             .exec(db)
             .await?;
         FailedLoginAttempt::Entity::delete_many()
-            .filter(FailedLoginAttempt::Column::RemoteIp.eq(ip.to_string()))
+            .filter(FailedLoginAttempt::Column::RemoteIp.is_in(forms))
             .exec(db)
             .await?;
 
-        self.cache.unblock_ip(ip).await;
+        self.cache.unblock_ip(&ip.to_canonical()).await;
         info!(ip = %ip, "IP unblocked by admin");
         Ok(())
     }
@@ -657,7 +663,7 @@ fn calculate_block_duration(block_count: u32, config: &IpRateLimitConfig) -> Dur
         .powi(block_count.saturating_sub(1).cast_signed());
     #[allow(clippy::cast_precision_loss)]
     let duration_secs = (base_secs as f32 * factor) as u64;
-    Duration::from_secs(duration_secs.min(max_secs))
+    Duration::from_secs(std::cmp::min(duration_secs, max_secs))
 }
 
 #[cfg(test)]
@@ -728,5 +734,74 @@ mod tests {
             calculate_block_duration(0, &default_config()).as_secs(),
             1800
         );
+    }
+}
+
+#[cfg(all(test, feature = "sqlite"))]
+mod db_tests {
+    use sea_orm::{ActiveModelTrait, Database, IntoActiveModel, Set};
+    use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
+    use warpgate_db_migrations::migrate_database;
+
+    use super::*;
+
+    async fn service(ip_max_attempts: i32) -> LoginProtectionService {
+        set_config_migration_values(ConfigMigrationValues::default());
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        migrate_database(&db).await.unwrap();
+        let mut params = Parameters::Entity::get(&db)
+            .await
+            .unwrap()
+            .into_active_model();
+        params.login_protection_enabled = Set(true);
+        params.lp_ip_max_attempts = Set(ip_max_attempts);
+        params.lp_user_max_attempts = Set(100);
+        params.update(&db).await.unwrap();
+        LoginProtectionService::new(db).await.unwrap()
+    }
+
+    async fn fail(lp: &LoginProtectionService, ip: &str, username: &str) {
+        lp.record_failed_attempt(FailedAttemptInfo {
+            username: username.into(),
+            remote_ip: ip.parse().unwrap(),
+            protocol: Protocol::Http,
+            credential_type: "password".into(),
+        })
+        .await
+        .unwrap();
+    }
+
+    async fn blocked(lp: &LoginProtectionService, ip: &str) -> bool {
+        lp.check_ip_blocked(&ip.parse().unwrap())
+            .await
+            .unwrap()
+            .is_some()
+    }
+
+    #[tokio::test]
+    async fn other_users_login_keeps_ip_counter() {
+        let lp = service(3).await;
+        fail(&lp, "10.0.0.1", "victim").await;
+        fail(&lp, "10.0.0.1", "victim").await;
+        lp.clear_failed_attempts(&"10.0.0.1".parse().unwrap(), "attacker")
+            .await
+            .unwrap();
+        fail(&lp, "10.0.0.1", "victim").await;
+        assert!(blocked(&lp, "10.0.0.1").await);
+    }
+
+    #[tokio::test]
+    async fn mapped_and_plain_v4_share_one_counter() {
+        let lp = service(3).await;
+        fail(&lp, "::ffff:10.0.0.1", "victim").await;
+        fail(&lp, "::ffff:10.0.0.1", "victim").await;
+        fail(&lp, "10.0.0.1", "victim").await;
+        assert!(blocked(&lp, "10.0.0.1").await);
+        assert!(blocked(&lp, "::ffff:10.0.0.1").await);
+
+        lp.unblock_ip(&"::ffff:10.0.0.1".parse().unwrap())
+            .await
+            .unwrap();
+        assert!(!blocked(&lp, "10.0.0.1").await);
     }
 }

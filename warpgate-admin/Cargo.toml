@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-admin"
-version = "0.30.0"
+version = "0.31.0-beta.1"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -32,13 +32,13 @@ tokio-tungstenite.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 warpgate-aws = { path = "../warpgate-aws" }
+warpgate-azure = { path = "../warpgate-azure" }
 warpgate-ca = { path = "../warpgate-ca" }
 warpgate-common = { path = "../warpgate-common" }
 warpgate-common-http = { path = "../warpgate-common-http" }
 warpgate-core = { path = "../warpgate-core" }
 warpgate-db-entities = { path = "../warpgate-db-entities" }
 warpgate-ldap = { path = "../warpgate-ldap" }
-warpgate-protocol-kubernetes = { path = "../warpgate-protocol-kubernetes" }
 warpgate-protocol-ssh = { path = "../warpgate-protocol-ssh" }
 warpgate-tls = { path = "../warpgate-tls" }
 

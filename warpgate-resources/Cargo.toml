@@ -1,0 +1,14 @@
+[package]
+name = "warpgate-resources"
+version = "0.31.0-beta.1"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+schemars.workspace = true
+serde.workspace = true
+serde_json = { workspace = true, features = ["std"] }
+uuid.workspace = true
+warpgate-common = { path = "../warpgate-common" }
+warpgate-db-entities = { path = "../warpgate-db-entities" }

@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use poem_openapi::Enum;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -24,10 +26,10 @@ impl LdapUsernameAttribute {
     }
 }
 
-impl TryFrom<&str> for LdapUsernameAttribute {
-    type Error = ();
+impl FromStr for LdapUsernameAttribute {
+    type Err = ();
 
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
         Ok(match value {
             "cn" => Self::Cn,
             "uid" => Self::Uid,

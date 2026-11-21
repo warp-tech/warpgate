@@ -1,3 +1,4 @@
+use warpgate_common::{TargetId, UserId};
 use poem_openapi::{Enum, Object};
 use sea_orm::entity::prelude::*;
 use serde::Serialize;
@@ -22,13 +23,13 @@ pub enum TicketRequestStatus {
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
-    pub user_id: Uuid,
-    pub target_id: Uuid,
+    pub user_id: UserId,
+    pub target_id: TargetId,
     pub requested_duration_seconds: Option<i64>,
     #[sea_orm(column_type = "Text")]
     pub description: String,
     pub status: TicketRequestStatus,
-    pub resolved_by_user_id: Option<Uuid>,
+    pub resolved_by_user_id: Option<UserId>,
     pub ticket_id: Option<Uuid>,
     pub created: OffsetDateTime,
     pub resolved_at: Option<OffsetDateTime>,

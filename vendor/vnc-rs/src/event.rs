@@ -48,6 +48,9 @@ pub enum VncEvent {
     /// If the [crate::VncEncoding::DesktopSizePseudo] is set
     ///
     SetResolution(Screen),
+    /// Negotiated layout or resize result. Same-size updates preserve pixels.
+    /// Never answer this announcement with an unconditional full refresh.
+    DesktopUpdate(crate::DesktopUpdate),
     /// If the connector doesn't call `set_pixel_format` method
     ///
     /// The engine will generate a [VncEvent::SetPixelFormat] to let the window know how to render image
@@ -81,6 +84,8 @@ pub enum VncEvent {
     /// According to [RFC6143](https://www.rfc-editor.org/rfc/rfc6143.html#section-7.6.4)
     ///
     Text(String),
+    /// Sent after the last rectangle of a `FramebufferUpdate` message
+    FramebufferUpdateEnd,
     /// If any unexpected error happens in the async process routines
     /// This event will propagate the error to the current context
     Error(String),

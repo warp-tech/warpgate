@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-secrets-vault"
-version = "0.30.0"
+version = "0.31.0-beta.1"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -12,5 +12,10 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "time"] }
 tracing.workspace = true
-vaultrs = { version = "0.7", default-features = false, features = ["rustls"] }
+vaultrs = { version = "0.8", default-features = false, features = [
+    "rustls-no-provider",
+] }
 warpgate-common = { path = "../warpgate-common" }
+
+[dev-dependencies]
+rustls = { workspace = true, features = ["aws-lc-rs"] }

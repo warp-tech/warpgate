@@ -103,6 +103,8 @@ pub struct SsoKubernetesConfigDescription {
 enum GetSsoKubernetesConfigsResponse {
     #[oai(status = 200)]
     Ok(Json<Vec<SsoKubernetesConfigDescription>>),
+    #[oai(status = 403)]
+    Forbidden,
 }
 
 fn make_redirect_url(err: &str) -> String {
@@ -372,6 +374,17 @@ impl Api {
             )));
         }
 
+        // Stored before any remaining factor so back-channel logout and SLO
+        // can find the session even when TOTP or an approval is still pending.
+        session.remove(SSO_CONTEXT_SESSION_KEY);
+        session.set_sso_login_state(SsoLoginState {
+            provider: context.provider,
+            token: response.id_token.clone(),
+            supports_single_logout: context.supports_single_logout,
+            subject: Some(response.subject.clone()),
+            sid: response.sid.clone(),
+        });
+
         if let Ok(user_info) = outcome.into_accepted() {
             authorize_session(req, &ctx, user_info).await?;
             state.emit_authenticated_event_once();
@@ -381,15 +394,8 @@ impl Api {
                     .clear_failed_attempts(&ip, &username)
                     .await;
             }
-            drop(state);
-            session.set_sso_login_state(SsoLoginState {
-                provider: context.provider,
-                token: response.id_token.clone(),
-                supports_single_logout: context.supports_single_logout,
-                subject: Some(response.subject.clone()),
-                sid: response.sid.clone(),
-            });
         }
+        drop(state);
 
         warpgate_core::resolve_and_map_sso_user(
             services.config_provider.as_ref(),
@@ -455,6 +461,9 @@ impl Api {
         &self,
         ctx: AuthedSession,
     ) -> Result<GetSsoKubernetesConfigsResponse, WarpgateError> {
+        if ctx.auth.as_full_user().is_none() {
+            return Ok(GetSsoKubernetesConfigsResponse::Forbidden);
+        }
         let mut providers = ctx
             .services()
             .config

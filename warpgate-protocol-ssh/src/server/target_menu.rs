@@ -15,7 +15,7 @@ use termwiz::input::{InputEvent, InputParser, KeyCode, Modifiers};
 use tui_input::{Input, InputRequest};
 use warpgate_common::eventhub::{EventSender, EventSubscription};
 use warpgate_common::fuzzy::fuzzy_rank;
-use warpgate_common::{Target, TargetSSHOptions, UserSessionId, WarpgateError};
+use warpgate_common::{Target, TargetId, TargetSSHOptions, UserSessionId, WarpgateError};
 
 use crate::server::session::Event;
 
@@ -125,10 +125,9 @@ struct DrawState {
 }
 
 #[derive(Debug)]
-#[allow(clippy::large_enum_variant)]
 pub enum MenuEvent {
     Render(Bytes),
-    Selected(Target),
+    Selected(TargetId),
     Abort,
 }
 
@@ -544,7 +543,7 @@ async fn run_target_menu_loop(
                     }
                     Some(MenuInputResult::Abort) => Some(MenuEvent::Abort),
                     Some(MenuInputResult::Selected((target, _options))) => {
-                        Some(MenuEvent::Selected(target))
+                        Some(MenuEvent::Selected(target.id))
                     }
                 };
 

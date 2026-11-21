@@ -1,11 +1,13 @@
+use super::{
+    auth::{AuthHelper, AuthResult, SecurityType},
+    connection::VncClient,
+    security::ard::{ArdCredentials, APPLE_RFB_VERSION},
+};
 use std::future::Future;
 use std::pin::Pin;
-
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tracing::{info, trace};
 
-use super::auth::{read_reason_string, AuthHelper, AuthResult, SecurityType};
-use super::connection::VncClient;
 use crate::{PixelFormat, VncEncoding, VncError, VncVersion};
 
 pub enum VncState<S, F>
@@ -30,16 +32,28 @@ where
             match self {
                 VncState::Handshake(mut connector) => {
                     // Read the rfbversion informed by the server
-                    let rfbversion = VncVersion::read(&mut connector.stream).await?;
+                    let (server_version, raw_version) =
+                        VncVersion::read(&mut connector.stream).await?;
                     trace!(
                         "Our version {:?}, server version {:?}",
                         connector.rfb_version,
-                        rfbversion
+                        server_version
                     );
-                    let rfbversion = if connector.rfb_version < rfbversion {
+                    let rfbversion = if connector.ard.is_some() && raw_version == *APPLE_RFB_VERSION
+                    {
+                        // Apple reports 003.889 and supports the 3.7/3.8
+                        // handshake, which is required to be offered the ARD
+                        // security type. Our ARD flow implements the 3.8
+                        // variant, so a lower client limit cannot be honoured
+                        // and is reported instead of being silently raised.
+                        if connector.rfb_version < VncVersion::RFB38 {
+                            return Err(VncError::ArdVersionConflict(connector.rfb_version));
+                        }
+                        VncVersion::RFB38
+                    } else if connector.rfb_version < server_version {
                         connector.rfb_version
                     } else {
-                        rfbversion
+                        server_version
                     };
 
                     // Record the negotiated rfbversion
@@ -52,7 +66,50 @@ where
                     let security_types =
                         SecurityType::read(&mut connector.stream, &connector.rfb_version).await?;
 
-                    assert!(!security_types.is_empty());
+                    if security_types.is_empty() {
+                        return Err(VncError::ConnectError);
+                    }
+
+                    if let Some(credentials) = connector.ard.take() {
+                        if security_types.contains(&SecurityType::AppleArd) {
+                            SecurityType::write(&SecurityType::AppleArd, &mut connector.stream)
+                                .await?;
+                            let result = super::security::ard::authenticate(
+                                &mut connector.stream,
+                                &credentials,
+                            )
+                            .await?;
+                            if let AuthResult::Failed = result {
+                                // In 3.8 the server appends a reason string; it may
+                                // also just close the connection instead.
+                                let reason = crate::limits::string(
+                                    &mut connector.stream,
+                                    crate::limits::MAX_NAME,
+                                )
+                                .await
+                                .unwrap_or_else(|_| "connection closed".to_owned());
+                                return Err(VncError::ArdAuthFailed(reason));
+                            }
+                            info!("Apple ARD auth done, client connected");
+                            return Ok(VncState::Connected(
+                                VncClient::new(
+                                    connector.stream,
+                                    connector.allow_shared,
+                                    connector.pixel_format,
+                                    connector.encodings,
+                                )
+                                .await?,
+                            ));
+                        }
+                        // ARD is not on offer; only fall back to a legacy
+                        // method when one could actually complete.
+                        let can_fallback = security_types.contains(&SecurityType::None)
+                            || (security_types.contains(&SecurityType::VncAuth)
+                                && connector.auth_methond.is_some());
+                        if !can_fallback {
+                            return Err(VncError::ArdNotOffered);
+                        }
+                    }
 
                     if security_types.contains(&SecurityType::None) {
                         match connector.rfb_version {
@@ -74,8 +131,16 @@ where
                                 info!("No auth needed in vnc3.8");
                                 SecurityType::write(&SecurityType::None, &mut connector.stream)
                                     .await?;
-                                let mut ok = [0; 4];
-                                connector.stream.read_exact(&mut ok).await?;
+                                let result = connector.stream.read_u32().await?.try_into()?;
+                                if let AuthResult::Failed = result {
+                                    return Err(VncError::General(
+                                        crate::limits::string(
+                                            &mut connector.stream,
+                                            crate::limits::MAX_NAME,
+                                        )
+                                        .await?,
+                                    ));
+                                }
                             }
                         }
                     } else {
@@ -115,13 +180,17 @@ where
                         auth.write(&mut connector.stream).await?;
                         let result = auth.finish(&mut connector.stream).await?;
                         if let AuthResult::Failed = result {
-                            if let VncVersion::RFB37 = connector.rfb_version {
+                            if connector.rfb_version != VncVersion::RFB38 {
                                 // In VNC Authentication (Section 7.2.2), if the authentication fails,
                                 // the server sends the SecurityResult message, but does not send an
                                 // error message before closing the connection.
                                 return Err(VncError::WrongPassword);
                             } else {
-                                let err_msg = read_reason_string(&mut connector.stream).await?;
+                                let err_msg = crate::limits::string(
+                                    &mut connector.stream,
+                                    crate::limits::MAX_NAME,
+                                )
+                                .await?;
                                 return Err(VncError::General(err_msg));
                             }
                         }
@@ -160,6 +229,7 @@ where
 {
     stream: S,
     auth_methond: Option<F>,
+    ard: Option<ArdCredentials>,
     rfb_version: VncVersion,
     allow_shared: bool,
     pixel_format: Option<PixelFormat>,
@@ -202,6 +272,7 @@ where
         Self {
             stream,
             auth_methond: None,
+            ard: None,
             allow_shared: true,
             rfb_version: VncVersion::RFB38,
             pixel_format: None,
@@ -250,6 +321,35 @@ where
     ///
     pub fn set_auth_method(mut self, auth_callback: F) -> Self {
         self.auth_methond = Some(auth_callback);
+        self
+    }
+
+    /// Enable Apple Remote Desktop (RFB security type 30) authentication.
+    ///
+    /// When set, the client answers Apple's `RFB 003.889` version with the
+    /// 3.8 handshake so the server offers its security-type list, and signs
+    /// in with the macOS account `username` and `password` when type 30 is
+    /// available. This bypasses the login window that plain VNC
+    /// authentication shows on macOS 10.7 and later.
+    ///
+    /// When the server does not offer ARD the connection fails with
+    /// [VncError::ArdNotOffered] unless a legacy method could actually
+    /// complete: an unauthenticated session, or VNC authentication with
+    /// credentials supplied via [Self::set_auth_method].
+    ///
+    /// The ARD flow requires the 3.8 handshake. If [Self::set_version]
+    /// limited the client to an older version, the connection to an Apple
+    /// server fails with [VncError::ArdVersionConflict] instead of silently
+    /// raising that limit.
+    pub fn set_ard_credentials(
+        mut self,
+        username: impl Into<String>,
+        password: impl Into<String>,
+    ) -> Self {
+        self.ard = Some(ArdCredentials {
+            username: username.into(),
+            password: password.into(),
+        });
         self
     }
 
@@ -310,6 +410,9 @@ where
     pub fn build(self) -> Result<VncState<S, F>, VncError> {
         if self.encodings.is_empty() {
             return Err(VncError::NoEncoding);
+        }
+        if let Some(format) = &self.pixel_format {
+            format.validate()?;
         }
         Ok(VncState::Handshake(self))
     }

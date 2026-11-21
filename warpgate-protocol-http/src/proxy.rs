@@ -26,6 +26,7 @@ use warpgate_common::{TargetHTTPOptions, WarpgateError, try_block};
 use warpgate_common_http::logging::{get_client_ip, log_request_result};
 use warpgate_common_http::{
     AuthenticatedRequestContext, SessionAuthorization, SessionKeepalive, SessionKeepaliveGuard,
+    UpstreamBody, buffer_response,
 };
 use warpgate_core::AdmittedTarget;
 use warpgate_tls::{TlsMode, configure_tls_connector};
@@ -33,6 +34,10 @@ use warpgate_web::lookup_built_file;
 
 use crate::client_cache::{HttpClientCache, build_client};
 use crate::common::{SESSION_COOKIE_NAME, SessionExt};
+
+/// Injecting the embedded UI needs the whole page in memory. A larger page is
+/// passed through unmodified.
+const MAX_EMBED_PAGE_BYTES: usize = 2 * 1024 * 1024;
 
 static X_WARPGATE_USERNAME: HeaderName = HeaderName::from_static("x-warpgate-username");
 static X_WARPGATE_AUTHENTICATION_TYPE: HeaderName =
@@ -220,6 +225,29 @@ fn rewrite_response(
         }
     }
 
+    // Targets must not set the session cookie. An unparseable header could be
+    // one, so it is dropped too.
+    let cookies: Vec<_> = headers
+        .get_all(http::header::SET_COOKIE)
+        .iter()
+        .filter(|value| {
+            let keep = value
+                .to_str()
+                .ok()
+                .and_then(|value| Cookie::parse(value).ok())
+                .is_some_and(|cookie| cookie.name() != SESSION_COOKIE_NAME);
+            if !keep {
+                warn!(header=?value, "Dropped a response cookie");
+            }
+            keep
+        })
+        .cloned()
+        .collect();
+    headers.remove(http::header::SET_COOKIE);
+    for value in cookies {
+        headers.append(http::header::SET_COOKIE, value);
+    }
+
     if let http::header::Entry::Occupied(mut entry) = headers.entry(http::header::SET_COOKIE) {
         for value in entry.iter_mut() {
             try_block!({
@@ -285,6 +313,23 @@ fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> R
     Ok(target)
 }
 
+fn target_accept_encoding(req: &Request) -> HeaderValue {
+    let identity = HeaderValue::from_static("identity");
+    let wants_html = req
+        .headers()
+        .get_all(http::header::ACCEPT)
+        .iter()
+        .any(|v| v.to_str().is_ok_and(|v| v.contains("text/html")));
+    if wants_html {
+        // we need a parseable body for manipulation
+        return identity;
+    }
+    req.headers()
+        .get(http::header::ACCEPT_ENCODING)
+        .cloned()
+        .unwrap_or(identity)
+}
+
 fn inject_forwarding_headers<B: SomeRequestBuilder>(
     req: &Request,
     ctx: &AuthenticatedRequestContext,
@@ -294,8 +339,8 @@ fn inject_forwarding_headers<B: SomeRequestBuilder>(
         target = target.header(X_FORWARDED_HOST.clone(), host);
     }
     target = target.header(X_FORWARDED_PROTO.clone(), ctx.trusted_proto(req).as_str());
-    if let Some(addr) = req.remote_addr().as_socket_addr() {
-        target = target.header(X_FORWARDED_FOR.clone(), addr.ip().to_string());
+    if let Some(ip) = ctx.trusted_client_ip(req) {
+        target = target.header(X_FORWARDED_FOR.clone(), ip);
     }
     target
 }
@@ -311,6 +356,7 @@ async fn inject_own_headers<B: SomeRequestBuilder>(req: &Request, mut target: B)
             },
         );
     }
+    target = target.header(http::header::ACCEPT_ENCODING, target_accept_encoding(req));
     Ok(target)
 }
 
@@ -370,8 +416,11 @@ pub async fn proxy_normal_request(
 
     // The embedded UI can go in if the response is a usable HTML page - we for example
     // don't want to embed into a 404 page or a JS file - and it has something to show:
-    // the session menu, the login banner, or both.
+    // the session menu, the login banner, or both. An encoded body can't be edited.
     let embed_ui = response.status() == StatusCode::OK
+        && !response
+            .headers()
+            .contains_key(http::header::CONTENT_ENCODING)
         && response
             .content_type()
             .is_some_and(|content_type| content_type.starts_with("text/html"))
@@ -406,17 +455,15 @@ async fn copy_client_body(
     close_rx: broadcast::Receiver<()>,
     keepalive_guard: Option<SessionKeepaliveGuard>,
 ) -> Result<()> {
-    if embed_ui {
-        copy_client_body_and_embed(client_response, response).await?;
-        drop(keepalive_guard);
-        return Ok(());
-    }
-
-    let body = Box::pin(
-        client_response
-            .bytes_stream()
-            .map_err(std::io::Error::other),
-    );
+    let body = if embed_ui {
+        buffer_response(client_response, MAX_EMBED_PAGE_BYTES).await?
+    } else {
+        UpstreamBody::Streamed(client_response.bytes_stream().boxed())
+    };
+    let body = match body {
+        UpstreamBody::Buffered(page) => return embed_ui_into_page(&page, response),
+        UpstreamBody::Streamed(body) => body.map_err(std::io::Error::other),
+    };
     let guarded = futures::stream::unfold(
         (body, close_rx, keepalive_guard),
         |(mut body, mut close_rx, keepalive_guard)| async move {
@@ -432,11 +479,8 @@ async fn copy_client_body(
     Ok(())
 }
 
-async fn copy_client_body_and_embed(
-    client_response: reqwest::Response,
-    response: &mut Response,
-) -> Result<()> {
-    let content = client_response.text().await?;
+fn embed_ui_into_page(page: &[u8], response: &mut Response) -> Result<()> {
+    let content = String::from_utf8_lossy(page);
 
     let script_manifest = lookup_built_file("src/embed/index.ts")?;
 
@@ -674,6 +718,43 @@ mod tests {
     }
 
     #[test]
+    fn accept_encoding_passes_through_except_for_pages() {
+        let req = |accept: &str| {
+            Request::builder()
+                .header(http::header::ACCEPT, accept)
+                .header(http::header::ACCEPT_ENCODING, "br, gzip")
+                .finish()
+        };
+        assert_eq!(target_accept_encoding(&req("*/*")), "br, gzip");
+        assert_eq!(
+            target_accept_encoding(&req("text/html,application/xhtml+xml,*/*;q=0.8")),
+            "identity"
+        );
+        assert_eq!(
+            target_accept_encoding(&Request::builder().finish()),
+            "identity"
+        );
+    }
+
+    #[test]
+    fn client_forwarding_headers_are_not_copied() {
+        let req = Request::builder()
+            .header(&X_FORWARDED_FOR, "203.0.113.10")
+            .header(&X_FORWARDED_HOST, "evil.example")
+            .header(&X_FORWARDED_PROTO, "https")
+            .header(http::header::FORWARDED, "for=203.0.113.10")
+            .header("x-real-ip", "203.0.113.10")
+            .header("x-custom", "kept")
+            .finish();
+        let copied = copy_server_request(&req, http::Request::builder())
+            .unwrap()
+            .body(())
+            .unwrap();
+        let names: Vec<_> = copied.headers().keys().map(HeaderName::as_str).collect();
+        assert_eq!(names, ["x-custom"]);
+    }
+
+    #[test]
     fn request_cookie_header_omits_only_warpgate_session() {
         assert_eq!(
             forwarded_cookie_header(&[
@@ -703,6 +784,31 @@ mod tests {
             forwarded_cookie_header(&["warpgate-http-session=secret"]),
             None
         );
+    }
+
+    #[tokio::test]
+    async fn page_over_the_embed_limit_passes_through_unmodified() {
+        let mut page = b"<html><head></head><body>".to_vec();
+        page.resize(MAX_EMBED_PAGE_BYTES + 1, b'x');
+        let chunks: Vec<_> = page
+            .chunks(64 * 1024)
+            .map(|chunk| Ok::<_, std::io::Error>(chunk.to_vec()))
+            .collect();
+        let upstream: reqwest::Response = http::Response::builder()
+            .header(http::header::CONTENT_TYPE, "text/html")
+            .body(reqwest::Body::wrap_stream(futures::stream::iter(chunks)))
+            .unwrap()
+            .into();
+
+        let mut response: Response = "".into();
+        copy_client_response(&upstream, &mut response);
+        let (_close_tx, close_rx) = broadcast::channel(1);
+        copy_client_body(upstream, &mut response, true, close_rx, None)
+            .await
+            .unwrap();
+
+        assert_eq!(response.content_type(), Some("text/html"));
+        assert_eq!(response.into_body().into_bytes().await.unwrap(), page);
     }
 
     fn make_options(url: &str) -> TargetHTTPOptions {
@@ -785,6 +891,27 @@ mod tests {
             .collect();
         assert_eq!(cookie_headers.len(), 1);
         Cookie::parse(cookie_headers[0].clone()).unwrap()
+    }
+
+    #[test]
+    fn rewrite_response_drops_session_and_unparseable_cookies() {
+        let mut resp = poem::Response::builder()
+            .header(
+                http::header::SET_COOKIE,
+                format!("{SESSION_COOKIE_NAME}=planted; Path=/"),
+            )
+            .header(http::header::SET_COOKIE, "no-equals-sign")
+            .header(http::header::SET_COOKIE, "app=1; Path=/")
+            .body(());
+        let options = make_options("https://100.0.0.1:7080");
+        let source_uri = Uri::try_from("https://100.0.0.1:7080/").unwrap();
+        rewrite_response(&mut resp, &options, &source_uri).unwrap();
+        let cookies: Vec<_> = resp
+            .headers()
+            .get_all(http::header::SET_COOKIE)
+            .iter()
+            .collect();
+        assert_eq!(cookies, ["app=1; Path=/"]);
     }
 
     #[test]

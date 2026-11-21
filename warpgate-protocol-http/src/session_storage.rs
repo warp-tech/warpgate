@@ -9,13 +9,12 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
     ColumnTrait, Condition, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
-    TransactionTrait,
 };
 use serde_json::Value;
 use time::OffsetDateTime;
 use tracing::error;
 use warpgate_common::{UserSessionId, WarpgateError};
-use warpgate_db_entities::{HttpSession, UserSession};
+use warpgate_db_entities::{HttpSession, UserSession, begin_write};
 
 use crate::SsoLoginState;
 use crate::common::SessionExt;
@@ -185,7 +184,7 @@ impl SharedSessionStorage {
         session_id: &str,
         only_if_expired: Option<(OffsetDateTime, Duration)>,
     ) -> Result<(), WarpgateError> {
-        let transaction = self.db.begin().await?;
+        let transaction = begin_write(&self.db).await?;
         let Some(initial) = HttpSession::Entity::find_by_id(session_id.to_owned())
             .one(&transaction)
             .await?
@@ -236,7 +235,7 @@ impl SharedSessionStorage {
 
         transaction.commit().await?;
         if let Some(ended) = ended {
-            ended.settle(&self.db).await;
+            warpgate_core::user_sessions::settle(ended, &self.db).await;
         }
         Ok(())
     }
@@ -261,7 +260,7 @@ impl SharedSessionStorage {
     ) -> Result<(), WarpgateError> {
         if let Some(id) = stored_id {
             let user_session_id = session.get_session_id();
-            let transaction = self.db.begin().await?;
+            let transaction = begin_write(&self.db).await?;
             if let Some(user_session_id) = user_session_id {
                 UserSession::lock_for_update(&transaction, user_session_id).await?;
             }
@@ -338,7 +337,7 @@ impl SessionStorage for SharedSessionStorage {
             sso_subject: Set(sso_subject),
             sso_sid: Set(sso_sid),
         };
-        let transaction = self.db.begin().await.map_err(InternalServerError)?;
+        let transaction = begin_write(&self.db).await.map_err(InternalServerError)?;
 
         if let Some(id) = user_session_id {
             let parent = UserSession::lock_for_update(&transaction, id)
@@ -399,6 +398,7 @@ impl SessionStorage for SharedSessionStorage {
 mod tests {
     use sea_orm::Database;
     use uuid::Uuid;
+    use warpgate_common::UserId;
 
     use super::*;
 
@@ -434,7 +434,7 @@ mod tests {
         UserSession::Entity::insert(UserSession::ActiveModel {
             id: Set(id),
             username: Set(Some("alice".into())),
-            user_id: Set(Some(Uuid::new_v4())),
+            user_id: Set(Some(UserId(Uuid::new_v4()))),
             remote_address: Set("127.0.0.1:443".into()),
             started: Set(OffsetDateTime::now_utc()),
             ended: Set(None),

@@ -1,5 +1,6 @@
-use sea_orm::{ConnectionTrait, DatabaseTransaction, StatementBuilder, TransactionTrait};
+use sea_orm::{ConnectionTrait, DatabaseTransaction, StatementBuilder};
 use sea_orm_migration::prelude::*;
+use warpgate_db_entities::begin_write;
 
 /// The three role-assignment tables carried an autoincrement integer primary
 /// key that nothing ever read - an assignment is only ever looked up by the
@@ -26,7 +27,7 @@ impl MigrationTrait for Migration {
         // itself on SQLite, the statements below land on different pooled
         // connections, and one holding an older schema snapshot rejects them -
         // so this migration keeps itself on a single connection.
-        let db = manager.get_connection().begin().await?;
+        let db = begin_write(manager.get_connection()).await?;
 
         exec(
             &db,
@@ -136,7 +137,7 @@ impl MigrationTrait for Migration {
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         // Restores the surrogate key and the lookup indexes it needed. The rows
         // dropped as duplicates on the way up do not come back.
-        let db = manager.get_connection().begin().await?;
+        let db = begin_write(manager.get_connection()).await?;
 
         exec(
             &db,
@@ -282,8 +283,7 @@ async fn swap_in(db: &DatabaseTransaction, table: &str) -> Result<(), DbErr> {
 
 /// Runs one sea-query statement on the migration's own connection.
 async fn exec<S: StatementBuilder>(db: &DatabaseTransaction, stmt: &S) -> Result<(), DbErr> {
-    let statement = db.get_database_backend().build(stmt);
-    db.execute(statement).await?;
+    db.execute(stmt).await?;
     Ok(())
 }
 
