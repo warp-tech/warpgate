@@ -11,7 +11,7 @@ use warpgate_common::auth::{
     ApprovalKind, ApprovalScope, AuthStateUserInfo, RememberApprovalBy, StoredCredential,
     StoredCredentialFingerprint, StoredCredentialKind, WebApprovalMatchKey,
 };
-use warpgate_common::{NodeId, Protocol, UserSessionId};
+use warpgate_common::{NodeId, Protocol, TargetId, UserId, UserSessionId};
 use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
 use warpgate_db_entities::SessionApprovalRequest::{
     self, Advertised, ApprovalActor, close_request, mark_consumed, upsert_request,
@@ -82,7 +82,7 @@ fn plain_subject(target: &str) -> ApprovalSubject {
         kind: ApprovalKind::Admin,
         session_id: UserSessionId(Uuid::new_v4()),
         user_info: AuthStateUserInfo {
-            id: Uuid::new_v4(),
+            id: UserId(Uuid::new_v4()),
             username: "someone".into(),
         },
         protocol: Protocol::Ssh,
@@ -100,7 +100,7 @@ async fn pending_row(db: &DatabaseConnection, session_id: UserSessionId, target:
 fn admin_actor() -> ApprovalActor {
     ApprovalActor {
         username: Some("admin".into()),
-        user_id: Uuid::nil(),
+        user_id: UserId(Uuid::nil()),
     }
 }
 
@@ -201,9 +201,7 @@ async fn revoking_a_session_abandons_its_pending_requests() {
     pending_row(&db, revoked, "a-target").await;
     pending_row(&db, other, "a-target").await;
 
-    warpgate_db_entities::UserSession::revoke(&db, revoked)
-        .await
-        .unwrap();
+    crate::user_sessions::revoke(&db, revoked).await.unwrap();
 
     assert_eq!(status_of(&db, revoked, "a-target").await, Status::Abandoned);
     assert_eq!(status_of(&db, other, "a-target").await, Status::Pending);
@@ -690,7 +688,7 @@ async fn a_decision_written_later_is_picked_up() {
                 ApprovalDecision::Approved(ApprovalScope::Once),
                 ApprovalActor {
                     username: Some("admin".into()),
-                    user_id: Uuid::nil(),
+                    user_id: UserId(Uuid::nil()),
                 },
             )
             .await
@@ -961,7 +959,7 @@ pub(crate) async fn seed_ticket(
     use warpgate_db_entities::Target::TargetKind;
     use warpgate_db_entities::{Target, Ticket, User};
 
-    let user_id = Uuid::new_v4();
+    let user_id = UserId(Uuid::new_v4());
     User::Entity::insert(User::ActiveModel {
         id: Set(user_id),
         username: Set(format!("user-{user_id}")),
@@ -971,12 +969,13 @@ pub(crate) async fn seed_ticket(
         ldap_server_id: Set(None),
         ldap_object_uuid: Set(None),
         allowed_ip_ranges: Set(serde_json::Value::Null),
+        ..Default::default()
     })
     .exec(db)
     .await
     .unwrap();
 
-    let target_id = Uuid::new_v4();
+    let target_id = TargetId(Uuid::new_v4());
     Target::Entity::insert(Target::ActiveModel {
         id: Set(target_id),
         name: Set(format!("target-{target_id}")),
@@ -990,6 +989,7 @@ pub(crate) async fn seed_ticket(
         ticket_require_approval: Set(false),
         ticket_max_uses: Set(None),
         require_approval: Set(true),
+        ..Default::default()
     })
     .exec(db)
     .await
@@ -1193,7 +1193,7 @@ async fn a_decision_aimed_at_an_earlier_asking_settles_nothing() {
         None,
         &ApprovalActor {
             username: Some("admin".into()),
-            user_id: Uuid::nil(),
+            user_id: UserId(Uuid::nil()),
         },
     )
     .await
@@ -1436,7 +1436,7 @@ mod delivery {
 
     fn test_user() -> User {
         User {
-            id: Uuid::new_v4(),
+            id: UserId(Uuid::new_v4()),
             username: "someone".into(),
             description: String::new(),
             credential_policy: None,
@@ -1742,7 +1742,7 @@ mod polled_gate {
 
     fn gated_target(name: &str) -> Target {
         Target {
-            id: Uuid::new_v4(),
+            id: TargetId(Uuid::new_v4()),
             name: name.into(),
             description: String::new(),
             allow_roles: vec![],
@@ -1759,12 +1759,13 @@ mod polled_gate {
             ticket_require_approval: false,
             require_approval: true,
             ticket_max_uses: None,
+            provider: None,
         }
     }
 
     fn someone() -> AuthStateUserInfo {
         AuthStateUserInfo {
-            id: Uuid::new_v4(),
+            id: UserId(Uuid::new_v4()),
             username: "someone".into(),
         }
     }

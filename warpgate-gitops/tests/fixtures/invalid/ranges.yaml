@@ -1,0 +1,29 @@
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: " "
+spec:
+  options:
+    postgres:
+      host: db
+      port: 0
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: uses
+spec:
+  ticket_max_uses: 0
+  options:
+    postgres:
+      host: db
+---
+apiVersion: warpgate/v1
+kind: Target
+metadata:
+  name: duration
+spec:
+  ticket_max_duration_seconds: -1
+  options:
+    postgres:
+      host: db

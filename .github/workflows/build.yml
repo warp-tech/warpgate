@@ -93,11 +93,7 @@ jobs:
           use-cross: ${{ matrix.cargo-cross }}
           args: --all-features --release --target ${{ matrix.target }}
         env:
-          ENV SOURCE_DATE_EPOCH: "0" # for rust-embed determinism
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
-          CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
-          CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS: "--cfg tokio_unstable --remap-path-prefix=$HOME=/reproducible-home --remap-path-prefix=$PWD=/reproducible-pwd"
+          SOURCE_DATE_EPOCH: "0" # for rust-embed determinism
 
       - name: Generate Rust BOM
         run: |
@@ -149,13 +145,51 @@ jobs:
           fi
 
       - name: Upload release
-        uses: softprops/action-gh-release@v3.0.3
+        uses: softprops/action-gh-release@v3.0.4
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           draft: true
           generate_release_notes: ${{ steps.release_notes.outputs.generate == 'true' }}
           files: dist/*
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  build-windows:
+    # Publishes no artifact. The tests cover the crates with OS-dependent
+    # behaviour: file access, signals, sockets and SQLite files
+    name: Build (x86_64-windows)
+    runs-on: windows-2025
+    env:
+      # openssl-src builds OpenSSL with Perl; the runner's Git Perl lacks modules it needs
+      OPENSSL_SRC_PERL: C:\Strawberry\perl\bin\perl.exe
+      # the web UI's npm scripts use POSIX shell syntax
+      npm_config_script_shell: C:\Program Files\Git\bin\bash.exe
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: recursive
+
+      - uses: Swatinem/rust-cache@v2.9.3
+        with:
+          key: "build-windows"
+
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+
+      - name: Build admin UI
+        run: |
+          cd warpgate-web
+          npm ci
+          npm run build
+
+      - name: Build
+        run: cargo build --all-features
+
+      - name: Test
+        run: cargo test --all-features -p warpgate-common -p warpgate-core -p warpgate-db-migrations -p warpgate -p warpgate-protocol-ssh
 
   config-schema:
     name: Config schema check
@@ -180,3 +214,8 @@ jobs:
           mkdir warpgate-web/dist
           just config-schema
           git diff --exit-code config-schema.json
+
+      - name: Ensure there are no changes in GitOps resource schema
+        run: |
+          just gitops-schema
+          git diff --exit-code gitops-schema.json

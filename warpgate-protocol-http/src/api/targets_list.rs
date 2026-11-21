@@ -6,7 +6,7 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::EntityTrait;
 use serde::Serialize;
 use uuid::Uuid;
-use warpgate_common::{Target as TargetConfig, WarpgateError};
+use warpgate_common::{Target as TargetConfig, TargetOptions, WarpgateError};
 use warpgate_common_http::{RequestAuthorization, SessionAuthorization};
 use warpgate_core::ConfigProvider;
 use warpgate_db_entities::Target::fuzzy_filter_targets;
@@ -19,18 +19,20 @@ pub struct Api;
 
 #[derive(Debug, Serialize, Clone, Object)]
 pub struct GroupInfo {
-    pub id: uuid::Uuid,
+    pub id: warpgate_common::TargetGroupId,
     pub name: String,
     pub color: Option<BootstrapThemeColor>,
 }
 
 #[derive(Debug, Serialize, Clone, Object)]
 pub struct TargetSnapshot {
-    pub id: Uuid,
+    pub id: warpgate_common::TargetId,
     pub name: String,
     pub description: String,
     pub kind: Target::TargetKind,
     pub external_host: Option<String>,
+    /// Initial HTTP path, query and fragment, omitted for the bare root path.
+    pub default_http_path: Option<String>,
     pub group: Option<GroupInfo>,
     pub default_database_name: Option<String>,
 }
@@ -56,7 +58,7 @@ impl Api {
             TargetGroup::Entity::find().all(db).await
         }?;
 
-        let group_map: HashMap<uuid::Uuid, &TargetGroup::Model> =
+        let group_map: HashMap<warpgate_common::TargetGroupId, &TargetGroup::Model> =
             groups.iter().map(|g| (g.id, g)).collect();
 
         let all_targets: Vec<TargetConfig> = services.config_provider.list_targets().await?;
@@ -97,6 +99,10 @@ impl Api {
                     description: t.description.clone(),
                     kind: (&t.options).into(),
                     external_host: t.options.external_host().map(ToString::to_string),
+                    default_http_path: match &t.options {
+                        TargetOptions::Http(options) => default_http_path(&options.url),
+                        _ => None,
+                    },
                     default_database_name: t
                         .options
                         .default_database_name()
@@ -107,5 +113,44 @@ impl Api {
             .collect();
 
         Ok(GetTargetsResponse::Ok(Json(result)))
+    }
+}
+
+fn default_http_path(url: &str) -> Option<String> {
+    let url = url::Url::parse(url).ok()?;
+    let path = &url[url::Position::BeforePath..url::Position::AfterFragment];
+    if path.is_empty() || path == "/" {
+        None
+    } else {
+        Some(path.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::default_http_path;
+
+    #[test]
+    fn extracts_default_http_path() {
+        for (url, expected) in [
+            ("https://cluster.example.com", None),
+            ("https://cluster.example.com/", None),
+            ("", None),
+            (
+                "https://cluster.example.com/prometheus/",
+                Some("/prometheus/"),
+            ),
+            (
+                "https://cluster.example.com/prometheus/?view=graph&name=a%2Fb#section",
+                Some("/prometheus/?view=graph&name=a%2Fb#section"),
+            ),
+            (
+                "https://cluster.example.com/?view=graph",
+                Some("/?view=graph"),
+            ),
+            ("https://cluster.example.com/#section", Some("/#section")),
+        ] {
+            assert_eq!(default_http_path(url).as_deref(), expected, "{url}");
+        }
     }
 }

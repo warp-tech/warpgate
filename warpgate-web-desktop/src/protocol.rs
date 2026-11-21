@@ -143,10 +143,6 @@ pub enum ServerMessage {
         text: String,
     },
     Bell,
-    /// A non-fatal notice; the session ends through [`ServerMessage::State`] alone.
-    Error {
-        message: String,
-    },
 }
 
 impl From<SessionPhase> for ServerMessage {
@@ -215,7 +211,7 @@ pub const fn phase_for(state: DesktopState) -> Option<LiveSessionPhase> {
 }
 
 impl ServerMessage {
-    /// `None` for state changes, which are reported as a session phase instead.
+    /// `None` for state changes and errors, which are reported as a session phase instead.
     pub fn from_event(event: DesktopEvent) -> Option<Self> {
         Some(match event {
             // The browser client doesn't draw the target's cursor shape, so there is nothing
@@ -247,7 +243,7 @@ impl ServerMessage {
             },
             DesktopEvent::Clipboard(text) => Self::Clipboard { text },
             DesktopEvent::Bell => Self::Bell,
-            DesktopEvent::Error(message) => Self::Error { message },
+            DesktopEvent::Error(_) => return None,
         })
     }
 }

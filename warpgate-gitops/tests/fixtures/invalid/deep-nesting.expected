@@ -1,0 +1,1 @@
+tests/fixtures/invalid/deep-nesting.yaml:1:129: nesting is deeper than 64 levels

@@ -4,6 +4,7 @@
   "type": "object",
   "properties": {
     "database_url": {
+      "description": "For SQLite, `sqlite:<directory>`: the database is\n`<directory>/db.sqlite3`, relative to the config file's directory.\nAs in any URL, write `%`, `?` and `#` in the path as `%25`, `%3F` and\n`%23`.",
       "type": "string",
       "default": "sqlite:data/db"
     },
@@ -172,7 +173,7 @@
           "default": "[::]:8888"
         },
         "proxy_protocol": {
-          "description": "Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.",
+          "description": "Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.\nOther cluster nodes connect directly and are exempt",
           "type": "boolean",
           "default": false
         },
@@ -192,7 +193,7 @@
           "default": false
         },
         "user_api_token_allowed_endpoints": {
-          "description": "API endpoints allowed when using token auth. Each item is a \"<METHOD> <path>\".",
+          "description": "API endpoints allowed when using token auth. Each item is a \"<METHOD> <path>\".\n`<METHOD>` may be `*`. In `<path>`, `*` matches one segment and `**` any number.",
           "type": [
             "array",
             "null"

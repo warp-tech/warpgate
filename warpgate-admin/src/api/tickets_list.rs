@@ -7,7 +7,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilte
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::helpers::hash::{generate_ticket_secret, hash_secret};
-use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_common::{AdminPermission, TargetId, UserId, WarpgateError};
 use warpgate_common_http::auth::web_reauth_required;
 use warpgate_common_http::errors::bad_request;
 use warpgate_core::logging::AuditEvent;
@@ -21,10 +21,10 @@ pub struct Api;
 #[oai(rename = "Ticket")]
 pub struct TicketModel {
     pub id: Uuid,
-    pub user_id: Uuid,
+    pub user_id: UserId,
     pub username: String,
     pub description: String,
-    pub target_id: Uuid,
+    pub target_id: TargetId,
     pub target: String,
     pub uses_left: Option<i16>,
     pub self_service: bool,
@@ -72,8 +72,8 @@ enum GetTicketsResponse {
 #[derive(Object)]
 struct CreateTicketRequest {
     username: Option<String>,
-    user_id: Option<Uuid>,
-    target_id: Option<Uuid>,
+    user_id: Option<UserId>,
+    target_id: Option<TargetId>,
     target_name: Option<String>,
     expiry: Option<OffsetDateTime>,
     number_of_uses: Option<i16>,

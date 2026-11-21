@@ -25,9 +25,16 @@ pub fn warpgate_surface_path(path: &str) -> Option<&str> {
         .or_else(|| path.strip_prefix("/_warpgate"))
 }
 
-/// Whether a request is allowed during
-/// * MFA setup or
-/// * Cross-site request
+/// Whether a request is allowed while MFA setup is pending.
+pub fn is_mfa_setup_path(method: &Method, path: &str) -> bool {
+    is_session_bootstrap_path(method, path)
+        || (*method == Method::POST
+            && warpgate_surface_path(path) == Some("/api/profile/credentials/otp"))
+}
+
+/// Whether a request may use the session outside the control plane host.
+/// Scripts of a host-bound target can send these requests, so no path here
+/// may modify the account.
 pub fn is_session_bootstrap_path(method: &Method, path: &str) -> bool {
     #[allow(clippy::unwrap_used)]
     static ALLOW_ANY: LazyLock<Regex> = LazyLock::new(|| {
@@ -60,10 +67,7 @@ pub fn is_session_bootstrap_path(method: &Method, path: &str) -> bool {
     static ALLOW_POST: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
             r"^(?x)
-                /api/(
-                    profile/credentials/otp
-                |   auth/(login|otp|logout)
-                )
+                /api/auth/(login|otp|logout)
             $",
         )
         .unwrap()
@@ -124,7 +128,7 @@ pub async fn assert_mfa_setup_gate(
     req: &Request,
     session: &Session,
 ) -> poem::Result<()> {
-    if is_session_bootstrap_path(req.method(), req.original_uri().path()) {
+    if is_mfa_setup_path(req.method(), req.original_uri().path()) {
         return Ok(());
     }
 
@@ -170,7 +174,6 @@ mod tests {
             (Method::GET, "/_warpgate/assets/index.css", true),
             // Enrollment essentials
             (Method::GET, "/@warpgate/api/info", true),
-            (Method::POST, "/@warpgate/api/profile/credentials/otp", true),
             (Method::POST, "/_warpgate/api/auth/logout", true),
             (Method::GET, "/@warpgate/api/sso/logout", true),
             (Method::GET, "/@warpgate/api/auth/state", true),
@@ -230,6 +233,16 @@ mod tests {
                 allowed,
                 "{method} {path}"
             );
+            assert_eq!(is_mfa_setup_path(&method, path), allowed, "{method} {path}");
+        }
+
+        // OTP enrollment passes the MFA gate, but not from a target's host
+        for path in [
+            "/@warpgate/api/profile/credentials/otp",
+            "/_warpgate/api/profile/credentials/otp",
+        ] {
+            assert!(is_mfa_setup_path(&Method::POST, path));
+            assert!(!is_session_bootstrap_path(&Method::POST, path));
         }
     }
 }

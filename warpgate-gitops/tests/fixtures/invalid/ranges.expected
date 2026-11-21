@@ -1,0 +1,4 @@
+tests/fixtures/invalid/ranges.yaml:4:9 metadata.name: must not be empty
+tests/fixtures/invalid/ranges.yaml:9:13 spec.options.postgres.port: must satisfy minimum(1, exclusive: false)
+tests/fixtures/invalid/ranges.yaml:16:20 spec.ticket_max_uses: must satisfy minimum(1, exclusive: false)
+tests/fixtures/invalid/ranges.yaml:26:32 spec.ticket_max_duration_seconds: must satisfy minimum(1, exclusive: false)

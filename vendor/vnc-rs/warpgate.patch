@@ -1,0 +1,23 @@
+diff -ru vnc-rs-0.6.1/src/client/connection.rs base/vnc-rs/src/client/connection.rs
+--- vnc-rs-0.6.1/src/client/connection.rs	2026-11-20 20:10:13.648506548 +0100
++++ base/vnc-rs/src/client/connection.rs	2026-11-20 20:10:13.656682202 +0100
+@@ -615,6 +615,7 @@
+                     desktop.observe(&update);
+                     output_func(VncEvent::DesktopUpdate(update)).await?;
+                 }
++                output_func(VncEvent::FramebufferUpdateEnd).await?;
+             }
+             // SetColorMapEntries,
+             ServerMsg::Bell => {
+diff -ru vnc-rs-0.6.1/src/event.rs base/vnc-rs/src/event.rs
+--- vnc-rs-0.6.1/src/event.rs	2026-11-20 20:10:13.645188328 +0100
++++ base/vnc-rs/src/event.rs	2026-11-20 20:10:13.653675900 +0100
+@@ -84,6 +84,8 @@
+     /// According to [RFC6143](https://www.rfc-editor.org/rfc/rfc6143.html#section-7.6.4)
+     ///
+     Text(String),
++    /// Sent after the last rectangle of a `FramebufferUpdate` message
++    FramebufferUpdateEnd,
+     /// If any unexpected error happens in the async process routines
+     /// This event will propagate the error to the current context
+     Error(String),

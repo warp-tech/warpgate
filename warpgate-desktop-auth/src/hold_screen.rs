@@ -9,7 +9,6 @@
 //! kept as separate objects so the driver can await input and paint without aliasing one
 //! `&mut` across the `select!`.
 
-use std::convert::Infallible;
 use std::future::Future;
 use std::net::IpAddr;
 use std::pin::Pin;
@@ -49,7 +48,7 @@ pub enum HoldFrame<'a> {
 }
 
 impl HoldFrame<'_> {
-    pub fn render(&self, screen: Screen, tick: u64) -> Result<Vec<u8>, Infallible> {
+    pub fn render(&self, screen: Screen, tick: u64) -> Vec<u8> {
         match self {
             Self::Prompt(prompt) => ui::render_authentication(screen, tick, prompt),
             Self::Connecting => ui::render_connecting(screen, tick),

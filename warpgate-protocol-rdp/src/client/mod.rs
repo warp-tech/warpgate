@@ -9,6 +9,7 @@ mod logon;
 mod tls;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use bytes::Bytes;
@@ -47,6 +48,7 @@ use warpgate_core::{
 };
 
 pub(crate) use self::logon::LogonWatcher;
+use crate::client::input::InputHold;
 use crate::clipboard::{Clipboard, ClipboardSink, TextClipboard};
 use crate::desktop_size::bound_desktop_size;
 
@@ -54,6 +56,9 @@ type Framed = TokioFramed<tls::TargetTlsStream>;
 
 /// Signals that the session was aborted from the Warpgate side.
 struct Aborted;
+
+/// How long input is held for a target that does not acknowledge a clipboard offer.
+const CLIPBOARD_ACK_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// cliprdr passes this to active_loop which owns transport and events
 #[derive(Debug)]
@@ -191,6 +196,7 @@ async fn active_loop(
     // for it again is dropped: the target would still answer with a reactivation or a
     // graphics reset, and the viewer re-sends its size right after connecting.
     let mut requested_size = (u32::from(image.width()), u32::from(image.height()));
+    let mut input_hold = InputHold::new(clipboard.acks(), CLIPBOARD_ACK_TIMEOUT);
     let mut reported_size = None;
     if report_size(image, &mut reported_size, None, event_tx, abort_rx)
         .await
@@ -210,6 +216,12 @@ async fn active_loop(
         let outputs = tokio::select! {
             biased;
             _ = abort_rx.recv() => return Ok(()),
+            ops = input_hold.released() => {
+                let events = input_db.apply(ops);
+                active_stage
+                    .process_fastpath_input(image, &events)
+                    .context("processing input")?
+            }
             input = input_rx.recv() => {
                 let Some(first) = input else {
                     return Ok(());
@@ -231,9 +243,8 @@ async fn active_loop(
                     }
                 }
 
-                // flush cliprdr offers enqueued in the loop above
-                // flushed before the the fastpath messages below
-                // so that clipboard is written before ctrl-v arrives
+                // Flush cliprdr offers enqueued in the loop above ahead of the input that
+                // followed them.
                 while let Ok(out) = clipboard_rx.try_recv() {
                     if !handle_clipboard_out(out, &mut framed, &mut active_stage, event_tx, abort_rx)
                         .await?
@@ -253,6 +264,9 @@ async fn active_loop(
                 if ops.is_empty() {
                     continue;
                 }
+                let Some(ops) = input_hold.admit(ops) else {
+                    continue;
+                };
                 let events = input_db.apply(ops);
                 active_stage
                     .process_fastpath_input(image, &events)

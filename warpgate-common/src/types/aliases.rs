@@ -1,6 +1,18 @@
-use poem_openapi::NewType;
+use std::borrow::Cow;
+
+use poem_openapi::registry::{MetaSchemaRef, Registry};
+use poem_openapi::types::{ParseError, ParseFromJSON, ParseResult, ToJSON, Type};
+use poem_openapi::{NewType, Object};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+/// A row ID that code generic over the kind of row can erase to its UUID and
+/// rebuild. Deliberately not `From`/`Into`: sea-orm takes `impl Into<Id>`, and
+/// a blanket conversion would let any UUID pass as any kind of ID again.
+pub trait RowId: Copy {
+    fn from_uuid(id: Uuid) -> Self;
+    fn uuid(self) -> Uuid;
+}
 
 // TODO reuse for other IDs
 macro_rules! uuid_newtype {
@@ -17,7 +29,6 @@ macro_rules! uuid_newtype {
             Hash,
             Serialize,
             Deserialize,
-            NewType,
         )]
         #[serde(transparent)]
         pub struct $name(pub Uuid);
@@ -69,6 +80,16 @@ macro_rules! uuid_newtype {
             }
         }
 
+        impl RowId for $name {
+            fn from_uuid(id: Uuid) -> Self {
+                Self(id)
+            }
+
+            fn uuid(self) -> Uuid {
+                self.0
+            }
+        }
+
         impl sea_orm::TryFromU64 for $name {
             fn try_from_u64(n: u64) -> Result<Self, sea_orm::DbErr> {
                 <Uuid as sea_orm::TryFromU64>::try_from_u64(n).map(Self)
@@ -77,9 +98,105 @@ macro_rules! uuid_newtype {
     };
 }
 
-uuid_newtype!(UserSessionId);
-uuid_newtype!(TargetSessionId);
-uuid_newtype!(NodeId);
+uuid_newtype!(
+    #[derive(NewType)]
+    UserSessionId
+);
+uuid_newtype!(
+    #[derive(NewType)]
+    TargetSessionId
+);
+uuid_newtype!(
+    #[derive(NewType)]
+    NodeId
+);
+uuid_newtype!(
+    #[derive(NewType)]
+    UserId
+);
+uuid_newtype!(
+    #[derive(NewType, Default)]
+    TargetId
+);
+uuid_newtype!(
+    #[derive(NewType)]
+    RoleId
+);
+uuid_newtype!(
+    #[derive(NewType)]
+    TargetGroupId
+);
+uuid_newtype!(
+    #[derive(NewType)]
+    SshClientKeyId
+);
+uuid_newtype!(ProviderId);
+
+impl ProviderId {
+    pub const GITOPS: Self = Self(Uuid::nil());
+
+    pub fn label(self) -> String {
+        if self == Self::GITOPS {
+            "GitOps".to_owned()
+        } else {
+            self.to_string()
+        }
+    }
+}
+
+/// A provider as the API returns it: its ID and display name
+#[derive(Object)]
+#[oai(rename = "Provider")]
+struct ProviderRepr {
+    id: Uuid,
+    label: String,
+}
+
+impl Type for ProviderId {
+    const IS_REQUIRED: bool = true;
+    type RawValueType = Self;
+    type RawElementValueType = Self;
+
+    fn name() -> Cow<'static, str> {
+        ProviderRepr::name()
+    }
+
+    fn schema_ref() -> MetaSchemaRef {
+        ProviderRepr::schema_ref()
+    }
+
+    fn register(registry: &mut Registry) {
+        ProviderRepr::register(registry);
+    }
+
+    fn as_raw_value(&self) -> Option<&Self::RawValueType> {
+        Some(self)
+    }
+
+    fn raw_element_iter<'a>(
+        &'a self,
+    ) -> Box<dyn Iterator<Item = &'a Self::RawElementValueType> + 'a> {
+        Box::new(std::iter::once(self))
+    }
+}
+
+impl ParseFromJSON for ProviderId {
+    fn parse_from_json(value: Option<serde_json::Value>) -> ParseResult<Self> {
+        ProviderRepr::parse_from_json(value)
+            .map(|provider| Self(provider.id))
+            .map_err(|e| ParseError::custom(e.into_message()))
+    }
+}
+
+impl ToJSON for ProviderId {
+    fn to_json(&self) -> Option<serde_json::Value> {
+        ProviderRepr {
+            id: self.0,
+            label: self.label(),
+        }
+        .to_json()
+    }
+}
 
 /// Identity of a Warpgate protocol. Used wherever code branches on the
 /// protocol (credential policies, auth states) so that a protocol can't be

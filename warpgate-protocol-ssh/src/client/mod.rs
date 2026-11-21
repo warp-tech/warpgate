@@ -29,8 +29,8 @@ use tracing::*;
 use uuid::Uuid;
 use warpgate_aws::AwsError;
 use warpgate_common::{
-    SSHTargetAuth, TargetOptionsVariant, TargetSSHOptions, UserFacingReason, UserSessionId,
-    WarpgateError, io_connect_reason,
+    SSHTargetAuth, TargetId, TargetOptionsVariant, TargetSSHOptions, UserFacingReason,
+    UserSessionId, WarpgateError, io_connect_reason,
 };
 use warpgate_core::{AdmittedTarget, ConfigProvider, Services};
 
@@ -114,7 +114,7 @@ pub struct ResolvedSshChainHost {
 /// A jump host that names a deleted or non-SSH target: a broken configuration
 /// that must fail the connection rather than silently shorten the chain, which
 /// would dial the target more directly than the operator intended.
-fn unresolvable_jump_host(id: Uuid) -> WarpgateError {
+fn unresolvable_jump_host(id: TargetId) -> WarpgateError {
     WarpgateError::InconsistentState(format!(
         "SSH jump host {id} does not resolve to an SSH target"
     ))
@@ -128,9 +128,9 @@ fn unresolvable_jump_host(id: Uuid) -> WarpgateError {
 /// chain; `None` — the id does not resolve to an SSH target. An unresolvable id,
 /// or one that repeats (a cycle), fails resolution.
 fn resolve_chain_ids(
-    start: Uuid,
-    lookup: impl Fn(Uuid) -> Option<Option<Uuid>>,
-) -> Result<Vec<Uuid>, WarpgateError> {
+    start: TargetId,
+    lookup: impl Fn(TargetId) -> Option<Option<TargetId>>,
+) -> Result<Vec<TargetId>, WarpgateError> {
     let mut ids = vec![];
     let mut visited = HashSet::new();
     let mut current = Some(start);
@@ -154,7 +154,7 @@ fn resolve_chain_ids(
 /// in targets' configs
 async fn resolve_ssh_chain(
     services: &Services,
-    target_id: Uuid,
+    target_id: TargetId,
     logged_in_username: Option<&String>,
 ) -> Result<Vec<ResolvedSshChainHost>, WarpgateError> {
     let targets = services.config_provider.list_targets().await?;
@@ -196,7 +196,7 @@ async fn resolve_ssh_chain(
 /// connection paths must use [`resolve_approved_ssh_chain`] instead.
 pub async fn resolve_ssh_chain_for_admin(
     services: &Services,
-    target_id: Uuid,
+    target_id: TargetId,
     admin_username: Option<&String>,
 ) -> Result<Vec<ResolvedSshChainHost>, WarpgateError> {
     resolve_ssh_chain(services, target_id, admin_username).await
@@ -1448,14 +1448,18 @@ mod tests {
     use std::collections::HashMap;
 
     use uuid::Uuid;
-    use warpgate_common::UserFacingReason;
+    use warpgate_common::{TargetId, UserFacingReason};
 
     use super::{ConnectionError, resolve_chain_ids};
 
+    fn target_id() -> TargetId {
+        TargetId(Uuid::new_v4())
+    }
+
     #[test]
     fn resolve_chain_ids_returns_ordered_chain() {
-        let (a, b, c) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
-        let jumps: HashMap<Uuid, Option<Uuid>> =
+        let (a, b, c) = (target_id(), target_id(), target_id());
+        let jumps: HashMap<TargetId, Option<TargetId>> =
             HashMap::from([(a, Some(b)), (b, Some(c)), (c, None)]);
         let ids = resolve_chain_ids(a, |id| jumps.get(&id).copied()).unwrap();
         assert_eq!(ids, vec![a, b, c]);
@@ -1463,16 +1467,17 @@ mod tests {
 
     #[test]
     fn resolve_chain_ids_detects_cycle() {
-        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
-        let jumps: HashMap<Uuid, Option<Uuid>> = HashMap::from([(a, Some(b)), (b, Some(a))]);
+        let (a, b) = (target_id(), target_id());
+        let jumps: HashMap<TargetId, Option<TargetId>> =
+            HashMap::from([(a, Some(b)), (b, Some(a))]);
         assert!(resolve_chain_ids(a, |id| jumps.get(&id).copied()).is_err());
     }
 
     #[test]
     fn resolve_chain_ids_rejects_unresolvable_jump_host() {
-        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+        let (a, b) = (target_id(), target_id());
         // `a` jumps through `b`, but `b` resolves to no SSH target.
-        let jumps: HashMap<Uuid, Option<Uuid>> = HashMap::from([(a, Some(b))]);
+        let jumps: HashMap<TargetId, Option<TargetId>> = HashMap::from([(a, Some(b))]);
         assert!(resolve_chain_ids(a, |id| jumps.get(&id).copied()).is_err());
     }
 
@@ -1482,5 +1487,60 @@ mod tests {
             "the certificate names [\"root\", \"admin\"]".into(),
         );
         assert!(!error.user_facing_reason().contains("admin"));
+    }
+
+    struct TestHandler;
+
+    impl russh::client::Handler for TestHandler {
+        type Error = russh::Error;
+    }
+
+    #[tokio::test]
+    async fn legacy_ssh_1_99_banner_with_bare_lf_is_accepted() {
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // Regression for https://github.com/warp-tech/warpgate/issues/989.
+        let (client_io, mut server_io) = tokio::io::duplex(65536);
+        let task = tokio::spawn(russh::client::connect_stream(
+            Arc::new(russh::client::Config::default()),
+            client_io,
+            TestHandler,
+        ));
+
+        server_io
+            .write_all(b"SSH-1.99-OpenSSH_6.0\n")
+            .await
+            .expect("failed to write the legacy server banner");
+
+        let mut received = Vec::new();
+        let id_end = tokio::time::timeout(Duration::from_secs(5), async {
+            let mut chunk = [0; 4096];
+            loop {
+                let count = server_io
+                    .read(&mut chunk)
+                    .await
+                    .expect("failed to read the client identification and KEXINIT");
+                assert!(
+                    count > 0,
+                    "client closed the connection before sending KEXINIT"
+                );
+                received.extend_from_slice(&chunk[..count]);
+                if let Some(position) = received.windows(2).position(|bytes| bytes == b"\r\n") {
+                    let id_end = position + 2;
+                    if received.len() >= id_end + 6 {
+                        break id_end;
+                    }
+                }
+            }
+        })
+        .await
+        .expect("client did not send KEXINIT after the bare-LF SSH-1.99 banner");
+
+        assert!(received[..id_end].starts_with(b"SSH-2.0-"));
+        assert_eq!(received[id_end + 5], 20, "expected SSH_MSG_KEXINIT");
+        task.abort();
     }
 }
