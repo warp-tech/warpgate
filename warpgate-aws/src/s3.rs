@@ -27,7 +27,7 @@ pub enum S3Credentials {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Object, Default)]
 pub struct AutoCredentials {}
 
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Object)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Object)]
 pub struct StaticCredentials {
     pub access_key_id: String,
     /// Encrypted at rest. Blank in responses; absent or blank in an update
