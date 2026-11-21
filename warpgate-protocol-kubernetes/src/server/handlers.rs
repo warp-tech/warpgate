@@ -1062,7 +1062,7 @@ mod tests {
                 .unwrap();
             let got: Vec<&str> = decoded.lines().collect();
             assert_eq!(got, lines.iter().map(String::as_str).collect::<Vec<_>>());
-            assert!(got[4].contains("k8s.io/initial-events-end"));
+            assert!(got.last().is_some_and(|l| l.contains("k8s.io/initial-events-end")));
 
             let head = server.await.unwrap().to_ascii_lowercase();
             match accept_encoding {
