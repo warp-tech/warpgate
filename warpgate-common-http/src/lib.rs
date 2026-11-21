@@ -76,18 +76,26 @@ pub async fn buffer_response(
     Ok(UpstreamBody::Buffered(head.freeze()))
 }
 
-/// The credential from the first `Authorization` header using `scheme`
+/// The `Authorization` scheme a client presents a Warpgate ticket with. It is
+/// Warpgate's credential, never the target's.
+pub const WARPGATE_AUTH_SCHEME: &str = "Warpgate";
+
+/// The credential in an `Authorization` header value using `scheme`
 /// (compared case-insensitively, as RFC 7235 requires).
+pub fn authorization_credential<'a>(value: &'a str, scheme: &str) -> Option<&'a str> {
+    value
+        .split_once(' ')
+        .filter(|(s, _)| s.eq_ignore_ascii_case(scheme))
+        .map(|(_, token)| token)
+}
+
+/// The credential from the first `Authorization` header using `scheme`.
 pub fn authorization_token<'a>(req: &'a Request, scheme: &str) -> Option<&'a str> {
     req.headers()
         .get_all(poem::http::header::AUTHORIZATION)
         .iter()
         .filter_map(|v| v.to_str().ok())
-        .find_map(|v| {
-            v.split_once(' ')
-                .filter(|(s, _)| s.eq_ignore_ascii_case(scheme))
-                .map(|(_, token)| token)
-        })
+        .find_map(|v| authorization_credential(v, scheme))
 }
 
 // style-src unsafe-inline for Svelte

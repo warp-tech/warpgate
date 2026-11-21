@@ -9,7 +9,9 @@ use uuid::Uuid;
 use warpgate_common::{Secret, TargetId, UserId};
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::get_client_ip;
-use warpgate_common_http::{SessionAuthorization, X_WARPGATE_TICKET, authorization_token};
+use warpgate_common_http::{
+    SessionAuthorization, WARPGATE_AUTH_SCHEME, X_WARPGATE_TICKET, authorization_token,
+};
 use warpgate_core::authorize_and_spend_ticket;
 use warpgate_db_entities::Ticket;
 
@@ -72,23 +74,20 @@ impl<E: Endpoint> Endpoint for TicketMiddlewareEndpoint<E> {
     type Output = E::Output;
 
     async fn call(&self, mut req: Request) -> poem::Result<Self::Output> {
-        let mut session_is_temporary = false;
         let ctx = Data::<&UnauthenticatedRequestContext>::from_request_without_body(&req)
             .await?
             .clone();
 
         let params: QueryParams = req.params()?;
-        let mut ticket_value = params.ticket;
-
-        if let Some(token_value) = authorization_token(&req, "Warpgate") {
-            ticket_value = Some(token_value.to_string());
-            session_is_temporary = true;
-        } else if let Some(header_value) = req.headers().get(&X_WARPGATE_TICKET) {
-            if let Ok(ticket_str) = header_value.to_str() {
-                ticket_value = Some(ticket_str.to_string());
-                session_is_temporary = true;
-            }
-        }
+        let header_ticket = authorization_token(&req, WARPGATE_AUTH_SCHEME)
+            .or_else(|| {
+                req.headers()
+                    .get(&X_WARPGATE_TICKET)
+                    .and_then(|value| value.to_str().ok())
+            })
+            .map(str::to_owned);
+        let session_is_temporary = header_ticket.is_some();
+        let ticket_value = header_ticket.or(params.ticket);
 
         if session_is_temporary {
             // ticket/token requests get a fake temp session
