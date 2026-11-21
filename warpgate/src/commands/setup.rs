@@ -484,7 +484,11 @@ fn install_tls(
         .paths_relative_to()
         .join(&config.store.http.certificate);
     let key_path = params.paths_relative_to().join(&config.store.http.key);
-    write_file(&certificate_path, &certificate, params.should_secure_files())?;
+    write_file(
+        &certificate_path,
+        &certificate,
+        params.should_secure_files(),
+    )?;
     write_file(&key_path, &key, params.should_secure_files())?;
     Ok(())
 }
@@ -552,7 +556,12 @@ pub async fn command(
     info!("Generated configuration:");
     let yaml = yaml_serde::to_string(&store)?;
     let mut display_store = store.clone();
-    if display_store.database_url.expose_secret().contains('@') {
+    // non-sqlite URLs can contain creds, including in query params
+    if !display_store
+        .database_url
+        .expose_secret()
+        .starts_with("sqlite:")
+    {
         display_store.database_url = Secret::new("<redacted>".to_string());
     }
     let display_yaml = yaml_serde::to_string(&display_store)?;

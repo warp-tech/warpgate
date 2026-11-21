@@ -35,18 +35,6 @@ pub struct StaticCredentials {
     pub secret_access_key: Option<StoredSecret>,
 }
 
-impl std::fmt::Debug for StaticCredentials {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StaticCredentials")
-            .field("access_key_id", &self.access_key_id)
-            .field(
-                "secret_access_key",
-                &self.secret_access_key.as_ref().map(|_| "***"),
-            )
-            .finish()
-    }
-}
-
 impl S3Credentials {
     pub fn setup_config_loader(&self, loader: ConfigLoader) -> Result<ConfigLoader, AwsError> {
         Ok(match self {
