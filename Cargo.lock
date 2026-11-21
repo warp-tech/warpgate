@@ -10943,6 +10943,7 @@ dependencies = [
  "async-trait",
  "base64 0.23.1",
  "bytes",
+ "flate2",
  "futures",
  "h2",
  "http",

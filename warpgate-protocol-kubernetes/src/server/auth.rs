@@ -579,9 +579,17 @@ pub async fn create_authenticated_client(
 /// SNI-routing front ends can miss a ClientHello that spans two TCP segments
 /// and answer with their default certificate (kubernetes/ingress-nginx#11491),
 /// and a ClientHello with a post-quantum key share is big enough to do that.
-fn upstream_client_builder(cluster_url: &str) -> reqwest::ClientBuilder {
-    // never follow untrusted redirects
-    let builder = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none());
+pub(super) fn upstream_client_builder(cluster_url: &str) -> reqwest::ClientBuilder {
+    // Never follow untrusted redirects. Responses pass through still encoded:
+    // reqwest decodes with tower-http, whose gzip decoder stops after the first
+    // gzip member. Kubernetes 1.37+ (WatchListCompression) gzips a WatchList
+    // response as one member per flush, so decoding here cut it short.
+    let builder = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .no_gzip()
+        .no_brotli()
+        .no_deflate()
+        .no_zstd();
     match url::Url::parse(cluster_url)
         .ok()
         .and_then(|url| url.host_str().map(str::to_owned))
