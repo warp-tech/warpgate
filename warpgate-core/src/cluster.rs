@@ -3,6 +3,7 @@ use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Context;
 use futures::future::join_all;
 use futures::{SinkExt, StreamExt};
 use poem::IntoResponse;
@@ -489,22 +490,32 @@ pub async fn reap(db: &DatabaseConnection) -> Result<Vec<UserSessionId>, Warpgat
 /// * WARPGATE_PEER_ADDRESS
 /// * POD_IP (kubernetes)
 /// * local outbound IP
-fn advertised_peer_address(http_port: u16) -> std::io::Result<String> {
+fn advertised_peer_address(http_port: u16) -> anyhow::Result<String> {
     if let Some(addr) = non_empty_env("WARPGATE_PEER_ADDRESS") {
         return Ok(addr);
     }
-    if let Some(ip) = non_empty_env("POD_IP") {
-        return Ok(format!("{ip}:{http_port}"));
-    }
+    let ip = match non_empty_env("POD_IP") {
+        Some(ip) => ip.parse().context("Invalid POD_IP")?,
+        None => local_ip()?,
+    };
 
-    let ip = local_ip()?;
-    Ok(format!("{ip}:{http_port}"))
+    Ok(format_peer_address(ip, http_port))
 }
 
-fn local_ip() -> std::io::Result<IpAddr> {
-    let socket = UdpSocket::bind(("0.0.0.0", 0))?;
-    socket.connect(("1.1.1.1", 80))?; // no traffic here yet, just a route resolve
-    socket.local_addr().map(|a| a.ip())
+fn format_peer_address(ip: IpAddr, port: u16) -> String {
+    SocketAddr::new(ip, port).to_string()
+}
+
+fn local_ip() -> anyhow::Result<IpAddr> {
+    let probe = |bind_ip: &str, peer_ip: &str| -> std::io::Result<IpAddr> {
+        let socket = UdpSocket::bind((bind_ip, 0))?;
+        socket.connect((peer_ip, 80))?; // no traffic here yet, just a route resolve
+        socket.local_addr().map(|a| a.ip())
+    };
+
+    probe("0.0.0.0", "1.1.1.1")
+        .or_else(|_| probe("::", "2606:4700:4700::1111"))
+        .context("Failed to determine local IP address; set WARPGATE_PEER_ADDRESS")
 }
 
 /// An environment variable's value, trimmed, or `None` if unset or blank.
@@ -513,6 +524,23 @@ fn non_empty_env(key: &str) -> Option<String> {
         .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
+}
+
+#[cfg(test)]
+mod address_tests {
+    use super::*;
+
+    #[test]
+    fn peer_address_formats_ip_and_port() {
+        assert_eq!(
+            format_peer_address("192.0.2.1".parse().unwrap(), 8443),
+            "192.0.2.1:8443"
+        );
+        assert_eq!(
+            format_peer_address("2001:db8::1".parse().unwrap(), 8443),
+            "[2001:db8::1]:8443"
+        );
+    }
 }
 
 #[cfg(all(test, feature = "sqlite"))]
