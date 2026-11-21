@@ -42,7 +42,7 @@ tracing-core = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false }
 url.workspace = true
 uuid.workspace = true
-vt100 = "0.16"
+vt100 = "0.18"
 warpgate-aws = { path = "../warpgate-aws" }
 warpgate-azure = { path = "../warpgate-azure" }
 warpgate-ca = { path = "../warpgate-ca" }
