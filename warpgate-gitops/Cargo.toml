@@ -20,7 +20,7 @@ gix = { version = "0.90", default-features = false, features = [
 ] }
 poem-openapi.workspace = true
 saphyr = { version = "0.2", default-features = false }
-saphyr-parser = { version = "0.2", default-features = false }
+saphyr-parser = { version = "0.3", default-features = false }
 schemars.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["std"] }
