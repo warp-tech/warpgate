@@ -7,6 +7,7 @@
     import { stringifyError } from 'common/errors'
     import { routeQueryParams } from 'common/helpers'
     import Loadable from 'common/Loadable.svelte'
+    import OnboardingHint from 'common/OnboardingHint.svelte'
     import { api, type ExistingApiToken } from 'gateway/lib/api'
     import Fa from 'svelte-fa'
     import CreateApiTokenModal from './CreateApiTokenModal.svelte'
@@ -65,6 +66,11 @@
         Create token
     </Button>
 </div>
+
+<OnboardingHint>
+    Warpgate has full REST API coverage, as well as a Terraform provider and a
+    community-maintained Kubernetes operator.
+</OnboardingHint>
 
 {#if error}
     <Alert color="danger">{error}</Alert>

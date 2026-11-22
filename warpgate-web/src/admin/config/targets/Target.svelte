@@ -15,6 +15,8 @@
         type Target,
         type TargetGroup,
     } from 'admin/lib/api'
+    import HelpText from 'admin/lib/HelpText.svelte'
+    import { variantLabel } from 'admin/lib/jsonSchema'
     import ManagedObjectStatus from 'admin/lib/ManagedObjectStatus.svelte'
     import Section from 'admin/lib/Section.svelte'
     import SectionedForm from 'admin/lib/SectionedForm.svelte'
@@ -23,7 +25,9 @@
     import ConnectionInstructions from 'common/ConnectionInstructions.svelte'
     import DurationInput from 'common/DurationInput.svelte'
     import { stringifyError } from 'common/errors'
+    import InfoBox from 'common/InfoBox.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import OnboardingHint from 'common/OnboardingHint.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
     import SecretRefInput from 'common/SecretRefInput.svelte'
     import StickyActionBar from 'common/StickyActionBar.svelte'
@@ -166,7 +170,8 @@
                             </Loadable>
                         {/if}
 
-                        {#key connectionsInstructionsModalOpen}<!-- regenerate examples when modal opens -->
+                        {#key connectionsInstructionsModalOpen}
+                            <!-- regenerate examples when modal opens -->
                             <ConnectionInstructions
                                 targetName={target.name}
                                 username={selectedUsername}
@@ -265,32 +270,32 @@
                             </FormGroup>
                         </Section>
 
-                        <Section id="target-options" title="Target options">
-                            {#if target.options.kind === 'Ssh'}
-                                <TargetSshOptions
-                                    id={target.id}
-                                    name={target.name}
-                                    options={target.options}
-                                />
-                            {/if}
+                        {#if target.options.kind === 'Ssh'}
+                            <TargetSshOptions
+                                id={target.id}
+                                name={target.name}
+                                options={target.options}
+                            />
+                        {/if}
 
-                            {#if target.options.kind === 'Vnc'}
-                                <TargetVncOptions
-                                    id={target.id}
-                                    name={target.name}
-                                    bind:options={target.options}
-                                />
-                            {/if}
+                        {#if target.options.kind === 'Vnc'}
+                            <TargetVncOptions
+                                id={target.id}
+                                name={target.name}
+                                bind:options={target.options}
+                            />
+                        {/if}
 
-                            {#if target.options.kind === 'Rdp'}
-                                <TargetRdpOptions
-                                    id={target.id}
-                                    name={target.name}
-                                    bind:options={target.options}
-                                />
-                            {/if}
+                        {#if target.options.kind === 'Rdp'}
+                            <TargetRdpOptions
+                                id={target.id}
+                                name={target.name}
+                                bind:options={target.options}
+                            />
+                        {/if}
 
-                            {#if target.options.kind === 'Http'}
+                        {#if target.options.kind === 'Http'}
+                            <Section title="Connection" id="connection">
                                 <FormGroup floating label="Target URL">
                                     <input
                                         class="form-control"
@@ -301,29 +306,63 @@
                                 <TlsConfiguration
                                     bind:value={target.options.tls}
                                 />
+                            </Section>
 
-                                {#if $serverInfo?.externalHost}
-                                    <FormGroup
-                                        floating
-                                        label="Bind to a domain"
+                            <Section title="Domain binding" id="domain-binding">
+                                <FormGroup
+                                    floating
+                                    disabled={!$serverInfo?.externalHost}
+                                    label="Bind to a domain"
+                                >
+                                    <Input
+                                        type="text"
+                                        placeholder={`foo.${$serverInfo?.externalHost}`}
+                                        bind:value={target.options.externalHost}
+                                    />
+                                </FormGroup>
+                                <HelpText>
+                                    <a
+                                        href="https://warpgate.null.page/http-domain-binding/"
+                                        target="_blank"
                                     >
-                                        <Input
-                                            type="text"
-                                            placeholder={`foo.${$serverInfo.externalHost}`}
-                                            bind:value={target.options
-                                                .externalHost}
-                                        />
-                                    </FormGroup>
+                                        Domain binding
+                                    </a>
+                                    lets you hard-link a subdomain of Warpgate's
+                                    host to this target.
+                                </HelpText>
+                                {#if !$serverInfo?.externalHost}
+                                    <InfoBox>
+                                        Domain binding requires either the
+                                        <code>external_host</code>
+                                        option to be set, or a usable
+                                        <code>Host</code>
+                                        header.
+                                    </InfoBox>
                                 {/if}
 
-                                <h4 class="mt-4">Additional headers</h4>
+                                <InfoBox variant="warning">
+                                    Unless you fully trust this target, you
+                                    should use domain binding. It protects you
+                                    from untrusted JavaScript sending API
+                                    requests to Warpgate's own API on the same
+                                    HTTP origin.
+                                </InfoBox>
+                            </Section>
+
+                            <Section
+                                title="Headers"
+                                bodyTitle="Additional headers"
+                                id="headers"
+                            >
                                 <HttpHeadersEditor
                                     bind:value={target.options.headers}
                                 />
-                            {/if}
+                            </Section>
+                        {/if}
 
-                            {#if target.options.kind === 'MySql' ||
-                                target.options.kind === 'Postgres'}
+                        {#if target.options.kind === 'MySql' ||
+                            target.options.kind === 'Postgres'}
+                            <Section title="Connection" id="connection">
                                 <div class="row">
                                     <div class="col-8">
                                         <FormGroup floating label="Target host">
@@ -347,6 +386,12 @@
                                     </div>
                                 </div>
 
+                                <TlsConfiguration
+                                    bind:value={target.options.tls}
+                                />
+                            </Section>
+
+                            <Section title="Authentication" id="authentication">
                                 <div class="row">
                                     <div class="col">
                                         <FormGroup floating label="Username">
@@ -395,13 +440,11 @@
                                         }}
                                     />
                                 {/if}
+                            </Section>
+                        {/if}
 
-                                <TlsConfiguration
-                                    bind:value={target.options.tls}
-                                />
-                            {/if}
-
-                            {#if target.options.kind === 'Kubernetes'}
+                        {#if target.options.kind === 'Kubernetes'}
+                            <Section title="Connection" id="connection">
                                 <FormGroup floating label="Cluster URL">
                                     <input
                                         class="form-control"
@@ -409,8 +452,12 @@
                                         placeholder="https://kubernetes.example.com:6443"
                                     >
                                 </FormGroup>
+                                <TlsConfiguration
+                                    bind:value={target.options.tls}
+                                />
+                            </Section>
 
-                                <h5 class="mt-3">Authentication</h5>
+                            <Section title="Authentication" id="authentication">
                                 <FormGroup floating label="Auth Type">
                                     <select
                                         class="form-control"
@@ -467,18 +514,20 @@
                                         }}
                                     />
                                 {/if}
-
-                                <TlsConfiguration
-                                    bind:value={target.options.tls}
-                                />
-                            {/if}
-                        </Section>
+                            </Section>
+                        {/if}
 
                         <Section
                             id="roles"
                             title="Roles"
                             bodyTitle="Allow access for roles"
                         >
+                            <OnboardingHint>
+                                Decide which users can access this target. Each
+                                role can correspond to multiple users. Tick
+                                <em>admin</em>
+                                here to give yourself access.
+                            </OnboardingHint>
                             <Loadable promise={loadRolesPromise}>
                                 {#snippet children(roles)}
                                     <div

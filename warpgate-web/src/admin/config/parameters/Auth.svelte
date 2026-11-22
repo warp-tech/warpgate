@@ -11,7 +11,6 @@
     import DurationInput from 'common/DurationInput.svelte'
     import InfoBox from 'common/InfoBox.svelte'
     import { api as gatewayApi } from 'gateway/lib/api'
-    import { link } from 'svelte-spa-router'
     import ParametersForm from './ParametersForm.svelte'
 
     let parameters: ParameterValues | undefined = $state()
