@@ -897,6 +897,9 @@ impl ServerSession {
     }
 
     async fn handle_menu_event(&mut self, action: MenuEvent) -> Result<()> {
+        if !matches!(self.target, TargetSelection::Menu) {
+            return Ok(());
+        }
         match action {
             MenuEvent::Render(data) => {
                 self.emit_pty_output(&data)?;

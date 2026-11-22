@@ -1,6 +1,8 @@
+import os
 from pathlib import Path
 import socket
 import subprocess
+import tempfile
 import threading
 import time
 from uuid import uuid4
@@ -60,6 +62,26 @@ def _start_menu_client(
         "IdentityFile=ssh-keys/id_ed25519",
         stderr=subprocess.PIPE,
     )
+
+
+def _wait_for_menu(client, target_name: str, timeout):
+    """Collects the client's output in the background and returns once the
+    menu has listed the target, which it does only after loading it from
+    the DB."""
+    output = bytearray()
+
+    def read():
+        while chunk := client.stdout.read1(4096):
+            output.extend(chunk)
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+
+    deadline = time.time() + timeout
+    while target_name.encode() not in output:
+        assert time.time() < deadline, "menu never rendered the target"
+        time.sleep(0.1)
+    return output, reader
 
 
 def _approve(url: str, approval):
@@ -135,20 +157,7 @@ class Test:
             )
 
         client = _start_menu_client(processes, shared_wg, user.username)
-        output = bytearray()
-
-        def read():
-            while chunk := client.stdout.read1(4096):
-                output.extend(chunk)
-
-        reader = threading.Thread(target=read, daemon=True)
-        reader.start()
-
-        # The menu lists the target only once it has been built from the DB.
-        deadline = time.time() + timeout
-        while target.name.encode() not in output:
-            assert time.time() < deadline, "menu never rendered the target"
-            time.sleep(0.1)
+        output, reader = _wait_for_menu(client, target.name, timeout)
 
         request.require_approval = True
         with admin_client(url) as api:
@@ -209,3 +218,58 @@ class Test:
             wait_for_recording(url, user.username, sdk.RecordingKind.TRAFFIC)
         finally:
             client.kill()
+
+    def test_a_menu_left_behind_by_another_shell_cannot_select(
+        self,
+        processes: ProcessManager,
+        timeout,
+        shared_wg: WarpgateProcess,
+    ):
+        # A multiplexed client can put several shells at the menu, and each
+        # runs its own menu. One of them makes the selection; the others stay
+        # behind and keep reading the terminal's keystrokes.
+        url = f"https://localhost:{shared_wg.http_port}"
+        with (
+            # Accepts the connection and never speaks, so the session stays
+            # up, still connecting
+            socket.create_server(("127.0.0.1", 0)) as silent_target,
+            tempfile.TemporaryDirectory() as tmp,
+        ):
+            with admin_client(url) as api:
+                user, target, request = _create_menu_target(
+                    api, silent_target.getsockname()[1], require_approval=False
+                )
+                request.name = f"ssh-{uuid4()}"
+                other = api.create_target(request)
+                for role in api.get_target_roles(target.id):
+                    api.add_target_role(other.id, role.id)
+
+            mux = ["-o", f"ControlPath={os.path.join(tmp, 'mux')}"]
+            master = _start_menu_client(
+                processes, shared_wg, user.username, "-o", "ControlMaster=yes", *mux
+            )
+            _wait_for_menu(master, target.name, timeout)
+            second = _start_menu_client(
+                processes, shared_wg, user.username, "-o", "ControlMaster=no", *mux
+            )
+            _wait_for_menu(second, target.name, timeout)
+
+            def target_sessions():
+                with admin_client(url) as api:
+                    sessions = api.get_sessions(username=user.username).items
+                return [t for s in sessions for t in s.target_sessions]
+
+            # Down, Enter: the second entry
+            master.stdin.write(b"\x1b[B\r")
+            master.stdin.flush()
+            deadline = time.time() + timeout
+            while not target_sessions():
+                assert time.time() < deadline, "the selection never started a session"
+                time.sleep(0.1)
+
+            # This Enter belongs to the session. The leftover menu still has
+            # the first entry highlighted
+            master.stdin.write(b"\r")
+            master.stdin.flush()
+            time.sleep(1)
+            assert len(target_sessions()) == 1
