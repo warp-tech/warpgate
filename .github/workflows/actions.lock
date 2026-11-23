@@ -65,7 +65,7 @@ workflows:
         - 'actions/setup-node@v7.1.0'
         - 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9'
         - 'jlumbroso/free-disk-space@v2.0.0'
-        - 'sonarsource/sonarqube-scan-action@v8.4.1'
+        - 'sonarsource/sonarqube-scan-action@v8.5.0'
         - 'swatinem/rust-cache@v2.9.3'
 dependencies:
     'actions-rs/cargo@v1.0.3':
@@ -235,9 +235,9 @@ dependencies:
         commit: 'sha1-8a0cd651e5b2365bd640854a3fa5dfc70e4875f3'
         owner_id: 2242
         repo_id: 204253808
-    'sonarsource/sonarqube-scan-action@v8.4.1':
-        ref: 'v8.4.1'
-        commit: 'sha1-e805d875275f728fac1885b413934be6d7c63f65'
+    'sonarsource/sonarqube-scan-action@v8.5.0':
+        ref: 'v8.5.0'
+        commit: 'sha1-59202af334b4ba7b5db01b701b8e79f8b3bef0f4'
         owner_id: 545988
         repo_id: 366408409
     'swatinem/rust-cache@v2.9.3':
