@@ -98,6 +98,12 @@ pub fn authorization_token<'a>(req: &'a Request, scheme: &str) -> Option<&'a str
         .find_map(|v| authorization_credential(v, scheme))
 }
 
+/// A redirect to this `Location` stays on the host that sent it.
+/// Browsers treat `/\host` as `//host`
+pub fn is_same_authority_location(value: &[u8]) -> bool {
+    value.first() == Some(&b'/') && !matches!(value.get(1), Some(b'/' | b'\\'))
+}
+
 // style-src unsafe-inline for Svelte
 // img-src data: for TOTP codes
 pub const WARPGATE_CSP: &str = "default-src 'self'; \
