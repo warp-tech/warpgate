@@ -14,6 +14,7 @@ use bytes::Bytes;
 use channel_direct_tcpip::DirectTCPIPChannel;
 use channel_session::SessionChannel;
 pub use error::SshClientError;
+use futures::future::BoxFuture;
 use futures::{FutureExt, pin_mut};
 use handler::ClientHandler;
 use russh::client::{AuthResult, Handle, KeyboardInteractiveAuthResponse};
@@ -285,6 +286,13 @@ impl RCEvent {
 
 pub type RCCommandReply = oneshot::Sender<Result<(), SshClientError>>;
 
+/// A forwarding request and the reply channel for its result. The reply is
+/// `None` for a request that was acknowledged before the target connected
+type ForwardRequest = (
+    BoxFuture<'static, Result<(), russh::Error>>,
+    Option<RCCommandReply>,
+);
+
 /// subset of ChannelOperation
 enum ChannelOpen {
     Session,
@@ -325,6 +333,8 @@ enum InnerEvent {
     ClientHandlerEvent(ClientHandlerEvent),
     /// `None` = host key check that stopped before auth
     Connected(Result<Option<Connection>, ConnectionError>),
+    /// The target refused a forward that was already acknowledged to the client
+    ForwardFailed(SshClientError),
 }
 
 struct Connection(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>);
@@ -351,6 +361,7 @@ pub struct RemoteClient {
     pending_ops: Vec<(Uuid, ChannelOperation)>,
     pending_forwards: Vec<(String, u32)>,
     pending_streamlocal_forwards: Vec<String>,
+    forward_requests: UnboundedSender<ForwardRequest>,
     state: RCState,
     abort_rx: UnboundedReceiver<()>,
     connecting: Option<JoinHandle<()>>,
@@ -373,8 +384,9 @@ impl RemoteClient {
         let (abort_tx, abort_rx) = unbounded_channel();
 
         let (inner_event_tx, inner_event_rx) = unbounded_channel();
+        let (forward_requests, forward_requests_rx) = unbounded_channel();
 
-        let this = Self {
+        let mut this = Self {
             id,
             tx: event_tx,
             session: None,
@@ -382,6 +394,7 @@ impl RemoteClient {
             pending_ops: vec![],
             pending_forwards: vec![],
             pending_streamlocal_forwards: vec![],
+            forward_requests,
             state: RCState::NotInitialized,
             inner_event_rx,
             inner_event_tx: inner_event_tx.clone(),
@@ -401,6 +414,15 @@ impl RemoteClient {
                 }
             }
             .instrument(Span::current()),
+        );
+
+        this.child_tasks.push(
+            tokio::task::Builder::new()
+                .name(&format!("SSH {id} forward requests"))
+                .spawn(run_forward_requests(
+                    forward_requests_rx,
+                    this.inner_event_tx.clone(),
+                ))?,
         );
 
         this.start()?;
@@ -558,6 +580,7 @@ impl RemoteClient {
                     }
                 }
             }
+            InnerEvent::ForwardFailed(error) => return Err(error),
             InnerEvent::ClientHandlerEvent(client_event) => {
                 debug!("Client handler event: {:?}", client_event);
                 match client_event {
@@ -645,16 +668,16 @@ impl RemoteClient {
                 self.apply_channel_op(ch, op, reply).await?;
             }
             RCCommand::ForwardTCPIP(address, port) => {
-                self.tcpip_forward(address, port).await?;
+                self.tcpip_forward(address, port, reply);
             }
             RCCommand::CancelTCPIPForward(address, port) => {
-                self.cancel_tcpip_forward(address, port).await?;
+                self.cancel_tcpip_forward(address, port, reply);
             }
             RCCommand::StreamlocalForward(socket_path) => {
-                self.streamlocal_forward(socket_path).await?;
+                self.streamlocal_forward(socket_path, reply);
             }
             RCCommand::CancelStreamlocalForward(socket_path) => {
-                self.cancel_streamlocal_forward(socket_path).await?;
+                self.cancel_streamlocal_forward(socket_path, reply);
             }
             RCCommand::Disconnect => {
                 self.disconnect().await;
@@ -724,12 +747,12 @@ impl RemoteClient {
 
         let forwards = std::mem::take(&mut self.pending_forwards);
         for (address, port) in forwards {
-            self.tcpip_forward(address, port).await?;
+            self.tcpip_forward(address, port, &mut None);
         }
 
         let forwards = std::mem::take(&mut self.pending_streamlocal_forwards);
         for socket_path in forwards {
-            self.streamlocal_forward(socket_path).await?;
+            self.streamlocal_forward(socket_path, &mut None);
         }
         Ok(())
     }
@@ -1363,49 +1386,70 @@ impl RemoteClient {
         Ok(())
     }
 
-    async fn tcpip_forward(&mut self, address: String, port: u32) -> Result<(), SshClientError> {
-        if let Some(session) = &self.session {
-            session.tcpip_forward(address, port).await?;
+    /// Queue `request` for [`run_forward_requests`]. `reply` is taken, and
+    /// the worker answers it with the target's result. A `reply` left in
+    /// place is acknowledged as soon as the command returns
+    fn queue_forward_request(
+        &self,
+        request: impl Future<Output = Result<(), russh::Error>> + Send + 'static,
+        reply: &mut Option<RCCommandReply>,
+    ) {
+        let _ = self.forward_requests.send((request.boxed(), reply.take()));
+    }
+
+    fn tcpip_forward(&mut self, address: String, port: u32, reply: &mut Option<RCCommandReply>) {
+        if let Some(session) = self.session.clone() {
+            self.queue_forward_request(
+                async move { session.tcpip_forward(address, port).await.map(drop) },
+                reply,
+            );
         } else {
             self.pending_forwards.push((address, port));
         }
-        Ok(())
     }
 
-    async fn cancel_tcpip_forward(
+    fn cancel_tcpip_forward(
         &mut self,
         address: String,
         port: u32,
-    ) -> Result<(), SshClientError> {
-        if let Some(session) = &self.session {
-            session.cancel_tcpip_forward(address, port).await?;
+        reply: &mut Option<RCCommandReply>,
+    ) {
+        if let Some(session) = self.session.clone() {
+            self.queue_forward_request(
+                async move { session.cancel_tcpip_forward(address, port).await },
+                reply,
+            );
         } else {
             self.pending_forwards
                 .retain(|x| x.0 != address || x.1 != port);
         }
-        Ok(())
     }
 
-    async fn streamlocal_forward(&mut self, socket_path: String) -> Result<(), SshClientError> {
-        if let Some(session) = &self.session {
-            session.streamlocal_forward(socket_path).await?;
+    fn streamlocal_forward(&mut self, socket_path: String, reply: &mut Option<RCCommandReply>) {
+        if let Some(session) = self.session.clone() {
+            self.queue_forward_request(
+                async move { session.streamlocal_forward(socket_path).await },
+                reply,
+            );
         } else {
             self.pending_streamlocal_forwards.push(socket_path);
         }
-        Ok(())
     }
 
-    async fn cancel_streamlocal_forward(
+    fn cancel_streamlocal_forward(
         &mut self,
         socket_path: String,
-    ) -> Result<(), SshClientError> {
-        if let Some(session) = &self.session {
-            session.cancel_streamlocal_forward(socket_path).await?;
+        reply: &mut Option<RCCommandReply>,
+    ) {
+        if let Some(session) = self.session.clone() {
+            self.queue_forward_request(
+                async move { session.cancel_streamlocal_forward(socket_path).await },
+                reply,
+            );
         } else {
             self.pending_streamlocal_forwards
                 .retain(|x| x != &socket_path);
         }
-        Ok(())
     }
 
     async fn disconnect(&mut self) {
@@ -1428,6 +1472,29 @@ impl RemoteClient {
     async fn _on_disconnect(&mut self) {
         self.set_disconnected().await;
     }
+}
+
+/// Send forwarding requests to the target one at a time, so a cancel cannot
+/// overtake its forward. The target can take arbitrarily long to answer, and
+/// the command loop cannot wait for it: the loop also passes channel data
+async fn run_forward_requests(
+    mut requests: UnboundedReceiver<ForwardRequest>,
+    inner_event_tx: UnboundedSender<InnerEvent>,
+) -> Result<(), SshClientError> {
+    while let Some((request, reply)) = requests.recv().await {
+        let result = request.await.map_err(SshClientError::from);
+        match reply {
+            Some(reply) => {
+                let _ = reply.send(result);
+            }
+            None => {
+                if let Err(error) = result {
+                    let _ = inner_event_tx.send(InnerEvent::ForwardFailed(error));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 impl Drop for RemoteClient {

@@ -1,16 +1,22 @@
-//! Owns the per-session channel table and its two invariants: a channel id
-//! maps to a client-facing [`ServerChannelId`] and back through *one* place,
-//! and a channel only becomes writable ([`ChannelState::Open`]) through
-//! [`ChannelRegistry::confirm`], which hands back the events deferred while
-//! the open was in flight. The backing map is private to this module, so
-//! session code cannot create half-registered channels.
+//! Owns the per-session channel table and its invariants. A channel id maps
+//! to a client-facing [`ServerChannelId`] and back through *one* place. A
+//! channel only becomes writable ([`ChannelState::Open`]) through
+//! [`ChannelRegistry::accept_client_open`] or
+//! [`ChannelRegistry::confirm_server_open`], which return the events deferred
+//! while the open was in flight. The backing map and the client's open handle
+//! are private to this module, so session code cannot create half-registered
+//! channels or confirm an open to the client without making the channel
+//! writable
 
 use std::collections::HashMap;
 
+use russh::ChannelOpenFailure;
+use russh::server::ChannelOpenHandle;
 use tokio::sync::OwnedSemaphorePermit;
 use uuid::Uuid;
 use warpgate_core::recordings::ConnectionRecorder;
 
+use super::session::TrafficRecording;
 use crate::RCEvent;
 use crate::channel_audit::ChannelAudit;
 use crate::common::{PtyRequest, ServerChannelId};
@@ -28,17 +34,45 @@ enum ChannelState {
     /// Each event keeps its outbound slot. The client controls when the open
     /// resolves and the target controls how much it sends until then, so the
     /// slots are the only bound on this queue
-    Opening { deferred: Vec<DeferredEvent> },
+    Opening {
+        deferred: Vec<DeferredEvent>,
+        open: PendingOpen,
+    },
     /// Confirmed open on both sides. `pty` marks channels that had a PTY
     /// allocated — those receive service output and drive the interactive
     /// target-selection menu.
     Open { pty: bool },
 }
 
-impl Default for ChannelState {
-    fn default() -> Self {
-        Self::Opening { deferred: vec![] }
+enum PendingOpen {
+    /// The client asked for the channel. The target has not answered
+    Client(Box<ClientOpen>),
+    /// The target asked for the channel. The client has not answered
+    Server,
+}
+
+impl PendingOpen {
+    fn client(self) -> Result<Box<ClientOpen>, Self> {
+        match self {
+            Self::Client(open) => Ok(open),
+            Self::Server => Err(self),
+        }
     }
+
+    fn server(self) -> Result<(), Self> {
+        match self {
+            Self::Server => Ok(()),
+            Self::Client(_) => Err(self),
+        }
+    }
+}
+
+struct ClientOpen {
+    /// Dropping the handle refuses the open, so removing the channel is
+    /// enough to refuse the client
+    handle: ChannelOpenHandle,
+    /// Set for port forwards. The recording starts when the target accepts
+    recording: Option<TrafficRecording>,
 }
 
 /// A deferred target-side event and its outbound slot
@@ -63,10 +97,18 @@ pub struct Channel {
 }
 
 impl Channel {
-    fn new(id: Uuid, server_id: Option<ServerChannelId>, awaits_exit: bool) -> Self {
+    const fn new(
+        id: Uuid,
+        server_id: Option<ServerChannelId>,
+        awaits_exit: bool,
+        open: PendingOpen,
+    ) -> Self {
         Self {
             server_id,
-            state: ChannelState::default(),
+            state: ChannelState::Opening {
+                deferred: vec![],
+                open,
+            },
             audit: ChannelAudit::new(id),
             pty_size: None,
             traffic_recorder: None,
@@ -103,8 +145,14 @@ impl Channel {
         matches!(self.state, ChannelState::Open { .. })
     }
 
-    const fn is_opening(&self) -> bool {
-        matches!(self.state, ChannelState::Opening { .. })
+    const fn awaits_client(&self) -> bool {
+        matches!(
+            self.state,
+            ChannelState::Opening {
+                open: PendingOpen::Server,
+                ..
+            }
+        )
     }
 
     /// Queue `event` until the open is confirmed, or hand it back if the
@@ -116,7 +164,7 @@ impl Channel {
         slot: impl FnOnce() -> Option<OwnedSemaphorePermit>,
     ) -> Result<(), RCEvent> {
         match &mut self.state {
-            ChannelState::Opening { deferred } => {
+            ChannelState::Opening { deferred, .. } => {
                 deferred.push((event, slot()));
                 Ok(())
             }
@@ -126,7 +174,7 @@ impl Channel {
 
     /// Record that the client allocated a PTY. A channel whose open is still
     /// unconfirmed is left alone — the flag would be dropped by the transition
-    /// anyway, and the caller re-checks after the target round-trip.
+    /// anyway.
     pub const fn mark_pty(&mut self) {
         if let ChannelState::Open { pty } = &mut self.state {
             *pty = true;
@@ -146,14 +194,25 @@ impl Channel {
         std::mem::replace(&mut self.held_eof, false)
     }
 
-    fn confirm_open(&mut self) -> Vec<DeferredEvent> {
-        match &mut self.state {
-            ChannelState::Opening { deferred } => {
-                let deferred = std::mem::take(deferred);
-                self.state = ChannelState::Open { pty: false };
-                deferred
+    /// Move the channel to [`ChannelState::Open`] if `resolves` accepts its
+    /// pending open, and return the events deferred on it. Otherwise the
+    /// state is unchanged
+    fn open<T>(
+        &mut self,
+        resolves: impl FnOnce(PendingOpen) -> Result<T, PendingOpen>,
+    ) -> Option<(T, Vec<DeferredEvent>)> {
+        match std::mem::replace(&mut self.state, ChannelState::Open { pty: false }) {
+            ChannelState::Opening { deferred, open } => match resolves(open) {
+                Ok(resolved) => Some((resolved, deferred)),
+                Err(open) => {
+                    self.state = ChannelState::Opening { deferred, open };
+                    None
+                }
+            },
+            state @ ChannelState::Open { .. } => {
+                self.state = state;
+                None
             }
-            ChannelState::Open { .. } => vec![],
         }
     }
 }
@@ -169,52 +228,105 @@ impl ChannelRegistry {
     }
 
     /// Register a client-initiated open (session, direct-tcpip, streamlocal):
-    /// the client id is known upfront, the target-side id is minted here.
-    pub fn begin_client_open(&mut self, server_id: ServerChannelId, session: bool) -> Uuid {
+    /// the client id is known upfront, the target-side id is minted here. The
+    /// client's open is answered by [`Self::accept_client_open`],
+    /// [`Self::reject_client_open`] or [`Self::close`]
+    pub fn begin_client_open(
+        &mut self,
+        server_id: ServerChannelId,
+        session: bool,
+        handle: ChannelOpenHandle,
+        recording: Option<TrafficRecording>,
+    ) -> Uuid {
         let uuid = Uuid::new_v4();
+        let open = PendingOpen::Client(Box::new(ClientOpen { handle, recording }));
         self.channels
-            .insert(uuid, Channel::new(uuid, Some(server_id), session));
+            .insert(uuid, Channel::new(uuid, Some(server_id), session, open));
         uuid
     }
 
     /// Register a server-initiated open (forwarded-tcpip, X11, agent): the
     /// target side already named the channel, the client id arrives with the
-    /// confirmation ([`Self::assign_server_id`]).
+    /// confirmation ([`Self::confirm_server_open`]).
     pub fn begin_server_open(&mut self, id: Uuid) {
         self.channels
             .entry(id)
-            .or_insert_with(|| Channel::new(id, None, false));
+            .or_insert_with(|| Channel::new(id, None, false, PendingOpen::Server));
     }
 
-    /// Attach the client id the confirmation resolved to. `false` means the
-    /// channel was closed while the open was in flight — the caller must not
-    /// treat it as open.
-    #[must_use]
-    pub fn assign_server_id(&mut self, id: Uuid, server_id: ServerChannelId) -> bool {
-        match self.channels.get_mut(&id) {
-            Some(channel) => {
-                channel.server_id = Some(server_id);
-                true
-            }
-            None => false,
+    pub fn take_pending_recording(&mut self, id: Uuid) -> Option<TrafficRecording> {
+        match &mut self.channels.get_mut(&id)?.state {
+            ChannelState::Opening {
+                open: PendingOpen::Client(open),
+                ..
+            } => open.recording.take(),
+            _ => None,
         }
     }
 
-    /// The only transition into [`ChannelState::Open`]: hands back the events
-    /// held while the open was in flight, so confirming a channel without
-    /// replaying them is a visible lint at the call site. A channel closed
-    /// while the open was in flight is left absent — inserting here would
-    /// resurrect a zombie entry with no client mapping.
+    /// Confirm the open to the client and return the target events deferred
+    /// on the channel. The confirmation is queued before this returns, so
+    /// the replayed events cannot reach the client ahead of it (#2328).
+    ///
+    /// `None` means the client got no confirmation. Either the channel was
+    /// closed while the open was in flight, or its recording was never taken.
+    /// The open is then refused, so a forward cannot run unrecorded
     #[must_use]
-    pub fn confirm(&mut self, id: Uuid) -> Option<Vec<DeferredEvent>> {
-        self.channels.get_mut(&id).map(Channel::confirm_open)
+    pub async fn accept_client_open(
+        &mut self,
+        id: Uuid,
+        traffic_recorder: Option<ConnectionRecorder>,
+    ) -> Option<Vec<DeferredEvent>> {
+        let channel = self.channels.get_mut(&id)?;
+        let (open, deferred) = channel.open(PendingOpen::client)?;
+        if open.recording.is_some() {
+            // `open` is dropped on return, which refuses the client
+            self.channels.remove(&id);
+            return None;
+        }
+        open.handle.accept().await;
+        channel.traffic_recorder = traffic_recorder;
+        Some(deferred)
+    }
+
+    /// Does nothing unless the channel is waiting for the target's answer
+    pub async fn reject_client_open(&mut self, id: Uuid, reason: ChannelOpenFailure) {
+        let Some((open, _)) = self
+            .channels
+            .get_mut(&id)
+            .and_then(|channel| channel.open(PendingOpen::client))
+        else {
+            return;
+        };
+        self.channels.remove(&id);
+        open.handle.reject(reason).await;
+    }
+
+    /// The client accepted the target's open as channel `server_id`. Returns
+    /// the events deferred while the open was in flight. `#[must_use]` makes
+    /// confirming without replaying them a lint at the call site.
+    ///
+    /// `None` means the channel was closed while the open was in flight, or
+    /// was not waiting for the client. Nothing is inserted, because that
+    /// would resurrect a closed channel
+    #[must_use]
+    pub fn confirm_server_open(
+        &mut self,
+        id: Uuid,
+        server_id: ServerChannelId,
+    ) -> Option<Vec<DeferredEvent>> {
+        let channel = self.channels.get_mut(&id)?;
+        let ((), deferred) = channel.open(PendingOpen::server)?;
+        channel.server_id = Some(server_id);
+        Some(deferred)
     }
 
     /// Tear down a closed channel: dropping its [`Channel`] finalizes the
     /// recorders (their background writers flush on drop, as they do at session
-    /// end) and discards any still-deferred events, whose open will never
-    /// resolve. Idempotent — the SSH close handshake reaches here from both the
-    /// client and the target side.
+    /// end), discards any still-deferred events, whose open will never
+    /// resolve, and refuses a client open still waiting for the target.
+    /// Idempotent — the SSH close handshake reaches here from both the client
+    /// and the target side.
     pub fn close(&mut self, id: Uuid) {
         self.channels.remove(&id);
     }
@@ -240,12 +352,9 @@ impl ChannelRegistry {
         self.channels.values()
     }
 
-    pub fn has_opening(&self) -> bool {
-        self.channels.values().any(Channel::is_opening)
-    }
-
-    pub fn opening_count(&self) -> usize {
-        self.channels.values().filter(|c| c.is_opening()).count()
+    /// Number of target-initiated opens the client has not answered
+    pub fn pending_server_opens(&self) -> usize {
+        self.channels.values().filter(|c| c.awaits_client()).count()
     }
 }
 
@@ -253,9 +362,15 @@ impl ChannelRegistry {
 mod tests {
     use std::sync::Arc;
 
+    use russh::ChannelId;
+    use russh::keys::ssh_encoding::Decode;
     use tokio::sync::Semaphore;
 
     use super::*;
+
+    fn client_id(number: u8) -> ServerChannelId {
+        ServerChannelId(ChannelId::decode(&mut &[0, 0, 0, number][..]).unwrap())
+    }
 
     #[test]
     fn deferred_events_hold_their_slots_until_the_open_resolves() {
@@ -270,10 +385,17 @@ mod tests {
         assert!(channel.try_defer(RCEvent::Eof(id), take).is_ok());
         assert!(channel.try_defer(RCEvent::Eof(id), take).is_ok());
         assert_eq!(slots.available_permits(), 0);
-        let deferred = channels.confirm(id).unwrap();
+        assert_eq!(channels.pending_server_opens(), 1);
+        let deferred = channels.confirm_server_open(id, client_id(1)).unwrap();
         assert!(deferred.iter().all(|(_, slot)| slot.is_some()));
         assert_eq!(slots.available_permits(), 0);
+        assert_eq!(channels.pending_server_opens(), 0);
+        assert_eq!(channels.uuid_for(client_id(1)), Some(id));
         drop(deferred);
+
+        // A second confirmation changes nothing
+        assert!(channels.confirm_server_open(id, client_id(2)).is_none());
+        assert_eq!(channels.uuid_for(client_id(1)), Some(id));
 
         // An open channel takes no slot
         let channel = channels.get_mut(&id).unwrap();
