@@ -661,6 +661,7 @@
               }
             },
             "admin_role_mappings": {
+              "description": "Like role_mappings, for admin roles and the admin roles claim.",
               "type": [
                 "object",
                 "null"
@@ -685,6 +686,7 @@
               "type": "string"
             },
             "role_mappings": {
+              "description": "Maps the groups in the roles claim to Warpgate role names. The\nmapped roles follow the claim: a login without it removes them.",
               "type": [
                 "object",
                 "null"

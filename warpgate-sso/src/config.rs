@@ -161,7 +161,10 @@ pub enum SsoInternalProviderConfig {
         #[schemars(with = "String")]
         issuer_url: IssuerUrl,
         scopes: Vec<String>,
+        /// Maps the groups in the roles claim to Warpgate role names. The
+        /// mapped roles follow the claim: a login without it removes them.
         role_mappings: Option<HashMap<String, RoleMapping>>,
+        /// Like role_mappings, for admin roles and the admin roles claim.
         admin_role_mappings: Option<HashMap<String, RoleMapping>>,
         /// OIDC claim to read group memberships from (e.g. "groups").
         /// Its values are mapped to roles via role_mappings / admin_role_mappings.
@@ -316,6 +319,10 @@ impl SsoInternalProviderConfig {
             Self::Apple { .. } => false,
             _ => true,
         }
+    }
+
+    pub const fn supports_role_claims(&self) -> bool {
+        !matches!(self, Self::Google { .. })
     }
 
     #[inline]
