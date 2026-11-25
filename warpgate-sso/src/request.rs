@@ -68,15 +68,23 @@ pub async fn map_sso_result(
     }
 
     // If preferred_username is absent or empty, fall back to `email`
-    let preferred_username = get_claim!(preferred_username)
-        .map(|x| x.as_str())
-        .filter(|x| !x.is_empty())
-        .map(ToString::to_string)
-        .or_else(|| {
-            get_claim!(email)
-                .map(|x| x.as_str())
-                .map(ToString::to_string)
-        });
+    let preferred_username = [
+        result.claims.preferred_username(),
+        result
+            .userinfo_claims
+            .as_ref()
+            .and_then(|x| x.preferred_username()),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|x| x.as_str())
+    .find(|x| !x.is_empty())
+    .map(ToString::to_string)
+    .or_else(|| {
+        get_claim!(email)
+            .map(|x| x.as_str())
+            .map(ToString::to_string)
+    });
 
     let name = get_claim!(name)
         .and_then(|x| x.get(None))

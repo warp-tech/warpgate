@@ -11213,7 +11213,6 @@ dependencies = [
  "schemars 1.2.3",
  "serde",
  "serde_json",
- "serde_path_to_error",
  "subtle",
  "thiserror 2.0.21",
  "tokio",

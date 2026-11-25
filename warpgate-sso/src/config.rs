@@ -162,6 +162,7 @@ pub enum SsoInternalProviderConfig {
         issuer_url: IssuerUrl,
         /// Full discovery document URL when it is hosted separately from the issuer.
         /// The document and ID tokens must still match issuer_url exactly.
+        /// Kubernetes OIDC clients discover from issuer_url and ignore this
         #[schemars(with = "Option<String>")]
         discovery_url: Option<openidconnect::url::Url>,
         scopes: Vec<String>,

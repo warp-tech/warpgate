@@ -23,18 +23,22 @@ use crate::config::SsoInternalProviderConfig;
 use crate::request::SsoLoginRequest;
 use crate::{BackchannelLogout, SsoError, discover_metadata, refresh_metadata};
 
-/// A single entry in a group-style claim: either a bare string, or a
-/// SCIM-style object (RFC 7643) from which we take `value` (stable group ID)
-/// and `display` (human-readable name).
+/// A single entry in a group-style claim: a bare string, or an object with a
+/// stable group ID and a human-readable name. SCIM (RFC 7643) calls them
+/// `value` and `display`. Oracle IDCS calls them `id` and `name`
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum GroupClaimEntry {
     Str(String),
     Obj {
-        #[serde(default, alias = "id")]
+        #[serde(default)]
         value: Option<String>,
-        #[serde(default, alias = "name")]
+        #[serde(default)]
         display: Option<String>,
+        #[serde(default)]
+        id: Option<String>,
+        #[serde(default)]
+        name: Option<String>,
     },
 }
 
@@ -50,10 +54,9 @@ pub enum GroupClaim {
 
 /// Flatten a group claim into a sorted, de-duplicated list of strings.
 ///
-/// For object entries BOTH `value` and `display` are emitted (when present),
-/// so role mappings may be keyed on either the stable group ID or its name.
-/// (A collision between one group's `display` and another's `value` would map
-/// both -- effectively impossible with opaque IDs.)
+/// Object entries emit both the ID and the name when present, so role mappings
+/// may be keyed on either. One group's name colliding with another's ID would
+/// map both, which opaque IDs make effectively impossible
 pub fn flatten_group_claim(claim: GroupClaim) -> Vec<String> {
     let entries = match claim {
         GroupClaim::One(e) => vec![e],
@@ -63,9 +66,12 @@ pub fn flatten_group_claim(claim: GroupClaim) -> Vec<String> {
         .into_iter()
         .flat_map(|e| match e {
             GroupClaimEntry::Str(s) => vec![s],
-            GroupClaimEntry::Obj { value, display } => {
-                [value, display].into_iter().flatten().collect()
-            }
+            GroupClaimEntry::Obj {
+                value,
+                display,
+                id,
+                name,
+            } => [value, display, id, name].into_iter().flatten().collect(),
         })
         .collect();
     out.sort();
@@ -587,6 +593,14 @@ mod tests {
         assert_eq!(
             flat(json!([{"id": "admin-group-id", "name": "Administrators"}])),
             vec!["Administrators".to_string(), "admin-group-id".to_string()]
+        );
+    }
+
+    #[test]
+    fn object_with_both_naming_schemes() {
+        assert_eq!(
+            flat(json!([{"id": "g1", "value": "g1", "display": "Admins", "name": "Admins"}])),
+            vec!["Admins".to_string(), "g1".to_string()]
         );
     }
 
