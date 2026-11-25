@@ -27,12 +27,16 @@ pub enum AwsError {
     Signing(#[from] SigningError),
     #[error("HTTP: {0}")]
     Http(#[from] http::Error),
+    #[error("{0:#}")]
+    Sdk(anyhow::Error),
     #[error(transparent)]
     Other(#[from] Box<dyn Error + Send + Sync>),
 }
 
 impl AwsError {
     pub fn sdk_error<E: Error + Send + Sync + 'static>(err: E) -> Self {
-        Self::Other(Box::new(err))
+        Self::Sdk(err.into())
+    }
+}
     }
 }

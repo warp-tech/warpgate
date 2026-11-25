@@ -10577,6 +10577,7 @@ dependencies = [
 name = "warpgate-aws"
 version = "0.22.0-beta.5"
 dependencies = [
+ "anyhow",
  "aws-config",
  "aws-credential-types",
  "aws-sdk-ec2",
