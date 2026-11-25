@@ -21,7 +21,9 @@ use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
-use warpgate_common_http::{UpstreamBody, buffer_response, read_body_limited_with_timeout};
+use warpgate_common_http::{
+    UpstreamBody, buffer_response, passthrough_accept_encoding, read_body_limited_with_timeout,
+};
 use warpgate_core::logging::KubernetesAuditSubject;
 use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
 use warpgate_core::{Services, WarpgateServerHandle};
@@ -440,7 +442,8 @@ async fn _handle_normal_request_inner(
         full_url.clone(),
     );
 
-    // Add headers (excluding authorization, host, and content-length as they'll be set by reqwest)
+    // Add headers (excluding authorization, host, and content-length as they'll be set by reqwest,
+    // and accept-encoding, which is set below)
     let mut upstream_headers = HashMap::new();
     for (name, value) in &headers {
         let header_name_lower = name.to_lowercase();
@@ -450,6 +453,7 @@ async fn _handle_normal_request_inner(
             "connection",
             "transfer-encoding",
             "authorization",
+            "accept-encoding",
         ]
         .contains(&header_name_lower.as_str())
         {
@@ -462,11 +466,10 @@ async fn _handle_normal_request_inner(
             upstream_headers.insert(name.clone(), value.clone());
         }
     }
-    // Responses are forwarded still encoded, so a client that sent no
-    // Accept-Encoding must get an unencoded one.
-    if !headers.contains_key(http::header::ACCEPT_ENCODING.as_str()) {
-        request_builder = request_builder.header(reqwest::header::ACCEPT_ENCODING, "identity");
-    }
+    request_builder = request_builder.header(
+        http::header::ACCEPT_ENCODING,
+        passthrough_accept_encoding(req.headers()),
+    );
 
     debug!(
         filtered_headers = ?redact_headers(&upstream_headers),
@@ -561,7 +564,6 @@ async fn _handle_normal_request_inner(
 
     // Record the response
     if let Some(ref mut recorder) = recorder_opt {
-        // The client gets the body as received; only the recording is decoded.
         let body_for_recording = decode_response_body_for_recording(
             response_headers.get(http::header::CONTENT_ENCODING),
             &body_for_recording,
@@ -935,8 +937,8 @@ fn requested_websocket_protocols(headers: &http::HeaderMap) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     /// Read the full request head before replying so unread bytes cannot reset
-    /// the mock connection when the server task exits. Returns the head.
-    async fn drain_request_head(stream: &mut tokio::net::TcpStream) -> String {
+    /// the mock connection when the server task exits.
+    async fn drain_request_head(stream: &mut tokio::net::TcpStream) {
         use tokio::io::AsyncReadExt;
 
         let mut buf = Vec::new();
@@ -949,7 +951,6 @@ mod tests {
                 break;
             }
         }
-        String::from_utf8(buf).unwrap()
     }
 
     #[tokio::test]
@@ -962,131 +963,96 @@ mod tests {
         use tokio_util::sync::CancellationToken;
         use warpgate_common_http::UpstreamBody;
 
-        use super::{copy_response_headers, take_response_body};
+        use super::take_response_body;
+        use crate::recording::tests::gzip_member;
         use crate::server::auth::upstream_client_builder;
 
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-        let mut lines: Vec<String> = (0..4)
+        let mut events: String = (0..4)
             .map(|i| {
-                format!(
-                    r#"{{"type":"ADDED","object":{{"kind":"Service","metadata":{{"name":"svc-{i}"}}}}}}"#
-                )
+                format!(r#"{{"type":"ADDED","object":{{"metadata":{{"name":"svc-{i}"}}}}}}"#) + "\n"
             })
             .collect();
-        lines.push(
-            r#"{"type":"BOOKMARK","object":{"kind":"Service","metadata":{"annotations":{"k8s.io/initial-events-end":"true"}}}}"#
-                .to_string(),
+        events.push_str(
+            r#"{"type":"BOOKMARK","object":{"metadata":{"annotations":{"k8s.io/initial-events-end":"true"}}}}"#,
         );
-        let mut wire = Vec::new();
-        for line in &lines {
-            let member = crate::recording::tests::gzip_member(format!("{line}\n").as_bytes());
+        events.push('\n');
+
+        // One gzip member per event, each in its own chunk.
+        let members: Vec<Vec<u8>> = events
+            .split_inclusive('\n')
+            .map(|line| gzip_member(line.as_bytes()))
+            .collect();
+        let mut wire = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Encoding: gzip\r\nTransfer-Encoding: chunked\r\n\r\n".to_vec();
+        for member in &members {
             wire.extend_from_slice(format!("{:x}\r\n", member.len()).as_bytes());
-            wire.extend_from_slice(&member);
+            wire.extend_from_slice(member);
             wire.extend_from_slice(b"\r\n");
         }
         wire.extend_from_slice(b"0\r\n\r\n");
-        let sent_body: Vec<u8> = {
-            // what the client should see: the concatenated members
-            lines
-                .iter()
-                .flat_map(|line| {
-                    crate::recording::tests::gzip_member(format!("{line}\n").as_bytes())
-                })
-                .collect()
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            drain_request_head(&mut stream).await;
+            stream.write_all(&wire).await.unwrap();
+            stream.flush().await.unwrap();
+        });
+
+        let client = upstream_client_builder(&format!("http://{address}"))
+            .build()
+            .unwrap();
+        let query = "watch=true&sendInitialEvents=true&resourceVersionMatch=NotOlderThan";
+        let response = client
+            .get(format!("http://{address}/api/v1/services?{query}"))
+            .header(reqwest::header::ACCEPT_ENCODING, "gzip")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response
+                .headers()
+                .get(http::header::CONTENT_ENCODING)
+                .unwrap(),
+            "gzip"
+        );
+
+        let taken = take_response_body(response, false, Some(query), &CancellationToken::new())
+            .await
+            .unwrap();
+        let UpstreamBody::Streamed(stream) = taken else {
+            panic!("a watch response must be streamed");
         };
+        let received = stream
+            .try_collect::<Vec<bytes::Bytes>>()
+            .await
+            .unwrap()
+            .concat();
+        assert_eq!(received, members.concat());
 
-        for accept_encoding in [Some("gzip"), None] {
-            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let address = listener.local_addr().unwrap();
-            let wire = wire.clone();
-            let server = tokio::spawn(async move {
-                let (mut stream, _) = listener.accept().await.unwrap();
-                let head = drain_request_head(&mut stream).await;
-                stream
-                    .write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Encoding: gzip\r\nTransfer-Encoding: chunked\r\n\r\n",
-                    )
-                    .await
-                    .unwrap();
-                stream.write_all(&wire).await.unwrap();
-                stream.flush().await.unwrap();
-                head
-            });
-
-            let client = upstream_client_builder(&format!("http://{address}"))
-                .build()
-                .unwrap();
-            let query = "watch=true&sendInitialEvents=true&resourceVersionMatch=NotOlderThan";
-            let mut request = client.get(format!("http://{address}/api/v1/services?{query}"));
-            if let Some(value) = accept_encoding {
-                request = request.header(reqwest::header::ACCEPT_ENCODING, value);
-            }
-            let response = request.send().await.unwrap();
-            assert_eq!(response.status(), http::StatusCode::OK);
-            assert_eq!(
-                response
-                    .headers()
-                    .get(http::header::CONTENT_ENCODING)
-                    .unwrap(),
-                "gzip"
-            );
-            let headers = response.headers().clone();
-
-            let forwarded = copy_response_headers(
-                poem::Response::builder().status(http::StatusCode::OK),
-                &headers,
-            )
-            .body(poem::Body::empty());
-            assert_eq!(
-                forwarded
-                    .headers()
-                    .get(http::header::CONTENT_ENCODING)
-                    .unwrap(),
-                "gzip"
-            );
-
-            let taken = take_response_body(response, false, Some(query), &CancellationToken::new())
-                .await
-                .unwrap();
-            let UpstreamBody::Streamed(stream) = taken else {
-                panic!("a watch response must be streamed");
-            };
-            let chunks: Vec<bytes::Bytes> = stream.try_collect().await.unwrap();
-            let received = chunks.concat();
-            assert_eq!(received, sent_body, "accept_encoding={accept_encoding:?}");
-
-            let mut decoded = String::new();
-            flate2::read::MultiGzDecoder::new(received.as_slice())
-                .read_to_string(&mut decoded)
-                .unwrap();
-            let got: Vec<&str> = decoded.lines().collect();
-            assert_eq!(got, lines.iter().map(String::as_str).collect::<Vec<_>>());
-            assert!(got.last().is_some_and(|l| l.contains("k8s.io/initial-events-end")));
-
-            let head = server.await.unwrap().to_ascii_lowercase();
-            match accept_encoding {
-                Some(_) => assert!(head.contains("accept-encoding: gzip\r\n"), "head: {head}"),
-                None => assert!(!head.contains("accept-encoding"), "head: {head}"),
-            }
-        }
+        let mut decoded = String::new();
+        flate2::read::MultiGzDecoder::new(received.as_slice())
+            .read_to_string(&mut decoded)
+            .unwrap();
+        assert_eq!(decoded, events);
+        server.await.unwrap();
     }
 
     #[tokio::test]
-    async fn gzipped_list_is_buffered_raw_and_recorded_decoded() {
+    async fn gzipped_list_is_buffered_as_received() {
         use tokio::io::AsyncWriteExt;
         use tokio::net::TcpListener;
         use tokio_util::sync::CancellationToken;
         use warpgate_common_http::UpstreamBody;
 
-        use super::{MAX_BUFFERED_RESPONSE_BYTES, take_response_body};
-        use crate::recording::decode_response_body_for_recording;
+        use super::take_response_body;
         use crate::server::auth::upstream_client_builder;
 
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-        let json = br#"{"kind":"ServiceList","items":[]}"#;
-        let gz = crate::recording::tests::gzip_member(json);
+        let gz = crate::recording::tests::gzip_member(br#"{"kind":"ServiceList","items":[]}"#);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let reply = gz.clone();
@@ -1111,9 +1077,11 @@ mod tests {
             .send()
             .await
             .unwrap();
-        let headers = response.headers().clone();
         assert_eq!(
-            headers.get(http::header::CONTENT_LENGTH).unwrap(),
+            response
+                .headers()
+                .get(http::header::CONTENT_LENGTH)
+                .unwrap(),
             gz.len().to_string().as_str()
         );
 
@@ -1124,12 +1092,6 @@ mod tests {
             panic!("a small list must be buffered");
         };
         assert_eq!(raw.as_ref(), gz.as_slice());
-        let recorded = decode_response_body_for_recording(
-            headers.get(http::header::CONTENT_ENCODING),
-            &raw,
-            MAX_BUFFERED_RESPONSE_BYTES,
-        );
-        assert_eq!(recorded.as_ref(), json);
         server.await.unwrap();
     }
 

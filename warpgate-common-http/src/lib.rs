@@ -50,6 +50,16 @@ pub async fn read_body_limited_with_timeout(
         })
 }
 
+/// The `Accept-Encoding` to send upstream when the response body is forwarded
+/// to the client still encoded: the client's own, or `identity` if it sent
+/// none, so the upstream never picks an encoding the client didn't offer.
+pub fn passthrough_accept_encoding(headers: &HeaderMap) -> HeaderValue {
+    headers
+        .get(header::ACCEPT_ENCODING)
+        .cloned()
+        .unwrap_or(HeaderValue::from_static("identity"))
+}
+
 pub enum UpstreamBody {
     Buffered(Bytes),
     /// Yields the whole body, starting from its first byte.
@@ -162,6 +172,17 @@ mod tests {
     use futures::TryStreamExt;
 
     use super::*;
+
+    #[test]
+    fn passthrough_accept_encoding_defaults_to_identity() {
+        let mut headers = HeaderMap::new();
+        assert_eq!(passthrough_accept_encoding(&headers), "identity");
+        headers.insert(
+            header::ACCEPT_ENCODING,
+            HeaderValue::from_static("br, gzip"),
+        );
+        assert_eq!(passthrough_accept_encoding(&headers), "br, gzip");
+    }
 
     /// With `ends` unset, the body stalls forever after the last chunk.
     fn response_of(chunks: &[&'static str], ends: bool) -> reqwest::Response {

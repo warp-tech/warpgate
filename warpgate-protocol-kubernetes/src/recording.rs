@@ -69,23 +69,28 @@ impl Recorder for KubernetesRecorder {
 /// Decodes a gzip-encoded upstream response body for the recording. The proxy
 /// forwards the body still encoded; only the recording stores it decoded.
 ///
-/// Returns the body unchanged unless `Content-Encoding` is exactly `gzip` or
-/// `x-gzip`. A decoded body over `limit`, or one that fails to decode, is
-/// recorded as empty.
+/// An unencoded body is returned unchanged. A body in any encoding other than
+/// `gzip`/`x-gzip`, one that decodes to more than `limit` bytes, or one that
+/// fails to decode is recorded as empty: the recording doesn't store the
+/// encoding, so encoded bytes would be unreadable there.
 pub(crate) fn decode_response_body_for_recording(
     content_encoding: Option<&http::HeaderValue>,
     body: &Bytes,
     limit: usize,
 ) -> Bytes {
-    if body.is_empty() {
+    let Some(encoding) = content_encoding.filter(|_| !body.is_empty()) else {
+        return body.clone();
+    };
+    let encoding = encoding.to_str().unwrap_or_default().trim();
+    if encoding.eq_ignore_ascii_case("identity") {
         return body.clone();
     }
-    let is_gzip = content_encoding
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .is_some_and(|v| v.eq_ignore_ascii_case("gzip") || v.eq_ignore_ascii_case("x-gzip"));
-    if !is_gzip {
-        return body.clone();
+    if !encoding.eq_ignore_ascii_case("gzip") && !encoding.eq_ignore_ascii_case("x-gzip") {
+        tracing::debug!(
+            encoding,
+            "Unsupported response encoding, not recording the body"
+        );
+        return Bytes::new();
     }
 
     let max = u64::try_from(limit).unwrap_or(u64::MAX).saturating_add(1);
@@ -103,7 +108,7 @@ pub(crate) fn decode_response_body_for_recording(
             Bytes::new()
         }
         Err(error) => {
-            tracing::debug!(%error, "Failed to decode gzip response body, not recording it");
+            tracing::warn!(%error, "Failed to decode gzip response body, not recording it");
             Bytes::new()
         }
     }
@@ -191,11 +196,17 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn other_encodings_are_unchanged() {
-        let body = Bytes::from(gzip_member(b"hello"));
+    fn unencoded_body_is_unchanged() {
+        let body = Bytes::from_static(b"hello");
         assert_eq!(decode(None, &body, 1024), body);
-        assert_eq!(decode(Some(&header("br")), &body, 1024), body);
-        assert_eq!(decode(Some(&header("gzip, br")), &body, 1024), body);
+        assert_eq!(decode(Some(&header("identity")), &body, 1024), body);
+    }
+
+    #[test]
+    fn unsupported_encodings_are_recorded_empty() {
+        let body = Bytes::from(gzip_member(b"hello"));
+        assert!(decode(Some(&header("br")), &body, 1024).is_empty());
+        assert!(decode(Some(&header("gzip, br")), &body, 1024).is_empty());
     }
 
     #[test]

@@ -972,8 +972,7 @@ class TestKubernetesIntegration:
             f"/api/v1/namespaces/{namespace}/configmaps",
             headers={
                 "Authorization": f"Bearer {user_token}",
-                # Without this the 4 MiB of "x" gzips to almost nothing and
-                # no longer exercises the over-limit streaming path.
+                # Gzipped, the 4 MiB of "x" would fit the buffer limit.
                 "Accept-Encoding": "identity",
             },
             verify=False,
@@ -994,9 +993,9 @@ class TestKubernetesIntegration:
         """A WatchList stream (sendInitialEvents) must reach the client with its
         initial-events-end bookmark and the upstream Content-Encoding.
         Kubernetes 1.37+ gzips WatchList responses as one member per flush,
-        which a decoder that stops after the first member cuts short. Older
-        apiservers (including the k3s used here, if older) don't compress
-        watches, so this may only cover the uncompressed path; the Rust test
+        which a decoder that stops after the first member cuts short. Against
+        an apiserver that doesn't compress watches this covers only the
+        uncompressed path; the Rust test
         `watchlist_gzip_members_reach_the_client_whole` covers the gzip one."""
         k3s, user, target_name, url = _provision_kubernetes_target(
             processes, shared_wg, "watchlist"

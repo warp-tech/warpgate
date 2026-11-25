@@ -583,9 +583,8 @@ pub async fn create_authenticated_client(
 /// and a ClientHello with a post-quantum key share is big enough to do that.
 pub(super) fn upstream_client_builder(cluster_url: &str) -> reqwest::ClientBuilder {
     // Never follow untrusted redirects. Responses pass through still encoded:
-    // reqwest decodes with tower-http, whose gzip decoder stops after the first
-    // gzip member. Kubernetes 1.37+ (WatchListCompression) gzips a WatchList
-    // response as one member per flush, so decoding here cut it short.
+    // reqwest's gzip decoder stops after the first gzip member, and Kubernetes
+    // (WatchListCompression) gzips a WatchList response as one member per flush.
     let builder = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .no_gzip()
