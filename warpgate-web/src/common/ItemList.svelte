@@ -62,8 +62,9 @@
 </script>
 
 <script lang="ts" generics="T, G = unknown, GK extends string = string">
-    import { Input } from '@sveltestrap/sveltestrap'
+    import { Alert, Input } from '@sveltestrap/sveltestrap'
     import {
+        catchError,
         combineLatest,
         debounceTime,
         distinctUntilChanged,
@@ -77,6 +78,7 @@
     import { autosave } from './autosave'
     import DelayedSpinner from './DelayedSpinner.svelte'
     import EmptyState from './EmptyState.svelte'
+    import { stringifyError } from './errors'
     import Pagination from './Pagination.svelte'
     import VirtualList from './VirtualList.svelte'
 
@@ -170,6 +172,7 @@
     let loaded = $state(false)
     let list = $state.raw<T[] | null>(null)
     let total = $state(0)
+    let error = $state<string>()
 
     const page$ = new Subject<number>()
     const filter$ = new Subject<string>()
@@ -188,15 +191,26 @@
             switchMap(([p, f]) => {
                 page = p
                 loaded = false
+                error = undefined
                 return load({
                     search: f,
                     offset: p * (pageSize ?? 0),
                     limit: pageSize,
-                })
+                }).pipe(
+                    // An error reaching the outer stream would end it, and
+                    // the list would stop following the page and the search.
+                    catchError(async (err: unknown) => ({
+                        error: await stringifyError(err),
+                    })),
+                )
             }),
         )
         .subscribe(response => {
             loaded = true
+            if ('error' in response) {
+                error = response.error
+                return
+            }
             list = response.items
             total = response.total
         })
@@ -326,8 +340,13 @@ widest one anywhere in the list. -->
     {/if}
 {/snippet}
 
+{#if error}
+    <Alert color="danger">{error}</Alert>
+{/if}
 {#if !list}
-    <DelayedSpinner />
+    {#if !error}
+        <DelayedSpinner />
+    {/if}
 {:else}
     <div class="d-flex align-items-center mb-2" hidden={!loaded}>
         <!-- either filtering or not filtering and there are at least some items at all -->
