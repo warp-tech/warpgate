@@ -1176,3 +1176,31 @@ class Test:
 
         stdout, _ = ssh_client.communicate(timeout=timeout)
         assert b"123\n" == stdout
+
+    # https://github.com/warp-tech/warpgate/issues/2955
+    def test_target_offering_only_nist_ecdh_kex(
+        self,
+        processes: ProcessManager,
+        timeout,
+        wg_c_ed25519_pubkey,
+        shared_wg: WarpgateProcess,
+    ):
+        user, ssh_target = setup_user_and_target(
+            processes, shared_wg, wg_c_ed25519_pubkey,
+            extra_config=(
+                "KexAlgorithms "
+                "ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521"
+            ),
+        )
+
+        ssh_client = processes.start_ssh_client(
+            f"{user.username}:{ssh_target.name}@localhost",
+            "-p",
+            str(shared_wg.ssh_port),
+            *common_args,
+            "echo", "123",
+            password="123",
+        )
+
+        stdout, _ = ssh_client.communicate(timeout=timeout)
+        assert b"123\n" == stdout

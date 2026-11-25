@@ -6,6 +6,7 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
+anyhow.workspace = true
 aws-config = { version = "1", default-features = false, features = [
     "behavior-version-latest",
     "rustls",
