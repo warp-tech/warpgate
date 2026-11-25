@@ -3,7 +3,6 @@ mod channel_direct_tcpip;
 mod channel_session;
 mod error;
 mod handler;
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
@@ -758,79 +757,42 @@ impl RemoteClient {
     }
 }
 
+fn preferred_algos(allow_insecure: bool) -> Preferred {
+    let mut algos = Preferred::default();
+    // The only key exchange some FIPS-mode servers offer. Listed
+    // last, so it is picked only when nothing else matches.
+    algos.kex.to_mut().extend([
+        kex::ECDH_SHA2_NISTP256,
+        kex::ECDH_SHA2_NISTP384,
+        kex::ECDH_SHA2_NISTP521,
+    ]);
+    if allow_insecure {
+        algos
+            .kex
+            .to_mut()
+            .extend([kex::DH_GEX_SHA1, kex::DH_G14_SHA1, kex::DH_G1_SHA1]);
+        algos.key.to_mut().push(russh::keys::Algorithm::Dsa);
+        algos.cipher.to_mut().extend([
+            russh::cipher::AES_256_CBC,
+            russh::cipher::AES_192_CBC,
+            russh::cipher::AES_128_CBC,
+            russh::cipher::TRIPLE_DES_CBC,
+        ]);
+        // For legacy devices such as older network switches that only offer
+        // hmac-sha1. https://github.com/warp-tech/warpgate/issues/2066
+        algos
+            .mac
+            .to_mut()
+            .extend([mac::HMAC_SHA1_ETM, mac::HMAC_SHA1]);
+    }
+    algos
+}
+
 impl Connector {
     async fn build_ssh_config(&self, ssh_options: &TargetSSHOptions) -> Arc<russh::client::Config> {
-        let algos = if ssh_options.allow_insecure_algos {
-            Preferred {
-                kex: Cow::Borrowed(&[
-                    kex::MLKEM768X25519_SHA256,
-                    kex::CURVE25519,
-                    kex::CURVE25519_PRE_RFC_8731,
-                    kex::ECDH_SHA2_NISTP256,
-                    kex::ECDH_SHA2_NISTP384,
-                    kex::ECDH_SHA2_NISTP521,
-                    kex::DH_G16_SHA512,
-                    kex::DH_G14_SHA256,
-                    kex::DH_GEX_SHA256,
-                    kex::DH_GEX_SHA1,
-                    kex::DH_G14_SHA1,
-                    kex::DH_G1_SHA1,
-                    kex::EXTENSION_SUPPORT_AS_CLIENT,
-                    kex::EXTENSION_SUPPORT_AS_SERVER,
-                    kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
-                    kex::EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
-                ]),
-                key: Cow::Borrowed(&[
-                    russh::keys::Algorithm::Ed25519,
-                    russh::keys::Algorithm::Ecdsa {
-                        curve: russh::keys::EcdsaCurve::NistP256,
-                    },
-                    russh::keys::Algorithm::Ecdsa {
-                        curve: russh::keys::EcdsaCurve::NistP384,
-                    },
-                    russh::keys::Algorithm::Ecdsa {
-                        curve: russh::keys::EcdsaCurve::NistP521,
-                    },
-                    russh::keys::Algorithm::Rsa {
-                        hash: Some(russh::keys::HashAlg::Sha256),
-                    },
-                    russh::keys::Algorithm::Rsa {
-                        hash: Some(russh::keys::HashAlg::Sha512),
-                    },
-                    russh::keys::Algorithm::Rsa { hash: None },
-                    russh::keys::Algorithm::Dsa,
-                ]),
-                cipher: Cow::Borrowed(&[
-                    russh::cipher::CHACHA20_POLY1305,
-                    russh::cipher::AES_256_GCM,
-                    russh::cipher::AES_256_CTR,
-                    russh::cipher::AES_256_CBC,
-                    russh::cipher::AES_192_CTR,
-                    russh::cipher::AES_192_CBC,
-                    russh::cipher::AES_128_CTR,
-                    russh::cipher::AES_128_CBC,
-                    russh::cipher::TRIPLE_DES_CBC,
-                ]),
-                // The secure defaults exclude SHA-1 MACs; append them here for
-                // legacy devices (e.g. older network switches that only offer
-                // hmac-sha1). https://github.com/warp-tech/warpgate/issues/2066
-                mac: Cow::Borrowed(&[
-                    mac::HMAC_SHA512_ETM,
-                    mac::HMAC_SHA256_ETM,
-                    mac::HMAC_SHA512,
-                    mac::HMAC_SHA256,
-                    mac::HMAC_SHA1_ETM,
-                    mac::HMAC_SHA1,
-                ]),
-                ..<_>::default()
-            }
-        } else {
-            Preferred::default()
-        };
-
         let ssh_config = { self.services.config.lock().await.store.ssh.clone() };
         let mut config = russh::client::Config {
-            preferred: algos,
+            preferred: preferred_algos(ssh_options.allow_insecure_algos),
             nodelay: true,
             // Extra time for the "closing due to inactivity" message to be sent
             inactivity_timeout: Some(ssh_config.inactivity_timeout + Duration::from_secs(10)),
@@ -1517,10 +1479,23 @@ mod tests {
     use uuid::Uuid;
     use warpgate_common::{TargetId, UserFacingReason};
 
-    use super::{ConnectionError, resolve_chain_ids};
+    use super::{ConnectionError, preferred_algos, resolve_chain_ids};
 
     fn target_id() -> TargetId {
         TargetId(Uuid::new_v4())
+    }
+
+    #[test]
+    fn insecure_algos_only_add_to_the_secure_ones() {
+        let secure = preferred_algos(false);
+        let insecure = preferred_algos(true);
+        assert!(insecure.kex.starts_with(&secure.kex));
+        assert!(insecure.key.starts_with(&secure.key));
+        assert!(insecure.cipher.starts_with(&secure.cipher));
+        assert!(insecure.mac.starts_with(&secure.mac));
+        assert!(insecure.kex.contains(&russh::kex::DH_G1_SHA1));
+        assert!(!secure.kex.contains(&russh::kex::DH_G1_SHA1));
+        assert!(insecure.mac.contains(&russh::mac::HMAC_SHA1));
     }
 
     #[test]
