@@ -138,7 +138,8 @@ async fn discover_at(
         if request.uri() == well_known.as_str() {
             *request.uri_mut() = discovery_uri.clone();
         }
-        http_client.call(request)
+        let http_client = http_client.clone();
+        async move { http_client.call(request).await }
     };
     discover(issuer, &redirecting_client).await
 }
