@@ -2249,9 +2249,12 @@ impl ServerSession {
             Ok(AuthResult::Rejected) => {
                 reject_with_allowed_auth_methods(self.allowed_auth_methods.clone())
             }
+            // Need = required minus valid, so the publickey was accepted unless it is
+            // still needed; say so (RFC 4252 §5.1), or clients that only continue
+            // on partial success give up.
             Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
+                partial_success: !kinds.contains(&CredentialKind::PublicKey),
                 proceed_with_methods: Some(self.get_remaining_auth_methods(kinds)),
-                partial_success: false,
             },
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
@@ -2287,9 +2290,12 @@ impl ServerSession {
         match result {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::reject(),
+            // Need = required minus valid, so the password was accepted unless it is
+            // still needed; say so (RFC 4252 §5.1), or clients that only continue
+            // on partial success give up.
             Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
+                partial_success: !kinds.contains(&CredentialKind::Password),
                 proceed_with_methods: Some(self.get_remaining_auth_methods(kinds)),
-                partial_success: false,
             },
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
