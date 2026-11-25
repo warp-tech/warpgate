@@ -105,6 +105,7 @@ mod m00097_ssh_client_key_provider;
 mod m00098_gitops_sync;
 mod m00099_unique_admin_role_names;
 mod m00100_admin_role_builtin;
+mod m00101_s3_blank_prefix_keys;
 
 pub(crate) mod helpers;
 
@@ -214,6 +215,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00098_gitops_sync::Migration),
             Box::new(m00099_unique_admin_role_names::Migration),
             Box::new(m00100_admin_role_builtin::Migration),
+            Box::new(m00101_s3_blank_prefix_keys::Migration),
         ]
     }
 }

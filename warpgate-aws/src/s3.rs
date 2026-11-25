@@ -9,6 +9,7 @@ use poem_openapi::{Object, Union};
 use serde::{Deserialize, Serialize};
 use tracing::error;
 use warpgate_common::StoredSecret;
+use warpgate_common::helpers::object_key;
 
 use crate::AwsError;
 
@@ -153,12 +154,8 @@ impl S3Storage {
         self.serve_through_warpgate
     }
 
-    fn prefix_no_trailing_slash(&self) -> &str {
-        self.prefix.trim_suffix('/')
-    }
-
     fn key(&self, path: &str) -> String {
-        format!("{}/{}", self.prefix_no_trailing_slash(), path)
+        object_key::prefixed(&self.prefix, path)
     }
 
     /// Open an object as a streaming reader (no full-object buffering).
