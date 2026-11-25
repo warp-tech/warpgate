@@ -46,6 +46,7 @@ fn secret_destination(config: &RecordingsStorageConfig) -> RecordingsStorageConf
         }
         RecordingsStorageConfig::Azure(azure) => {
             azure.prefix.clear();
+            azure.scratch_path = None;
             azure.serve_through_warpgate = false;
         }
     }
@@ -799,6 +800,7 @@ mod tests {
             container: "recordings".into(),
             endpoint: None,
             prefix: String::new(),
+            scratch_path: None,
             serve_through_warpgate: true,
             credentials: AzureCredentials::ServicePrincipal(ServicePrincipalCredentials {
                 tenant_id: "tenant".into(),
@@ -940,6 +942,7 @@ mod tests {
         }
         for incoming in [
             azure(|c| c.prefix = "recordings/".into()),
+            azure(|c| c.scratch_path = Some("/var/tmp/scratch".into())),
             azure(|c| c.serve_through_warpgate = false),
         ] {
             assert_eq!(

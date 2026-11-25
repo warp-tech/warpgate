@@ -35,6 +35,7 @@ fn config() -> AzureBlobConfig {
         container,
         endpoint: None,
         prefix: "managed-identity-test".to_owned(),
+        scratch_path: None,
         serve_through_warpgate: true,
         credentials: AzureCredentials::ManagedIdentity(ManagedIdentityCredentials {
             client_id: std::env::var("WARPGATE_AZURE_MI_CLIENT_ID").ok(),
