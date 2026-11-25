@@ -12,6 +12,7 @@ use warpgate_common::{
 use warpgate_db_entities::TargetSession::TargetSessionOpenOutcome;
 use warpgate_db_entities::{TargetSession, UserSession};
 
+use crate::logging::AuditEvent;
 use crate::rate_limiting::{RateLimiterRegistry, stack_rate_limiters};
 use crate::{ApprovedTarget, State, TargetAuthorization, UserSessionState};
 
@@ -189,19 +190,28 @@ impl WarpgateServerHandle {
         &self,
         authorization: &TargetAuthorization<O>,
     ) -> Result<TargetSessionId, WarpgateError> {
+        let target = authorization.target();
         let outcome = TargetSession::open_or_lookup(
             &self.db,
             TargetSessionId(Uuid::new_v4()),
             self.user_session_id,
-            authorization.target(),
+            target,
             self.node_owned.then_some(self.node_id),
             authorization.ticket_id(),
-            authorization.user_info(),
         )
         .await?;
 
         let target_session = match outcome {
             TargetSessionOpenOutcome::Created(model) => {
+                let user_info = authorization.user_info();
+                AuditEvent::TargetSessionStarted {
+                    session_id: model.id.0,
+                    target_id: target.id,
+                    target_name: target.name.clone(),
+                    user_id: user_info.id,
+                    username: user_info.username.clone(),
+                }
+                .emit();
                 self.user_session_state.lock().await.emit_change();
 
                 model

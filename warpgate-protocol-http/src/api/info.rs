@@ -54,7 +54,7 @@ pub struct SetupState {
 
 impl SetupState {
     pub const fn completed(&self) -> bool {
-        self.tutorial_dismissed || (self.has_targets && self.has_users)
+        self.tutorial_dismissed
     }
 }
 

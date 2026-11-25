@@ -7,11 +7,11 @@ use serde_json::Value;
 use warpgate_common::{
     MaybeSecretRef, TargetDataRequest, TargetOptions, TargetSecrets, public_key_of_pem,
 };
+use warpgate_resources::{OptionReferences, Path, ResourceKind, Segment, changed_paths};
 
-use crate::diagnostic::{Diagnostic, Level, Location, Path, Segment};
+use crate::diagnostic::{Diagnostic, Level, Location, error_path};
 use crate::parse::{Document, parse};
-use crate::plan::changed_paths;
-use crate::types::{OptionReferences, Resource, ResourceKind};
+use crate::types::Resource;
 
 /// A valid fileset
 #[derive(Debug)]
@@ -212,7 +212,7 @@ pub fn check_document(doc: &Document) -> (Option<Resource>, Vec<Diagnostic>) {
     let resource = match Resource::from_value(&doc.value) {
         Ok(resource) => resource,
         Err(error) => {
-            let path = Path::from(error.path());
+            let path = error_path(error.path());
             // A node without a JSON representation was already reported and reads as null.
             // serde loses track inside internally tagged enums, so it may point at an ancestor.
             if !doc.errors.iter().any(|e| e.path.0.starts_with(&path.0)) {

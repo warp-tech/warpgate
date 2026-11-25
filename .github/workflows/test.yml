@@ -72,19 +72,19 @@ jobs:
           TIMEOUT=120 poetry run ./run.sh
 
       - name: Upload coverage
-        uses: actions/upload-artifact@2848b2cda0e5190984587ec6bb1f36730ca78d50
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: coverage.lcov
           path: tests/coverage.lcov
 
       - name: Upload coverage (HTML)
-        uses: actions/upload-artifact@2848b2cda0e5190984587ec6bb1f36730ca78d50
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: coverage-html
           path: target/llvm-cov/html
 
       - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@v8.4.1
+        uses: SonarSource/sonarqube-scan-action@v8.5.0
         if: ${{ env.SONAR_TOKEN }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any

@@ -7,6 +7,7 @@ use russh::keys::{Algorithm, PublicKey};
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_core::resources::audit;
 use warpgate_db_entities::KnownHost;
 
 use super::AdminContext;
@@ -63,6 +64,7 @@ impl Api {
         }
         .insert(db)
         .await?;
+        audit::created(db, admin.changed_by(), &model).await;
         Ok(AddSshKnownHostResponse::Ok(Json(model)))
     }
 

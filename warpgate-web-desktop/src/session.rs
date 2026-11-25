@@ -1,4 +1,3 @@
-use warpgate_common::UserId;
 use std::sync::{Arc, OnceLock};
 
 use bytes::Bytes;
@@ -6,7 +5,7 @@ use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
-use warpgate_common::UserSessionId;
+use warpgate_common::{UserId, UserSessionId};
 use warpgate_core::recordings::DesktopRecorder;
 use warpgate_core::{DesktopEvent, DesktopInput, DesktopRect, Framebuffer, Rect};
 use warpgate_web_clients_common::{ManagedSession, Sheddable, WebSession};

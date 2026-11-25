@@ -1,4 +1,4 @@
-use std::fs::{File, create_dir_all};
+use std::fs::create_dir_all;
 use std::io::Write;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
@@ -20,7 +20,7 @@ use warpgate_common::{
     WarpgateConfigStore,
 };
 use warpgate_core::consts::{BUILTIN_ADMIN_ROLE_NAME, BUILTIN_ADMIN_USERNAME};
-use warpgate_core::db::connect_to_db_and_migrate;
+use warpgate_core::db::{connect_to_db_and_migrate, sqlite_url};
 use warpgate_db_entities::Parameters::{RecordingsDiskConfig, RecordingsStorageConfig};
 use warpgate_db_entities::{Parameters, Role, User, UserRoleAssignment};
 
@@ -137,12 +137,17 @@ impl Answers {
         } else {
             info!(
                 "* Paths can be either absolute or relative to {}.",
-                config_dir.canonicalize()?.display()
+                dunce::canonicalize(config_dir)?.display()
             );
             #[cfg(target_os = "linux")]
             let default_data_path = "/var/lib/warpgate";
             #[cfg(target_os = "macos")]
             let default_data_path = "/usr/local/var/lib/warpgate";
+            #[cfg(windows)]
+            let default_data_path = format!(
+                r"{}\warpgate",
+                std::env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".into())
+            );
             dialoguer::Input::with_theme(&theme)
                 .default(default_data_path.to_string())
                 .with_prompt("Directory to store app data (up to a few MB) in")
@@ -208,10 +213,10 @@ impl Answers {
     }
 
     fn config(&self, db_path: &Path) -> WarpgateConfigStore {
-        let database_url = self.database_url.clone().unwrap_or_else(|| {
-            let db_path = db_path.to_string_lossy();
-            format!("sqlite:{}", db_path.trim_suffix("./"))
-        });
+        let database_url = self
+            .database_url
+            .clone()
+            .unwrap_or_else(|| sqlite_url(db_path));
         let mut store = WarpgateConfigStore {
             database_url: Secret::new(database_url),
             ..Default::default()
@@ -335,8 +340,28 @@ fn config_dir(params: &GlobalParams) -> &Path {
     }
 }
 
+/// `canonicalize` fails on a missing path, so the directory is created
+/// first. `dunce` omits the `\\?\` prefix that Windows adds, which would
+/// otherwise be written to the config
 fn resolve_data_path(config_dir: &Path, data_path: &str) -> Result<PathBuf> {
-    Ok(config_dir.join(data_path).canonicalize()?)
+    let data_path = config_dir.join(data_path);
+    create_dir_all(&data_path)?;
+    Ok(dunce::canonicalize(data_path)?)
+}
+
+fn write_file(path: &Path, contents: &[u8], secure: bool) -> Result<()> {
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    if secure {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    opts.open(path)?.write_all(contents)?;
+    if secure {
+        secure_file(path)?;
+    }
+    Ok(())
 }
 
 async fn bootstrap_database(
@@ -459,12 +484,12 @@ fn install_tls(
         .paths_relative_to()
         .join(&config.store.http.certificate);
     let key_path = params.paths_relative_to().join(&config.store.http.key);
-    std::fs::write(&certificate_path, certificate)?;
-    std::fs::write(&key_path, key)?;
-    if params.should_secure_files() {
-        secure_file(&certificate_path)?;
-        secure_file(&key_path)?;
-    }
+    write_file(
+        &certificate_path,
+        &certificate,
+        params.should_secure_files(),
+    )?;
+    write_file(&key_path, &key, params.should_secure_files())?;
     Ok(())
 }
 
@@ -530,7 +555,17 @@ pub async fn command(
 
     info!("Generated configuration:");
     let yaml = yaml_serde::to_string(&store)?;
-    println!("{yaml}");
+    let mut display_store = store.clone();
+    // non-sqlite URLs can contain creds, including in query params
+    if !display_store
+        .database_url
+        .expose_secret()
+        .starts_with("sqlite:")
+    {
+        display_store.database_url = Secret::new("<redacted>".to_string());
+    }
+    let display_yaml = yaml_serde::to_string(&display_store)?;
+    println!("{display_yaml}");
 
     let yaml = format!(
         "# Config generated in version {version}\n# yaml-language-server: $schema={schema}\n\n{yaml}",
@@ -538,7 +573,7 @@ pub async fn command(
         schema = repository_file_url("config-schema.json"),
     );
 
-    File::create(config_path)?.write_all(yaml.as_bytes())?;
+    write_file(config_path, yaml.as_bytes(), params.should_secure_files())?;
     info!("Saved into {}", config_path.display());
 
     let config = load_config(params, true)?;
@@ -558,13 +593,57 @@ pub async fn command(
         );
     } else {
         info!(
-            "  {} --config {} run",
+            "  {}{} --config {} run",
             std::env::args()
                 .next()
                 .unwrap_or_else(|| "warpgate".to_string()),
+            if params.should_secure_files() {
+                ""
+            } else {
+                " --skip-securing-files"
+            },
             config_path.display()
         );
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use crate::{Cli, Commands};
+
+    /// The data path has a space, a non-ASCII character and a `#`. The
+    /// database URL that setup writes must still open it
+    #[tokio::test]
+    async fn unattended_setup_creates_a_new_data_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
+        let data_path = "new data/caf\u{e9} #1";
+        let cli = Cli::try_parse_from([
+            "warpgate".into(),
+            "--config".into(),
+            base.join("warpgate.yaml").into_os_string(),
+            "unattended-setup".into(),
+            "--data-path".into(),
+            data_path.into(),
+            "--http-port".into(),
+            "8888".into(),
+            "--admin-password".into(),
+            "password".into(),
+        ])
+        .unwrap();
+        let Commands::UnattendedSetup(args) = &cli.command else {
+            unreachable!()
+        };
+        let params = cli.into_global_params().unwrap();
+
+        super::command(&params, &args.common, Some(args))
+            .await
+            .unwrap();
+
+        assert!(base.join(data_path).join("db/db.sqlite3").is_file());
+    }
 }

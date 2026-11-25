@@ -337,6 +337,8 @@ widest one anywhere in the list. -->
                 placeholder="Search..."
                 class="flex-grow-1"
             />
+        {:else}
+            <div class="flex-grow-1"></div>
         {/if}
         {@render header?.(
             list,

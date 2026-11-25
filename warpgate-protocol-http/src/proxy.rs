@@ -26,7 +26,8 @@ use warpgate_common::{TargetHTTPOptions, WarpgateError, try_block};
 use warpgate_common_http::logging::{get_client_ip, log_request_result};
 use warpgate_common_http::{
     AuthenticatedRequestContext, SessionAuthorization, SessionKeepalive, SessionKeepaliveGuard,
-    UpstreamBody, buffer_response, passthrough_accept_encoding,
+    UpstreamBody, WARPGATE_AUTH_SCHEME, authorization_credential, buffer_response,
+    passthrough_accept_encoding,
 };
 use warpgate_core::AdmittedTarget;
 use warpgate_tls::{TlsMode, configure_tls_connector};
@@ -288,6 +289,19 @@ fn cookie_header_for_target(req: &Request) -> Result<Option<String>> {
     Ok((!cookies.is_empty()).then(|| cookies.join("; ")))
 }
 
+/// The client's `Authorization` header without a ticket presented with the
+/// Warpgate scheme, which would let the target replay it against Warpgate.
+fn authorization_header_for_target(req: &Request) -> Option<String> {
+    let values: Vec<_> = req
+        .headers()
+        .get_all(http::header::AUTHORIZATION)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .filter(|value| authorization_credential(value, WARPGATE_AUTH_SCHEME).is_none())
+        .collect();
+    (!values.is_empty()).then(|| values.join("; "))
+}
+
 fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> Result<B> {
     for k in req.headers().keys() {
         if !may_forward_header(k) {
@@ -295,6 +309,12 @@ fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> R
         }
         if k == http::header::COOKIE {
             if let Some(value) = cookie_header_for_target(req)? {
+                target = target.header(k.clone(), value);
+            }
+            continue;
+        }
+        if k == http::header::AUTHORIZATION {
+            if let Some(value) = authorization_header_for_target(req) {
                 target = target.header(k.clone(), value);
             }
             continue;
@@ -703,6 +723,8 @@ async fn proxy_ws_inner(
 
 #[cfg(test)]
 mod tests {
+    use warpgate_common::http_headers::X_WARPGATE_TICKET;
+
     use super::*;
 
     fn forwarded_cookie_header(values: &[&str]) -> Option<String> {
@@ -748,6 +770,35 @@ mod tests {
             .unwrap();
         let names: Vec<_> = copied.headers().keys().map(HeaderName::as_str).collect();
         assert_eq!(names, ["x-custom"]);
+    }
+
+    #[test]
+    fn warpgate_ticket_is_not_copied_to_the_target() {
+        let copied_authorization = |values: &[&str]| {
+            let mut req = Request::builder().header(&X_WARPGATE_TICKET, "secret");
+            for value in values {
+                req = req.header(http::header::AUTHORIZATION, *value);
+            }
+            let copied = copy_server_request(&req.finish(), http::Request::builder())
+                .unwrap()
+                .body(())
+                .unwrap();
+            assert!(!copied.headers().contains_key(&X_WARPGATE_TICKET));
+            copied
+                .headers()
+                .get(http::header::AUTHORIZATION)
+                .map(|v| v.to_str().unwrap().to_owned())
+        };
+        assert_eq!(copied_authorization(&["Warpgate secret"]), None);
+        assert_eq!(copied_authorization(&["warpgate secret"]), None);
+        assert_eq!(
+            copied_authorization(&["Warpgate secret", "Basic dXNlcjpwYXNz"]),
+            Some("Basic dXNlcjpwYXNz".to_owned())
+        );
+        assert_eq!(
+            copied_authorization(&["Bearer target-token"]),
+            Some("Bearer target-token".to_owned())
+        );
     }
 
     #[test]

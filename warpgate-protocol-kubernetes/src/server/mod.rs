@@ -7,7 +7,6 @@ use futures::future::BoxFuture;
 use poem::{EndpointExt, Route, Server};
 use rustls::ServerConfig;
 use tracing::info;
-use warpgate_common::helpers::proxy_protocol::MaybeProxyProtocolAcceptor;
 use warpgate_common::{ListenEndpoint, TargetId, TargetKubernetesOptions};
 use warpgate_common_http::HTTP2_MAX_CONCURRENT_STREAMS_PER_CONN;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
@@ -74,8 +73,8 @@ pub async fn bind_server(
         ))));
 
     let tcp_acceptor = address.poem_acceptor().await?;
-    let tcp_acceptor = MaybeProxyProtocolAcceptor::new(tcp_acceptor, proxy_protocol);
-    let cert_capturing_acceptor = certificate_capturing_acceptor(tcp_acceptor, tls_config);
+    let cert_capturing_acceptor =
+        certificate_capturing_acceptor(tcp_acceptor, proxy_protocol, tls_config);
 
     Ok(async move {
         Server::new_with_acceptor(cert_capturing_acceptor)

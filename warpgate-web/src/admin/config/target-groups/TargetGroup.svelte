@@ -100,6 +100,7 @@
 {#if error}
     <Alert color="danger">{error}</Alert>
 {/if}
+
 <Loadable promise={initPromise}>
     {#if group}
         <div class="container-max-md">

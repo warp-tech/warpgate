@@ -110,13 +110,13 @@ jobs:
           subject-path: target/${{ matrix.target }}/release/warpgate
 
       - name: Upload artifact
-        uses: actions/upload-artifact@2848b2cda0e5190984587ec6bb1f36730ca78d50
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}
           path: target/${{ matrix.target }}/release/warpgate
 
       - name: Upload SBOM
-        uses: actions/upload-artifact@2848b2cda0e5190984587ec6bb1f36730ca78d50
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: warpgate-${{ env.GITHUB_REF_SLUG }}-${{ matrix.arch }}.cdx.xml
           path: cdx.xml
@@ -152,6 +152,44 @@ jobs:
           generate_release_notes: ${{ steps.release_notes.outputs.generate == 'true' }}
           files: dist/*
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  build-windows:
+    # Publishes no artifact. The tests cover the crates with OS-dependent
+    # behaviour: file access, signals, sockets and SQLite files
+    name: Build (x86_64-windows)
+    runs-on: windows-2025
+    env:
+      # openssl-src builds OpenSSL with Perl; the runner's Git Perl lacks modules it needs
+      OPENSSL_SRC_PERL: C:\Strawberry\perl\bin\perl.exe
+      # the web UI's npm scripts use POSIX shell syntax
+      npm_config_script_shell: C:\Program Files\Git\bin\bash.exe
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: recursive
+
+      - uses: Swatinem/rust-cache@v2.9.3
+        with:
+          key: "build-windows"
+
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+
+      - name: Build admin UI
+        run: |
+          cd warpgate-web
+          npm ci
+          npm run build
+
+      - name: Build
+        run: cargo build --all-features
+
+      - name: Test
+        run: cargo test --all-features -p warpgate-common -p warpgate-core -p warpgate-db-migrations -p warpgate -p warpgate-protocol-ssh
 
   config-schema:
     name: Config schema check

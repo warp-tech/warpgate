@@ -10,12 +10,12 @@ use sea_orm::{
 use time::{Duration, OffsetDateTime};
 use tracing::*;
 use uuid::Uuid;
-use warpgate_common::audit::AuditEvent;
 use warpgate_common::helpers::hash::{generate_ticket_secret, hash_secret};
 use warpgate_common::{Secret, TargetId, UserId, WarpgateError};
 use warpgate_db_entities::TicketRequest::TicketRequestStatus;
 use warpgate_db_entities::{Parameters, Target, Ticket, TicketRequest, begin_write};
 
+use crate::logging::AuditEvent;
 use crate::{ConfigProvider, ConfigProviderEnum};
 
 pub struct TicketRequestResult {

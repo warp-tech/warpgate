@@ -26,10 +26,10 @@ serde.workspace = true
 serde_json = { workspace = true, features = ["std"] }
 serde_path_to_error = "0.1"
 sha2 = { workspace = true, features = ["alloc"] }
-strum = { version = "0.28", features = ["derive"] }
 tempfile = "3"
 thiserror.workspace = true
 uuid.workspace = true
 walkdir = "2.5"
 warpgate-common = { path = "../warpgate-common" }
 warpgate-db-entities = { path = "../warpgate-db-entities" }
+warpgate-resources = { path = "../warpgate-resources" }

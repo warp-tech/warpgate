@@ -33,6 +33,7 @@
     import { formatDurationAsHumantime } from 'common/duration'
     import EmptyState from 'common/EmptyState.svelte'
     import { errorStatus, stringifyError } from 'common/errors'
+    import OnboardingHint from 'common/OnboardingHint.svelte'
     import RelativeDate from 'common/RelativeDate.svelte'
     import Fa from 'svelte-fa'
 
@@ -186,6 +187,11 @@
 <div class="page-summary-bar">
     <h1>requests</h1>
 </div>
+
+<OnboardingHint>
+    When your user requests a ticket or a just-in-time session approval, the
+    request will appear here.
+</OnboardingHint>
 
 {#if !canSeeSessions && !canManageTickets}
     <Alert color="warning">You have no permission to view requests.</Alert>

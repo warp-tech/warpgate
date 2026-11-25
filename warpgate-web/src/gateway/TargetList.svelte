@@ -33,6 +33,7 @@
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
     import ListOverflowMenu from 'common/ListOverflowMenu.svelte'
+    import OnboardingHint from 'common/OnboardingHint.svelte'
     import { TARGET_KIND_LABELS } from 'common/targetKinds'
     import {
         api,
@@ -390,6 +391,21 @@
         {/if}
     {/snippet}
     {#snippet empty()}
+        {#if $serverInfo?.setupState}
+            {#if $serverInfo?.setupState?.hasTargets}
+                <OnboardingHint>
+                    You have created a target, but have no access to it. To get
+                    access to targets, both your user and the target have to
+                    have the same <em>access role</em> assigned to them.
+                </OnboardingHint>
+            {:else}
+                <OnboardingHint>
+                    This is your <em>user's homepage</em>. <br>
+                    Targets that your user is allowed to access will appear
+                    here.
+                </OnboardingHint>
+            {/if}
+        {/if}
         <EmptyState
             title="You don't have access to any targets yet"
             hint={`Ask an administrator to give ${$serverInfo?.username ?? 'your account'} a role with the targets you need.`}
@@ -432,13 +448,6 @@
         </a>
     {/snippet}
 </ItemList>
-
-{#if $serverInfo?.setupState && !$serverInfo.setupState.hasTargets}
-    <EmptyState
-        hint="Once you add targets and assign access, they will appear here"
-        title="No other targets yet"
-    />
-{/if}
 
 <Modal
     isOpen={!!instructionsTarget}

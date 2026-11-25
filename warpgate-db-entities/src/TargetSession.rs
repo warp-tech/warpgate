@@ -1,11 +1,9 @@
-use warpgate_common::{TargetId, UserId};
+use warpgate_common::TargetId;
 use sea_orm::entity::prelude::*;
 use sea_orm::sea_query::{IntoCondition, OnConflict};
 use sea_orm::QuerySelect;
 use time::OffsetDateTime;
 use uuid::Uuid;
-use warpgate_common::audit::AuditEvent;
-use warpgate_common::auth::AuthStateUserInfo;
 use warpgate_common::{
     NodeId, StoredSecrets, Target, TargetSessionId, UserSessionId, WarpgateError,
 };
@@ -87,7 +85,6 @@ pub async fn open_or_lookup(
     target: &Target,
     node_id: Option<NodeId>,
     ticket_id: Option<Uuid>,
-    user_info: &AuthStateUserInfo,
 ) -> Result<TargetSessionOpenOutcome, WarpgateError> {
     use sea_orm::ActiveValue::Set;
 
@@ -126,16 +123,7 @@ pub async fn open_or_lookup(
         })?;
     transaction.commit().await?;
 
-    let created = row.id == preferred_id;
-    if created {
-        AuditEvent::TargetSessionStarted {
-            session_id: preferred_id.0,
-            target_id: target.id,
-            target_name: target.name.clone(),
-            user_id: user_info.id,
-            username: user_info.username.clone(),
-        }
-        .emit();
+    if row.id == preferred_id {
         return Ok(TargetSessionOpenOutcome::Created(row));
     }
 
@@ -183,28 +171,6 @@ pub async fn open_user_sessions_admitted_by_tickets<C: ConnectionTrait>(
         .into_tuple()
         .all(db)
         .await?)
-}
-
-pub fn emit_ended_audit_event(session: &TargetSession::Model, user_id: UserId, username: &str) {
-    let Some(target_name) = serde_json::from_str::<serde_json::Value>(&session.target_snapshot)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("name")
-                .and_then(|name| name.as_str())
-                .map(str::to_owned)
-        })
-    else {
-        return;
-    };
-    AuditEvent::TargetSessionEnded {
-        session_id: session.id.0,
-        target_id: session.target_id,
-        target_name,
-        user_id,
-        username: username.into(),
-    }
-    .emit();
 }
 
 #[cfg(test)]

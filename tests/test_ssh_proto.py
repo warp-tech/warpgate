@@ -1,5 +1,6 @@
 from uuid import uuid4
 import http.server
+import json
 import os
 import paramiko
 import requests
@@ -90,6 +91,84 @@ def setup_user_and_target(
         )
         api.add_target_role(ssh_target.id, role.id)
         return user, ssh_target
+
+
+class UnansweringForwardTarget(paramiko.ServerInterface):
+    """SSH target that accepts a shell and never answers a forwarding
+    request. It holds the request until the peer drops the connection"""
+
+    def __init__(self):
+        self.shell_requested = threading.Event()
+        self.forward_requested = threading.Event()
+        self.abandoned = threading.Event()
+        self.connection = None
+        self.transport = None
+        self.listener = socket.create_server(("127.0.0.1", 0))
+        # The accepting thread exits if nothing connects
+        self.listener.settimeout(60)
+        self.port = self.listener.getsockname()[1]
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self):
+        try:
+            self.connection, _ = self.listener.accept()
+        except OSError:
+            return
+        self.transport = paramiko.Transport(self.connection)
+        self.transport.add_server_key(
+            paramiko.Ed25519Key.from_private_key_file("ssh-keys/id_ed25519")
+        )
+        self.transport.start_server(server=self)
+
+    def close(self):
+        self.listener.close()
+        if self.connection:
+            # Closing alone does not wake a thread blocked in recv()
+            try:
+                self.connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        if self.transport:
+            self.transport.close()
+
+    def _hold_until_abandoned(self):
+        self.forward_requested.set()
+        # paramiko runs this callback on its reader thread, so nothing else
+        # reads the connection. paramiko sets a short timeout on the socket,
+        # so recv() is retried
+        while True:
+            try:
+                if not self.connection.recv(4096):
+                    break
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+        self.abandoned.set()
+
+    def get_allowed_auths(self, username):
+        return "publickey"
+
+    def check_auth_publickey(self, username, key):
+        return paramiko.AUTH_SUCCESSFUL
+
+    def check_channel_request(self, kind, chanid):
+        return paramiko.OPEN_SUCCEEDED
+
+    def check_channel_pty_request(self, *args):
+        return True
+
+    def check_channel_shell_request(self, channel):
+        self.shell_requested.set()
+        return True
+
+    def check_channel_direct_tcpip_request(self, chanid, origin, destination):
+        self._hold_until_abandoned()
+        return paramiko.OPEN_FAILED_CONNECT_FAILED
+
+    def check_port_forward_request(self, address, port):
+        self._hold_until_abandoned()
+        return False
 
 
 class Test:
@@ -269,6 +348,66 @@ class Test:
 
         assert ssh_client.returncode != 0
 
+    # A ControlMaster closes a mux session on EOF without waiting for
+    # exit-status (#2872); the plain client is the control.
+    @pytest.mark.parametrize("multiplexed", [False, True])
+    def test_exit_status_after_output_closes(
+        self,
+        processes: ProcessManager,
+        timeout,
+        wg_c_ed25519_pubkey,
+        shared_wg: WarpgateProcess,
+        multiplexed,
+    ):
+        user, ssh_target = setup_user_and_target(
+            processes, shared_wg, wg_c_ed25519_pubkey
+        )
+        destination = [
+            f"{user.username}:{ssh_target.name}@localhost",
+            "-p",
+            str(shared_wg.ssh_port),
+            *common_args,
+        ]
+        command = "exec >&- 2>&-; sleep 1; exit 3"
+        with tempfile.TemporaryDirectory() as tmp:
+            if multiplexed:
+                control_path = os.path.join(tmp, "mux")
+                processes.start_ssh_client(
+                    *destination,
+                    "-o",
+                    "ControlMaster=yes",
+                    "-o",
+                    f"ControlPath={control_path}",
+                    "-N",
+                    password="123",
+                )
+                for _ in range(timeout * 10):
+                    if os.path.exists(control_path):
+                        break
+                    time.sleep(0.1)
+                else:
+                    raise AssertionError("the master never opened its control socket")
+                ssh_client = processes.start_ssh_client(
+                    *destination,
+                    "-o",
+                    "ControlMaster=no",
+                    "-o",
+                    f"ControlPath={control_path}",
+                    command,
+                    stderr=subprocess.PIPE,
+                )
+            else:
+                ssh_client = processes.start_ssh_client(
+                    *destination,
+                    command,
+                    password="123",
+                    stderr=subprocess.PIPE,
+                )
+
+            stderr = ssh_client.communicate(timeout=timeout)[1]
+
+        assert ssh_client.returncode == 3, stderr
+
     def test_direct_tcpip(
         self,
         processes: ProcessManager,
@@ -335,6 +474,110 @@ class Test:
             ssh_client.kill()
             server.shutdown()
             server.server_close()
+
+    # https://github.com/warp-tech/warpgate/issues/2680
+    def test_direct_tcpip_recording_ends_with_its_last_channel(
+        self,
+        processes: ProcessManager,
+        wg_c_ed25519_pubkey,
+        shared_wg: WarpgateProcess,
+        timeout,
+    ):
+        # Each forwarded host:port is recorded through a recorder that holds an
+        # open file. Channels open at the same time share it, but once the last
+        # of them closes it must be released: kept for the whole SSH session, a
+        # client that keeps forwarding to new ports (VS Code) runs the process
+        # out of file descriptors.
+        class Echo(socketserver.BaseRequestHandler):
+            def handle(self):
+                while data := self.request.recv(4096):
+                    self.request.sendall(data)
+
+        servers = []
+        for _ in range(3):
+            # All interfaces: the target container reaches the runner through
+            # the Docker host gateway, not through loopback.
+            server = socketserver.ThreadingTCPServer(("0.0.0.0", 0), Echo)
+            server.daemon_threads = True
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            servers.append(server)
+        shared_port, *other_ports = [s.server_address[1] for s in servers]
+
+        user, ssh_target = setup_user_and_target(
+            processes, shared_wg, wg_c_ed25519_pubkey
+        )
+
+        def open_forward(port):
+            channel = transport.open_channel(
+                "direct-tcpip",
+                ("host.docker.internal", port),
+                ("127.0.0.1", 0),
+                timeout=timeout,
+            )
+            channel.settimeout(timeout)
+            channel.sendall(b"ping")
+            echoed = b""
+            while len(echoed) < 4:
+                chunk = channel.recv(4 - len(echoed))
+                assert chunk, f"forward to {port} closed before echoing"
+                echoed += chunk
+            assert echoed == b"ping"
+            return channel
+
+        def recordings_by_port(api):
+            [session] = api.get_sessions(username=user.username).items
+            by_port = {}
+            for recording in api.get_session_recordings(session.id):
+                if recording.kind != sdk.RecordingKind.TRAFFIC:
+                    continue
+                port = json.loads(recording.metadata)["port"]
+                by_port.setdefault(port, []).append(recording)
+            return by_port
+
+        def wait_for_recordings(api, condition, what):
+            deadline = time.monotonic() + timeout
+            while True:
+                by_port = recordings_by_port(api)
+                if condition(by_port):
+                    return by_port
+                if time.monotonic() > deadline:
+                    raise AssertionError(f"{what}: {by_port}")
+                time.sleep(0.5)
+
+        def ended(by_port, port):
+            return [r.ended is not None for r in by_port.get(port, [])] == [True]
+
+        transport = paramiko.Transport(("localhost", shared_wg.ssh_port))
+        try:
+            transport.connect(
+                username=f"{user.username}:{ssh_target.name}", password="123"
+            )
+            first = open_forward(shared_port)
+            second = open_forward(shared_port)
+            for port in other_ports:
+                open_forward(port).close()
+            first.close()
+
+            with admin_client(f"https://localhost:{shared_wg.http_port}") as api:
+                by_port = wait_for_recordings(
+                    api,
+                    lambda by_port: all(ended(by_port, p) for p in other_ports),
+                    "recordings of closed forwards did not end",
+                )
+                [shared] = by_port[shared_port]
+                assert shared.ended is None, "recording ended while a channel still uses it"
+
+                second.close()
+                wait_for_recordings(
+                    api,
+                    lambda by_port: ended(by_port, shared_port),
+                    "recording did not end with its last channel",
+                )
+        finally:
+            transport.close()
+            for server in servers:
+                server.shutdown()
+                server.server_close()
 
     # https://github.com/warp-tech/warpgate/issues/2328
     def test_direct_tcpip_server_speaks_first(
@@ -615,6 +858,72 @@ class Test:
         finally:
             ssh_client.kill()
 
+    @pytest.mark.parametrize("request_kind", ["direct-tcpip", "tcpip-forward"])
+    def test_unanswered_forwarding_request_does_not_stall_the_session(
+        self,
+        processes: ProcessManager,
+        wg_c_ed25519_pubkey,
+        shared_wg: WarpgateProcess,
+        timeout,
+        request_kind,
+    ):
+        # A target can take arbitrarily long to answer a direct-tcpip open or
+        # a tcpip-forward. The session loop must still act on an admin close,
+        # and the target client must still drop the target connection
+        target = UnansweringForwardTarget()
+        user, ssh_target = setup_user_and_target(
+            processes,
+            shared_wg,
+            wg_c_ed25519_pubkey,
+            ssh_port=target.port,
+            host="127.0.0.1",
+        )
+
+        def request_forward():
+            # Blocks until the connection closes
+            try:
+                if request_kind == "direct-tcpip":
+                    transport.open_channel(
+                        "direct-tcpip", ("192.0.2.1", 80), ("127.0.0.1", 1234)
+                    )
+                else:
+                    transport.request_port_forward("127.0.0.1", 0)
+            except (paramiko.SSHException, EOFError):
+                pass
+
+        transport = paramiko.Transport(("localhost", shared_wg.ssh_port))
+        try:
+            transport.connect(
+                username=f"{user.username}:{ssh_target.name}", password="123"
+            )
+            channel = transport.open_session()
+            channel.get_pty()
+            # Warpgate connects to the target on the shell request
+            channel.invoke_shell()
+            assert target.shell_requested.wait(timeout), "target was never reached"
+
+            threading.Thread(target=request_forward, daemon=True).start()
+            assert target.forward_requested.wait(timeout), (
+                "the forwarding request never reached the target"
+            )
+
+            with admin_client(f"https://localhost:{shared_wg.http_port}") as api:
+                (session,) = api.get_sessions(username=user.username).items
+                api.close_session(session.id)
+
+            transport.join(10)
+            assert not transport.is_active(), (
+                "the session did not act on the close while a forwarding "
+                "request was waiting for the target"
+            )
+            assert target.abandoned.wait(10), (
+                "the target connection outlived the session: its client is "
+                "still waiting for the forwarding request to be answered"
+            )
+        finally:
+            target.close()
+            transport.close()
+
     def test_agent_forwarding_parallel(
         self,
         processes: ProcessManager,
@@ -855,6 +1164,34 @@ class Test:
                 ticket_require_approval=False,
                 options=ssh_target.options,
             ))
+
+        ssh_client = processes.start_ssh_client(
+            f"{user.username}:{ssh_target.name}@localhost",
+            "-p",
+            str(shared_wg.ssh_port),
+            *common_args,
+            "echo", "123",
+            password="123",
+        )
+
+        stdout, _ = ssh_client.communicate(timeout=timeout)
+        assert b"123\n" == stdout
+
+    # https://github.com/warp-tech/warpgate/issues/2955
+    def test_target_offering_only_nist_ecdh_kex(
+        self,
+        processes: ProcessManager,
+        timeout,
+        wg_c_ed25519_pubkey,
+        shared_wg: WarpgateProcess,
+    ):
+        user, ssh_target = setup_user_and_target(
+            processes, shared_wg, wg_c_ed25519_pubkey,
+            extra_config=(
+                "KexAlgorithms "
+                "ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521"
+            ),
+        )
 
         ssh_client = processes.start_ssh_client(
             f"{user.username}:{ssh_target.name}@localhost",

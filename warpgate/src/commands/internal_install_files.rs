@@ -86,12 +86,14 @@ fn substitute(content: Vec<u8>, substitutions: &Substitutions) -> Result<Vec<u8>
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::{PermissionsExt, symlink};
-
     use super::*;
 
+    // Symlinks and mode bits
+    #[cfg(unix)]
     #[test]
     fn installs_a_kubernetes_volume() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+
         let source = tempfile::tempdir().unwrap();
         let destination = tempfile::tempdir().unwrap();
 

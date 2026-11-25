@@ -11,6 +11,7 @@
     import CopyableTextArea from 'common/CopyableTextArea.svelte'
     import { stringifyError } from 'common/errors'
     import InfoBox from 'common/InfoBox.svelte'
+    import OnboardingHint from 'common/OnboardingHint.svelte'
     import { isSecretRef } from 'common/SecretRefInput.svelte'
     import ClientKeyModal from './ClientKeyModal.svelte'
     import GenerateClientKeyModal from './GenerateClientKeyModal.svelte'
@@ -113,6 +114,11 @@
 {/if}
 
 {#if clientKeys}
+    <OnboardingHint>
+        These are Warpgate's internal SSH private keys that it uses to connect
+        to SSH targets. You can import your existing private keys if needed.
+    </OnboardingHint>
+
     <InfoBox>
         Add one of these keys to the targets'
         <code>authorized_keys</code>

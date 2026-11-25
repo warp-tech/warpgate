@@ -1,6 +1,7 @@
 <script lang="ts">
     import { Badge } from '@sveltestrap/sveltestrap'
     import NavListItem from 'common/NavListItem.svelte'
+    import OnboardingHint from 'common/OnboardingHint.svelte'
     import { TARGET_KIND_LABELS } from 'common/targetKinds'
     import { TargetKind } from 'gateway/lib/api'
 
@@ -45,6 +46,11 @@
     <div class="page-summary-bar">
         <h1>add a target</h1>
     </div>
+
+    <OnboardingHint>
+        Choose the type of the service on your network that you want to expose
+        through Warpgate
+    </OnboardingHint>
 
     <div class="narrow-page">
         {#each kinds as kind (kind.value)}

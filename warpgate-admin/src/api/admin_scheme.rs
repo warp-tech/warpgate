@@ -9,6 +9,7 @@ use poem_openapi::SecurityScheme;
 use poem_openapi::auth::ApiKey;
 use warpgate_common::{AdminPermission, AdminPermissionSet, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
+use warpgate_core::resources::audit::ChangedBy;
 
 use super::common::{admin_permission_set, user_admin_permission_set};
 
@@ -113,6 +114,10 @@ impl AdminContext {
     /// Require a specific permission, yielding a [`PermissionGranted`] proof or a 403.
     pub(crate) const fn require(&self, permission: AdminPermission) -> Result<(), WarpgateError> {
         self.access().require(permission)
+    }
+
+    pub(crate) const fn changed_by(&self) -> ChangedBy {
+        ChangedBy::Admin(self.access().ctx.auth.user_id())
     }
 }
 

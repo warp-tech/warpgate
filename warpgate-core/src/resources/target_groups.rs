@@ -5,17 +5,19 @@ use sea_orm::{
     TransactionSession, TransactionTrait,
 };
 use uuid::Uuid;
-use warpgate_common::TargetGroupId;
+use warpgate_common::{RowId, TargetGroupId, WarpgateError};
 use warpgate_db_entities::TargetGroup::BootstrapThemeColor;
 use warpgate_db_entities::{Target, TargetGroup, begin_write};
-use warpgate_gitops::types::ResourceKind;
+use warpgate_resources::{Comparable, ComparableValues, ResourceKind, Row, TargetGroupSpec};
 
+use super::audit::{Audited, Subject, Unaudited};
 use super::{Actor, OwnedEntity, ResourceError, check_name, name_taken};
 
 impl OwnedEntity for TargetGroup::Entity {
     type Id = TargetGroupId;
     const KIND: ResourceKind = ResourceKind::TargetGroup;
     const ID: Self::Column = TargetGroup::Column::Id;
+    const NAME: Self::Column = TargetGroup::Column::Name;
     const PROVIDER: Self::Column = TargetGroup::Column::Provider;
 }
 
@@ -32,11 +34,40 @@ fn set_data(model: &mut TargetGroup::ActiveModel, data: &TargetGroupDataRequest)
     model.color = Set(data.color.clone());
 }
 
+pub(super) fn row(group: TargetGroup::Model) -> Row<TargetGroupSpec> {
+    Row {
+        id: group.id.uuid(),
+        name: group.name,
+        provider: group.provider,
+        live: TargetGroupSpec {
+            description: group.description,
+            color: group.color,
+        },
+    }
+}
+
+impl Audited for TargetGroup::Model {
+    fn subject(&self) -> Subject {
+        Subject::of::<TargetGroup::Entity>(self.id)
+    }
+
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    async fn compared<C: ConnectionTrait>(
+        &self,
+        _db: &C,
+    ) -> Result<ComparableValues, WarpgateError> {
+        Ok(row(self.clone()).live.compared())
+    }
+}
+
 pub async fn create<C: ConnectionTrait>(
     db: &C,
     actor: Actor,
     data: &TargetGroupDataRequest,
-) -> Result<TargetGroup::Model, ResourceError> {
+) -> Result<Unaudited<TargetGroup::Model>, ResourceError> {
     check_name(&data.name)?;
     let mut model = TargetGroup::ActiveModel {
         id: Set(TargetGroupId(Uuid::new_v4())),
@@ -44,7 +75,8 @@ pub async fn create<C: ConnectionTrait>(
         ..Default::default()
     };
     set_data(&mut model, data);
-    model.insert(db).await.map_err(name_taken)
+    let group = model.insert(db).await.map_err(name_taken)?;
+    Ok(Unaudited::created(group))
 }
 
 pub async fn update<C: ConnectionTrait>(
@@ -52,24 +84,25 @@ pub async fn update<C: ConnectionTrait>(
     actor: Actor,
     id: TargetGroupId,
     data: &TargetGroupDataRequest,
-) -> Result<TargetGroup::Model, ResourceError> {
+) -> Result<Unaudited<TargetGroup::Model>, ResourceError> {
     check_name(&data.name)?;
-    let group = TargetGroup::Entity::find_by_id(id)
+    let before = TargetGroup::Entity::find_by_id(id)
         .one(db)
         .await?
         .ok_or(ResourceError::NotFound)?;
-    actor.may_write(group.provider)?;
+    actor.may_write(before.provider)?;
 
-    let mut model: TargetGroup::ActiveModel = group.into();
+    let mut model: TargetGroup::ActiveModel = before.clone().into();
     set_data(&mut model, data);
-    model.update(db).await.map_err(name_taken)
+    let after = model.update(db).await.map_err(name_taken)?;
+    Ok(Unaudited::updated(before, after))
 }
 
 pub async fn delete<C: ConnectionTrait + TransactionTrait>(
     db: &C,
     actor: Actor,
     id: TargetGroupId,
-) -> Result<(), ResourceError> {
+) -> Result<Unaudited<TargetGroup::Model>, ResourceError> {
     let txn = begin_write(db).await?;
     let group = TargetGroup::Entity::find_by_id(id)
         .one(&txn)
@@ -83,7 +116,7 @@ pub async fn delete<C: ConnectionTrait + TransactionTrait>(
         .exec(&txn)
         .await?;
 
-    group.delete(&txn).await?;
+    group.clone().delete(&txn).await?;
     txn.commit().await?;
-    Ok(())
+    Ok(Unaudited::deleted(group))
 }

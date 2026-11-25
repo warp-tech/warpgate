@@ -1,27 +1,4 @@
-# This template contains all of the possible sections and their default values
-
-# Note that all fields that take a lint level have these possible values:
-# * deny - An error will be produced and the check will fail
-# * warn - A warning will be produced, but the check will not fail
-# * allow - No warning or error will be produced, though in some cases a note
-# will be
-
-# The values provided in this template are the default values that will be used
-# when any section or field is not specified in your own configuration
-
-# Root options
-
-# The graph table configures how the dependency graph is constructed and thus
-# which crates the checks are performed against
 [graph]
-# If 1 or more target triples (and optionally, target_features) are specified,
-# only the specified targets will be checked when running `cargo deny check`.
-# This means, if a particular package is only ever used as a target specific
-# dependency, such as, for example, the `nix` crate only being used via the
-# `target_family = "unix"` configuration, that only having windows targets in
-# this list would mean the nix crate, as well as any of its exclusive
-# dependencies not shared by any other crates, would be ignored, as the target
-# list here is effectively saying which targets you are building for.
 targets = [
     "x86_64-unknown-linux-gnu",
     "aarch64-unknown-linux-gnu",
@@ -86,6 +63,8 @@ ignore = [
     "RUSTSEC-2026-0580", # heapless race, used by gix only
     "RUSTSEC-2026-0581", # heapless unsound, used by gix only
     "RUSTSEC-2026-0582", # heapless unsound, used by gix only
+
+    "RUSTSEC-2026-0592", # url blob: parsing
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.

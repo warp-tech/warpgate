@@ -22,7 +22,8 @@ use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
 use warpgate_common_http::{
-    UpstreamBody, buffer_response, passthrough_accept_encoding, read_body_limited_with_timeout,
+    UpstreamBody, buffer_response, is_same_authority_location, passthrough_accept_encoding,
+    read_body_limited_with_timeout,
 };
 use warpgate_core::logging::KubernetesAuditSubject;
 use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
@@ -293,14 +294,21 @@ where
     })
 }
 
-/// Copies every upstream response header onto a poem response builder.
+/// Copies upstream response headers onto a poem response builder.
 /// Shared by the normal request path and a websocket upgrade the API server
 /// refused, so both forward an upstream response the same way.
+///
+/// A `Location` to another authority is dropped. client-go follows redirects
+/// and re-sends its Warpgate bearer token to the new host
 fn copy_response_headers(
     mut builder: poem::ResponseBuilder,
     headers: &http::HeaderMap,
 ) -> poem::ResponseBuilder {
     for (name, value) in headers {
+        if name == http::header::LOCATION && !is_same_authority_location(value.as_bytes()) {
+            warn!(location = ?value, "Dropping cross-authority redirect from upstream Kubernetes API");
+            continue;
+        }
         if let Ok(poem_name) = poem::http::HeaderName::from_bytes(name.as_str().as_bytes())
             && let Ok(poem_value) = poem::http::HeaderValue::from_bytes(value.as_bytes())
         {
@@ -1402,6 +1410,34 @@ mod tests {
     use std::collections::HashMap;
 
     use super::{is_impersonation_header, named_target_path, redact_headers};
+
+    #[test]
+    fn cross_authority_redirects_are_dropped() {
+        use super::copy_response_headers;
+
+        for (location, kept) in [
+            ("/api/v1/namespaces/x/services/y/proxy/", true),
+            ("http://collector.example/collect", false),
+            ("//collector.example/collect", false),
+            ("/\\collector.example/collect", false),
+            ("collect", false),
+        ] {
+            let mut headers = http::HeaderMap::new();
+            headers.insert(http::header::LOCATION, location.parse().unwrap());
+            headers.insert(http::header::CONTENT_LENGTH, "0".parse().unwrap());
+            let response = copy_response_headers(poem::Response::builder(), &headers).finish();
+            assert_eq!(
+                response.headers().contains_key(http::header::LOCATION),
+                kept,
+                "{location}"
+            );
+            assert!(
+                response
+                    .headers()
+                    .contains_key(http::header::CONTENT_LENGTH)
+            );
+        }
+    }
 
     #[test]
     fn named_routes_decode_only_the_target_selector() {

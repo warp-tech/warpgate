@@ -7,6 +7,7 @@ import base64
 import contextlib
 import hashlib
 import hmac
+import json
 import os
 import time
 import subprocess
@@ -340,7 +341,7 @@ ADMIN_API_TEST_CASES: list[AdminApiTestCase] = [
     ),
     AdminApiTestCase(
         id="get_secret_backend",
-        permission=None,
+        permission="config_edit",
         call=lambda api, r: api.get_secret_backend_with_http_info(str(uuid4())),
         expected_statuses={404},
     ),
@@ -1404,18 +1405,34 @@ def test_provider_cannot_be_set_by_clients(pg_wg):
         assert updated.json()["provider"] is None, update
 
 
-def _audited(admin_client: sdk.DefaultApi, count: int, **values: str) -> list[dict]:
-    """Audit entries carrying `values`, waiting up to 10 s for `count` of them."""
+def _poll_logs(
+    admin_client: sdk.DefaultApi,
+    request: sdk.GetLogsRequest,
+    collect: Callable,
+    done: Callable,
+):
+    """Re-reads the log for up to 10 s until `done` accepts `collect(entries)`,
+    and returns that. Log entries reach the database asynchronously"""
     deadline = time.monotonic() + 10
     while True:
-        entries = [
-            entry.values or {}
-            for entry in admin_client.get_logs(sdk.GetLogsRequest(limit=500))
-            if values.items() <= (entry.values or {}).items()
-        ]
-        if len(entries) >= count or time.monotonic() > deadline:
-            return entries
+        found = collect(admin_client.get_logs(request))
+        if done(found) or time.monotonic() > deadline:
+            return found
         time.sleep(0.5)
+
+
+def _audited(admin_client: sdk.DefaultApi, count: int, **values: str) -> list[dict]:
+    """Audit entries carrying `values`, waiting up to 10 s for `count` of them."""
+    return _poll_logs(
+        admin_client,
+        sdk.GetLogsRequest(limit=500),
+        lambda entries: [
+            entry.values or {}
+            for entry in entries
+            if values.items() <= (entry.values or {}).items()
+        ],
+        lambda found: len(found) >= count,
+    )
 
 
 def _config(wg, *args: str) -> subprocess.CompletedProcess:
@@ -1496,7 +1513,15 @@ spec:
     recorded = admin_client.get_gitops_history().items[0]
     assert (recorded.triggered_by, recorded.status) == ("Cli", "Applied")
     assert recorded.stats.create == 4
-    assert len(_audited(admin_client, 5, sync_id=str(recorded.id))) == 5
+    audited = _audited(admin_client, 6, sync_id=str(recorded.id))
+    assert sorted((e["_type"], e.get("kind", "")) for e in audited) == [
+        ("ProviderSynced1", ""),
+        ("ResourceChanged1", "Role"),
+        ("ResourceChanged1", "SshClientKey"),
+        ("ResourceChanged1", "Target"),
+        ("ResourceChanged1", "TargetGroup"),
+        ("TargetRoleAdded1", ""),
+    ]
 
     target = next(t for t in admin_client.get_targets() if t.name == name)
     role = next(r for r in admin_client.get_roles() if r.name == name)
@@ -1636,17 +1661,23 @@ spec:
         assert (head.stats.create, head.stats.update) == (2, 0)
         assert port() == 2222
         assert f"file://{repo}@main" in head.source
-        entries = audited(head.id, 3)
+        entries = audited(head.id, 4)
         assert {(e["_type"], e.get("action"), e.get("kind"), e.get("name")) for e in entries} == {
             ("ProviderSynced1", None, None, None),
-            ("ProviderResourceChanged1", "Create", "Role", name),
-            ("ProviderResourceChanged1", "Create", "Target", name),
+            ("ResourceChanged1", "Create", "Role", name),
+            ("ResourceChanged1", "Create", "Target", name),
+            ("TargetRoleAdded1", None, None, None),
         }
+        [granted] = [e for e in entries if e["_type"] == "TargetRoleAdded1"]
+        assert (granted["target_name"], granted["role_name"]) == (name, name)
+        role_id = next(r.id for r in admin_client.get_roles() if r.name == name)
+        by_role = admin_client.get_logs(sdk.GetLogsRequest(related_access_roles=role_id, limit=500))
+        assert granted in [e.values for e in by_role], "the role's log lists the grant"
 
         again = admin_client.sync_gitops(sdk.SyncGitopsRequest())
         assert again.id == head.id, "an unchanged sync extends the latest row"
         assert [row.revision for row in admin_client.get_gitops_history().items[:1]] == [second]
-        assert len(audited(head.id, 4)) == 3, "an unchanged sync is not audited again"
+        assert len(audited(head.id, 5)) == 4, "an unchanged sync is not audited again"
 
         webhook = f"https://localhost:{pg_wg.http_port}/@warpgate/api/gitops/webhook"
 
@@ -1680,7 +1711,7 @@ spec:
             time.sleep(0.5)
         assert (latest.status, latest.revision) == ("Applied", third)
         assert port() == 2200
-        [update] = [e for e in audited(latest.id, 2) if e["_type"] == "ProviderResourceChanged1"]
+        [update] = [e for e in audited(latest.id, 2) if e["_type"] == "ResourceChanged1"]
         assert (update["action"], update["kind"], update["name"]) == ("Update", "Target", name)
         assert '"from":2222' in update["fields"] and '"to":2200' in update["fields"]
 
@@ -1808,6 +1839,348 @@ def test_update_target_rejects_empty_name(admin_client: sdk.DefaultApi):
         admin_client.update_target(target.id, _ssh_target_request(""))
     assert err.value.status == 400
     assert admin_client.get_target(target.id).name == target.name
+
+
+def _logged_in_full_admin(url: str, admin_client: sdk.DefaultApi):
+    """Logs in as a new full admin. A request with the admin token has no user
+    in its audit entries.
+    Returns the admin and a `call(method, path, json)` helper for its session"""
+    full_admin = {
+        k: True if isinstance(v, bool) else v
+        for k, v in make_limited_admin_role_payload().items()
+    }
+    actor = _create_user_with_role(
+        admin_client, _create_admin_role(admin_client, full_admin).id
+    )
+    session = requests.Session()
+    session.verify = False
+    login = session.post(
+        f"{url}/@warpgate/api/auth/login",
+        json={"username": actor.username, "password": "123"},
+    )
+    assert login.ok, login.text
+
+    def call(method, path, json=None):
+        resp = session.request(method, f"{url}/@warpgate{path}", json=json)
+        resp.raise_for_status()
+        return resp.json() if resp.content else None
+
+    return actor, call
+
+
+def _wait_for_audit_entries(
+    admin_client: sdk.DefaultApi,
+    tag: str,
+    expected: set,
+    key: Callable = lambda values: values.get("_type"),
+):
+    """Polls the log for entries mentioning `tag` until one exists for each
+    `key(values)` in `expected`. Returns them as {key: entry}"""
+    return _poll_logs(
+        admin_client,
+        sdk.GetLogsRequest(search=tag, limit=100),
+        lambda entries: {
+            key(e.values): e for e in entries if key(e.values or {}) in expected
+        },
+        lambda found: expected <= found.keys(),
+    )
+
+
+def test_admin_changes_to_roles_and_targets_are_audited(
+    pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
+):
+    actor, call = _logged_in_full_admin(f"https://localhost:{pg_wg.http_port}", admin_client)
+
+    tag = uuid4().hex
+    role = call("POST", "/admin/api/roles", {"name": f"audit-role-{tag}"})
+    call("PUT", f"/admin/api/role/{role['id']}", {"name": role["name"], "description": "dbas"})
+    group = call("POST", "/admin/api/target-groups", {"name": f"audit-group-{tag}"})
+    call(
+        "PUT",
+        f"/admin/api/target-groups/{group['id']}",
+        {"name": group["name"], "description": "prod"},
+    )
+    key = call(
+        "POST", "/admin/api/ssh/own-keys/generate", {"label": f"audit-key-{tag}", "kind": "Ed25519"}
+    )
+    call(
+        "PUT",
+        f"/admin/api/ssh/own-keys/{key['id']}",
+        {"label": f"audit-key-renamed-{tag}", "is_default": False},
+    )
+    call("DELETE", f"/admin/api/ssh/own-keys/{key['id']}")
+
+    target_body = _ssh_target_request(f"audit-target-{tag}").to_dict()
+    target_body["options"]["auth"] = {"kind": "Password", "password": "old-secret"}
+    target = call("POST", "/admin/api/targets", target_body)
+    call("PUT", f"/admin/api/targets/{target['id']}", target_body)
+    target_body["options"]["port"] = 2222
+    target_body["options"]["auth"]["password"] = "new-secret"
+    target_body["group_id"] = group["id"]
+    call("PUT", f"/admin/api/targets/{target['id']}", target_body)
+    call("POST", f"/admin/api/targets/{target['id']}/roles/{role['id']}")
+    call("DELETE", f"/admin/api/targets/{target['id']}/roles/{role['id']}")
+
+    user = admin_client.create_user(sdk.CreateUserRequest(username=f"audit-user-{tag}"))
+    admin_client.add_user_role(user.id, role["id"])
+    admin_client.delete_user_role(user.id, role["id"])
+    expiry = datetime.now(timezone.utc) + timedelta(hours=1)
+    call(
+        "PUT",
+        f"/admin/api/users/{user.id}/roles/{role['id']}",
+        {"expires_at": expiry.isoformat()},
+    )
+
+    call("DELETE", f"/admin/api/targets/{target['id']}")
+    call("DELETE", f"/admin/api/target-groups/{group['id']}")
+    call("DELETE", f"/admin/api/role/{role['id']}")
+
+    expected = {
+        ("ResourceChanged1", action, kind)
+        for action in ("Create", "Update", "Delete")
+        for kind in ("Role", "Target", "TargetGroup", "SshClientKey")
+    } | {
+        ("TargetRoleAdded1", None, None),
+        ("TargetRoleRemoved1", None, None),
+        ("AccessRoleExpiryChanged1", None, None),
+    }
+    entries = _wait_for_audit_entries(
+        admin_client,
+        tag,
+        expected,
+        key=lambda values: (values.get("_type"), values.get("action"), values.get("kind")),
+    )
+
+    assert entries.keys() == expected
+    assert all(e.username == actor.username for e in entries.values())
+
+    updates = _audited(
+        admin_client, 1, _type="ResourceChanged1", action="Update", id=target["id"]
+    )
+    assert len(updates) == 1, "a save that changes nothing is not audited"
+    fields = {field["path"]: field for field in json.loads(updates[0]["fields"])}
+    assert fields.keys() == {
+        "spec.group",
+        "spec.options.ssh.auth.password",
+        "spec.options.ssh.port",
+    }
+    assert (fields["spec.options.ssh.port"]["from"], fields["spec.options.ssh.port"]["to"]) == (22, 2222)
+    assert fields["spec.group"]["to"] == group["name"]
+    assert "secret" not in updates[0]["fields"]
+
+    created = entries[("ResourceChanged1", "Create", "Target")].values["fields"]
+    assert "secret" not in created
+    created = {field["path"]: field for field in json.loads(created)}
+    assert created["spec.options.ssh.port"] == {"path": "spec.options.ssh.port", "to": 22}
+    assert created["spec.options.ssh.auth.password"]["credential"]
+
+    added = entries[("TargetRoleAdded1", None, None)].values
+    assert (added["target_name"], added["role_name"]) == (target["name"], role["name"])
+    expiry_changed = entries[("AccessRoleExpiryChanged1", None, None)].values
+    assert expiry_changed["revocation_cleared"] in (True, "true")
+    assert expiry_changed["expires_at"].startswith(expiry.isoformat(timespec="seconds")[:19])
+
+
+def test_admin_changes_to_configuration_are_audited(
+    pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
+):
+    actor, call = _logged_in_full_admin(f"https://localhost:{pg_wg.http_port}", admin_client)
+
+    tag = uuid4().hex[:8]
+    ldap_body = sdk.UpdateLdapServerRequest(
+        name=f"audit-ldap-{tag}",
+        host="127.0.0.1",
+        bind_dn="cn=admin,dc=example,dc=org",
+        bind_password="old-secret",
+        auto_link_sso_users=False,
+        description="",
+        enabled=True,
+        port=389,
+        ssh_key_attribute="sshPublicKey",
+        tls_mode=sdk.TlsMode.DISABLED,
+        tls_verify=False,
+        user_filter="(uid={0})",
+        username_attribute=sdk.LdapUsernameAttribute.UID,
+        uuid_attribute="uid",
+    ).to_dict()
+    ldap = call("POST", "/admin/api/ldap-servers", ldap_body)
+    call(
+        "PUT",
+        f"/admin/api/ldap-servers/{ldap['id']}",
+        {**ldap_body, "port": 636, "bind_password": "new-secret"},
+    )
+    call("DELETE", f"/admin/api/ldap-servers/{ldap['id']}")
+
+    backend_body = sdk.SecretBackendRequest(
+        name=f"audit-{tag}",
+        backend_type="vault",
+        address="https://vault.invalid:8200",
+        auth=sdk.SecretBackendAuth(
+            sdk.SecretBackendAuthVaultTokenAuth(method="Token", token="old-secret")
+        ),
+    ).to_dict()
+    backend = call("POST", "/admin/api/secret-backends", backend_body)
+    call(
+        "PUT",
+        f"/admin/api/secret-backends/{backend['id']}",
+        {
+            **backend_body,
+            "address": "https://vault2.invalid:8200",
+            "auth": {"method": "Token", "token": "new-secret"},
+        },
+    )
+    call("DELETE", f"/admin/api/secret-backends/{backend['id']}")
+
+    known_host = call(
+        "POST",
+        "/admin/api/ssh/known-hosts",
+        {
+            "host": f"{tag}.invalid",
+            "port": 22,
+            "key_type": "ecdsa-sha2-nistp256",
+            "key_base64": "AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBKL5C+OCN2hAbPoR+mwG4M402Z0XVDOuV5k7n6zCRIMsgnYiyz6a61Zcw/RRHoQAb7ndqUyk8eAi9gjPEiGq2d0=",
+        },
+    )
+    call("DELETE", f"/admin/api/ssh/known-hosts/{known_host['id']}")
+
+    call("PUT", "/admin/api/parameters", {"banner": f"audit-{tag}"})
+    call("PUT", "/admin/api/parameters", {"banner": ""})
+
+    expected = {
+        ("ResourceChanged1", action, kind)
+        for kind in ("LdapServer", "SecretBackend")
+        for action in ("Create", "Update", "Delete")
+    } | {
+        ("ResourceChanged1", "Create", "KnownHost"),
+        ("ResourceChanged1", "Delete", "KnownHost"),
+        ("ResourceChanged1", "Update", "Parameters"),
+    }
+    entries = _wait_for_audit_entries(
+        admin_client,
+        tag,
+        expected,
+        key=lambda values: (values.get("_type"), values.get("action"), values.get("kind")),
+    )
+
+    assert entries.keys() == expected
+    assert all(e.username == actor.username for e in entries.values())
+
+    def changed(kind: str) -> dict:
+        fields = entries[("ResourceChanged1", "Update", kind)].values["fields"]
+        assert "secret" not in fields
+        return {field["path"]: field for field in json.loads(fields)}
+
+    ldap_fields = changed("LdapServer")
+    assert ldap_fields.keys() == {"spec.bind_password", "spec.port"}
+    assert ldap_fields["spec.bind_password"]["credential"]
+    backend_fields = changed("SecretBackend")
+    assert backend_fields.keys() == {"spec.address", "spec.auth.token"}
+    assert backend_fields["spec.auth.token"]["credential"]
+    assert changed("Parameters").keys() == {"spec.banner"}
+
+
+def test_admin_changes_to_admin_roles_users_and_tokens_are_audited(
+    pg_wg: WarpgateProcess, admin_client: sdk.DefaultApi
+):
+    actor, call = _logged_in_full_admin(f"https://localhost:{pg_wg.http_port}", admin_client)
+
+    tag = uuid4().hex
+    admin_role_body = make_limited_admin_role_payload(
+        name=f"audit-admin-role-{tag}", sessions_view=True
+    )
+    admin_role = call("POST", "/admin/api/admin-roles", admin_role_body)
+    call(
+        "PUT",
+        f"/admin/api/admin-roles/{admin_role['id']}",
+        {**admin_role_body, "users_edit": True},
+    )
+    call("DELETE", f"/admin/api/admin-roles/{admin_role['id']}")
+
+    user = admin_client.create_user(sdk.CreateUserRequest(username=f"audit-user-{tag}"))
+    call(
+        "PUT",
+        f"/admin/api/users/{user.id}",
+        {"username": user.username, "allowed_ip_ranges": ["10.0.0.0/8"]},
+    )
+    key = admin_client.create_public_key_credential(
+        user.id,
+        sdk.NewPublicKeyCredential(
+            label=f"key-{tag}",
+            openssh_public_key="ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBKL5C+OCN2hAbPoR+mwG4M402Z0XVDOuV5k7n6zCRIMsgnYiyz6a61Zcw/RRHoQAb7ndqUyk8eAi9gjPEiGq2d0=",
+        ),
+    )
+    call(
+        "PUT",
+        f"/admin/api/users/{user.id}/credentials/public-keys/{key.id}",
+        {"label": f"key-{tag}", "openssh_public_key": key.openssh_public_key},
+    )
+    sso = admin_client.create_sso_credential(
+        user.id, sdk.NewSsoCredential(email=f"{tag}@example.com")
+    )
+    call(
+        "PUT",
+        f"/admin/api/users/{user.id}/credentials/sso/{sso.id}",
+        {"email": f"{tag}@example.org"},
+    )
+    cert = admin_client.issue_certificate_credential(
+        user.id,
+        sdk.IssueCertificateCredentialRequest(
+            label=f"cert-{tag}",
+            public_key_pem="-----BEGIN PUBLIC KEY-----\nMFswDQYJKoZIhvcNAQEBBQADSgAwRwJAXWRPQyGlEY+SXz8Uslhe+MLjTgWd8lf/\nnA0hgCm9JFKC1tq1S73cQ9naClNXsMqY7pwPt1bSY8jYRqHHbdoUvwIDAQAB\n-----END PUBLIC KEY-----",
+        ),
+    )
+    call(
+        "PATCH",
+        f"/admin/api/users/{user.id}/credentials/certificates/{cert.credential.id}",
+        {"label": f"cert-renamed-{tag}"},
+    )
+
+    expiry = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    token = call("POST", "/api/profile/api-tokens", {"label": f"token-{tag}", "expiry": expiry})
+    call("DELETE", f"/api/profile/api-tokens/{token['token']['id']}")
+
+    expected = {
+        ("ResourceChanged1", "AdminRole", "Create"),
+        ("ResourceChanged1", "AdminRole", "Update"),
+        ("ResourceChanged1", "AdminRole", "Delete"),
+        ("ResourceChanged1", "User", "Update"),
+        ("CredentialUpdated1", "public_key", None),
+        ("CredentialUpdated1", "sso", None),
+        ("CredentialUpdated1", "certificate", None),
+        ("CredentialCreated1", "api_token", None),
+        ("CredentialDeleted1", "api_token", None),
+    }
+    entries = _wait_for_audit_entries(
+        admin_client,
+        tag,
+        expected,
+        key=lambda values: (
+            values.get("_type"),
+            values.get("kind") or values.get("credential_type"),
+            values.get("action"),
+        ),
+    )
+
+    assert entries.keys() == expected
+    assert all(e.username == actor.username for e in entries.values())
+    role_created = json.loads(entries[("ResourceChanged1", "AdminRole", "Create")].values["fields"])
+    granted = {field["path"] for field in role_created if field.get("to") is True}
+    assert granted == {"spec.sessions_view"}
+    role_updated = entries[("ResourceChanged1", "AdminRole", "Update")].values
+    [permission] = json.loads(role_updated["fields"])
+    assert (permission["path"], permission["to"]) == ("spec.users_edit", True)
+    updated = entries[("ResourceChanged1", "User", "Update")].values
+    assert updated["id"] == user.id
+    [ranges] = json.loads(updated["fields"])
+    assert (ranges["path"], ranges["to"]) == ("spec.allowed_ip_ranges", ["10.0.0.0/8"])
+    assert (
+        entries[("CredentialUpdated1", "certificate", None)].values["credential_name"]
+        == f"cert-renamed-{tag}"
+    )
+    assert (
+        entries[("CredentialCreated1", "api_token", None)].values["credential_name"]
+        == f"token-{tag}"
+    )
 
 
 # https://github.com/warp-tech/warpgate/issues/2875

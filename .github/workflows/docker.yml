@@ -124,7 +124,7 @@ jobs:
 
       - name: Upload image for the chart test
         if: matrix.matrix-id == 'amd64'
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: chart-test-image
           path: ${{ runner.temp }}/warpgate-image.tar.gz
@@ -139,7 +139,7 @@ jobs:
 
       - name: Upload digest
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: digests-${{ matrix.matrix-id }}
           path: ${{ runner.temp }}/digests/*

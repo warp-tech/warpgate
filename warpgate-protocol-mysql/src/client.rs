@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use rsa::pkcs8::DecodePublicKey;
-use rsa::{Oaep, RsaPublicKey};
+use rsa::{Oaep, PublicKey};
 use sha1::Sha1;
 use tokio::net::TcpStream;
 use tracing::{debug, info};
@@ -292,7 +292,7 @@ async fn caching_sha2_full_auth(
         .ok_or_else(|| {
             MySqlError::ProtocolError("expected an RSA public key response".to_owned())
         })?;
-    let key = RsaPublicKey::from_public_key_pem(std::str::from_utf8(pem)?)?;
+    let key = PublicKey::from_public_key_pem(std::str::from_utf8(pem)?)?;
 
     let mut masked_password = password_nul(password);
     masked_password
