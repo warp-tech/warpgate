@@ -34,3 +34,4 @@ yup-oauth2 = { version = "12", default-features = false, features = [
 
 [dev-dependencies]
 rcgen.workspace = true
+rustls = { workspace = true, features = ["aws_lc_rs"] }

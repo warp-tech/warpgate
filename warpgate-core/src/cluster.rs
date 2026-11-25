@@ -13,7 +13,7 @@ use sea_orm::sea_query::{Expr, ExprTrait, IntoCondition, OnConflict};
 use sea_orm::{ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use tokio::sync::broadcast;
+use tokio::sync::{Mutex, broadcast};
 use tokio::time::timeout;
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -86,6 +86,9 @@ pub struct Cluster {
     /// cached warpgate root CA
     ca_certificate_pem: String,
     notifications: broadcast::Sender<ClusterNotification>,
+    /// Held across every write of this node's row. A heartbeat racing
+    /// `shutdown` would otherwise re-register the node after its row is deleted
+    deregistered: Mutex<bool>,
 }
 
 impl Cluster {
@@ -101,6 +104,7 @@ impl Cluster {
             hostname: std::net::hostname()?.to_string_lossy().to_string(),
             ca_certificate_pem: params.ca_certificate_pem,
             notifications: broadcast::channel(256).0,
+            deregistered: Mutex::new(false),
             db,
         })
     }
@@ -296,6 +300,10 @@ impl Cluster {
     }
 
     async fn heartbeat(&self) -> Result<(), WarpgateError> {
+        let deregistered = self.deregistered.lock().await;
+        if *deregistered {
+            return Ok(());
+        }
         let model = Node::ActiveModel {
             id: Set(self.node_id),
             address: Set(self.address.clone()),
@@ -334,6 +342,8 @@ impl Cluster {
         end_connection_bound_sessions(&self.db, UserSession::Column::NodeId.eq(self.node_id))
             .await?;
         end_children_of_ended_parents(&self.db).await?;
+        let mut deregistered = self.deregistered.lock().await;
+        *deregistered = true;
         Node::Entity::delete_by_id(self.node_id)
             .exec(&self.db)
             .await?;
@@ -558,6 +568,18 @@ mod tests {
         let db = Database::connect("sqlite::memory:").await.unwrap();
         migrate_database(&db).await.unwrap();
         db
+    }
+
+    #[tokio::test]
+    async fn heartbeat_after_shutdown_does_not_reregister() {
+        let db = migrated_db().await;
+        let cluster = Cluster::new(db.clone(), 1).await.unwrap();
+        cluster.heartbeat().await.unwrap();
+        assert_eq!(Node::Entity::find().all(&db).await.unwrap().len(), 1);
+
+        cluster.shutdown().await.unwrap();
+        cluster.heartbeat().await.unwrap();
+        assert!(Node::Entity::find().all(&db).await.unwrap().is_empty());
     }
 
     async fn target_session(db: &DatabaseConnection, parent: Uuid, node_id: Option<Uuid>) -> Uuid {
