@@ -38,5 +38,3 @@ impl AwsError {
         Self::Sdk(err.into())
     }
 }
-    }
-}
