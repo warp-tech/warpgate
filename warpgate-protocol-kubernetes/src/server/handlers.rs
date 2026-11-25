@@ -22,7 +22,8 @@ use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
 use warpgate_common_http::{
-    UpstreamBody, buffer_response, is_same_authority_location, read_body_limited_with_timeout,
+    UpstreamBody, buffer_response, is_same_authority_location, passthrough_accept_encoding,
+    read_body_limited_with_timeout,
 };
 use warpgate_core::logging::KubernetesAuditSubject;
 use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
@@ -32,7 +33,9 @@ use crate::audit::{
     PendingRun, StreamOperation, classify_node_run, classify_pod_write, classify_stream,
 };
 use crate::correlator::{AdmittedSession, RequestCorrelator, correlated_authorization};
-use crate::recording::{start_recording_api, start_recording_exec};
+use crate::recording::{
+    decode_response_body_for_recording, start_recording_api, start_recording_exec,
+};
 use crate::server::UpstreamClientCache;
 use crate::server::auth::{
     KubernetesIdentity, authenticate_kubernetes_user, create_authenticated_client, unauthorized,
@@ -46,7 +49,9 @@ const MAX_REQUEST_BODY_BYTES: usize = 3 * 1024 * 1024;
 /// Responses up to this size are buffered. Larger ones are streamed and
 /// recorded without their body. The limit equals [`MAX_REQUEST_BODY_BYTES`]
 /// because a write usually returns the object it was sent. It applies to the
-/// body after reqwest has decompressed it.
+/// body as received, which may be gzip-encoded: responses are not decoded on
+/// their way to the client. A recording stores the decoded body only if that
+/// also fits the limit.
 const MAX_BUFFERED_RESPONSE_BYTES: usize = 3 * 1024 * 1024;
 
 /// A client-supplied impersonation header (`Impersonate-User`,
@@ -445,7 +450,8 @@ async fn _handle_normal_request_inner(
         full_url.clone(),
     );
 
-    // Add headers (excluding authorization, host, and content-length as they'll be set by reqwest)
+    // Add headers (excluding authorization, host, and content-length as they'll be set by reqwest,
+    // and accept-encoding, which is set below)
     let mut upstream_headers = HashMap::new();
     for (name, value) in &headers {
         let header_name_lower = name.to_lowercase();
@@ -455,6 +461,7 @@ async fn _handle_normal_request_inner(
             "connection",
             "transfer-encoding",
             "authorization",
+            "accept-encoding",
         ]
         .contains(&header_name_lower.as_str())
         {
@@ -467,6 +474,10 @@ async fn _handle_normal_request_inner(
             upstream_headers.insert(name.clone(), value.clone());
         }
     }
+    request_builder = request_builder.header(
+        http::header::ACCEPT_ENCODING,
+        passthrough_accept_encoding(req.headers()),
+    );
 
     debug!(
         filtered_headers = ?redact_headers(&upstream_headers),
@@ -560,8 +571,13 @@ async fn _handle_normal_request_inner(
         };
 
     // Record the response
-    if let Some(ref mut recorder) = recorder_opt
-        && let Err(e) = recorder
+    if let Some(ref mut recorder) = recorder_opt {
+        let body_for_recording = decode_response_body_for_recording(
+            response_headers.get(http::header::CONTENT_ENCODING),
+            &body_for_recording,
+            MAX_BUFFERED_RESPONSE_BYTES,
+        );
+        if let Err(e) = recorder
             .record_response(
                 method,
                 full_url.as_ref(),
@@ -571,8 +587,9 @@ async fn _handle_normal_request_inner(
                 &body_for_recording,
             )
             .await
-    {
-        warn!("Failed to record Kubernetes response: {}", e);
+        {
+            warn!("Failed to record Kubernetes response: {}", e);
+        }
     }
 
     let poem_response =
@@ -942,6 +959,148 @@ mod tests {
                 break;
             }
         }
+    }
+
+    #[tokio::test]
+    async fn watchlist_gzip_members_reach_the_client_whole() {
+        use std::io::Read;
+
+        use futures::TryStreamExt;
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::TcpListener;
+        use tokio_util::sync::CancellationToken;
+        use warpgate_common_http::UpstreamBody;
+
+        use super::take_response_body;
+        use crate::recording::tests::gzip_member;
+        use crate::server::auth::upstream_client_builder;
+
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let mut events: String = (0..4)
+            .map(|i| {
+                format!(r#"{{"type":"ADDED","object":{{"metadata":{{"name":"svc-{i}"}}}}}}"#) + "\n"
+            })
+            .collect();
+        events.push_str(
+            r#"{"type":"BOOKMARK","object":{"metadata":{"annotations":{"k8s.io/initial-events-end":"true"}}}}"#,
+        );
+        events.push('\n');
+
+        // One gzip member per event, each in its own chunk.
+        let members: Vec<Vec<u8>> = events
+            .split_inclusive('\n')
+            .map(|line| gzip_member(line.as_bytes()))
+            .collect();
+        let mut wire = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Encoding: gzip\r\nTransfer-Encoding: chunked\r\n\r\n".to_vec();
+        for member in &members {
+            wire.extend_from_slice(format!("{:x}\r\n", member.len()).as_bytes());
+            wire.extend_from_slice(member);
+            wire.extend_from_slice(b"\r\n");
+        }
+        wire.extend_from_slice(b"0\r\n\r\n");
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            drain_request_head(&mut stream).await;
+            stream.write_all(&wire).await.unwrap();
+            stream.flush().await.unwrap();
+        });
+
+        let client = upstream_client_builder(&format!("http://{address}"))
+            .build()
+            .unwrap();
+        let query = "watch=true&sendInitialEvents=true&resourceVersionMatch=NotOlderThan";
+        let response = client
+            .get(format!("http://{address}/api/v1/services?{query}"))
+            .header(reqwest::header::ACCEPT_ENCODING, "gzip")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response
+                .headers()
+                .get(http::header::CONTENT_ENCODING)
+                .unwrap(),
+            "gzip"
+        );
+
+        let taken = take_response_body(response, false, Some(query), &CancellationToken::new())
+            .await
+            .unwrap();
+        let UpstreamBody::Streamed(stream) = taken else {
+            panic!("a watch response must be streamed");
+        };
+        let received = stream
+            .try_collect::<Vec<bytes::Bytes>>()
+            .await
+            .unwrap()
+            .concat();
+        assert_eq!(received, members.concat());
+
+        let mut decoded = String::new();
+        flate2::read::MultiGzDecoder::new(received.as_slice())
+            .read_to_string(&mut decoded)
+            .unwrap();
+        assert_eq!(decoded, events);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn gzipped_list_is_buffered_as_received() {
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::TcpListener;
+        use tokio_util::sync::CancellationToken;
+        use warpgate_common_http::UpstreamBody;
+
+        use super::take_response_body;
+        use crate::server::auth::upstream_client_builder;
+
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let gz = crate::recording::tests::gzip_member(br#"{"kind":"ServiceList","items":[]}"#);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let reply = gz.clone();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            drain_request_head(&mut stream).await;
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n",
+                reply.len()
+            );
+            stream.write_all(head.as_bytes()).await.unwrap();
+            stream.write_all(&reply).await.unwrap();
+            stream.flush().await.unwrap();
+        });
+
+        let client = upstream_client_builder(&format!("http://{address}"))
+            .build()
+            .unwrap();
+        let response = client
+            .get(format!("http://{address}/api/v1/services"))
+            .header(reqwest::header::ACCEPT_ENCODING, "gzip")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response
+                .headers()
+                .get(http::header::CONTENT_LENGTH)
+                .unwrap(),
+            gz.len().to_string().as_str()
+        );
+
+        let taken = take_response_body(response, false, None, &CancellationToken::new())
+            .await
+            .unwrap();
+        let UpstreamBody::Buffered(raw) = taken else {
+            panic!("a small list must be buffered");
+        };
+        assert_eq!(raw.as_ref(), gz.as_slice());
+        server.await.unwrap();
     }
 
     #[test]

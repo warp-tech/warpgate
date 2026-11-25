@@ -27,6 +27,7 @@ use warpgate_common_http::logging::{get_client_ip, log_request_result};
 use warpgate_common_http::{
     AuthenticatedRequestContext, SessionAuthorization, SessionKeepalive, SessionKeepaliveGuard,
     UpstreamBody, WARPGATE_AUTH_SCHEME, authorization_credential, buffer_response,
+    passthrough_accept_encoding,
 };
 use warpgate_core::AdmittedTarget;
 use warpgate_tls::{TlsMode, configure_tls_connector};
@@ -333,7 +334,6 @@ fn copy_server_request<B: SomeRequestBuilder>(req: &Request, mut target: B) -> R
 }
 
 fn target_accept_encoding(req: &Request) -> HeaderValue {
-    let identity = HeaderValue::from_static("identity");
     let wants_html = req
         .headers()
         .get_all(http::header::ACCEPT)
@@ -341,12 +341,9 @@ fn target_accept_encoding(req: &Request) -> HeaderValue {
         .any(|v| v.to_str().is_ok_and(|v| v.contains("text/html")));
     if wants_html {
         // we need a parseable body for manipulation
-        return identity;
+        return HeaderValue::from_static("identity");
     }
-    req.headers()
-        .get(http::header::ACCEPT_ENCODING)
-        .cloned()
-        .unwrap_or(identity)
+    passthrough_accept_encoding(req.headers())
 }
 
 fn inject_forwarding_headers<B: SomeRequestBuilder>(

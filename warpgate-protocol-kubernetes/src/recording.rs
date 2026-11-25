@@ -1,3 +1,5 @@
+use std::io::Read;
+
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -64,6 +66,54 @@ impl Recorder for KubernetesRecorder {
     }
 }
 
+/// Decodes a gzip-encoded upstream response body for the recording. The proxy
+/// forwards the body still encoded; only the recording stores it decoded.
+///
+/// An unencoded body is returned unchanged. A body in any encoding other than
+/// `gzip`/`x-gzip`, one that decodes to more than `limit` bytes, or one that
+/// fails to decode is recorded as empty: the recording doesn't store the
+/// encoding, so encoded bytes would be unreadable there.
+pub(crate) fn decode_response_body_for_recording(
+    content_encoding: Option<&http::HeaderValue>,
+    body: &Bytes,
+    limit: usize,
+) -> Bytes {
+    let Some(encoding) = content_encoding.filter(|_| !body.is_empty()) else {
+        return body.clone();
+    };
+    let encoding = encoding.to_str().unwrap_or_default().trim();
+    if encoding.eq_ignore_ascii_case("identity") {
+        return body.clone();
+    }
+    if !encoding.eq_ignore_ascii_case("gzip") && !encoding.eq_ignore_ascii_case("x-gzip") {
+        tracing::debug!(
+            encoding,
+            "Unsupported response encoding, not recording the body"
+        );
+        return Bytes::new();
+    }
+
+    let max = u64::try_from(limit).unwrap_or(u64::MAX).saturating_add(1);
+    let mut decoded = Vec::new();
+    match flate2::read::MultiGzDecoder::new(body.as_ref())
+        .take(max)
+        .read_to_end(&mut decoded)
+    {
+        Ok(_) if decoded.len() <= limit => Bytes::from(decoded),
+        Ok(_) => {
+            tracing::debug!(
+                limit,
+                "Decoded response body is over the limit, not recording it"
+            );
+            Bytes::new()
+        }
+        Err(error) => {
+            tracing::warn!(%error, "Failed to decode gzip response body, not recording it");
+            Bytes::new()
+        }
+    }
+}
+
 // ----------
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -111,4 +161,83 @@ pub async fn start_recording_exec(
         .start::<TerminalRecorder, _>(target_session_id, None, metadata)
         .await
         .context("starting recording")
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use std::io::Write;
+
+    use bytes::Bytes;
+
+    use super::decode_response_body_for_recording as decode;
+
+    pub(crate) fn gzip_member(data: &[u8]) -> Vec<u8> {
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(data).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    fn header(value: &'static str) -> http::HeaderValue {
+        http::HeaderValue::from_static(value)
+    }
+
+    #[test]
+    fn concatenated_members_decode_whole() {
+        let body = Bytes::from(
+            [
+                gzip_member(b"one\n"),
+                gzip_member(b"two\n"),
+                gzip_member(b"three\n"),
+            ]
+            .concat(),
+        );
+        let out = decode(Some(&header("gzip")), &body, 1024);
+        assert_eq!(out.as_ref(), b"one\ntwo\nthree\n");
+    }
+
+    #[test]
+    fn unencoded_body_is_unchanged() {
+        let body = Bytes::from_static(b"hello");
+        assert_eq!(decode(None, &body, 1024), body);
+        assert_eq!(decode(Some(&header("identity")), &body, 1024), body);
+    }
+
+    #[test]
+    fn unsupported_encodings_are_recorded_empty() {
+        let body = Bytes::from(gzip_member(b"hello"));
+        assert!(decode(Some(&header("br")), &body, 1024).is_empty());
+        assert!(decode(Some(&header("gzip, br")), &body, 1024).is_empty());
+    }
+
+    #[test]
+    fn gzip_name_is_case_insensitive_and_x_gzip_is_accepted() {
+        let body = Bytes::from(gzip_member(b"hello"));
+        assert_eq!(
+            decode(Some(&header("GZIP")), &body, 1024).as_ref(),
+            b"hello"
+        );
+        assert_eq!(
+            decode(Some(&header("x-gzip")), &body, 1024).as_ref(),
+            b"hello"
+        );
+    }
+
+    #[test]
+    fn empty_body_stays_empty() {
+        assert!(decode(Some(&header("gzip")), &Bytes::new(), 1024).is_empty());
+    }
+
+    #[test]
+    fn decoded_size_is_limited() {
+        let body = Bytes::from(gzip_member(&[b'x'; 11]));
+        assert!(decode(Some(&header("gzip")), &body, 10).is_empty());
+        let body = Bytes::from(gzip_member(&[b'x'; 10]));
+        assert_eq!(decode(Some(&header("gzip")), &body, 10).len(), 10);
+    }
+
+    #[test]
+    fn corrupt_gzip_is_recorded_empty() {
+        let body = Bytes::from_static(b"definitely not gzip");
+        assert!(decode(Some(&header("gzip")), &body, 1024).is_empty());
+    }
 }
