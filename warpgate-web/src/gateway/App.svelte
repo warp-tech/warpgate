@@ -84,6 +84,13 @@
             asyncComponent: () => import('./ProfileCredentials.svelte'),
             conditions: [requireLogin],
         }),
+        '/authorize-terminal': wrap({
+            asyncComponent: () => import('./AuthorizeTerminal.svelte'),
+            conditions: [requireLogin],
+            userData: {
+                doNotShowAuthRequests: true,
+            },
+        }),
         '/ticket-requests': wrap({
             asyncComponent: () => import('./TicketRequests.svelte'),
             conditions: [requireLogin],

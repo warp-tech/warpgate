@@ -6,12 +6,25 @@
  * The client listens on `http://127.0.0.1:<port>/…` (`redirect_uri`) and
  * must answer CORS preflights from the Warpgate origin, including
  * `Access-Control-Allow-Private-Network: true`. The page then POSTs JSON:
- * - probe:  `{ type: 'probe', state }` → `{ public_key? }`. The key comes
- *   from the live client rather than the link, so a crafted link can't plant
- *   someone else's key.
+ * - probe:  `{ type: 'probe', state }` → `{ public_key?, public_key_id? }`.
+ *   The key comes from the live client rather than the link, so a crafted
+ *   link can't plant someone else's key. A client re-authorizing with a key
+ *   it registered before sends its id too; if the user still has that key,
+ *   it is reused instead of being added again.
  * - result: `{ type: 'result', state, token, token_id, public_key_id? }`
  *   or `{ type: 'result', state, error: 'denied' }`.
  * Nothing goes through the URL, so the token never lands in browser history.
+ *
+ * Any web page can POST to the client, so it must check `state` on every
+ * request; that is what proves the request is genuine. `Origin` is not
+ * necessarily the URL the user gave the client: in a cluster, logging in
+ * moves the browser to the control plane (`control_plane_host` in `/info`),
+ * so accept that origin too.
+ *
+ * Each request times out after 10 s, and unless the page sees a 2xx to
+ * `result` it revokes the token and key again. A reply that got lost leaves
+ * the client holding a revoked token, so it should treat a later 401 as
+ * "authorize again".
  */
 
 export type TerminalAuthorizationResult =
@@ -43,28 +56,13 @@ export function parseLoopbackRedirectUri(raw: string | null): URL {
     return url
 }
 
-/** `SHA256:…` fingerprint as printed by `ssh-keygen -l`. */
-export async function sshKeyFingerprint(
-    opensshPublicKey: string,
-): Promise<string> {
-    const [, blob] = opensshPublicKey.trim().split(/\s+/)
-    if (!blob) {
-        throw new Error('The SSH public key is malformed.')
-    }
-    let bytes: Uint8Array<ArrayBuffer>
-    try {
-        bytes = Uint8Array.from(atob(blob), c => c.charCodeAt(0))
-    } catch {
-        throw new Error('The SSH public key is malformed.')
-    }
-    const digest = await crypto.subtle.digest('SHA-256', bytes)
-    const b64 = btoa(String.fromCharCode(...new Uint8Array(digest)))
-    return `SHA256:${b64.replace(/=+$/, '')}`
-}
+const REQUEST_TIMEOUT_MS = 10_000
 
 async function post(url: URL, body: object): Promise<unknown> {
     const response = await fetch(url, {
         method: 'POST',
+        redirect: 'error',
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
     })
@@ -74,11 +72,10 @@ async function post(url: URL, body: object): Promise<unknown> {
     return response.json().catch(() => ({}))
 }
 
-/** The client's SSH key, or throws if no client answered on this machine. */
 export async function probeClient(
     url: URL,
     state: string,
-): Promise<{ publicKey?: string }> {
+): Promise<{ publicKey?: string; publicKeyId?: string }> {
     let body: unknown
     try {
         body = await post(url, { type: 'probe', state })
@@ -87,8 +84,12 @@ export async function probeClient(
             'The application could not be reached on this computer. Make sure it is still waiting, and allow access to local network devices if the browser asks.',
         )
     }
-    const key = (body as { public_key?: unknown } | null)?.public_key
-    return { publicKey: typeof key === 'string' ? key.trim() : undefined }
+    const { public_key: key, public_key_id: keyId } =
+        (body as { public_key?: unknown; public_key_id?: unknown } | null) ?? {}
+    return {
+        publicKey: typeof key === 'string' ? key.trim() : undefined,
+        publicKeyId: typeof keyId === 'string' ? keyId : undefined,
+    }
 }
 
 export async function deliverResult(

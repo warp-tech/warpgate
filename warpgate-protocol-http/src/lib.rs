@@ -257,7 +257,13 @@ impl ProtocolServer for HTTPProtocolServer {
                 .at(
                     "",
                     EmbeddedFileEndpoint::<Assets>::new("src/gateway/index.html")
-                        .with(cache_bust()),
+                        .with(cache_bust())
+                        // #/authorize-terminal hands its token to a client
+                        // listening on the loopback address.
+                        .with(SetHeader::new().overriding(
+                            http::header::CONTENT_SECURITY_POLICY,
+                            warpgate_csp_with_connect_src(Some("http://127.0.0.1:*")),
+                        )),
                 )
                 .around(limit_request_body)
                 .around({
