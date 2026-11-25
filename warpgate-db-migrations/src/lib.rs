@@ -349,7 +349,8 @@ pub(crate) async fn migrate_up_to(db: &DatabaseConnection, name: &str) {
 
 #[cfg(test)]
 mod tests {
-    use sea_orm::{ConnectOptions, Database};
+    use sea_orm::SqlxSqliteConnector;
+    use sea_orm::sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
     use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
 
     use super::{migrate_database, migrate_database_down, migrate_database_up};
@@ -360,10 +361,17 @@ mod tests {
     async fn sqlite_migrations_run_through_a_pool() {
         set_config_migration_values(ConfigMigrationValues::default());
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("db.sqlite3");
-        let mut opt = ConnectOptions::new(format!("sqlite://{}?mode=rwc", path.display()));
-        opt.max_connections(100);
-        let db = Database::connect(opt).await.unwrap();
+        // Opened by filename: a Windows path does not survive a `sqlite:` URL
+        let pool = SqlitePoolOptions::new()
+            .max_connections(100)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(dir.path().join("db.sqlite3"))
+                    .create_if_missing(true),
+            )
+            .await
+            .unwrap();
+        let db = SqlxSqliteConnector::from_sqlx_sqlite_pool(pool);
 
         migrate_database(&db).await.unwrap();
         migrate_database_down(&db, 1).await.unwrap();
