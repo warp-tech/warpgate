@@ -63,8 +63,6 @@ ignore = [
     "RUSTSEC-2026-0580", # heapless race, used by gix only
     "RUSTSEC-2026-0581", # heapless unsound, used by gix only
     "RUSTSEC-2026-0582", # heapless unsound, used by gix only
-
-    "RUSTSEC-2026-0592", # url blob: parsing
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
