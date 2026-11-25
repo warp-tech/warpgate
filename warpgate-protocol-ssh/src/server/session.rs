@@ -1,9 +1,8 @@
-use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::pin::Pin;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -255,7 +254,10 @@ enum TargetSessionState {
 
 struct StampedTargetSession {
     id: TargetSessionId,
-    traffic_recorders: HashMap<TrafficRecorderKey, TrafficRecorder>,
+    /// Channels open at the same time to the same destination share a
+    /// recording. Each channel's `ConnectionRecorder` holds it, so it ends
+    /// when the last of them closes
+    traffic_recorders: HashMap<TrafficRecorderKey, Weak<TrafficRecorder>>,
 }
 
 impl StampedTargetSession {
@@ -265,15 +267,20 @@ impl StampedTargetSession {
         recordings: &SessionRecordings,
         (key, metadata, params): TrafficRecording,
     ) -> Result<Option<ConnectionRecorder>> {
-        let recorder = match self.traffic_recorders.entry(key) {
-            Entry::Occupied(e) => e.into_mut(),
-            Entry::Vacant(e) => {
+        let recorder =
+            if let Some(recorder) = self.traffic_recorders.get(&key).and_then(Weak::upgrade) {
+                recorder
+            } else {
                 let Some(recorder) = recordings.start(&self.id, None, metadata).await? else {
                     return Ok(None);
                 };
-                e.insert(recorder)
-            }
-        };
+                let recorder = Arc::new(recorder);
+                self.traffic_recorders
+                    .retain(|_, recorder| recorder.strong_count() > 0);
+                self.traffic_recorders
+                    .insert(key, Arc::downgrade(&recorder));
+                recorder
+            };
         let mut connection = recorder.connection(params);
         connection.write_connection_setup().await?;
         Ok(Some(connection))
