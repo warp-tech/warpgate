@@ -90,6 +90,7 @@ pub async fn map_sso_result(
     let (access_groups, admin_groups) =
         match crate::google_groups::fetch_groups_if_configured(config, email.as_deref()).await {
             Ok(Some(google_groups)) => (Some(google_groups.clone()), Some(google_groups)),
+            Ok(None) if !config.supports_role_claims() => (None, None),
             Ok(None) => (
                 extract_groups(
                     &result,
@@ -127,7 +128,14 @@ pub async fn map_sso_result(
     }
 }
 
-fn extract_groups(result: &SsoResult, claim: &str, warn_if_missing: bool) -> Option<Vec<String>> {
+/// `None` leaves the user's roles as they are.
+///
+/// `mapped`: the provider maps the claim's groups to roles. The claim is then
+/// the whole list of the user's groups, and identity providers leave it out
+/// for a user who has none, so a login without it has no groups. That only
+/// holds once userinfo was read as well: a failed userinfo request must not
+/// take roles away.
+fn extract_groups(result: &SsoResult, claim: &str, mapped: bool) -> Option<Vec<String>> {
     let userinfo_claims = result
         .userinfo_claims
         .as_ref()
@@ -139,19 +147,23 @@ fn extract_groups(result: &SsoResult, claim: &str, warn_if_missing: bool) -> Opt
         .get(claim)
         .or_else(|| userinfo_claims.and_then(|c| c.get(claim)))
     else {
-        if warn_if_missing {
-            warn!(
-                "Claim {claim:?} not found - roles will not be synced. ID token claims: {:?}, userinfo claims: {:?}",
-                result
-                    .claims
-                    .additional_claims()
-                    .0
-                    .keys()
-                    .collect::<Vec<_>>(),
-                userinfo_claims.map(|c| c.keys().collect::<Vec<_>>()),
-            );
+        if !mapped {
+            return None;
         }
-        return None;
+        let id_token_claims = result.claims.additional_claims().0.keys();
+        let Some(userinfo_claims) = userinfo_claims else {
+            warn!(
+                "Claim {claim:?} not found and userinfo was not read - roles will not be synced. ID token claims: {:?}",
+                id_token_claims.collect::<Vec<_>>(),
+            );
+            return None;
+        };
+        debug!(
+            "Claim {claim:?} not found - the user has no groups. ID token claims: {:?}, userinfo claims: {:?}",
+            id_token_claims.collect::<Vec<_>>(),
+            userinfo_claims.keys().collect::<Vec<_>>(),
+        );
+        return Some(Vec::new());
     };
     match serde_json::from_value::<GroupClaim>(raw.clone()) {
         Ok(claim) => Some(flatten_group_claim(claim)),
