@@ -1,8 +1,10 @@
 <script lang="ts">
     import { Alert } from '@sveltestrap/sveltestrap'
+    import { hasAdminAccess } from 'admin/lib/store'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
     import { routeQueryParams } from 'common/helpers'
+    import InfoBox from 'common/InfoBox.svelte'
     import Loadable from 'common/Loadable.svelte'
     import { api } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
@@ -10,23 +12,18 @@
         deliverResult,
         parseLoopbackRedirectUri,
         probeClient,
-        sshKeyFingerprint,
-        type TerminalAuthorizationResult,
     } from 'gateway/lib/terminalAuthorization'
 
-    // ponytail: no server-side default, a year keeps re-authorization rare
     const DEFAULT_EXPIRY_SECONDS = 365 * 24 * 60 * 60
-    // The server checks the cap against its own clock.
-    const CLOCK_SKEW_MARGIN_SECONDS = 60
+    const CLOCK_SKEW_MARGIN_SECONDS = 300
 
-    const params = routeQueryParams()
-    // Self-declared by whoever built the link - shown as such.
-    const app = (params.get('app') ?? '').trim().slice(0, 64) || 'Terminal app'
-    const requestState = params.get('state') ?? ''
+    let appLabel = $state('')
+    let requestState = $state('')
 
     let redirectUri: URL | undefined
+    let clientAddress: string | undefined = $state()
     let publicKey: string | undefined = $state()
-    let fingerprint: string | undefined = $state()
+    let existingKey: { id: string; label: string } | undefined = $state()
     let busy = $state(false)
     let outcome: 'approved' | 'denied' | undefined = $state()
     let error: string | undefined = $state()
@@ -35,29 +32,59 @@
         !!publicKey && !!$serverInfo?.ownCredentialManagementAllowed,
     )
 
-    async function init() {
-        const uri = parseLoopbackRedirectUri(params.get('redirect_uri'))
-        if (!requestState) {
-            throw new Error('The request is missing its state parameter.')
+    let expirySeconds = $derived.by(() => {
+        const max = $serverInfo?.maxApiTokenDurationSeconds
+        if (!max) {
+            return DEFAULT_EXPIRY_SECONDS
         }
+        const margin = Math.min(CLOCK_SKEW_MARGIN_SECONDS, max / 10)
+        return Math.min(DEFAULT_EXPIRY_SECONDS, Math.floor(max - margin))
+    })
+
+    let tokenScope = $derived(
+        $hasAdminAccess
+            ? 'full API access as you, including your admin permissions'
+            : 'full API access as you',
+    )
+
+    let expiryLabel = $derived(
+        new Date(Date.now() + expirySeconds * 1000).toLocaleString(),
+    )
+
+    async function init() {
+        const params = routeQueryParams()
+        appLabel = (params.get('app') ?? '').trim().slice(0, 64)
+        if (!appLabel) {
+            throw new Error('Missing `app` parameter')
+        }
+        requestState = params.get('state') ?? ''
+        if (!requestState) {
+            throw new Error('Missing `state` parameter')
+        }
+        const uri = parseLoopbackRedirectUri(params.get('redirect_uri'))
         const probe = await probeClient(uri, requestState)
-        if (probe.publicKey) {
-            fingerprint = await sshKeyFingerprint(probe.publicKey)
+        if (probe.publicKey && probe.publicKeyId) {
+            if ($serverInfo?.ownCredentialManagementAllowed) {
+                const credentials = await api.getMyCredentials()
+                existingKey = credentials.publicKeys.find(
+                    k => k.id === probe.publicKeyId,
+                )
+            }
         }
         redirectUri = uri
+        clientAddress = uri.host
         publicKey = probe.publicKey
     }
 
-    // Not inline in the template: Loadable's prop would run it inside a
-    // $derived, where writing state throws.
     const initPromise = init()
 
-    async function finish(result: TerminalAuthorizationResult) {
-        if (!redirectUri) {
-            return
+    async function deny() {
+        if (redirectUri) {
+            await deliverResult(redirectUri, requestState, {
+                error: 'denied',
+            }).catch(() => undefined)
         }
-        await deliverResult(redirectUri, requestState, result)
-        outcome = 'error' in result ? result.error : 'approved'
+        outcome = 'denied'
         window.close()
     }
 
@@ -78,46 +105,48 @@
     }
 
     async function approve() {
-        const maxSeconds = $serverInfo?.maxApiTokenDurationSeconds
-        const expirySeconds = maxSeconds
-            ? Math.min(
-                  maxSeconds - CLOCK_SKEW_MARGIN_SECONDS,
-                  DEFAULT_EXPIRY_SECONDS,
-              )
-            : DEFAULT_EXPIRY_SECONDS
         const { secret, token } = await api.createApiToken({
             newApiToken: {
-                label: app,
+                label: appLabel,
                 expiry: new Date(Date.now() + expirySeconds * 1000),
             },
         })
 
-        let publicKeyId: string | undefined
+        let publicKeyId = existingKey?.id
+        let addedKeyId: string | undefined
         try {
-            if (addsKey && publicKey) {
+            if (addsKey && publicKey && !existingKey) {
                 publicKeyId = (
                     await api.addMyPublicKey({
                         newPublicKeyCredential: {
-                            label: app,
+                            label: appLabel,
                             opensshPublicKey: publicKey,
                         },
                     })
                 ).id
+                addedKeyId = publicKeyId
             }
-            await finish({
+
+            if (!redirectUri) {
+                return
+            }
+            await deliverResult(redirectUri, requestState, {
                 token: secret,
                 token_id: token.id,
                 public_key_id: publicKeyId,
             })
+
+            outcome = 'approved'
+            window.close()
         } catch (err) {
             // Don't leave credentials behind for a setup that didn't happen.
             const leftovers: string[] = []
             await api.deleteMyApiToken(token).catch(() => {
-                leftovers.push(`API token “${app}”`)
+                leftovers.push(`API token “${appLabel}”`)
             })
-            if (publicKeyId) {
-                await api.deleteMyPublicKey({ id: publicKeyId }).catch(() => {
-                    leftovers.push(`SSH key “${app}”`)
+            if (addedKeyId) {
+                await api.deleteMyPublicKey({ id: addedKeyId }).catch(() => {
+                    leftovers.push(`SSH key “${appLabel}”`)
                 })
             }
             if (leftovers.length) {
@@ -132,27 +161,40 @@
 
 <Loadable promise={initPromise}>
     <div class="page-summary-bar">
-        <h1>Connect {app}</h1>
+        <h1>Connect a terminal</h1>
     </div>
 
     {#if outcome === 'approved'}
         <Alert color="success">
-            Done. You can close this tab and return to {app}.
+            Done. You can close this tab and return to {appLabel}.
         </Alert>
     {:else if outcome === 'denied'}
         <Alert color="secondary">Request denied. You can close this tab.</Alert>
     {:else}
+        <InfoBox variant="warning">
+            Only approve if you just started this from {appLabel} yourself.
+        </InfoBox>
         <p>
-            An application calling itself <strong>{app}</strong> is asking to
-            access Warpgate as <strong>{$serverInfo?.username}</strong>.
-            Approving will:
+            An application calling itself <code>{appLabel}</code>, listening at
+            <code>{clientAddress}</code>
+            on your computer, is asking to access Warpgate as
+            <code>{$serverInfo?.username}</code>.
         </p>
+        <p>Approving this will:</p>
         <ul>
-            <li>create an API token labelled “{app}” for your account</li>
-            {#if addsKey}
+            <li class="mb-2">
+                create an API token labelled <code>{appLabel}</code> with
+                {tokenScope}, valid until {expiryLabel}
+            </li>
+            {#if existingKey}
                 <li>
-                    add an SSH key to your account
-                    <div><code>{fingerprint}</code></div>
+                    keep using the SSH key “{existingKey.label}” already on your
+                    account
+                </li>
+            {:else if addsKey}
+                <li>
+                    add a new SSH key to your account:
+                    <pre class="mt-1">{publicKey}</pre>
                 </li>
             {/if}
         </ul>
@@ -181,7 +223,7 @@
                 color="secondary"
                 class="ms-2"
                 disabled={busy}
-                click={() => guarded(() => finish({ error: 'denied' }))}
+                click={() => guarded(deny)}
             >
                 Deny
             </AsyncButton>
