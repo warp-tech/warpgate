@@ -370,6 +370,14 @@
         return null
     }
 
+    interface ForwardedKey {
+        keysym: number | null
+        scancode: number | null
+        extended: boolean
+    }
+
+    const heldKeys = new Map<string, ForwardedKey>()
+
     // RDP uses scancodes and VNC uses the keysym since RFB has no scancodes
     function onKey(e: KeyboardEvent, down: boolean) {
         clipboard.onKey(e, down)
@@ -385,13 +393,28 @@
             return
         }
         e.preventDefault()
-        send({
-            type: 'key_event',
+        let key: ForwardedKey = {
             keysym: ks,
             scancode: scancode?.code ?? null,
             extended: scancode?.extended ?? false,
-            down,
-        })
+        }
+        if (down) {
+            heldKeys.set(e.code, key)
+        } else {
+            // Letting go of Shift first changes the keysym this key resolves
+            // to, and the target would keep holding the one it was sent.
+            key = heldKeys.get(e.code) ?? key
+            heldKeys.delete(e.code)
+        }
+        send({ type: 'key_event', ...key, down })
+    }
+
+    function releaseHeldKeys() {
+        for (const key of heldKeys.values()) {
+            send({ type: 'key_event', ...key, down: false })
+        }
+        heldKeys.clear()
+        clipboard.onBlur()
     }
 
     function onPaste(e: ClipboardEvent) {
@@ -402,6 +425,7 @@
     }
 
     async function disconnect() {
+        releaseHeldKeys()
         ws?.close()
         if (sessionId) {
             try {
@@ -494,7 +518,7 @@
     onkeydown={e => onKey(e, true)}
     onkeyup={e => onKey(e, false)}
     onpaste={onPaste}
-    onblur={() => clipboard.onBlur()}
+    onblur={releaseHeldKeys}
 />
 <!-- Tracked via the event rather than a local toggle, so leaving fullscreen with Esc
      (which fires no click) still updates the button. -->
