@@ -423,6 +423,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "MartinAbadie",
+      "name": "Martin Abadie",
+      "avatar_url": "https://avatars.githubusercontent.com/u/25201580?v=4",
+      "profile": "https://martin-abadie.fr",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
