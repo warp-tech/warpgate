@@ -233,7 +233,6 @@ impl FileAccess {
 /// config change takes effect on the next recording / read. Owns the disk-vs-S3
 /// decisions so callers never inspect the backend themselves.
 pub struct Storage {
-    enable: bool,
     /// Absolute local root — final location for disk storage, scratch for S3.
     local_root: PathBuf,
     backend: Backend,
@@ -260,14 +259,9 @@ impl Storage {
         };
 
         Ok(Self {
-            enable: p.recordings_enable,
             local_root,
             backend,
         })
-    }
-
-    pub(crate) const fn enabled(&self) -> bool {
-        self.enable
     }
 
     /// Local folder holding a recording's files (final on disk, scratch on S3).
@@ -398,6 +392,7 @@ mod tests {
             kind: RecordingKind::Terminal,
             metadata: "{}".into(),
             generation,
+            node_id: None,
         }
     }
 

@@ -521,6 +521,18 @@ class TestKubernetesIntegration:
         p = run_kubectl(token_cmd)
         assert p.returncode == 0, f"should accept the correct token: {p.stderr!r}"
 
+        # a second kubectl joins the session and appends to its API recording
+        p = run_kubectl(token_cmd)
+        assert p.returncode == 0, p.stderr
+        with admin_client(url) as api:
+            api_recordings = [
+                recording
+                for session in api.get_sessions(username=user.username).items
+                for recording in api.get_session_recordings(session.id)
+                if recording.kind == sdk.RecordingKind.KUBERNETES
+            ]
+        assert len(api_recordings) == 1, api_recordings
+
         # negative token case
         bad_cmd = token_cmd.copy()
         bad_cmd[bad_cmd.index(user_token)] = user_token + "x"

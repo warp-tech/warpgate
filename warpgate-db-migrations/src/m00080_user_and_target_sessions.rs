@@ -449,6 +449,7 @@ mod tests {
             kind: Set(Recording::RecordingKind::Terminal),
             metadata: Set("{}".into()),
             generation: Set(1),
+            ..Default::default()
         })
         .exec_without_returning(&db)
         .await
@@ -499,6 +500,7 @@ mod tests {
             kind: Set(Recording::RecordingKind::Terminal),
             metadata: Set("{}".into()),
             generation: Set(1),
+            ..Default::default()
         })
         .exec_without_returning(&db)
         .await

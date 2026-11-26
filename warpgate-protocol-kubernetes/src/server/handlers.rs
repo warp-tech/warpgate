@@ -32,13 +32,14 @@ use warpgate_core::{Services, WarpgateServerHandle};
 use crate::audit::{
     PendingRun, StreamOperation, classify_node_run, classify_pod_write, classify_stream,
 };
-use crate::correlator::{AdmittedSession, RequestCorrelator, correlated_authorization};
-use crate::recording::{
-    decode_response_body_for_recording, start_recording_api, start_recording_exec,
+use crate::correlator::{
+    KubernetesTargetSession, RequestCorrelator, SessionTarget, correlated_authorization,
 };
+use crate::recording::decode_response_body_for_recording;
 use crate::server::UpstreamClientCache;
 use crate::server::auth::{
-    KubernetesIdentity, authenticate_kubernetes_user, create_authenticated_client, unauthorized,
+    KubernetesIdentity, authenticate_kubernetes_user, create_authenticated_client,
+    resolve_kubernetes_target, unauthorized,
 };
 
 /// The kube-apiserver's hardcoded cap on a write request body (twice etcd's
@@ -121,6 +122,22 @@ fn construct_target_url(
     })?)
 }
 
+/// A request that has joined its session, with what the plain and the
+/// websocket handler both need to proxy it
+struct AdmittedRequest<'a> {
+    req: &'a Request,
+    /// The path exactly as the API server will see it
+    api_path: &'a str,
+    /// A borrow, so a handler cannot move the session into a response stream.
+    /// That would keep its API recording open until the stream ends
+    session: &'a KubernetesTargetSession,
+    target: &'a SessionTarget,
+    audit_subject: &'a KubernetesAuditSubject,
+    services: &'a Services,
+    closed: CancellationToken,
+    handle: Arc<Mutex<WarpgateServerHandle>>,
+}
+
 #[handler]
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_api_request(
@@ -141,14 +158,21 @@ pub async fn handle_api_request(
     // resolved once per correlated session and reused, so a single `kubectl`
     // command's fan-out of requests only prompts for approval once.
     let identity = authenticate_kubernetes_user(req, ctx.services()).await?;
-    let (target_name, path) = match &identity {
+    // The target is resolved on every request. A session lasts up to
+    // `session_max_age`, and a rename or an edited credential or URL must
+    // apply to its next request
+    let (target, path) = match &identity {
         // Ticket credentials select the target; the entire URI belongs to the
         // upstream API, including discovery endpoints such as /api and /version.
         KubernetesIdentity::Ticket(ticket) => (
-            ticket.target().name.clone(),
+            ticket.target().clone(),
             req.uri().path().trim_start_matches('/').to_owned(),
         ),
-        KubernetesIdentity::User { .. } => named_target_path(req.uri().path())?,
+        KubernetesIdentity::User { .. } => {
+            let (target_name, path) = named_target_path(req.uri().path())?;
+            let target = resolve_kubernetes_target(ctx.services(), &target_name).await?;
+            (target, path)
+        }
     };
 
     // The path exactly as the API server will see it. The url crate resolves
@@ -161,7 +185,7 @@ pub async fn handle_api_request(
         .to_owned();
 
     let (handle, admitted, closed) =
-        correlated_authorization(correlator.0, req, identity, &target_name, ctx.services()).await?;
+        correlated_authorization(correlator.0, req, identity, &target, ctx.services()).await?;
     // Close may have arrived after the correlator lookup.
     if closed.is_cancelled() {
         return Err(unauthorized());
@@ -177,59 +201,54 @@ pub async fn handle_api_request(
         )
     };
 
-    // Built once per request and handed to both branches, so every Kubernetes
-    // audit event names the same actor, session and target. The *user* session
-    // id is the one the log layer keys entries by — recordings key off the
-    // target session id instead, and the two must not be confused.
-    let audit_subject = {
-        let target = admitted.target();
-        KubernetesAuditSubject {
-            session_id: user_session_id.0,
-            user_id: admitted.user_info().id,
-            username: admitted.user_info().username.clone(),
-            target_id: target.id,
-            target_name: target.name.clone(),
-        }
-    };
-
     async {
-        let response = if let Some(ws) = ws {
-            _handle_websocket_request_inner(
-                ws,
+        let response = async {
+            let target = admitted.target_for_request(target)?;
+
+            // Built once per request and handed to both branches, so every
+            // Kubernetes audit event names the same actor, session and target.
+            // The *user* session id is the one the log layer keys entries by —
+            // recordings key off the target session id instead, and the two
+            // must not be confused.
+            let audit_subject = KubernetesAuditSubject {
+                session_id: user_session_id.0,
+                user_id: admitted.user_info().id,
+                username: admitted.user_info().username.clone(),
+                target_id: target.id,
+                target_name: target.name.clone(),
+            };
+
+            let request = AdmittedRequest {
                 req,
-                admitted,
-                &api_path,
-                &audit_subject,
-                ctx.services(),
-                closed.clone(),
-                handle.clone(),
-            )
-            .await
-            .map(IntoResponse::into_response)
-            .map_err(poem::Error::from)
-        } else {
-            // Not `.context(...)`: that converts the `WarpgateError` to an
-            // `anyhow::Error`, which poem renders through `Display` instead
-            // of `as_response()`.
-            _handle_normal_request_inner(
-                req,
-                body,
-                admitted,
-                upstream_clients.0,
-                &api_path,
-                &audit_subject,
-                ctx.services(),
+                api_path: &api_path,
+                session: &admitted,
+                target: &target,
+                audit_subject: &audit_subject,
+                services: ctx.services(),
                 closed,
-                handle.clone(),
-            )
-            .await
-            .map(IntoResponse::into_response)
-            .map_err(|error| match error {
-                // Closed mid-request: the caller is no longer authorized.
-                WarpgateError::UserSessionEnded => unauthorized(),
-                error => poem::Error::from(error),
-            })
-        };
+                handle,
+            };
+
+            if let Some(ws) = ws {
+                _handle_websocket_request_inner(request, ws)
+                    .await
+                    .map(IntoResponse::into_response)
+                    .map_err(poem::Error::from)
+            } else {
+                // Not `.context(...)`: that converts the `WarpgateError` to an
+                // `anyhow::Error`, which poem renders through `Display` instead
+                // of `as_response()`.
+                _handle_normal_request_inner(request, body, upstream_clients.0)
+                    .await
+                    .map(IntoResponse::into_response)
+                    .map_err(|error| match error {
+                        // Closed mid-request: the caller is no longer authorized.
+                        WarpgateError::UserSessionEnded => unauthorized(),
+                        error => poem::Error::from(error),
+                    })
+            }
+        }
+        .await;
 
         let client_ip = get_client_ip(req, ctx.services()).await;
         let response = response.inspect_err(|e| {
@@ -357,20 +376,23 @@ async fn take_response_body(
     .context("reading kubernetes response")?)
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn _handle_normal_request_inner(
-    req: &Request,
+    request: AdmittedRequest<'_>,
     body: Body,
-    admitted: AdmittedSession,
     upstream_clients: &UpstreamClientCache,
-    api_path: &str,
-    audit_subject: &KubernetesAuditSubject,
-    services: &Services,
-    closed: CancellationToken,
-    handle: Arc<Mutex<WarpgateServerHandle>>,
 ) -> Result<Response, WarpgateError> {
-    let k8s_options = admitted.options();
-    let target_id = admitted.target().id;
+    let AdmittedRequest {
+        req,
+        api_path,
+        session,
+        target,
+        audit_subject,
+        services,
+        closed,
+        handle,
+    } = request;
+    let k8s_options = target.options();
+    let target_id = target.id;
     let client = upstream_clients
         .get_or_build(&target_id, k8s_options, || async {
             create_authenticated_client(k8s_options, services)
@@ -435,14 +457,6 @@ async fn _handle_normal_request_inner(
         ))
         .await
         .ok_or(WarpgateError::UserSessionEnded)??;
-
-    let mut recorder_opt = match start_recording_api(&admitted.id(), &services.recordings).await {
-        Ok(recorder) => recorder,
-        Err(e) => {
-            warn!("Failed to start recording: {}", e);
-            None
-        }
-    };
 
     // Forward request to Kubernetes API
     let mut request_builder = client.request(
@@ -570,27 +584,25 @@ async fn _handle_normal_request_inner(
             ),
         };
 
-    // Record the response
-    if let Some(ref mut recorder) = recorder_opt {
-        let body_for_recording = decode_response_body_for_recording(
-            response_headers.get(http::header::CONTENT_ENCODING),
-            &body_for_recording,
-            MAX_BUFFERED_RESPONSE_BYTES,
-        );
-        if let Err(e) = recorder
-            .record_response(
-                method,
-                full_url.as_ref(),
-                redacted_headers,
-                &body_bytes,
-                status.as_u16(),
+    session
+        .record_api(&services.recordings, async |recorder| {
+            let body_for_recording = decode_response_body_for_recording(
+                response_headers.get(http::header::CONTENT_ENCODING),
                 &body_for_recording,
-            )
-            .await
-        {
-            warn!("Failed to record Kubernetes response: {}", e);
-        }
-    }
+                MAX_BUFFERED_RESPONSE_BYTES,
+            );
+            recorder
+                .record_response(
+                    method,
+                    full_url.as_ref(),
+                    redacted_headers,
+                    &body_bytes,
+                    status.as_u16(),
+                    &body_for_recording,
+                )
+                .await
+        })
+        .await;
 
     let poem_response =
         copy_response_headers(Response::builder().status(status), &response_headers);
@@ -643,18 +655,21 @@ async fn run_websocket_recording(recorder: TerminalRecorder, mut rx: mpsc::Recei
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn _handle_websocket_request_inner(
+    request: AdmittedRequest<'_>,
     ws: WebSocket,
-    req: &Request,
-    admitted: AdmittedSession,
-    api_path: &str,
-    audit_subject: &KubernetesAuditSubject,
-    services: &Services,
-    closed: CancellationToken,
-    handle: Arc<Mutex<WarpgateServerHandle>>,
 ) -> anyhow::Result<impl IntoResponse> {
-    let k8s_options = admitted.options();
+    let AdmittedRequest {
+        req,
+        api_path,
+        session,
+        target,
+        audit_subject,
+        services,
+        closed,
+        handle,
+    } = request;
+    let k8s_options = target.options();
     let full_url = construct_target_url(req, api_path, k8s_options)?;
 
     let client = create_authenticated_client(k8s_options, services)
@@ -671,7 +686,11 @@ async fn _handle_websocket_request_inner(
         .as_ref()
         .and_then(StreamOperation::recording_metadata)
     {
-        match start_recording_exec(&admitted.id(), &services.recordings, metadata).await {
+        match services
+            .recordings
+            .start::<TerminalRecorder, _>(&session.id(), metadata)
+            .await
+        {
             Err(e) => {
                 error!("Failed to start recording: {}", e);
             }

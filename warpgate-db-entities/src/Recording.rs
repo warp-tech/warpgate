@@ -4,7 +4,7 @@ use sea_orm::sea_query::ForeignKeyAction;
 use serde::Serialize;
 use time::OffsetDateTime;
 use uuid::Uuid;
-use warpgate_common::TargetSessionId;
+use warpgate_common::{NodeId, TargetSessionId};
 
 #[derive(Debug, Clone, PartialEq, Eq, EnumIter, Enum, DeriveActiveEnum, Serialize)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
@@ -37,6 +37,11 @@ pub struct Model {
     /// terminal recordings too. Defaults to 1 for rows created before the folder layout.
     #[sea_orm(default_value = 1)]
     pub generation: i32,
+    /// The node writing the recording. It serves live views until the
+    /// recording ends. `None` on rows older than the column, which their
+    /// session's node wrote
+    #[oai(skip)]
+    pub node_id: Option<NodeId>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]

@@ -187,9 +187,8 @@ impl Services {
         params: GlobalParams,
     ) -> Result<Self> {
         let db = connect_to_db_and_migrate(&config, &params).await?;
-        let recordings = Arc::new(SessionRecordings::new(db.clone(), &params));
-
         let cluster = Arc::new(Cluster::new(db.clone(), config.store.http.listen.port()).await?);
+        let recordings = Arc::new(SessionRecordings::new(db.clone(), &params, cluster.node_id));
 
         let config = Arc::new(Mutex::new(config));
 

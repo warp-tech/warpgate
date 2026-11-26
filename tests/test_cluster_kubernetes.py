@@ -21,22 +21,26 @@ from .test_kubernetes_user_auth_ticket import (
     login,
     uses_left,
 )
-from .util import wait_port
+from .util import poll, wait_port
 
 # Nodes correlate requests by client IP, which behind a load balancer comes
 # from X-Forwarded-For.
 CLIENT_IP = "203.0.113.7"
 
 
-@pytest.fixture
-def nodes(processes):
+def start_nodes(processes, **peer_args):
     node = processes.start_wg(config_patch={"http": {"trust_x_forwarded_headers": True}})
     wait_port(node.http_port, for_process=node.process, recv=False)
     wait_port(node.kubernetes_port, for_process=node.process, recv=False)
-    peer = processes.start_wg(share_with=node)
+    peer = processes.start_wg(share_with=node, **peer_args)
     wait_port(peer.http_port, for_process=peer.process, recv=False)
     wait_port(peer.kubernetes_port, for_process=peer.process, recv=False)
     return node, peer
+
+
+@pytest.fixture
+def nodes(processes):
+    return start_nodes(processes)
 
 
 def kubernetes_request(wg, bearer, path="/api", timeout=60):
@@ -80,16 +84,6 @@ def pending_kubernetes_approvals(session, wg):
     )
     response.raise_for_status()
     return [r for r in response.json() if r["protocol"] == "Kubernetes"]
-
-
-def poll(fn, deadline_s=15):
-    deadline = time.monotonic() + deadline_s
-    while time.monotonic() < deadline:
-        value = fn()
-        if value:
-            return value
-        time.sleep(0.25)
-    return fn()
 
 
 def one_session(api, user):
@@ -277,3 +271,38 @@ def test_closing_a_shared_session_ends_it_on_both_nodes(nodes, echo_server_port)
         assert ticket_request(node, ticket).status_code == 401
         assert ticket_request(peer, ticket).status_code == 401
         assert uses_left(setup, ticket) == 0
+
+
+def test_a_nodes_live_api_recording_is_readable_from_the_other_node(processes, echo_server_port):
+    nodes = node, _ = start_nodes(processes, own_config_dir=True)
+    with admin_client(f"https://localhost:{node.http_port}") as api:
+        # The path is relative to each node's config, so a node has only its own files
+        api.update_parameters(sdk.ParameterUpdate(
+            recordings_storage=sdk.RecordingsStorageConfig(
+                sdk.RecordingsStorageConfigRecordingsDiskConfig(kind="Disk", path="recordings"),
+            ),
+        ))
+        target = create_target(api, echo_server_port)
+        user = user_with_access(api, target)
+        with login(node, api, user) as session:
+            token = create_api_token(session, node)
+
+        for wg in nodes:
+            assert token_request(wg, token, target).status_code == 200
+        recordings = api.get_session_recordings(one_session(api, user).id)
+        # Each node has its own recording and keeps it open while the session lasts
+        assert len(recordings) == 2, recordings
+        assert not any(r.ended for r in recordings), recordings
+
+        def recorded(wg, recording):
+            response = requests.get(
+                f"https://localhost:{wg.http_port}/@warpgate/admin/api/recordings/{recording.id}/data",
+                headers={"X-Warpgate-Token": "token-value"},
+                verify=False,
+                timeout=10,
+            )
+            return response.status_code == 200 and "request_method" in response.text
+
+        for wg in nodes:
+            for recording in recordings:
+                assert poll(lambda: recorded(wg, recording)), (wg.http_port, recording)
