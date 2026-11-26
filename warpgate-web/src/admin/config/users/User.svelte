@@ -21,6 +21,10 @@
         Tooltip,
     } from '@sveltestrap/sveltestrap'
     import {
+        adminAccessWarning,
+        confirmWithWarning,
+    } from 'admin/lib/adminAccess'
+    import {
         type AdminRole,
         api,
         type Role,
@@ -151,7 +155,11 @@
         if (!user) {
             return
         }
-        if (confirm(`Delete user ${user.username}?`)) {
+        const warning = await adminAccessWarning({
+            kind: 'deleteUser',
+            userId: user.id,
+        })
+        if (confirmWithWarning(`Delete user ${user.username}?`, warning)) {
             await api.deleteUser(user)
             replace('/manage/users')
         }
@@ -279,11 +287,27 @@
         return { text, class: urgencyClass }
     }
 
-    async function toggleAdminRole(role: AdminRole) {
+    async function toggleAdminRole(role: AdminRole, input: HTMLInputElement) {
         if (!user) {
             return
         }
         if (adminRoleIsAllowed[role.id]) {
+            const warning = await adminAccessWarning({
+                kind: 'revokeRole',
+                userId: user.id,
+                roleId: role.id,
+            })
+            if (
+                warning &&
+                !confirmWithWarning(
+                    `Remove admin role ${role.name} from ${user.username}?`,
+                    warning,
+                )
+            ) {
+                // The switch has flipped already.
+                input.checked = true
+                return
+            }
             await api.deleteUserAdminRole({
                 id: user.id,
                 roleId: role.id,
@@ -528,7 +552,11 @@
                                     id="admin-role-{role.id}"
                                     class="mb-0 me-2"
                                     type="switch"
-                                    on:change={() => toggleAdminRole(role)}
+                                    on:change={e =>
+                                        toggleAdminRole(
+                                            role,
+                                            e.target as HTMLInputElement,
+                                        )}
                                     disabled={!$adminPermissions.adminRolesManage}
                                     checked={adminRoleIsAllowed[role.id]}
                                 />
