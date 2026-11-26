@@ -62,6 +62,14 @@ spec:
       auth:
         kind: password
         password: secret://vault/kv/ssh#password
+      port_knocking:
+        sequence:
+          - port: 7000
+            protocol: tcp
+          - port: 8000
+            protocol: udp
+        delay_ms: 100
+        wait_after_ms: 500
 ---
 apiVersion: warpgate/v1
 kind: Target
