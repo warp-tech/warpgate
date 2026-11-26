@@ -254,7 +254,7 @@ impl Storage {
                 Backend::Remote(RemoteStorage::S3(S3Storage::new(&s3).await?))
             }
             RecordingsStorageConfig::Azure(azure) => {
-                local_root.push(SCRATCH_SUBDIR);
+                local_root.push(azure.scratch_path.as_deref().unwrap_or(SCRATCH_SUBDIR));
                 Backend::Remote(RemoteStorage::Azure(AzureBlobStorage::new(&azure).await?))
             }
         };

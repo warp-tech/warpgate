@@ -154,6 +154,9 @@ pub struct AzureBlobConfig {
     /// Blob-name prefix prepended to every recording path.
     pub prefix: String,
     pub credentials: AzureCredentials,
+    /// Local directory buffering recordings before upload, resolved against the
+    /// config file's directory unless absolute. Defaults to `data/recordings-scratch`.
+    pub scratch_path: Option<String>,
     /// Stream recordings through Warpgate instead of redirecting the browser to
     /// a SAS URL.
     ///
@@ -529,6 +532,7 @@ mod tests {
             endpoint: endpoint.map(Into::into),
             prefix: String::new(),
             credentials: AzureCredentials::ManagedIdentity(ManagedIdentityCredentials::default()),
+            scratch_path: None,
             serve_through_warpgate: true,
         }
     }
