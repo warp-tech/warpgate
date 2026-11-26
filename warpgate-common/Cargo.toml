@@ -53,7 +53,7 @@ tokio.workspace = true
 tokio-rustls.workspace = true
 tokio-stream.workspace = true
 tokio-tungstenite.workspace = true
-totp-rs = { version = "5.0", features = ["otpauth"], default-features = false }
+totp-rs = { version = "6.0", features = ["otpauth"], default-features = false }
 tracing.workspace = true
 tracing-core = { version = "0.1", default-features = false }
 url.workspace = true
