@@ -32,7 +32,7 @@ tui-input = { version = "0.15", default-features = false, features = [
 ] }
 url.workspace = true
 uuid.workspace = true
-vt100 = "0.16"
+vt100 = "0.18"
 warpgate-aws = { path = "../warpgate-aws", default-features = false }
 warpgate-common = { path = "../warpgate-common", default-features = false }
 warpgate-common-http = { path = "../warpgate-common-http", default-features = false }
