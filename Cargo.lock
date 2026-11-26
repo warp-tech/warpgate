@@ -8301,7 +8301,7 @@ checksum = "0662b098655e5e779a80041b640702e341cf3ede4560ecc103cf0ef098c8e33e"
 dependencies = [
  "hashlink 0.12.2",
  "ordered-float 5.5.1",
- "saphyr-parser",
+ "saphyr-parser 0.2.2",
  "thiserror 2.0.21",
 ]
 
@@ -8310,6 +8310,16 @@ name = "saphyr-parser"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c6220586c3dacac54bfddec87af86ddb31862d29666e7e35cf4baf70a25d387"
+dependencies = [
+ "arraydeque",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "saphyr-parser"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c98d2738e44a25e6ba2e6d83d91805648df204768abc96f4f1278cb3d5c90bbe"
 dependencies = [
  "arraydeque",
  "thiserror 2.0.21",
@@ -10886,7 +10896,7 @@ dependencies = [
  "gix",
  "poem-openapi",
  "saphyr",
- "saphyr-parser",
+ "saphyr-parser 0.3.4",
  "schemars 1.2.3",
  "serde",
  "serde_json",
