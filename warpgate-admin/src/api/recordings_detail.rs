@@ -493,6 +493,9 @@ pub async fn recording_owner(
     if recording.ended.is_some() {
         return Ok(Owner::Local);
     }
+    if recording.node_id.is_some() {
+        return ctx.services().cluster.owner(recording.node_id).await;
+    }
     let Some(session) = TargetSession::Entity::find_by_id(recording.session_id)
         .one(&ctx.services().db)
         .await?

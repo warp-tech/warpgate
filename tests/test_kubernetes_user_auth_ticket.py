@@ -13,12 +13,12 @@ import requests
 import yaml
 
 from .api_client import admin_client, sdk
-from .util import alloc_port, wait_port
+from .util import alloc_port, poll, wait_port
 
 
-def create_target(api, port):
-    return api.create_target(sdk.TargetDataRequest(
-        name=f"k8s-ticket-{uuid4()}",
+def target_request(name, port, token="upstream-token"):
+    return sdk.TargetDataRequest(
+        name=name,
         require_approval=False,
         ticket_requests_disabled=False,
         ticket_require_approval=False,
@@ -28,11 +28,15 @@ def create_target(api, port):
             tls=sdk.Tls(mode=sdk.TlsMode.DISABLED, verify=False),
             auth=sdk.KubernetesTargetAuth(
                 sdk.KubernetesTargetAuthKubernetesTargetTokenAuth(
-                    kind="Token", token="upstream-token",
+                    kind="Token", token=token,
                 ),
             ),
         )),
-    ))
+    )
+
+
+def create_target(api, port):
+    return api.create_target(target_request(f"k8s-ticket-{uuid4()}", port))
 
 
 @pytest.fixture
@@ -51,12 +55,22 @@ def create_ticket(setup, **kwargs):
     ))
 
 
-def request(wg, secret, path="/api", **kwargs):
+def bearer_request(wg, token, path, **kwargs):
     return requests.get(
         f"https://localhost:{wg.kubernetes_port}{path}",
-        headers={"Authorization": f"Bearer ticket-{secret}"},
+        headers={"Authorization": f"Bearer {token}"},
         verify=False, timeout=10, **kwargs,
     )
+
+
+def request(wg, secret, path="/api", **kwargs):
+    return bearer_request(wg, f"ticket-{secret}", path, **kwargs)
+
+
+def upstream_authorization(response):
+    """The credential Warpgate presented to the cluster, as echoed back by it."""
+    assert response.status_code == 200, response.text
+    return {k.lower(): v for k, v in response.json()["headers"]}["authorization"]
 
 
 def login(wg, api, user):
@@ -80,6 +94,20 @@ def create_api_token(session, wg):
     return response.json()["secret"]
 
 
+def role_access_token(wg, api, user, target):
+    """Grants `user` the target through a new role; returns the role and an API token."""
+    role = api.create_role(sdk.RoleDataRequest(name=f"k8s-role-{uuid4()}"))
+    api.add_user_role(user.id, role.id)
+    api.add_target_role(target.id, role.id)
+    with login(wg, api, user) as session:
+        return role, create_api_token(session, wg)
+
+
+def target_sessions(api, user):
+    sessions = api.get_sessions(username=user.username).items
+    return [target_session for s in sessions for target_session in s.target_sessions]
+
+
 def uses_left(setup, ticket):
     return next(t.uses_left for t in setup[0].get_tickets() if t.id == ticket.ticket.id)
 
@@ -99,8 +127,7 @@ def test_ticket_selects_target_and_shares_one_use(shared_wg, ticket_setup):
     for response, path in zip(responses, paths):
         assert response.status_code == 200, response.text
         assert response.json()["path"] == path.split("?")[0]
-        headers = {k.lower(): v for k, v in response.json()["headers"]}
-        assert headers["authorization"] == "Bearer upstream-token"
+        assert upstream_authorization(response) == "Bearer upstream-token"
     assert responses[4].json()["args"] == {"limit": "1"}
     assert uses_left(ticket_setup, ticket) == 0
     sessions = ticket_setup[0].get_sessions(username=ticket_setup[1].username).items
@@ -133,6 +160,81 @@ def test_ticket_revocation_applies_to_cached_session(shared_wg, ticket_setup):
     assert request(shared_wg, ticket.secret).status_code == 401
 
 
+def test_target_credential_change_applies_to_cached_session(
+    shared_wg, ticket_setup, echo_server_port,
+):
+    api, _, target = ticket_setup
+    ticket = create_ticket(ticket_setup)
+
+    assert upstream_authorization(request(shared_wg, ticket.secret)) == "Bearer upstream-token"
+    api.update_target(target.id, target_request(target.name, echo_server_port, "rotated-token"))
+    assert upstream_authorization(request(shared_wg, ticket.secret)) == "Bearer rotated-token"
+
+
+def test_recreated_target_is_not_served_by_the_old_session(
+    shared_wg, ticket_setup, echo_server_port,
+):
+    api, user, target = ticket_setup
+    # Deleting a target deletes its tickets, so only a role-based session can outlive it
+    role, token = role_access_token(shared_wg, api, user, target)
+
+    def get():
+        return bearer_request(shared_wg, token, f"/{target.name}/api")
+
+    assert upstream_authorization(get()) == "Bearer upstream-token"
+
+    api.delete_target(target.id)
+    recreated = api.create_target(target_request(target.name, echo_server_port, "rotated-token"))
+    api.add_target_role(recreated.id, role.id)
+
+    assert upstream_authorization(get()) == "Bearer rotated-token"
+    assert {t.target_id for t in target_sessions(api, user)} == {target.id, recreated.id}
+
+
+def test_renamed_target_keeps_its_session_under_the_new_name(
+    shared_wg, ticket_setup, echo_server_port,
+):
+    api, user, target = ticket_setup
+    # Tickets identify their target by id, so a rename only affects requests routed by name
+    _, token = role_access_token(shared_wg, api, user, target)
+
+    def get(name):
+        return bearer_request(shared_wg, token, f"/{name}/api")
+
+    assert get(target.name).status_code == 200
+    renamed = f"k8s-renamed-{uuid4()}"
+    api.update_target(target.id, target_request(renamed, echo_server_port))
+
+    assert get(target.name).status_code == 404
+    assert get(renamed).status_code == 200
+    assert [t.target_id for t in target_sessions(api, user)] == [target.id]
+
+
+def test_disabling_recording_ends_a_live_api_recording(processes, echo_server_port):
+    # Recording is a global setting, so this test runs its own instance
+    wg = processes.start_wg()
+    wait_port(wg.http_port, for_process=wg.process, recv=False)
+    wait_port(wg.kubernetes_port, for_process=wg.process, recv=False)
+    with admin_client(f"https://localhost:{wg.http_port}") as api:
+        user = api.create_user(sdk.CreateUserRequest(username=f"ticket-{uuid4()}"))
+        ticket = create_ticket((api, user, create_target(api, echo_server_port)))
+
+        assert request(wg, ticket.secret).status_code == 200
+        (session,) = api.get_sessions(username=user.username).items
+        (recording,) = api.get_session_recordings(session.id)
+        assert not recording.ended
+
+        api.update_parameters(sdk.ParameterUpdate(recordings_enable=False))
+
+        # The session rechecks the setting only every few seconds
+        def ended():
+            assert request(wg, ticket.secret).status_code == 200
+            return api.get_recording(recording.id).ended
+
+        assert poll(ended, deadline_s=30), "still recording"
+        assert len(api.get_session_recordings(session.id)) == 1
+
+
 def test_kubectl_with_targetless_ticket_kubeconfig(shared_wg, ticket_setup, tmp_path):
     ticket = create_ticket(ticket_setup, number_of_uses=1)
     config = tmp_path / "warpgate-kubeconfig.yaml"
@@ -160,13 +262,10 @@ def test_normal_api_token_cannot_join_ticket_session(shared_wg, ticket_setup):
     ticket = create_ticket(ticket_setup)
     assert request(shared_wg, ticket.secret).status_code == 200
     with login(shared_wg, api, user) as session:
-        headers = {"Authorization": f"Bearer {create_api_token(session, shared_wg)}"}
+        token = create_api_token(session, shared_wg)
 
     def normal_request(path):
-        return requests.get(
-            f"https://localhost:{shared_wg.kubernetes_port}{path}",
-            headers=headers, verify=False, timeout=10,
-        )
+        return bearer_request(shared_wg, token, path)
 
     # Same identity and IP as the ticket, but no role grants normal access.
     assert normal_request(f"/{target.name}/api").status_code == 403

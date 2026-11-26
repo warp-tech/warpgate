@@ -271,7 +271,7 @@ impl StampedTargetSession {
             if let Some(recorder) = self.traffic_recorders.get(&key).and_then(Weak::upgrade) {
                 recorder
             } else {
-                let Some(recorder) = recordings.start(&self.id, None, metadata).await? else {
+                let Some(recorder) = recordings.start(&self.id, metadata).await? else {
                     return Ok(None);
                 };
                 let recorder = Arc::new(recorder);
@@ -1967,7 +1967,7 @@ impl ServerSession {
             let recorder = self
                 .services
                 .recordings
-                .start::<TerminalRecorder, _>(&target_session_id, None, metadata)
+                .start::<TerminalRecorder, _>(&target_session_id, metadata)
                 .await?;
             if let Some(recorder) = &recorder
                 && let Some(request) = self

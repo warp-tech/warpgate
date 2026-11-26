@@ -105,7 +105,6 @@ impl WebSshSession {
         self.recordings
             .start::<TerminalRecorder, _>(
                 target_session_id,
-                None,
                 SshRecordingMetadata::Shell {
                     channel: channel_number,
                 },

@@ -1406,7 +1406,7 @@ mod delivery {
         let secret_backends = Arc::new(crate::SecretBackendRegistry::new(db.clone()));
         Services {
             db: db.clone(),
-            recordings: Arc::new(SessionRecordings::new(db.clone(), &params)),
+            recordings: Arc::new(SessionRecordings::new(db.clone(), &params, cluster.node_id)),
             config: Arc::new(Mutex::new(WarpgateConfig {
                 store: WarpgateConfigStore::default(),
             })),

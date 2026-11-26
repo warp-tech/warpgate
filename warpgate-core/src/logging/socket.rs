@@ -34,7 +34,10 @@ where
             return;
         }
         values.insert("target", target);
-        #[allow(clippy::unwrap_used, reason = "Rfc3339 formatting of valid OffsetDateTime does not fail")]
+        #[allow(
+            clippy::unwrap_used,
+            reason = "Rfc3339 formatting of valid OffsetDateTime does not fail"
+        )]
         values.insert(
             "timestamp",
             OffsetDateTime::now_local()

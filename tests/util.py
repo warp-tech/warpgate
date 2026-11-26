@@ -87,6 +87,16 @@ def _wait_timeout(fn, msg, timeout=60):
         raise failure[0]
 
 
+def poll(fn, deadline_s=15):
+    deadline = time.monotonic() + deadline_s
+    while time.monotonic() < deadline:
+        value = fn()
+        if value:
+            return value
+        time.sleep(0.25)
+    return fn()
+
+
 def wait_port(port, recv=True, timeout=60, for_process: subprocess.Popen = None, connect_timeout=5, read_timeout=5):
     logging.debug(f"Waiting for port {port}")
     for_process = for_process or port_owners.get(port)

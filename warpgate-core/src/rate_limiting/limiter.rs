@@ -15,8 +15,7 @@ pub fn new_rate_limiter(bytes_per_second: NonZeroU32) -> InnerRateLimiter {
     // Keep the burst capacity high to allow checking in large buffers but
     // consume (burst - per_second) cells initially to ensure that
     // the rate limiter is in its "normal" state
-    if let Some(initial_drain) =
-        NonZeroU32::new(u32::from(max_cells) - u32::from(bytes_per_second))
+    if let Some(initial_drain) = NonZeroU32::new(u32::from(max_cells) - u32::from(bytes_per_second))
     {
         for key in [RateLimiterDirection::Read, RateLimiterDirection::Write] {
             let _ = rate_limiter.check_key_n(&key, initial_drain);

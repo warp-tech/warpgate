@@ -1,13 +1,10 @@
 use std::io::Read;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use warpgate_common::TargetSessionId;
-use warpgate_core::recordings::{
-    NDJsonRecordingWriter, Recorder, RecordingWriterOpener, SessionRecordings, TerminalRecorder,
-};
+use warpgate_core::recordings::{NDJsonRecordingWriter, Recorder, RecordingWriterOpener};
 use warpgate_db_entities::Recording::RecordingKind;
 
 /// One recorded Kubernetes API request/response as stored in a data NDJSON line
@@ -138,29 +135,6 @@ pub enum SessionRecordingMetadata {
         pod: String,
         container: Option<String>,
     },
-}
-
-pub async fn start_recording_api(
-    target_session_id: &TargetSessionId,
-    recordings: &SessionRecordings,
-) -> anyhow::Result<Option<KubernetesRecorder>> {
-    // No name: `start` reuses the writer for a repeated name, so concurrent
-    // requests, possibly on different nodes, would write to the same folder.
-    recordings
-        .start::<KubernetesRecorder, _>(target_session_id, None, SessionRecordingMetadata::Api)
-        .await
-        .context("starting recording")
-}
-
-pub async fn start_recording_exec(
-    target_session_id: &TargetSessionId,
-    recordings: &SessionRecordings,
-    metadata: SessionRecordingMetadata,
-) -> anyhow::Result<Option<TerminalRecorder>> {
-    recordings
-        .start::<TerminalRecorder, _>(target_session_id, None, metadata)
-        .await
-        .context("starting recording")
 }
 
 #[cfg(test)]
