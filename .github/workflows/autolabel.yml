@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Add pro label to eligible issue authors
-        uses: actions/github-script@v7.1.0
+        uses: actions/github-script@v9.0.0
         env:
           TARGET_USERS: mba965
           TARGET_ORGS: zerodha

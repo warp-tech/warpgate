@@ -6,7 +6,7 @@ workflows:
     '.github/workflows/ai-comment-check.yml':
         - 'actions/ai-inference@v1.2.8'
     '.github/workflows/autolabel.yml':
-        - 'actions/github-script@v7.1.0'
+        - 'actions/github-script@v9.0.0'
     '.github/workflows/biome.yml':
         - 'actions/checkout@v7.0.0'
         - 'biomejs/setup-biome@v2.7.1'
@@ -132,9 +132,9 @@ dependencies:
         commit: 'sha1-9000827ccba6bdab643e8b6fd33ac0654aef8333'
         owner_id: 44036562
         repo_id: 192626254
-    'actions/github-script@v7.1.0':
-        ref: 'v7.1.0'
-        commit: 'sha1-f28e40c7f34bde8b3046d885e986cb6290c5673b'
+    'actions/github-script@v9.0.0':
+        ref: 'v9.0.0'
+        commit: 'sha1-3a2844b7e9c422d3c10d287c895573f7108da1b3'
         owner_id: 44036562
         repo_id: 205262760
     'actions/setup-node@v7.1.0':
