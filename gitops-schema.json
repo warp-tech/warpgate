@@ -478,6 +478,7 @@
         "tls": {
           "$ref": "#/$defs/Tls",
           "default": {
+            "ca": null,
             "mode": "preferred",
             "verify": true
           }
@@ -507,6 +508,7 @@
         "tls": {
           "$ref": "#/$defs/Tls",
           "default": {
+            "ca": null,
             "mode": "preferred",
             "verify": true
           }
@@ -545,6 +547,7 @@
         "tls": {
           "$ref": "#/$defs/Tls",
           "default": {
+            "ca": null,
             "mode": "preferred",
             "verify": true
           }
@@ -686,6 +689,7 @@
         "tls": {
           "$ref": "#/$defs/Tls",
           "default": {
+            "ca": null,
             "mode": "preferred",
             "verify": true
           }
@@ -914,6 +918,14 @@
     },
     "Tls": {
       "properties": {
+        "ca": {
+          "default": null,
+          "description": "PEM-encoded CA certificate(s) to trust when verifying the target's TLS\ncertificate, on top of the system roots. Accepts a bundle of several\nconcatenated PEM certificates. Has no effect when `verify` is false.\nThis lets a target whose certificate is signed by a private or cluster\nCA (e.g. a stock Kubernetes apiserver) be verified without turning\nverification off.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "mode": {
           "$ref": "#/$defs/TlsMode",
           "default": "preferred"

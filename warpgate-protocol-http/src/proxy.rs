@@ -618,7 +618,7 @@ async fn proxy_ws_inner(
     client_request = inject_own_headers(req, client_request).await?;
     client_request = rewrite_request(client_request, &options)?;
 
-    let tls_config = configure_tls_connector(!options.tls.verify, false, None)
+    let tls_config = configure_tls_connector(!options.tls.verify, false, options.tls.ca_pem())
         .await
         .map_err(poem::error::InternalServerError)?;
     let connector = Connector::Rustls(Arc::new(tls_config));

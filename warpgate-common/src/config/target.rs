@@ -140,6 +140,15 @@ pub struct TargetHTTPOptions {
 pub struct Tls {
     pub mode: TlsMode,
     pub verify: bool,
+
+    /// PEM-encoded CA certificate(s) to trust when verifying the target's TLS
+    /// certificate, on top of the system roots. Accepts a bundle of several
+    /// concatenated PEM certificates. Has no effect when `verify` is false.
+    /// This lets a target whose certificate is signed by a private or cluster
+    /// CA (e.g. a stock Kubernetes apiserver) be verified without turning
+    /// verification off.
+    #[schemars(with = "Option<String>")]
+    pub ca: Option<Secret<String>>,
 }
 
 impl Default for Tls {
@@ -149,7 +158,18 @@ impl Default for Tls {
             // A target that says nothing about certificate checking is not
             // asking for it to be off.
             verify: true,
+            ca: None,
         }
+    }
+}
+
+impl Tls {
+    /// The configured CA bundle as PEM bytes, if any.
+    ///
+    /// Callers still gate on `verify`: when verification is off the connection
+    /// trusts any certificate and this material is not consulted.
+    pub fn ca_pem(&self) -> Option<&[u8]> {
+        self.ca.as_ref().map(|ca| ca.expose_secret().as_bytes())
     }
 }
 
@@ -798,6 +818,65 @@ mod tests {
             serde_json::from_str(r#"{"url":"http://t","tls":{"verify":false}}"#).unwrap();
 
         assert!(!off.tls.verify);
+    }
+
+    /// A target with no `ca` behaves exactly as before: no extra trust material.
+    #[test]
+    fn tls_without_a_ca_exposes_no_pem() {
+        let default_tls = Tls::default();
+        assert!(default_tls.ca.is_none());
+        assert!(default_tls.ca_pem().is_none());
+
+        let http: TargetHTTPOptions =
+            serde_json::from_str(r#"{"url":"http://t","tls":{"verify":true}}"#).unwrap();
+        assert!(http.tls.ca.is_none());
+        assert!(http.tls.ca_pem().is_none());
+    }
+
+    /// An inline PEM CA bundle round-trips through the config and is handed out
+    /// as the bytes the TLS client stack expects.
+    #[test]
+    fn tls_ca_bundle_round_trips() {
+        const PEM: &str = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
+        let json = serde_json::json!({
+            "url": "https://t",
+            "tls": { "verify": true, "ca": PEM },
+        })
+        .to_string();
+
+        let http: TargetHTTPOptions = serde_json::from_str(&json).unwrap();
+        assert!(http.tls.verify);
+        assert_eq!(http.tls.ca_pem(), Some(PEM.as_bytes()));
+
+        // The CA survives a serialize/deserialize cycle unchanged.
+        let reparsed: TargetHTTPOptions =
+            serde_json::from_str(&serde_json::to_string(&http).unwrap()).unwrap();
+        assert_eq!(reparsed.tls, http.tls);
+    }
+
+    /// Every TLS-bearing target kind accepts the shared `ca` field.
+    #[test]
+    fn every_tls_target_kind_accepts_a_ca() {
+        const PEM: &str = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
+        let tls = serde_json::json!({ "verify": true, "ca": PEM });
+
+        let http: TargetHTTPOptions =
+            serde_json::from_value(serde_json::json!({ "url": "https://t", "tls": tls })).unwrap();
+        let mysql: TargetMySqlOptions =
+            serde_json::from_value(serde_json::json!({ "host": "t", "tls": tls })).unwrap();
+        let postgres: TargetPostgresOptions =
+            serde_json::from_value(serde_json::json!({ "host": "t", "tls": tls })).unwrap();
+        let kubernetes: TargetKubernetesOptions =
+            serde_json::from_value(serde_json::json!({ "tls": tls })).unwrap();
+
+        for ca in [
+            http.tls.ca_pem(),
+            mysql.tls.ca_pem(),
+            postgres.tls.ca_pem(),
+            kubernetes.tls.ca_pem(),
+        ] {
+            assert_eq!(ca, Some(PEM.as_bytes()));
+        }
     }
 
     /// Fails when a protocol gains a credential field that `secrets_mut` does not
