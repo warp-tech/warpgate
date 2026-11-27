@@ -93,8 +93,12 @@ impl PostgresClient {
                 let accept_invalid_certs = !target.tls.verify;
                 let accept_invalid_hostname = false; // ca + hostname verification
                 let client_config = Arc::new(
-                    configure_tls_connector(accept_invalid_certs, accept_invalid_hostname, None)
-                        .await?,
+                    configure_tls_connector(
+                        accept_invalid_certs,
+                        accept_invalid_hostname,
+                        target.tls.ca_pem(),
+                    )
+                    .await?,
                 );
 
                 stream = stream

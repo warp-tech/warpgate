@@ -512,6 +512,16 @@ pub async fn create_authenticated_client(
 
     if !k8s_options.tls.verify {
         client_builder = client_builder.danger_accept_invalid_certs(true);
+    } else if let Some(ca) = k8s_options.tls.ca_pem() {
+        // Trust the cluster's CA in addition to the system roots. A stock
+        // Kubernetes apiserver presents a certificate signed by the cluster CA,
+        // which is not in any system trust store, so this is what lets
+        // verification stay on instead of falling back to `verify: false`.
+        for cert in reqwest::Certificate::from_pem_bundle(ca)
+            .context("Parsing the Kubernetes target CA bundle")?
+        {
+            client_builder = client_builder.add_root_certificate(cert);
+        }
     }
 
     match &k8s_options.auth {
