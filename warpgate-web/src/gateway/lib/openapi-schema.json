@@ -2044,6 +2044,9 @@
           },
           "rdp": {
             "type": "string"
+          },
+          "redis": {
+            "type": "string"
           }
         }
       },
@@ -2488,6 +2491,10 @@
           "rdp": {
             "type": "integer",
             "format": "uint16"
+          },
+          "redis": {
+            "type": "integer",
+            "format": "uint16"
           }
         }
       },
@@ -2622,7 +2629,8 @@
           "Ssh",
           "Postgres",
           "Vnc",
-          "Rdp"
+          "Rdp",
+          "Redis"
         ]
       },
       "TargetSnapshot": {
@@ -2879,6 +2887,12 @@
             }
           },
           "rdp": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CredentialKind"
+            }
+          },
+          "redis": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CredentialKind"

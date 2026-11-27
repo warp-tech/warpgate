@@ -103,10 +103,7 @@ impl Api {
                         TargetOptions::Http(options) => default_http_path(&options.url),
                         _ => None,
                     },
-                    default_database_name: t
-                        .options
-                        .default_database_name()
-                        .map(ToString::to_string),
+                    default_database_name: t.options.default_database_name(),
                     group,
                 }
             })

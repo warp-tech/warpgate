@@ -40,6 +40,7 @@
         { id: 'kubernetes', name: 'Kubernetes' },
         { id: 'vnc', name: 'VNC' },
         { id: 'rdp', name: 'RDP' },
+        { id: 'redis', name: 'Redis' },
     ]
 
     const possibleCredentialsByProtocol = $derived(
@@ -75,6 +76,7 @@
         ]),
         http: new Map(),
         mysql: new Map(),
+        redis: new Map(),
         ssh: new Map(),
         vnc: new Map([
             [

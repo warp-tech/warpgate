@@ -231,6 +231,57 @@
         }
       ]
     },
+    "RedisIamAuthService": {
+      "description": "Which AWS service to sign the IAM auth token for. Redis has no RDS\nequivalent of its own, so unlike [`DatabaseTargetAuth::IamRole`] the\nservice has to be picked explicitly.",
+      "enum": [
+        "elasticache",
+        "memorydb"
+      ],
+      "type": "string"
+    },
+    "RedisIamRoleAuth": {
+      "properties": {
+        "service": {
+          "$ref": "#/$defs/RedisIamAuthService"
+        }
+      },
+      "required": [
+        "service"
+      ],
+      "type": "object"
+    },
+    "RedisTargetAuth": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/DatabaseTargetPasswordAuth",
+          "properties": {
+            "kind": {
+              "const": "password",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        },
+        {
+          "$ref": "#/$defs/RedisIamRoleAuth",
+          "properties": {
+            "kind": {
+              "const": "iam_role",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object",
+          "unevaluatedProperties": false
+        }
+      ]
+    },
     "RoleSpec": {
       "properties": {
         "description": {
@@ -642,6 +693,18 @@
             "rdp"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "redis": {
+              "$ref": "#/$defs/TargetRedisOptions"
+            }
+          },
+          "required": [
+            "redis"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -756,6 +819,83 @@
           "default": false,
           "description": "Verify the RDP server's TLS certificate against the system root store.\nRDP servers commonly use self-signed certificates, so this is off by default.",
           "type": "boolean"
+        }
+      },
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "TargetRedisOptions": {
+      "properties": {
+        "auth": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RedisTargetAuth"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "database": {
+          "default": null,
+          "description": "Numbered database (`SELECT`) to switch to right after connecting.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "host": {
+          "default": "",
+          "type": "string"
+        },
+        "iam_cluster_id": {
+          "default": null,
+          "description": "ElastiCache/MemoryDB cluster or replication-group id to sign the IAM\nauth token for, when `auth` is `IamRole`. Falls back to `host` if unset,\nsince the two are only sometimes the same string.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "iam_region": {
+          "default": null,
+          "description": "AWS region to sign the IAM auth token for, when `auth` is `IamRole`.\nUnlike RDS/EKS endpoints, ElastiCache/MemoryDB hostnames don't reliably\nembed a parseable region, so it must be given explicitly here.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "idle_timeout": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "port": {
+          "default": 6379,
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tls": {
+          "$ref": "#/$defs/Tls",
+          "default": {
+            "mode": "preferred",
+            "verify": true
+          }
+        },
+        "username": {
+          "default": null,
+          "description": "Redis ACL username. Optional, since Redis's legacy default user has none.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object",

@@ -181,4 +181,27 @@ export const protocolInfo: Partial<Record<TargetKind, string>> = {
 * Web approval
 * Ticket
 `,
+
+    [TargetKind.Redis]: `
+## Warpgate ↔ target
+
+* Authenticates with a stored password (optionally with a Redis ACL username), or an IAM role (ElastiCache/MemoryDB auth token).
+* TLS at target is optional.
+
+## Warpgate ↔ client
+
+* TLS is optional: the listener runs in plaintext unless a certificate is configured.
+* Client authenticates with \`AUTH <user> <password>\` or \`HELLO <proto> AUTH <user> <password>\`; a bare \`HELLO\`/other command before authenticating gets a \`NOAUTH\` error, same as a \`requirepass\`-enabled Redis.
+* The legacy no-username \`AUTH <password>\` form is rejected, since there's nowhere to encode the target name.
+
+## Redis protocol
+
+* RESP2 and RESP3, including pub/sub and transactions.
+* Minimum target: any RESP2/RESP3-speaking Redis-compatible server.
+
+## Supported Warpgate credentials
+
+* Password
+* Ticket
+`,
 }

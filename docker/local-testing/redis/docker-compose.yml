@@ -1,0 +1,62 @@
+# Full stack in Docker: builds Warpgate from the current branch (docker/Dockerfile)
+# and proxies to a real Redis container, to exercise the new Redis target support.
+services:
+  redis-target:
+    image: redis:7-alpine
+    container_name: wg-redis-target
+    # Not published to the host - only reachable from the warpgate container,
+    # as `redis-target:6379`, the same way a real backend would be.
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+    restart: unless-stopped
+
+  # A second backend that requires ACL username+password auth, to exercise
+  # TargetRedisOptions.username/auth (Warpgate authenticating *to the
+  # backend*, distinct from the client authenticating to Warpgate). The
+  # default user is left alone (nopass) so the healthcheck stays simple.
+  redis-target-auth:
+    image: redis:7-alpine
+    container_name: wg-redis-target-auth
+    command: ["redis-server", "--user", "wguser", "on", ">wgpassword123", "~*", "&*", "+@all"]
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+    restart: unless-stopped
+
+  warpgate:
+    build:
+      context: ../../..
+      dockerfile: docker/Dockerfile
+    container_name: wg-redis-poc
+    depends_on:
+      redis-target:
+        condition: service_healthy
+      redis-target-auth:
+        condition: service_healthy
+    entrypoint: ["/bootstrap/entrypoint.sh"]
+    environment:
+      WARPGATE_ADMIN_PASSWORD: ${WARPGATE_ADMIN_PASSWORD:-Admin1234!}
+      WARPGATE_ADMIN_TOKEN: ${WARPGATE_ADMIN_TOKEN:-token-value}
+    ports:
+      - "2222:2222" # SSH
+      - "8888:8888" # HTTPS admin UI / API
+      - "6379:6379" # Redis protocol listener, proxied through to redis-target
+    volumes:
+      - ./data:/data
+      - ./entrypoint.sh:/bootstrap/entrypoint.sh:ro
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+
+networks:
+  default:
+    name: wg-redis-test-net

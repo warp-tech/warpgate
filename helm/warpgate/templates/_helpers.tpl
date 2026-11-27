@@ -176,6 +176,9 @@ expanded from the container's environment.
 {{- with .Values.setup.pgsql }}
 - --postgres-port={{ . }}
 {{- end }}
+{{- with .Values.setup.redis }}
+- --redis-port={{ . }}
+{{- end }}
 {{- with .Values.setup.kubernetes }}
 - --kubernetes-port={{ . }}
 {{- end }}

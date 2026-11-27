@@ -8,4 +8,5 @@ export const TARGET_KIND_LABELS: Record<TargetKind, string> = {
     [TargetKind.Kubernetes]: 'Kubernetes',
     [TargetKind.Vnc]: 'VNC',
     [TargetKind.Rdp]: 'RDP',
+    [TargetKind.Redis]: 'Redis',
 }

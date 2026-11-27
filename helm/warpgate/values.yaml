@@ -180,6 +180,7 @@ setup:
   http: 8888
   mysql: 33306
   pgsql: 55432
+  redis: 6379
   kubernetes: 0
   # kubernetes: 6443
 
@@ -201,6 +202,7 @@ service:
     http: 8888
     mysql: 33306
     pgsql: 55432
+    redis: 6379
     kubernetes: 0
     # kubernetes: 6443
 

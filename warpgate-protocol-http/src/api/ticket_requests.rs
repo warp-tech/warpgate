@@ -59,10 +59,7 @@ impl TryFrom<Target::Model> for ActivatedTicketTargetInfo {
             name: target.name,
             kind: (&target.options).into(),
             external_host: target.options.external_host().map(ToString::to_string),
-            default_database_name: target
-                .options
-                .default_database_name()
-                .map(ToString::to_string),
+            default_database_name: target.options.default_database_name(),
         })
     }
 }

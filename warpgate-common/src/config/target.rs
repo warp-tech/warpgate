@@ -8,7 +8,8 @@ use warpgate_tls::TlsMode;
 use super::defaults::{
     _default_empty_string, _default_empty_vec, _default_mysql_port,
     _default_postgres_idle_timeout_str, _default_postgres_port, _default_rdp_port,
-    _default_ssh_ca_mount, _default_ssh_port, _default_username, _default_vnc_port,
+    _default_redis_port, _default_ssh_ca_mount, _default_ssh_port, _default_username,
+    _default_vnc_port,
 };
 use crate::secrets::{MaybeSecretRef, SecretRef, StoredSecrets};
 use crate::{Protocol, ProviderId, Secret, SshClientKeyId, StoredSecret, TargetGroupId, TargetId};
@@ -239,6 +240,76 @@ pub struct TargetPostgresOptions {
 
     #[serde(default)]
     pub protocol_version: PostgresProtocolVersion,
+}
+
+/// Which AWS service to sign the IAM auth token for. Redis has no RDS
+/// equivalent of its own, so unlike [`DatabaseTargetAuth::IamRole`] the
+/// service has to be picked explicitly.
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Enum, JsonSchema)]
+pub enum RedisIamAuthService {
+    #[serde(rename = "elasticache")]
+    ElastiCache,
+    #[serde(rename = "memorydb")]
+    MemoryDb,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Union, JsonSchema)]
+#[serde(tag = "kind")]
+#[oai(discriminator_name = "kind", one_of)]
+pub enum RedisTargetAuth {
+    #[serde(rename = "password")]
+    Password(DatabaseTargetPasswordAuth),
+    #[serde(rename = "iam_role")]
+    IamRole(RedisIamRoleAuth),
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
+pub struct RedisIamRoleAuth {
+    pub service: RedisIamAuthService,
+}
+
+impl Default for RedisTargetAuth {
+    fn default() -> Self {
+        Self::Password(DatabaseTargetPasswordAuth::default())
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
+pub struct TargetRedisOptions {
+    #[serde(default = "_default_empty_string")]
+    pub host: String,
+
+    #[serde(default = "_default_redis_port")]
+    pub port: u16,
+
+    /// Redis ACL username. Optional, since Redis's legacy default user has none.
+    #[serde(default)]
+    pub username: Option<String>,
+
+    #[serde(default)]
+    pub auth: Option<RedisTargetAuth>,
+
+    #[serde(default)]
+    pub tls: Tls,
+
+    /// Numbered database (`SELECT`) to switch to right after connecting.
+    #[serde(default)]
+    pub database: Option<u8>,
+
+    #[serde(default)]
+    pub idle_timeout: Option<String>,
+
+    /// ElastiCache/MemoryDB cluster or replication-group id to sign the IAM
+    /// auth token for, when `auth` is `IamRole`. Falls back to `host` if unset,
+    /// since the two are only sometimes the same string.
+    #[serde(default)]
+    pub iam_cluster_id: Option<String>,
+
+    /// AWS region to sign the IAM auth token for, when `auth` is `IamRole`.
+    /// Unlike RDS/EKS endpoints, ElastiCache/MemoryDB hostnames don't reliably
+    /// embed a parseable region, so it must be given explicitly here.
+    #[serde(default)]
+    pub iam_region: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, Object, JsonSchema)]
@@ -472,6 +543,8 @@ pub enum TargetOptions {
     Vnc(TargetVncOptions),
     #[serde(rename = "rdp")]
     Rdp(TargetRdpOptions),
+    #[serde(rename = "redis")]
+    Redis(TargetRedisOptions),
 }
 
 impl TargetOptions {
@@ -493,6 +566,7 @@ impl TargetOptions {
             TargetOptions::Postgres(_) => Protocol::Postgres,
             TargetOptions::Vnc(_) => Protocol::Vnc,
             TargetOptions::Rdp(_) => Protocol::Rdp,
+            TargetOptions::Redis(_) => Protocol::Redis,
         }
     }
 
@@ -505,10 +579,11 @@ impl TargetOptions {
         }
     }
 
-    pub fn default_database_name(&self) -> Option<&str> {
+    pub fn default_database_name(&self) -> Option<String> {
         match self {
-            Self::MySql(options) => options.default_database_name.as_deref(),
-            Self::Postgres(options) => options.default_database_name.as_deref(),
+            Self::MySql(options) => options.default_database_name.as_deref().map(String::from),
+            Self::Postgres(options) => options.default_database_name.as_deref().map(String::from),
+            Self::Redis(options) => options.database.map(|db| db.to_string()),
             _ => None,
         }
     }
@@ -604,6 +679,15 @@ impl TargetSecrets for TargetRdpOptions {
     }
 }
 
+impl TargetSecrets for TargetRedisOptions {
+    fn secrets_mut(&mut self) -> Vec<&mut MaybeSecretRef> {
+        match &mut self.auth {
+            Some(RedisTargetAuth::Password(auth)) => vec![&mut auth.password],
+            Some(RedisTargetAuth::IamRole(_)) | None => vec![],
+        }
+    }
+}
+
 impl TargetSecrets for TargetOptions {
     fn secrets_mut(&mut self) -> Vec<&mut MaybeSecretRef> {
         match self {
@@ -614,6 +698,7 @@ impl TargetSecrets for TargetOptions {
             TargetOptions::Postgres(o) => o.secrets_mut(),
             TargetOptions::Vnc(o) => o.secrets_mut(),
             TargetOptions::Rdp(o) => o.secrets_mut(),
+            TargetOptions::Redis(o) => o.secrets_mut(),
         }
     }
 }
@@ -835,6 +920,10 @@ mod tests {
         vnc.auth = VncTargetAuth::Password(VncTargetPasswordAuth { password: secret() });
         let mut rdp: TargetRdpOptions = serde_json::from_str("{}").unwrap();
         rdp.auth = RdpTargetAuth::Password(RdpTargetPasswordAuth { password: secret() });
+        let mut redis: super::TargetRedisOptions = serde_json::from_str("{}").unwrap();
+        redis.auth = Some(super::RedisTargetAuth::Password(
+            DatabaseTargetPasswordAuth { password: secret() },
+        ));
         let mut k8s_token: TargetKubernetesOptions = serde_json::from_str("{}").unwrap();
         k8s_token.auth = KubernetesTargetAuth::Token(KubernetesTargetTokenAuth { token: secret() });
         let mut k8s_cert: TargetKubernetesOptions = serde_json::from_str("{}").unwrap();
@@ -849,6 +938,7 @@ mod tests {
             TargetOptions::Postgres(postgres),
             TargetOptions::Vnc(vnc),
             TargetOptions::Rdp(rdp),
+            TargetOptions::Redis(redis),
             TargetOptions::Kubernetes(k8s_token),
             TargetOptions::Kubernetes(k8s_cert),
             TargetOptions::Http(serde_json::from_str(r#"{"url":"http://t"}"#).unwrap()),

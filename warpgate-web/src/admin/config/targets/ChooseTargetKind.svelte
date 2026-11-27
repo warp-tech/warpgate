@@ -39,6 +39,11 @@
             value: TargetKind.Rdp,
             description: 'Access a Windows remote desktop in the browser',
         },
+        {
+            value: TargetKind.Redis,
+            description: 'Expose access to a Redis-compatible server',
+            experimental: true,
+        },
     ]
 </script>
 

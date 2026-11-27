@@ -96,6 +96,10 @@ pub(crate) struct UnattendedSetupArgs {
     #[clap(long)]
     pub(crate) rdp_port: Option<u16>,
 
+    /// Enable Redis and set port
+    #[clap(long)]
+    pub(crate) redis_port: Option<u16>,
+
     /// Enable session recording
     #[clap(long)]
     pub(crate) record_sessions: bool,

@@ -41,6 +41,18 @@ pub async fn command(params: &GlobalParams) -> Result<()> {
             .await
             .with_context(|| "Checking PostgreSQL key".to_string())?;
     }
+    if config.store.redis.enable && !config.store.redis.certificate.is_empty() {
+        TlsCertificateBundle::from_file(
+            params
+                .paths_relative_to()
+                .join(&config.store.redis.certificate),
+        )
+        .await
+        .with_context(|| "Checking Redis certificate".to_string())?;
+        TlsPrivateKey::from_file(params.paths_relative_to().join(&config.store.redis.key))
+            .await
+            .with_context(|| "Checking Redis key".to_string())?;
+    }
     info!("No problems found");
     Ok(())
 }

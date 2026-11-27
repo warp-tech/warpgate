@@ -35,7 +35,7 @@ jobs:
 
       - name: Install build deps
         run: |
-          sudo apt-get install openssh-client expect
+          sudo apt-get install openssh-client expect redis-tools
           cargo install --locked just@1.4.0
           # Older versions can't find test binaries in Cargo's build-dir layout and
           # silently report no coverage for them.

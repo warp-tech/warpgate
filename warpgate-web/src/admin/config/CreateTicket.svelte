@@ -89,7 +89,9 @@
                     TargetKind.MySql ||
                 selectedTarget.options.kind === TargetKind.Postgres
                     ? selectedTarget.options.defaultDatabaseName
-                    : undefined}
+                    : selectedTarget.options.kind === TargetKind.Redis
+                      ? selectedTarget.options.database?.toString()
+                      : undefined}
             />
         {/if}
 
