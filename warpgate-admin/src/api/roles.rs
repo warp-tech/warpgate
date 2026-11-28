@@ -193,6 +193,10 @@ impl DetailApi {
         match store::delete(&admin.services().db, Actor::Admin, id.0).await {
             Ok(role) => {
                 audited(&admin, role).await;
+                admin
+                    .services()
+                    .close_sessions_without_role_access()
+                    .await?;
                 Ok(DeleteRoleResponse::Deleted)
             }
             Err(ResourceError::NotFound) => Ok(DeleteRoleResponse::NotFound),

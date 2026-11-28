@@ -189,8 +189,9 @@ impl DetailApi {
         admin.require(AdminPermission::TargetsEdit)?;
 
         let services = admin.services();
-        let target = match store::update(&services.db, Actor::Admin, id.0, &body).await {
-            Ok(target) => audited(&admin, target).await,
+        let (target, admitted) = match store::update(&services.db, Actor::Admin, id.0, &body).await
+        {
+            Ok((target, admitted)) => (audited(&admin, target).await, admitted),
             Err(ResourceError::EmptyName) => {
                 warn!("Rejecting request: target name is empty");
                 return Ok(UpdateTargetResponse::BadRequest);
@@ -205,6 +206,8 @@ impl DetailApi {
             }
             Err(err) => return Err(err.into()),
         };
+
+        services.close_admitted_sessions(admitted).await?;
 
         warpgate_core::rate_limiting::apply_new_rate_limits(
             &services.rate_limiter_registry,
@@ -386,6 +389,10 @@ impl RolesApi {
         match store::remove_role(&admin.services().db, Actor::Admin, id.0, role_id.0).await {
             Ok(change) => {
                 change.audit(admin.changed_by());
+                admin
+                    .services()
+                    .close_sessions_without_role_access()
+                    .await?;
                 Ok(DeleteTargetRoleResponse::Deleted)
             }
             Err(ResourceError::NotFound) => Ok(DeleteTargetRoleResponse::NotFound),

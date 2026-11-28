@@ -7,7 +7,7 @@ use sea_orm::{
 use uuid::Uuid;
 use warpgate_common::{
     ProviderId, RoleId, RowId, SSHTargetAuth, SecretResolver, SshClientKeyId,
-    Target as TargetConfig, TargetGroupId, TargetId, TargetOptions, WarpgateError,
+    Target as TargetConfig, TargetGroupId, TargetId, TargetOptions, UserSessionId, WarpgateError,
 };
 use warpgate_db_entities::{
     Role, SshClientKey, Target, TargetGroup, TargetRoleAssignment, begin_write,
@@ -78,7 +78,7 @@ pub struct Applied {
     pub entries: Vec<Entry>,
     /// Role assignments added and removed by the target changes
     pub role_assignments: Vec<RoleAssignmentChange>,
-    /// Sessions that deleted targets had admitted, for the caller to close
+    /// Sessions that deleted or updated targets had admitted, for the caller to close
     pub admitted: AdmittedSessions,
 }
 
@@ -144,6 +144,7 @@ pub async fn apply<C: ConnectionTrait + TransactionTrait>(
     };
     let mut entries = Vec::new();
     let mut role_assignments = Vec::new();
+    let mut admitted = Vec::new();
     let (targets, others): (Vec<&Change>, Vec<&Change>) = confirmed
         .changes
         .iter()
@@ -176,7 +177,7 @@ pub async fn apply<C: ConnectionTrait + TransactionTrait>(
                 write.client_key(manifest, secrets).await.map(untyped)
             }
             Resource::Target(manifest) => write
-                .target(manifest, &ids, &mut role_assignments)
+                .target(manifest, &ids, &mut role_assignments, &mut admitted)
                 .await
                 .map(untyped),
         };
@@ -193,7 +194,6 @@ pub async fn apply<C: ConnectionTrait + TransactionTrait>(
     // Deletes run after the writes. By then a replacement client key exists
     // and updated targets no longer reference the deleted rows. Reverse plan
     // order deletes targets before the rows they reference.
-    let mut admitted = Vec::new();
     for change in confirmed.changes.iter().rev() {
         let Change::Delete { kind, id, .. } = change else {
             continue;
@@ -319,7 +319,35 @@ store!(
     TargetGroupDataRequest
 );
 store!(RoleSpec, roles, Role, RoleDataRequest);
-store!(TargetSpec, targets, Target, TargetDataRequest);
+
+impl Store for TargetSpec {
+    type Entity = Target::Entity;
+    type Row = Target::Model;
+    type Data = TargetDataRequest;
+
+    fn id(row: &Self::Row) -> Id<Self> {
+        row.id
+    }
+
+    async fn create<C: ConnectionTrait>(
+        db: &C,
+        actor: Actor,
+        data: TargetDataRequest,
+    ) -> Result<Unaudited<Self::Row>, ResourceError> {
+        targets::create(db, actor, &data).await
+    }
+
+    async fn update<C: ConnectionTrait>(
+        db: &C,
+        actor: Actor,
+        id: Id<Self>,
+        data: TargetDataRequest,
+    ) -> Result<Unaudited<Self::Row>, ResourceError> {
+        targets::update(db, actor, id, &data)
+            .await
+            .map(|(updated, _)| updated)
+    }
+}
 
 impl Store for SshClientKeySpec {
     type Entity = SshClientKey::Entity;
@@ -412,6 +440,7 @@ impl<C: ConnectionTrait> Write<'_, C> {
         manifest: &Manifest<TargetSpec>,
         ids: &Ids<'_>,
         role_assignments: &mut Vec<RoleAssignmentChange>,
+        admitted: &mut Vec<UserSessionId>,
     ) -> Result<(TargetId, Entry), ResourceError> {
         let spec = &manifest.spec;
         let OptionReferences {
@@ -437,7 +466,21 @@ impl<C: ConnectionTrait> Write<'_, C> {
             .map(|group| ids.find::<TargetGroupSpec>(group))
             .transpose()?;
         let data = spec.data_request(&manifest.metadata.name, options, group_id);
-        let (id, entry) = self.save::<TargetSpec>(data).await?;
+        let (write, sessions) = match self.id.map(TargetId) {
+            None => (
+                targets::create(self.db, self.actor, &data).await?,
+                AdmittedSessions(vec![]),
+            ),
+            Some(id) if self.adopt => {
+                set_owner::<Target::Entity, _>(self.db, id, Some(self.provider)).await?;
+                let (update, sessions) = targets::update(self.db, self.actor, id, &data).await?;
+                (update.adopted(), sessions)
+            }
+            Some(id) => targets::update(self.db, self.actor, id, &data).await?,
+        };
+        admitted.extend(sessions.0);
+        let (row, entry) = write.deferred(self.db).await;
+        let id = row.id;
 
         let wanted = spec
             .roles
