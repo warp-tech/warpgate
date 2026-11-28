@@ -4,26 +4,32 @@ use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Enum, Object, OpenApi};
 use russh::keys::{Algorithm, HashAlg, PrivateKey};
-use sea_orm::{ActiveModelTrait, EntityTrait, ModelTrait, PaginatorTrait, Set, Unchanged};
+use sea_orm::EntityTrait;
 use serde::Serialize;
-use uuid::Uuid;
 use warpgate_common::helpers::rng::get_crypto_rng;
-use warpgate_common::{AdminPermission, SecretRef, WarpgateError};
+use warpgate_common::{AdminPermission, ProviderId, SecretRef, SshClientKeyId, WarpgateError};
 use warpgate_common_http::errors::bad_request;
+use warpgate_core::resources::audit::Unaudited;
+use warpgate_core::resources::ssh_client_keys::{self, KeyMaterial, SshClientKeyDataRequest};
+use warpgate_core::resources::{Actor, ResourceError};
 use warpgate_db_entities::SshClientKey;
 
 use super::AdminContext;
+use super::common::audited;
 
 pub struct Api;
 
 #[derive(Serialize, Object)]
 struct SSHClientKey {
-    pub id: Uuid,
+    pub id: SshClientKeyId,
     pub label: String,
     pub kind: String,
     pub public_key: String,
     pub is_default: bool,
     pub secret_backend: Option<String>,
+    // Undocumented: a description here makes the schema wrap the reference,
+    // and the client generators then emit a second provider type
+    pub provider: Option<ProviderId>,
 }
 
 impl From<SshClientKey::Model> for SSHClientKey {
@@ -42,6 +48,7 @@ impl From<SshClientKey::Model> for SSHClientKey {
             public_key: model.public_key,
             is_default: model.is_default,
             secret_backend: backend,
+            provider: model.provider,
         }
     }
 }
@@ -114,6 +121,18 @@ struct UpdateSSHClientKeyRequest {
 enum UpdateSSHClientKeyResponse {
     #[oai(status = 200)]
     Ok(Json<SSHClientKey>),
+    #[oai(status = 400)]
+    BadRequest(Json<String>),
+    #[oai(status = 409)]
+    Conflict(Json<String>),
+    #[oai(status = 404)]
+    NotFound,
+}
+
+#[derive(ApiResponse)]
+enum ReleaseSSHClientKeyResponse {
+    #[oai(status = 200)]
+    Ok(Json<SSHClientKey>),
     #[oai(status = 404)]
     NotFound,
 }
@@ -124,6 +143,8 @@ enum DeleteSSHClientKeyResponse {
     Deleted,
     #[oai(status = 400)]
     BadRequest(Json<String>),
+    #[oai(status = 409)]
+    Conflict(Json<String>),
     #[oai(status = 404)]
     NotFound,
 }
@@ -204,25 +225,24 @@ impl Api {
         admin.require(AdminPermission::ConfigEdit)?;
 
         let reference = SecretRef::from_str(&body.reference)?;
-
-        let model = warpgate_protocol_ssh::import_client_key_reference(
-            &admin.services().db,
-            &body.label,
-            &reference,
-            &*admin.services().secret_backends,
-            body.is_default,
+        let services = admin.services();
+        let material = match KeyMaterial::reference(&reference, &*services.secret_backends).await {
+            Ok(material) => material,
+            Err(e) => {
+                return Ok(CreateSSHClientKeyResponse::BadRequest(Json(format!(
+                    "Could not resolve the referenced key: {e}"
+                ))));
+            }
+        };
+        let data = SshClientKeyDataRequest {
+            label: body.label.clone(),
+            is_default: body.is_default,
+        };
+        created(
+            &admin,
+            ssh_client_keys::create(&services.db, Actor::Admin, &data, material).await,
         )
-        .await;
-
-        match model {
-            Ok(Some(model)) => Ok(CreateSSHClientKeyResponse::Created(Json(model.into()))),
-            Ok(None) => Ok(CreateSSHClientKeyResponse::Conflict(Json(
-                "This key is already imported".into(),
-            ))),
-            Err(e) => Ok(CreateSSHClientKeyResponse::BadRequest(Json(format!(
-                "Could not resolve the referenced key: {e}"
-            )))),
-        }
+        .await
     }
 
     #[oai(
@@ -233,26 +253,51 @@ impl Api {
     async fn api_update_client_key(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<SshClientKeyId>,
         body: Json<UpdateSSHClientKeyRequest>,
     ) -> Result<UpdateSSHClientKeyResponse, WarpgateError> {
         admin.require(AdminPermission::ConfigEdit)?;
 
-        let db = &admin.services().db;
-        let Some(key) = SshClientKey::Entity::find_by_id(id.0).one(db).await? else {
-            return Ok(UpdateSSHClientKeyResponse::NotFound);
+        let data = SshClientKeyDataRequest {
+            label: body.label.clone(),
+            is_default: body.is_default,
         };
-
-        let model = SshClientKey::ActiveModel {
-            id: Unchanged(key.id),
-            label: Set(body.label.clone()),
-            is_default: Set(body.is_default),
-            ..Default::default()
+        match ssh_client_keys::update(&admin.services().db, Actor::Admin, id.0, &data, None).await {
+            Ok(key) => Ok(UpdateSSHClientKeyResponse::Ok(Json(
+                audited(&admin, key).await.into(),
+            ))),
+            Err(ResourceError::EmptyName) => Ok(UpdateSSHClientKeyResponse::BadRequest(
+                bad_request("The label is empty"),
+            )),
+            Err(err @ (ResourceError::NameTaken | ResourceError::OwnedBy(_))) => {
+                Ok(UpdateSSHClientKeyResponse::Conflict(Json(err.to_string())))
+            }
+            Err(ResourceError::NotFound) => Ok(UpdateSSHClientKeyResponse::NotFound),
+            Err(err) => Err(err.into()),
         }
-        .update(db)
-        .await?;
+    }
 
-        Ok(UpdateSSHClientKeyResponse::Ok(Json(model.into())))
+    /// Hands a managed key back to manual editing
+    #[oai(
+        path = "/ssh/own-keys/:id/release",
+        method = "post",
+        operation_id = "release_ssh_own_key"
+    )]
+    async fn api_release_client_key(
+        &self,
+        admin: AdminContext,
+        id: Path<SshClientKeyId>,
+    ) -> Result<ReleaseSSHClientKeyResponse, WarpgateError> {
+        super::gitops::release_managed::<SshClientKey::Entity>(&admin, id.0).await?;
+        Ok(
+            match SshClientKey::Entity::find_by_id(id.0)
+                .one(&admin.services().db)
+                .await?
+            {
+                Some(key) => ReleaseSSHClientKeyResponse::Ok(Json(key.into())),
+                None => ReleaseSSHClientKeyResponse::NotFound,
+            },
+        )
     }
 
     #[oai(
@@ -263,40 +308,63 @@ impl Api {
     async fn api_delete_client_key(
         &self,
         admin: AdminContext,
-        id: Path<Uuid>,
+        id: Path<SshClientKeyId>,
     ) -> Result<DeleteSSHClientKeyResponse, WarpgateError> {
         admin.require(AdminPermission::ConfigEdit)?;
 
-        let db = &admin.services().db;
-        let Some(key) = SshClientKey::Entity::find_by_id(id.0).one(db).await? else {
-            return Ok(DeleteSSHClientKeyResponse::NotFound);
-        };
-
-        if SshClientKey::Entity::find().count(db).await? <= 1 {
-            return Ok(DeleteSSHClientKeyResponse::BadRequest(bad_request(
-                "At least one SSH client key must remain",
-            )));
+        match ssh_client_keys::delete(&admin.services().db, Actor::Admin, id.0).await {
+            Ok(key) => {
+                audited(&admin, key).await;
+                Ok(DeleteSSHClientKeyResponse::Deleted)
+            }
+            Err(err @ ResourceError::LastClientKey) => Ok(DeleteSSHClientKeyResponse::BadRequest(
+                bad_request(err.to_string()),
+            )),
+            Err(err @ ResourceError::OwnedBy(_)) => {
+                Ok(DeleteSSHClientKeyResponse::Conflict(Json(err.to_string())))
+            }
+            Err(ResourceError::NotFound) => Ok(DeleteSSHClientKeyResponse::NotFound),
+            Err(err) => Err(err.into()),
         }
-
-        key.delete(db).await?;
-        Ok(DeleteSSHClientKeyResponse::Deleted)
     }
 }
 
-/// Stores a fresh key (imported or generated) as a non-default key — the admin
-/// flags it default afterwards. A duplicate public key yields a 409.
+/// Stores a fresh key (imported or generated)
 async fn store_new_key(
     admin: &AdminContext,
     label: &str,
     key: &PrivateKey,
     is_default: bool,
 ) -> Result<CreateSSHClientKeyResponse, WarpgateError> {
-    match warpgate_protocol_ssh::import_client_key(&admin.services().db, label, key, is_default)
-        .await?
-    {
-        Some(model) => Ok(CreateSSHClientKeyResponse::Created(Json(model.into()))),
-        None => Ok(CreateSSHClientKeyResponse::Conflict(Json(
+    let data = SshClientKeyDataRequest {
+        label: label.into(),
+        is_default,
+    };
+    let material = KeyMaterial::inline(key)?;
+    created(
+        admin,
+        ssh_client_keys::create(&admin.services().db, Actor::Admin, &data, material).await,
+    )
+    .await
+}
+
+async fn created(
+    admin: &AdminContext,
+    result: Result<Unaudited<SshClientKey::Model>, ResourceError>,
+) -> Result<CreateSSHClientKeyResponse, WarpgateError> {
+    match result {
+        Ok(key) => Ok(CreateSSHClientKeyResponse::Created(Json(
+            audited(admin, key).await.into(),
+        ))),
+        Err(ResourceError::KeyTaken) => Ok(CreateSSHClientKeyResponse::Conflict(Json(
             "This key is already imported".into(),
         ))),
+        Err(err @ ResourceError::NameTaken) => {
+            Ok(CreateSSHClientKeyResponse::Conflict(Json(err.to_string())))
+        }
+        Err(ResourceError::EmptyName) => Ok(CreateSSHClientKeyResponse::BadRequest(bad_request(
+            "The label is empty",
+        ))),
+        Err(err) => Err(err.into()),
     }
 }

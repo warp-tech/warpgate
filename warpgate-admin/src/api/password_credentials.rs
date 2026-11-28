@@ -4,12 +4,13 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, Set};
 use uuid::Uuid;
 use warpgate_common::{
-    AdminPermission, PasswordPolicyViolation, Secret, UserPasswordCredential, WarpgateError,
-    validate_password,
+    AdminPermission, PasswordPolicyViolation, Secret, UserId, UserPasswordCredential,
+    WarpgateError, validate_password,
 };
-use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
+use warpgate_core::logging::CredentialChange;
 use warpgate_db_entities::{PasswordCredential, User};
 
+use super::common::audit_credential;
 use super::{AdminContext, guard_user_mutation};
 
 #[derive(Object)]
@@ -56,7 +57,7 @@ impl ListApi {
     async fn api_get_all(
         &self,
         admin: AdminContext,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
     ) -> Result<GetPasswordCredentialsResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
 
@@ -82,7 +83,7 @@ impl ListApi {
         &self,
         admin: AdminContext,
         body: Json<NewPasswordCredential>,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
     ) -> Result<CreatePasswordCredentialResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
 
@@ -112,15 +113,7 @@ impl ListApi {
             return Ok(CreatePasswordCredentialResponse::NotFound);
         };
 
-        AuditEvent::CredentialCreated {
-            credential_type: "password".to_string(),
-            credential_name: None,
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username: user.username,
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        audit_credential(&admin, CredentialChange::Created, "password", None, &user);
 
         Ok(CreatePasswordCredentialResponse::Created(Json(
             object.into(),
@@ -149,7 +142,7 @@ impl DetailApi {
     async fn api_delete(
         &self,
         admin: AdminContext,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
         id: Path<Uuid>,
     ) -> Result<DeleteCredentialResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
@@ -170,15 +163,7 @@ impl DetailApi {
             return Ok(DeleteCredentialResponse::NotFound);
         };
 
-        AuditEvent::CredentialDeleted {
-            credential_type: "password".to_string(),
-            credential_name: None,
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username: user.username,
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        audit_credential(&admin, CredentialChange::Deleted, "password", None, &user);
 
         Ok(DeleteCredentialResponse::Deleted)
     }

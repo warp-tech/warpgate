@@ -1,5 +1,6 @@
 <script lang="ts">
     import { api, type Role } from 'admin/lib/api'
+    import ManagedIcon from 'admin/lib/ManagedIcon.svelte'
     import ItemList, {
         type LoadOptions,
         type PaginatedResponse,
@@ -60,11 +61,12 @@
                         {role.name}
                     </strong>
                     {#if role.description}
-                        <small class="d-block text-muted"
-                            >{role.description}</small
-                        >
+                        <small class="d-block text-muted">
+                            {role.description}
+                        </small>
                     {/if}
                 </div>
+                <ManagedIcon provider={role.provider} class="ms-auto" />
             </a>
         {/snippet}
     </ItemList>

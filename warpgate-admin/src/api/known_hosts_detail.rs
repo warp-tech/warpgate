@@ -3,6 +3,7 @@ use poem_openapi::{ApiResponse, OpenApi};
 use sea_orm::{EntityTrait, ModelTrait};
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
+use warpgate_core::resources::audit;
 use warpgate_db_entities::KnownHost;
 
 use super::AdminContext;
@@ -37,7 +38,8 @@ impl Api {
 
         match known_host {
             Some(known_host) => {
-                known_host.delete(db).await?;
+                known_host.clone().delete(db).await?;
+                audit::deleted(admin.changed_by(), &known_host);
                 Ok(DeleteSSHKnownHostResponse::Deleted)
             }
             None => Ok(DeleteSSHKnownHostResponse::NotFound),

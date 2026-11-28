@@ -13,10 +13,9 @@ use ratatui::widgets::{
 use ratatui::{Terminal, TerminalOptions, Viewport};
 use termwiz::input::{InputEvent, InputParser, KeyCode, Modifiers};
 use tui_input::{Input, InputRequest};
-use uuid::Uuid;
 use warpgate_common::eventhub::{EventSender, EventSubscription};
 use warpgate_common::fuzzy::fuzzy_rank;
-use warpgate_common::{Target, TargetSSHOptions, UserSessionId, WarpgateError};
+use warpgate_common::{Target, TargetId, TargetSSHOptions, UserSessionId, WarpgateError};
 
 use crate::server::session::Event;
 
@@ -128,7 +127,7 @@ struct DrawState {
 #[derive(Debug)]
 pub enum MenuEvent {
     Render(Bytes),
-    Selected(Uuid),
+    Selected(TargetId),
     Abort,
 }
 
@@ -578,6 +577,7 @@ async fn run_target_menu_loop(
             | Event::Menu(_)
             | Event::AdminApprovalPending
             | Event::AdminApprovalResolved { .. }
+            | Event::ClientChannelOpenResult(_, _)
             | Event::ServerChannelOpenResult(_, _) => {}
         }
     }

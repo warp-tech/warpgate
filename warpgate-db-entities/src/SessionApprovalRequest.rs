@@ -2,14 +2,14 @@ use std::ops::Deref;
 
 use poem_openapi::Enum;
 use sea_orm::entity::prelude::*;
-use sea_orm::sea_query::{IntoCondition, SimpleExpr};
+use sea_orm::sea_query::{ExprTrait, IntoCondition, SimpleExpr};
 use sea_orm::{Condition, NotSet, QueryFilter, Set, SqlErr};
 use serde::Serialize;
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_common::auth::{ApprovalKind, ApprovalScope};
 use warpgate_common::helpers::username::username_eq_ci;
-use warpgate_common::{NodeId, UserSessionId, WarpgateError};
+use warpgate_common::{NodeId, UserId, UserSessionId, WarpgateError};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Enum, EnumIter, DeriveActiveEnum, Serialize)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(16))")]
@@ -63,7 +63,7 @@ pub struct Model {
     pub node_id: NodeId,
     pub protocol: String,
     pub username: String,
-    pub user_id: Uuid,
+    pub user_id: UserId,
     #[sea_orm(primary_key, auto_increment = false)]
     pub target: String,
     pub remote_address: Option<String>,
@@ -77,7 +77,7 @@ pub struct Model {
     pub scope: Option<ApprovalScope>,
     pub resolved_by_username: Option<String>,
     /// None when resolver isn't a user (e.g. API token)
-    pub resolved_by_user_id: Option<Uuid>,
+    pub resolved_by_user_id: Option<UserId>,
     pub resolved_at: Option<OffsetDateTime>,
     /// when the session has acknowledged the decision
     pub consumed_at: Option<OffsetDateTime>,
@@ -113,11 +113,7 @@ impl StatusTransition {
     }
 
     /// returns change count
-    async fn apply(
-        self,
-        db: &DatabaseConnection,
-        which: Condition,
-    ) -> Result<u64, WarpgateError> {
+    async fn apply(self, db: &DatabaseConnection, which: Condition) -> Result<u64, WarpgateError> {
         let mut query = Entity::update_many()
             .col_expr(Column::Status, self.to.into())
             .filter(which)
@@ -156,7 +152,7 @@ pub struct NewRequest {
     pub node_id: NodeId,
     pub protocol: String,
     pub username: String,
-    pub user_id: Uuid,
+    pub user_id: UserId,
     pub remote_address: Option<String>,
     pub match_digest: Option<String>,
     pub started: OffsetDateTime,
@@ -218,9 +214,9 @@ impl Key {
     }
 }
 
-impl IntoCondition for Key {
-    fn into_condition(self) -> Condition {
-        self.0
+impl From<Key> for Condition {
+    fn from(key: Key) -> Self {
+        key.0
     }
 }
 
@@ -259,6 +255,7 @@ async fn try_refresh_pending(db: &DatabaseConnection, row: &ActiveModel) -> Resu
         ..row.clone()
     };
     match Entity::update(refresh)
+        .validate()?
         .filter(Column::Status.eq(ApprovalRequestStatus::Pending))
         .exec(db)
         .await
@@ -269,7 +266,7 @@ async fn try_refresh_pending(db: &DatabaseConnection, row: &ActiveModel) -> Resu
     }
 }
 
-enum Reopened {
+enum ReopenOutcome {
     Reopened,
     /// The entry to be reopened just got refreshed by someone else
     NotUnanswered,
@@ -282,7 +279,7 @@ async fn try_reopen_unanswered(
     key: &Key,
     ticket_id: Option<Uuid>,
     row: &ActiveModel,
-) -> Result<Reopened, WarpgateError> {
+) -> Result<ReopenOutcome, WarpgateError> {
     if let Some(ticket_id) = ticket_id {
         let unanswered_row_exists = Entity::find()
             .filter(key.clone().into_condition())
@@ -291,11 +288,11 @@ async fn try_reopen_unanswered(
             .await?
             .is_some();
         if !unanswered_row_exists {
-            return Ok(Reopened::NotUnanswered);
+            return Ok(ReopenOutcome::NotUnanswered);
         }
         match super::Ticket::spend_use(db, ticket_id).await {
             Ok(()) => {}
-            Err(WarpgateError::InvalidTicket(_)) => return Ok(Reopened::TicketExhausted),
+            Err(WarpgateError::InvalidTicket(_)) => return Ok(ReopenOutcome::TicketExhausted),
             Err(error) => return Err(error),
         }
     }
@@ -310,15 +307,16 @@ async fn try_reopen_unanswered(
         ..row.clone()
     };
     let result = match Entity::update(reopened)
+        .validate()?
         .filter(Column::Status.is_in(ApprovalRequestStatus::UNANSWERED))
         .exec(db)
         .await
     {
-        Ok(_) => Ok(Reopened::Reopened),
-        Err(DbErr::RecordNotUpdated) => Ok(Reopened::NotUnanswered),
+        Ok(_) => Ok(ReopenOutcome::Reopened),
+        Err(DbErr::RecordNotUpdated) => Ok(ReopenOutcome::NotUnanswered),
         Err(error) => Err(error.into()),
     };
-    if !matches!(result, Ok(Reopened::Reopened))
+    if !matches!(result, Ok(ReopenOutcome::Reopened))
         && let Some(ticket_id) = ticket_id
         && let Err(error) = super::Ticket::refund_use(db, ticket_id).await
     {
@@ -328,6 +326,7 @@ async fn try_reopen_unanswered(
 }
 
 /// Result of an upsert_request
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Advertised {
     /// Created or reopened an entry
@@ -351,8 +350,8 @@ pub async fn upsert_request(
         return Ok(Advertised::AlreadyAdvertised);
     }
     match try_reopen_unanswered(db, &key, ticket_id, &row).await? {
-        Reopened::Reopened => return Ok(Advertised::Asked),
-        Reopened::TicketExhausted => {
+        ReopenOutcome::Reopened => return Ok(Advertised::Asked),
+        ReopenOutcome::TicketExhausted => {
             return Ok(if try_refresh_pending(db, &row).await? {
                 // The other requester has already spent a ticket so it's fine
                 Advertised::AlreadyAdvertised
@@ -360,7 +359,7 @@ pub async fn upsert_request(
                 Advertised::TicketExhausted
             });
         }
-        Reopened::NotUnanswered => {}
+        ReopenOutcome::NotUnanswered => {}
     }
 
     match Entity::insert(row.clone()).exec(db).await {
@@ -371,9 +370,9 @@ pub async fn upsert_request(
                 return Ok(Advertised::AlreadyAdvertised);
             }
             match try_reopen_unanswered(db, &key, ticket_id, &row).await? {
-                Reopened::Reopened => Ok(Advertised::Asked),
-                Reopened::TicketExhausted => Ok(Advertised::TicketExhausted),
-                Reopened::NotUnanswered => Ok(Advertised::AlreadyAdvertised),
+                ReopenOutcome::Reopened => Ok(Advertised::Asked),
+                ReopenOutcome::TicketExhausted => Ok(Advertised::TicketExhausted),
+                ReopenOutcome::NotUnanswered => Ok(Advertised::AlreadyAdvertised),
             }
         }
         Err(error) => Err(error.into()),
@@ -428,7 +427,7 @@ pub async fn close_request(
 pub struct ApprovalActor {
     /// None if not a user (admin API token)
     pub username: Option<String>,
-    pub user_id: Uuid,
+    pub user_id: UserId,
 }
 
 pub async fn settle_request(

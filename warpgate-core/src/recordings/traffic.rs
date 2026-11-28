@@ -1,4 +1,5 @@
 use std::net::Ipv4Addr;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use packet::Builder;
@@ -30,8 +31,8 @@ pub enum TrafficConnectionParams {
 }
 
 impl TrafficRecorder {
-    pub fn connection(&self, params: TrafficConnectionParams) -> ConnectionRecorder {
-        ConnectionRecorder::new(params, self.writer.clone(), self.started_at)
+    pub fn connection(self: &Arc<Self>, params: TrafficConnectionParams) -> ConnectionRecorder {
+        ConnectionRecorder::new(params, Arc::clone(self))
     }
 }
 
@@ -52,27 +53,24 @@ pub struct ConnectionRecorder {
     params: TrafficConnectionParams,
     seq_tx: u32,
     seq_rx: u32,
-    writer: RawRecordingWriter,
-    started_at: Instant,
+    /// The recording file stays open until the last of its connections is
+    /// dropped
+    recording: Arc<TrafficRecorder>,
 }
 
 impl ConnectionRecorder {
-    fn new(
-        params: TrafficConnectionParams,
-        writer: RawRecordingWriter,
-        started_at: Instant,
-    ) -> Self {
+    fn new(params: TrafficConnectionParams, recording: Arc<TrafficRecorder>) -> Self {
         Self {
             params,
-            writer,
-            started_at,
+            recording,
             seq_rx: rand::rng().random(),
             seq_tx: rand::rng().random(),
         }
     }
 
     pub async fn write_connection_setup(&mut self) -> anyhow::Result<()> {
-        self.writer
+        self.recording
+            .writer
             .write(&[
                 0xd4, 0xc3, 0xb2, 0xa1, 0x02, 0, 0x04, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 0, 0,
                 101, 0, 0, 0,
@@ -86,20 +84,17 @@ impl ConnectionRecorder {
     }
 
     async fn write_packet(&self, data: Bytes) -> Result<()> {
-        let ms = Instant::now().duration_since(self.started_at).as_micros();
-        self.writer
+        let TrafficRecorder { writer, started_at } = &*self.recording;
+        let ms = Instant::now().duration_since(*started_at).as_micros();
+        writer
             .write(&u32::to_le_bytes((ms / 10u128.pow(6)) as u32))
             .await?;
-        self.writer
+        writer
             .write(&u32::to_le_bytes((ms % 10u128.pow(6)) as u32))
             .await?;
-        self.writer
-            .write(&u32::to_le_bytes(data.len() as u32))
-            .await?;
-        self.writer
-            .write(&u32::to_le_bytes(data.len() as u32))
-            .await?;
-        self.writer.write(&data).await?;
+        writer.write(&u32::to_le_bytes(data.len() as u32)).await?;
+        writer.write(&u32::to_le_bytes(data.len() as u32)).await?;
+        writer.write(&data).await?;
         Ok(())
     }
 
@@ -113,7 +108,7 @@ impl ConnectionRecorder {
         .await?;
         self.write_packet(self.tcp_packet_tx(|b| {
             Ok(b.sequence(self.seq_tx)?
-                .acknowledgment(seq_rx + 1)?
+                .acknowledgment(seq_rx.wrapping_add(1))?
                 .flags(packet::tcp::Flags::ACK)?
                 .build()?
                 .into())
@@ -132,7 +127,7 @@ impl ConnectionRecorder {
         .await?;
         self.write_packet(self.tcp_packet_rx(|b| {
             Ok(b.sequence(self.seq_rx)?
-                .acknowledgment(seq_tx + 1)?
+                .acknowledgment(seq_tx.wrapping_add(1))?
                 .flags(packet::tcp::Flags::ACK)?
                 .build()?
                 .into())
@@ -216,14 +211,14 @@ impl ConnectionRecorder {
             })?,
             self.tcp_packet_rx(|b| {
                 Ok(b.sequence(seq_rx)?
-                    .acknowledgment(seq_tx + 1)?
+                    .acknowledgment(seq_tx.wrapping_add(1))?
                     .flags(packet::tcp::Flags::SYN | packet::tcp::Flags::ACK)?
                     .build()?
                     .into())
             })?,
             self.tcp_packet_tx(|b| {
-                Ok(b.sequence(seq_tx + 1)?
-                    .acknowledgment(seq_rx + 1)?
+                Ok(b.sequence(seq_tx.wrapping_add(1))?
+                    .acknowledgment(seq_rx.wrapping_add(1))?
                     .flags(packet::tcp::Flags::ACK)?
                     .build()?
                     .into())

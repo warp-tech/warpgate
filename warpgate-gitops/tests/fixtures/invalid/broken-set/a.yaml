@@ -1,0 +1,6 @@
+apiVersion: warpgate/v1
+kind: Role
+metadata:
+  name: dba
+spec:
+  is_default: "yes"

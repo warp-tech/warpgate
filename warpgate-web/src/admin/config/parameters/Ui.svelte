@@ -16,21 +16,22 @@
 
     let pendingLogo: string | null | undefined = $state()
 
-    // An untouched logo round-trips as undefined, which the server ignores.
-    async function afterSave() {
-        if (pendingLogo !== undefined && parameters) {
-            parameters.logoEtag = (await api.getParameters({})).logoEtag
-            pendingLogo = undefined
+    // An untouched logo stays undefined and is left as stored.
+    async function saveLogo() {
+        if (pendingLogo === undefined || !parameters) {
+            return
         }
+        if (pendingLogo === null) {
+            await api.deleteLogo()
+        } else {
+            await api.setLogo({ logoUpdate: { logo: pendingLogo } })
+        }
+        parameters.logoEtag = (await api.getParameters({})).logoEtag
+        pendingLogo = undefined
     }
 </script>
 
-<ParametersForm
-    title="UI"
-    bind:parameters
-    extraUpdate={() => ({ logo: pendingLogo })}
-    onsaved={afterSave}
->
+<ParametersForm title="UI" bind:parameters onsaved={saveLogo}>
     {#snippet children(parameters)}
         <Section id="logo" title="Custom logo">
             <LogoInput etag={parameters.logoEtag} bind:value={pendingLogo} />

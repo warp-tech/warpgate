@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{ActiveModelTrait, DatabaseConnection};
 use serde::Serialize;
 use time::OffsetDateTime;
 use tokio::sync::{Mutex, broadcast};
@@ -12,7 +12,8 @@ use tokio_util::task::TaskTracker;
 use tracing::{info, warn};
 use uuid::Uuid;
 use warpgate_common::helpers::fs::secure_directory;
-use warpgate_common::{GlobalParams, TargetSessionId};
+use warpgate_common::{GlobalParams, NodeId, TargetSessionId};
+use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Recording::{self, RecordingKind};
 mod desktop;
 mod storage;
@@ -94,6 +95,9 @@ pub enum Error {
 
     #[error("Storage backend: {0}")]
     Aws(#[from] warpgate_aws::AwsError),
+
+    #[error(transparent)]
+    Azure(#[from] warpgate_azure::AzureError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -162,14 +166,16 @@ pub struct SessionRecordings {
     db: DatabaseConnection,
     live: LiveMap,
     params: GlobalParams,
+    node_id: NodeId,
     shutdown: CancellationToken,
     shutdown_tracker: TaskTracker,
 }
 
 impl SessionRecordings {
-    pub fn new(db: DatabaseConnection, params: &GlobalParams) -> Self {
+    pub fn new(db: DatabaseConnection, params: &GlobalParams, node_id: NodeId) -> Self {
         Self {
             db,
+            node_id,
             live: Arc::new(Mutex::new(HashMap::new())),
             params: params.clone(),
             shutdown: CancellationToken::new(),
@@ -200,26 +206,24 @@ impl SessionRecordings {
         Storage::load(&self.db, &self.params).await
     }
 
-    /// Starting a recording with the same name again will append to it. On S3
-    /// storage this is not supported: each start completes its own upload of the
-    /// same keys, and `ended` is not reset on append.
+    /// Whether [`Self::start`] would record
+    pub async fn enabled(&self) -> Result<bool> {
+        Ok(Parameters::Entity::get(&self.db).await?.recordings_enable)
+    }
+
     /// `None` when recording is disabled.
-    pub async fn start<T, M>(
-        &self,
-        id: &TargetSessionId,
-        name: Option<String>,
-        metadata: M,
-    ) -> Result<Option<T>>
+    pub async fn start<T, M>(&self, id: &TargetSessionId, metadata: M) -> Result<Option<T>>
     where
         T: Recorder,
         M: Serialize + Debug,
     {
-        let storage = self.storage().await?;
-        if !storage.enabled() {
+        if !self.enabled().await? {
             return Ok(None);
         }
+        let storage = self.storage().await?;
 
-        let name = name.unwrap_or_else(|| Uuid::new_v4().to_string());
+        // A fresh name per start gives a recording's files a single writer
+        let name = Uuid::new_v4().to_string();
         // Gen 2+ recordings are folders holding fixed-name files (`data.ndjson`, and an
         // index `index.json`), so the recording path is a directory we create here.
         // On S3 this folder is a scratch copy, live-readable while the session runs and
@@ -236,33 +240,21 @@ impl SessionRecordings {
         }
 
         let model = {
-            let db = &self.db;
-            let existing = Recording::Entity::find()
-                .filter(
-                    Recording::Column::SessionId
-                        .eq(id.0)
-                        .and(Recording::Column::Name.eq(name.clone()))
-                        .and(Recording::Column::Kind.eq(T::kind())),
-                )
-                .one(db)
-                .await?;
-            if let Some(e) = existing {
-                e
-            } else {
-                use sea_orm::ActiveValue::Set;
-                info!(%name, ?metadata, path=?folder, "Recording session {}", id);
-                let values = Recording::ActiveModel {
-                    id: Set(Uuid::new_v4()),
-                    started: Set(OffsetDateTime::now_utc()),
-                    session_id: Set(*id),
-                    name: Set(name.clone()),
-                    kind: Set(T::kind()),
-                    metadata: Set(serde_json::to_string(&metadata)?),
-                    generation: Set(RECORDING_GENERATION),
-                    ..Default::default()
-                };
-                values.insert(db).await.map_err(Error::Database)?
+            use sea_orm::ActiveValue::Set;
+            info!(%name, ?metadata, path=?folder, "Recording session {}", id);
+            Recording::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                started: Set(OffsetDateTime::now_utc()),
+                session_id: Set(*id),
+                name: Set(name),
+                kind: Set(T::kind()),
+                metadata: Set(serde_json::to_string(&metadata)?),
+                generation: Set(RECORDING_GENERATION),
+                node_id: Set(Some(self.node_id)),
+                ..Default::default()
             }
+            .insert(&self.db)
+            .await?
         };
 
         let opener = RecordingWriterOpener {

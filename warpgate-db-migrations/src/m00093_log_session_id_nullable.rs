@@ -1,7 +1,6 @@
-use sea_orm::{
-    ConnectionTrait, DatabaseTransaction, DbBackend, StatementBuilder, TransactionTrait,
-};
+use sea_orm::{ConnectionTrait, DatabaseTransaction, DbBackend, StatementBuilder};
 use sea_orm_migration::prelude::*;
+use warpgate_db_entities::begin_write;
 
 /// Audit events raised outside a user session (API-token requests) carry no
 /// session id, so `log.session_id` becomes nullable.
@@ -44,7 +43,7 @@ impl MigrationTrait for Migration {
         // rebuilt. Kept on one connection: sea-orm only wraps migrations in a
         // transaction on PostgreSQL, and pooled SQLite connections holding an
         // older schema snapshot reject the statements otherwise.
-        let db = manager.get_connection().begin().await?;
+        let db = begin_write(manager.get_connection()).await?;
 
         exec(
             &db,
@@ -140,7 +139,6 @@ impl MigrationTrait for Migration {
 }
 
 async fn exec<S: StatementBuilder>(db: &DatabaseTransaction, stmt: &S) -> Result<(), DbErr> {
-    let statement = db.get_database_backend().build(stmt);
-    db.execute(statement).await?;
+    db.execute(stmt).await?;
     Ok(())
 }

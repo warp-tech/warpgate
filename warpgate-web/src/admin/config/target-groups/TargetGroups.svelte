@@ -1,5 +1,6 @@
 <script lang="ts">
     import { api, type TargetGroup } from 'admin/lib/api'
+    import ManagedIcon from 'admin/lib/ManagedIcon.svelte'
     import { adminPermissions } from 'admin/lib/store'
     import EmptyState from 'common/EmptyState.svelte'
     import GroupColorIcon from 'common/GroupColorIcon.svelte'
@@ -9,6 +10,7 @@
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
     import ListOverflowMenu from 'common/ListOverflowMenu.svelte'
+    import OnboardingHint from 'common/OnboardingHint.svelte'
     import { compare as naturalCompareFactory } from 'natural-orderby'
     import { from, map, type Observable } from 'rxjs'
     import { link } from 'svelte-spa-router'
@@ -49,6 +51,8 @@
             grow: true,
             class: 'text-truncate text-muted small',
         },
+        { id: 'spacer', spacer: true },
+        { id: 'managed', cell: managedCell },
     ]
 </script>
 
@@ -59,6 +63,9 @@
 {/snippet}
 {#snippet nameCell(group: TargetGroup)}
     <strong>{group.name}</strong>
+{/snippet}
+{#snippet managedCell(group: TargetGroup)}
+    <ManagedIcon provider={group.provider} />
 {/snippet}
 {#snippet descriptionCell(group: TargetGroup)}
     <small class="d-block text-muted">
@@ -78,6 +85,10 @@
             Add a group
         </a>
     </div>
+
+    <OnboardingHint>
+        Target groups are for visual organization only.
+    </OnboardingHint>
 
     <ItemList
         load={getTargetGroups}

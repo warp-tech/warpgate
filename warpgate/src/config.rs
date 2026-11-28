@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use config::{Config, File, FileFormat};
 use notify::{RecursiveMode, Watcher, recommended_watcher};
 use tokio::sync::{Mutex, mpsc, watch};
 use tracing::{error, info};
@@ -13,18 +12,13 @@ use warpgate_common::{
 pub fn load_config(params: &GlobalParams, secure: bool) -> Result<WarpgateConfig> {
     clear_config_warnings();
 
-    let mut store: yaml_serde::Value = Config::builder()
-        .add_source(File::new(
-            params
-                .config_path()
-                .to_str()
-                .context("Invalid config path")?,
-            FileFormat::Yaml,
-        ))
-        .build()
-        .context("Could not load config")?
-        .try_deserialize()
-        .context("Could not parse YAML")?;
+    let text = std::fs::read_to_string(params.config_path()).context("Could not load config")?;
+    let mut store: yaml_serde::Value =
+        match yaml_serde::from_str(&text).context("Could not parse YAML")? {
+            // An empty file loads as an empty config, not as null.
+            yaml_serde::Value::Null => yaml_serde::Value::Mapping(Default::default()),
+            value => value,
+        };
 
     if secure && params.should_secure_files() {
         secure_file(params.config_path()).context("Could not secure config")?;

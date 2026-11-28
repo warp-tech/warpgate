@@ -4,8 +4,9 @@ use std::fmt::Write;
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
+use openidconnect::http::Uri;
 use openidconnect::url::Url;
-use openidconnect::{ProviderMetadataWithLogout, reqwest};
+use openidconnect::{AsyncHttpClient, HttpRequest, IssuerUrl, ProviderMetadataWithLogout, reqwest};
 use tokio::sync::Mutex;
 use warpgate_common_cache::Cache;
 
@@ -23,12 +24,13 @@ const METADATA_REFRESH_MIN_INTERVAL: Duration = Duration::from_secs(10);
 /// providers reached over a trusted network (test rigs, in-cluster IdPs).
 const ALLOWED_ENDPOINT_SCHEMES: [&str; 2] = ["https", "http"];
 
-/// Key = issuer URL
-static METADATA_CACHE: LazyLock<Cache<String, (), ProviderMetadataWithLogout>> =
+// Tenants of one provider can share an issuer but have different metadata and keys
+type MetadataCacheKey = (String, Option<String>);
+
+static METADATA_CACHE: LazyLock<Cache<MetadataCacheKey, (), ProviderMetadataWithLogout>> =
     LazyLock::new(|| Cache::new(METADATA_CACHE_TTL));
 
-/// Key = issuer URL
-static LAST_FORCED_CACHE_EVICTION: LazyLock<Mutex<HashMap<String, Instant>>> =
+static LAST_FORCED_CACHE_EVICTION: LazyLock<Mutex<HashMap<MetadataCacheKey, Instant>>> =
     LazyLock::new(Default::default);
 
 /// Render an error together with its whole `source` chain.
@@ -108,16 +110,51 @@ fn validate_endpoint_schemes(metadata: &ProviderMetadataWithLogout) -> Result<()
     Ok(())
 }
 
+async fn discover<'c, C: AsyncHttpClient<'c>>(
+    issuer: IssuerUrl,
+    http_client: &'c C,
+) -> Result<ProviderMetadataWithLogout, SsoError> {
+    ProviderMetadataWithLogout::discover_async(issuer, http_client)
+        .await
+        .map_err(|e| SsoError::Discovery(describe_error(&e)))
+}
+
+/// Reads the discovery document from `discovery_url`.
+///
+/// `openidconnect` only fetches it from the issuer's well-known URL, so that
+/// request is rewritten. The library still validates the response, including
+/// the exact issuer match
+async fn discover_at(
+    issuer: IssuerUrl,
+    discovery_url: &Url,
+    http_client: &reqwest::Client,
+) -> Result<ProviderMetadataWithLogout, SsoError> {
+    let well_known = issuer.join(".well-known/openid-configuration")?;
+    let discovery_uri: Uri = discovery_url
+        .as_str()
+        .parse()
+        .map_err(|e| SsoError::ConfigError(format!("discovery_url: {e}")))?;
+    let redirecting_client = |mut request: HttpRequest| {
+        if request.uri() == well_known.as_str() {
+            *request.uri_mut() = discovery_uri.clone();
+        }
+        let http_client = http_client.clone();
+        async move { http_client.call(request).await }
+    };
+    discover(issuer, &redirecting_client).await
+}
+
 pub async fn discover_metadata(
     config: &SsoInternalProviderConfig,
     http_client: &reqwest::Client,
 ) -> Result<ProviderMetadataWithLogout, SsoError> {
     let issuer = config.issuer_url()?;
     METADATA_CACHE
-        .get_or_build(&issuer.to_string(), &(), || async {
-            let metadata = ProviderMetadataWithLogout::discover_async(issuer, http_client)
-                .await
-                .map_err(|e| SsoError::Discovery(describe_error(&e)))?;
+        .get_or_build(&metadata_cache_key(config)?, &(), || async {
+            let metadata = match config.discovery_url() {
+                Some(url) => discover_at(issuer, url, http_client).await?,
+                None => discover(issuer, http_client).await?,
+            };
 
             // Validate before caching, so a hostile document is never served from
             // the cache and never reaches a caller.
@@ -127,17 +164,24 @@ pub async fn discover_metadata(
         .await
 }
 
+fn metadata_cache_key(config: &SsoInternalProviderConfig) -> Result<MetadataCacheKey, SsoError> {
+    Ok((
+        config.issuer_url()?.to_string(),
+        config.discovery_url().map(ToString::to_string),
+    ))
+}
+
 /// false = not evicted due to interval check
-async fn evict_for_forced_refresh(issuer: &str) -> bool {
+async fn evict_for_forced_refresh(key: &MetadataCacheKey) -> bool {
     let mut last = LAST_FORCED_CACHE_EVICTION.lock().await;
     if last
-        .get(issuer)
+        .get(key)
         .is_some_and(|at| at.elapsed() < METADATA_REFRESH_MIN_INTERVAL)
     {
         return false;
     }
-    last.insert(issuer.to_owned(), Instant::now());
-    METADATA_CACHE.remove(&issuer.to_owned());
+    last.insert(key.clone(), Instant::now());
+    METADATA_CACHE.remove(key);
     true
 }
 
@@ -145,7 +189,7 @@ pub async fn refresh_metadata(
     config: &SsoInternalProviderConfig,
     http_client: &reqwest::Client,
 ) -> Result<ProviderMetadataWithLogout, SsoError> {
-    evict_for_forced_refresh(&config.issuer_url()?.to_string()).await;
+    evict_for_forced_refresh(&metadata_cache_key(config)?).await;
     discover_metadata(config, http_client).await
 }
 
@@ -299,9 +343,129 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn forced_refresh_is_throttled_per_issuer() {
-        assert!(evict_for_forced_refresh("https://a.example").await);
-        assert!(!evict_for_forced_refresh("https://a.example").await);
-        assert!(evict_for_forced_refresh("https://b.example").await);
+    async fn forced_refresh_is_throttled_per_metadata_source() {
+        let a = ("https://a.example".to_owned(), None);
+        let b = ("https://b.example".to_owned(), None);
+        let tenant = (
+            a.0.clone(),
+            Some("https://tenant.example/discovery".to_owned()),
+        );
+        assert!(evict_for_forced_refresh(&a).await);
+        assert!(!evict_for_forced_refresh(&a).await);
+        assert!(evict_for_forced_refresh(&b).await);
+        assert!(evict_for_forced_refresh(&tenant).await);
+    }
+
+    /// Serves an empty JWKS and a discovery document with the given `issuer`,
+    /// or the server's own address
+    async fn discovery_server(issuer: Option<&str>) -> (String, tokio::task::JoinHandle<()>) {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let document = json!({
+            "issuer": issuer.unwrap_or(&base),
+            "authorization_endpoint": format!("{base}/authorize"),
+            "jwks_uri": format!("{base}/keys"),
+            "response_types_supported": ["code"],
+            "subject_types_supported": ["public"],
+            "id_token_signing_alg_values_supported": ["RS256"],
+        })
+        .to_string();
+        let task = tokio::spawn(async move {
+            loop {
+                let (socket, _) = listener.accept().await.unwrap();
+                let mut lines = BufReader::new(socket).lines();
+                let request = lines.next_line().await.unwrap().unwrap_or_default();
+                // Closing a socket with unread input resets the connection
+                while lines
+                    .next_line()
+                    .await
+                    .unwrap()
+                    .is_some_and(|l| !l.is_empty())
+                {}
+                let body = if request.starts_with("GET /keys ") {
+                    r#"{"keys":[]}"#
+                } else {
+                    &document
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                lines
+                    .into_inner()
+                    .write_all(response.as_bytes())
+                    .await
+                    .unwrap();
+            }
+        });
+        (base, task)
+    }
+
+    fn client() -> openidconnect::reqwest::Client {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        openidconnect::reqwest::Client::new()
+    }
+
+    fn custom_config(issuer: &str, discovery: Option<String>) -> crate::SsoInternalProviderConfig {
+        serde_json::from_value(json!({
+            "type": "custom",
+            "client_id": "test-client",
+            "client_secret": "test-secret",
+            "issuer_url": issuer,
+            "discovery_url": discovery,
+            "scopes": [],
+        }))
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn discovery_url_keeps_issuer_check_and_isolates_tenants() {
+        let issuer = "https://identity.oraclecloud.com/";
+        let (first, first_task) = discovery_server(Some(issuer)).await;
+        let (second, second_task) = discovery_server(Some(issuer)).await;
+        let client = client();
+        let first_config = custom_config(issuer, Some(format!("{first}/discovery")));
+        let second_config = custom_config(issuer, Some(format!("{second}/discovery")));
+
+        let a = super::discover_metadata(&first_config, &client)
+            .await
+            .unwrap();
+        let b = super::discover_metadata(&second_config, &client)
+            .await
+            .unwrap();
+        assert_eq!(a.issuer().as_str(), issuer);
+        assert_eq!(a.jwks_uri().as_str(), format!("{first}/keys"));
+        assert_eq!(b.jwks_uri().as_str(), format!("{second}/keys"));
+
+        let refreshed = super::refresh_metadata(&first_config, &client)
+            .await
+            .unwrap();
+        assert_eq!(refreshed.jwks_uri(), a.jwks_uri());
+
+        let wrong_issuer =
+            custom_config("https://wrong.example/", Some(format!("{first}/discovery")));
+        let error = super::discover_metadata(&wrong_issuer, &client)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("unexpected issuer"), "{error}");
+
+        first_task.abort();
+        second_task.abort();
+    }
+
+    #[tokio::test]
+    async fn discovery_from_issuer_well_known_location() {
+        let (base, task) = discovery_server(None).await;
+        let metadata = super::discover_metadata(&custom_config(&base, None), &client())
+            .await
+            .unwrap();
+        assert_eq!(
+            metadata.authorization_endpoint().as_str(),
+            format!("{base}/authorize")
+        );
+        task.abort();
     }
 }

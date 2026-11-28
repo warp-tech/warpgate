@@ -26,7 +26,7 @@ pub(super) fn paint_fg<S: Display>(fg: Color, dimmed: bool, text: S) -> String {
     let _ = buf.set_color(ColorSpec::new().set_fg(Some(fg)).set_dimmed(dimmed));
     let _ = write!(buf, "{text}");
     let _ = buf.reset();
-    String::from_utf8_lossy(buf.as_slice()).to_string()
+    String::from_utf8_lossy_owned(buf.into_inner())
 }
 
 #[derive(Clone)]

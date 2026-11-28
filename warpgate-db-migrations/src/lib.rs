@@ -1,8 +1,9 @@
 use std::fmt::Display;
 
-use sea_orm::{DatabaseBackend, DatabaseConnection, TransactionTrait};
+use sea_orm::{DatabaseBackend, DatabaseConnection};
 use sea_orm_migration::MigrationTrait;
 use sea_orm_migration::prelude::*;
+use warpgate_db_entities::begin_write;
 
 mod m00001_create_ticket;
 mod m00002_create_session;
@@ -99,7 +100,14 @@ mod m00092_http_session_sso_identity;
 mod m00093_log_session_id_nullable;
 mod m00094_unique_role_names;
 mod m00095_kubernetes_sessions;
-mod m00096_desktop_recording_frame_rate;
+mod m00096_resource_provider;
+mod m00097_ssh_client_key_provider;
+mod m00098_gitops_sync;
+mod m00099_unique_admin_role_names;
+mod m00100_admin_role_builtin;
+mod m00101_s3_blank_prefix_keys;
+mod m00102_recording_node_id;
+mod m00103_desktop_recording_frame_rate;
 
 pub(crate) mod helpers;
 
@@ -204,7 +212,14 @@ impl MigratorTrait for Migrator {
             Box::new(m00093_log_session_id_nullable::Migration),
             Box::new(m00094_unique_role_names::Migration),
             Box::new(m00095_kubernetes_sessions::Migration),
-            Box::new(m00096_desktop_recording_frame_rate::Migration),
+            Box::new(m00096_resource_provider::Migration),
+            Box::new(m00097_ssh_client_key_provider::Migration),
+            Box::new(m00098_gitops_sync::Migration),
+            Box::new(m00099_unique_admin_role_names::Migration),
+            Box::new(m00100_admin_role_builtin::Migration),
+            Box::new(m00101_s3_blank_prefix_keys::Migration),
+            Box::new(m00102_recording_node_id::Migration),
+            Box::new(m00103_desktop_recording_frame_rate::Migration),
         ]
     }
 }
@@ -220,13 +235,13 @@ async fn run_locked<
     key: impl Display,
     f: F,
 ) -> Result<R, DbErr> {
-    use sea_orm::{ConnectionTrait, DatabaseBackend, Statement, TransactionTrait};
+    use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
     match connection.get_database_backend() {
         DatabaseBackend::Postgres => {
-            let lock = connection.begin().await?;
+            let lock = begin_write(connection).await?;
             // lock is tx scoped
-            lock.execute(Statement::from_string(
+            lock.execute_raw(Statement::from_string(
                 DatabaseBackend::Postgres,
                 format!("SELECT pg_advisory_xact_lock({key})"),
             ))
@@ -236,16 +251,16 @@ async fn run_locked<
             result
         }
         DatabaseBackend::MySql => {
-            let lock = connection.begin().await?;
+            let lock = begin_write(connection).await?;
             // lock is session scoped
-            lock.execute(Statement::from_string(
+            lock.execute_raw(Statement::from_string(
                 DatabaseBackend::MySql,
                 format!("SELECT GET_LOCK('warpgate_migration_{key}', -1)"),
             ))
             .await?;
             let result = f().await;
             let release = lock
-                .execute(Statement::from_string(
+                .execute_raw(Statement::from_string(
                     DatabaseBackend::MySql,
                     format!("SELECT RELEASE_LOCK('warpgate_migration_{key}')"),
                 ))
@@ -255,6 +270,9 @@ async fn run_locked<
             result
         }
         DatabaseBackend::Sqlite => f().await,
+        backend => Err(DbErr::Migration(format!(
+            "unsupported database backend: {backend:?}"
+        ))),
     }
 }
 
@@ -267,6 +285,12 @@ pub async fn migrate_database(connection: &DatabaseConnection) -> Result<(), DbE
     .await?;
 
     Ok(())
+}
+
+pub async fn has_pending_migrations(connection: &DatabaseConnection) -> Result<bool, DbErr> {
+    Ok(!Migrator::get_pending_migrations(connection)
+        .await?
+        .is_empty())
 }
 
 /// Apply `steps` pending migrations.
@@ -295,7 +319,7 @@ async fn run_maybe_in_tx(
     steps: Option<u32>,
 ) -> Result<(), DbErr> {
     if connection.get_database_backend() == DatabaseBackend::Sqlite {
-        let tx = connection.begin().await?;
+        let tx = begin_write(connection).await?;
         run(&tx, direction, steps).await?;
         tx.commit().await
     } else {
@@ -314,9 +338,23 @@ async fn run<'c, C: IntoSchemaManagerConnection<'c>>(
     }
 }
 
+/// Applies every migration that runs before `name`, so a test can seed the
+/// schema that migration starts from
+#[cfg(all(test, feature = "sqlite"))]
+pub(crate) async fn migrate_up_to(db: &DatabaseConnection, name: &str) {
+    let steps = Migrator::migrations()
+        .iter()
+        .position(|migration| migration.name() == name)
+        .unwrap();
+    Migrator::up(db, Some(steps.try_into().unwrap()))
+        .await
+        .unwrap();
+}
+
 #[cfg(test)]
 mod tests {
-    use sea_orm::{ConnectOptions, Database};
+    use sea_orm::SqlxSqliteConnector;
+    use sea_orm::sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
     use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
 
     use super::{migrate_database, migrate_database_down, migrate_database_up};
@@ -326,19 +364,23 @@ mod tests {
     #[tokio::test]
     async fn sqlite_migrations_run_through_a_pool() {
         set_config_migration_values(ConfigMigrationValues::default());
-        let path = std::env::temp_dir().join(format!(
-            "warpgate-migrations-{}.sqlite3",
-            std::process::id()
-        ));
-        let mut opt = ConnectOptions::new(format!("sqlite://{}?mode=rwc", path.display()));
-        opt.max_connections(100);
-        let db = Database::connect(opt).await.unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        // Opened by filename: a Windows path does not survive a `sqlite:` URL
+        let pool = SqlitePoolOptions::new()
+            .max_connections(100)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(dir.path().join("db.sqlite3"))
+                    .create_if_missing(true),
+            )
+            .await
+            .unwrap();
+        let db = SqlxSqliteConnector::from_sqlx_sqlite_pool(pool);
 
         migrate_database(&db).await.unwrap();
         migrate_database_down(&db, 1).await.unwrap();
         migrate_database_up(&db, 1).await.unwrap();
 
         db.close().await.unwrap();
-        std::fs::remove_file(path).unwrap();
     }
 }

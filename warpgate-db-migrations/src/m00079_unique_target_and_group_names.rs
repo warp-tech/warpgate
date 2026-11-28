@@ -27,13 +27,20 @@ fn deduplicated_name(taken: &HashSet<String>, name: &str, key: fn(&str) -> Strin
 
 /// Renames rows that would collide, rather than deleting them: these rows carry the
 /// access configuration for a machine, and dropping one silently revokes it.
-async fn deduplicate_names(manager: &SchemaManager<'_>, table: &str) -> Result<(), DbErr> {
+/// The rows in `keep` (with distinct names) hold on to their names; the rows they
+/// collide with are renamed instead.
+async fn deduplicate_names(
+    manager: &SchemaManager<'_>,
+    table: &str,
+    column: &str,
+    keep: &[Uuid],
+) -> Result<(), DbErr> {
     let db = manager.get_connection();
     let backend = db.get_database_backend();
 
     let table = Alias::new(table);
     let id_col = Alias::new("id");
-    let name_col = Alias::new("name");
+    let name_col = Alias::new(column);
 
     // Scanning in name order means a suffix we hand out is always compared against
     // the rows that could still claim it.
@@ -54,11 +61,17 @@ async fn deduplicate_names(manager: &SchemaManager<'_>, table: &str) -> Result<(
         str::to_owned
     };
 
+    let rows = db.query_all(&select).await?;
     let mut taken: HashSet<String> = HashSet::new();
-    for row in db.query_all(backend.build(&select)).await? {
+    for row in &rows {
+        if keep.contains(&row.try_get("", "id")?) {
+            taken.insert(key(&row.try_get::<String>("", column)?));
+        }
+    }
+    for row in rows {
         let id: Uuid = row.try_get("", "id")?;
-        let name: String = row.try_get("", "name")?;
-        if taken.insert(key(&name)) {
+        let name: String = row.try_get("", column)?;
+        if keep.contains(&id) || taken.insert(key(&name)) {
             continue;
         }
 
@@ -68,20 +81,32 @@ async fn deduplicate_names(manager: &SchemaManager<'_>, table: &str) -> Result<(
             .value(name_col.clone(), renamed.clone())
             .and_where(Expr::col(id_col.clone()).eq(id))
             .to_owned();
-        db.execute(backend.build(&update)).await?;
+        db.execute(&update).await?;
         taken.insert(key(&renamed));
     }
 
     Ok(())
 }
 
-/// Renames colliding names and then makes `name` unique
+/// Renames colliding names and then makes `column` unique
 pub async fn add_unique_name_index(
     manager: &SchemaManager<'_>,
     table: &str,
+    column: &str,
     index: &str,
 ) -> Result<(), DbErr> {
-    deduplicate_names(manager, table).await?;
+    add_unique_name_index_keeping(manager, table, column, index, &[]).await
+}
+
+/// [`add_unique_name_index`], with the rows in `keep` keeping their names.
+pub async fn add_unique_name_index_keeping(
+    manager: &SchemaManager<'_>,
+    table: &str,
+    column: &str,
+    index: &str,
+    keep: &[Uuid],
+) -> Result<(), DbErr> {
+    deduplicate_names(manager, table, column, keep).await?;
 
     // CREATE UNIQUE INDEX rather than ALTER COLUMN so that this works on SQLite,
     // which does not support altering column constraints.
@@ -90,7 +115,7 @@ pub async fn add_unique_name_index(
             Index::create()
                 .name(index)
                 .table(Alias::new(table))
-                .col(Alias::new("name"))
+                .col(Alias::new(column))
                 .unique()
                 .to_owned(),
         )
@@ -116,7 +141,7 @@ pub async fn drop_unique_name_index(
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         for (table, index) in TABLES {
-            add_unique_name_index(manager, table, index).await?;
+            add_unique_name_index(manager, table, "name", index).await?;
         }
         Ok(())
     }
