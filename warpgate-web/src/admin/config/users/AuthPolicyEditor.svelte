@@ -341,7 +341,8 @@
 </script>
 
 {#if globalParameters && globalParameters.mfaEnforcement !== 'Off'}
-    {#if globalParameters.mfaPolicyExemptSsoUsers && existingCredentials?.some(x => x.kind === CredentialKind.Sso)}
+    {#if globalParameters.mfaPolicyExemptSsoUsers &&
+        existingCredentials?.some(x => x.kind === CredentialKind.Sso)}
         <InfoBox>
             MFA enforcement is on, but is set to exempt this user from MFA
             requirements because they have an SSO credential.
@@ -361,7 +362,8 @@
         <div class="list-group-item">
             <div class="d-flex align-items-center">
                 <strong>{protocol.name}</strong>
-                {#if possibleCredentials(protocol.id).size > 0 || (combos && combos.length > 0)}
+                {#if possibleCredentials(protocol.id).size > 0 ||
+                    (combos && combos.length > 0)}
                     <Input
                         type="checkbox"
                         id={`policy-editor-${protocol.id}`}
@@ -409,8 +411,9 @@
                                     kind === CredentialKind.Password}
                                 {@const missingCredential =
                                     availableKinds && !availableKinds.has(kind)}
-                                {@const unsupported =
-                                    !possibleCredentials(protocol.id).has(kind)}
+                                {@const unsupported = !possibleCredentials(
+                                    protocol.id,
+                                ).has(kind)}
                                 {@const factorId = `factor-${protocol.id}-${comboIndex}-${factorIndex}`}
 
                                 {#if factorIndex > 0}
@@ -431,11 +434,21 @@
                                         value={kind}
                                         disabled={mandatory}
                                         onchange={e => {
-                                            const target = e.currentTarget as HTMLSelectElement
-                                            changeFactor(protocol.id, comboIndex, factorIndex, target.value as CredentialKind)
+                                            const target =
+                                                e.currentTarget as HTMLSelectElement
+                                            changeFactor(
+                                                protocol.id,
+                                                comboIndex,
+                                                factorIndex,
+                                                target.value as CredentialKind,
+                                            )
                                         }}
                                     >
-                                        {#each availableKindsForFactor(protocol, combo, kind) as opt (opt.kind)}
+                                        {#each availableKindsForFactor(
+                                            protocol,
+                                            combo,
+                                            kind,
+                                        ) as opt (opt.kind)}
                                             <option value={opt.kind}>
                                                 {opt.label}
                                             </option>
@@ -455,13 +468,20 @@
                                             class="btn btn-link text-muted p-0 ms-1 border-0"
                                             style="line-height: 1;"
                                             title="Remove factor"
-                                            onclick={() => removeFactor(protocol.id, comboIndex, factorIndex)}
+                                            onclick={() =>
+                                                removeFactor(
+                                                    protocol.id,
+                                                    comboIndex,
+                                                    factorIndex,
+                                                )}
                                         >
                                             <Fa icon={faTimes} />
                                         </button>
                                     {/if}
 
-                                    {#if mandatory || missingCredential || unsupported}
+                                    {#if mandatory ||
+                                        missingCredential ||
+                                        unsupported}
                                         <Tooltip
                                             target={factorId}
                                             animation
@@ -496,9 +516,14 @@
                                     style="width: auto; height: 31px; cursor: pointer; border-style: dashed;"
                                     value=""
                                     onchange={e => {
-                                        const target = e.currentTarget as HTMLSelectElement
+                                        const target =
+                                            e.currentTarget as HTMLSelectElement
                                         if (target.value) {
-                                            addFactor(protocol.id, comboIndex, target.value as CredentialKind)
+                                            addFactor(
+                                                protocol.id,
+                                                comboIndex,
+                                                target.value as CredentialKind,
+                                            )
                                             target.value = ''
                                         }
                                     }}
@@ -506,7 +531,10 @@
                                     <option value="" disabled selected>
                                         + Factor
                                     </option>
-                                    {#each unselectedKinds(protocol, combo) as opt (opt.kind)}
+                                    {#each unselectedKinds(
+                                        protocol,
+                                        combo,
+                                    ) as opt (opt.kind)}
                                         <option value={opt.kind}>
                                             + {opt.label}
                                         </option>
@@ -521,7 +549,11 @@
                                     class="text-danger p-1"
                                     disabled={combos.length <= 1}
                                     title="Delete combination"
-                                    on:click={() => removeCombination(protocol.id, comboIndex)}
+                                    on:click={() =>
+                                        removeCombination(
+                                            protocol.id,
+                                            comboIndex,
+                                        )}
                                 >
                                     <Fa icon={faTrash} />
                                 </Button>
