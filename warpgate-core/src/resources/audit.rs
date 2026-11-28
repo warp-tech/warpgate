@@ -435,18 +435,18 @@ mod tests {
         );
         assert!(!serde_json::to_string(&contents).unwrap().contains("secret"));
 
-        let same = targets::update(&db, Actor::Admin, created.id, &web(22, "old-secret"))
+        let (same, _) = targets::update(&db, Actor::Admin, created.id, &web(22, "old-secret"))
             .await
-            .unwrap()
-            .skip_audit();
+            .unwrap();
+        let same = same.skip_audit();
         assert_eq!(changes(&db, &created, &same).await, Some(vec![]));
 
         let mut moved = web(2222, "new-secret");
         moved.group_id = Some(prod.id);
-        let moved = targets::update(&db, Actor::Admin, created.id, &moved)
+        let (moved, _) = targets::update(&db, Actor::Admin, created.id, &moved)
             .await
-            .unwrap()
-            .skip_audit();
+            .unwrap();
+        let moved = moved.skip_audit();
         let fields = changes(&db, &created, &moved).await.unwrap();
         assert_eq!(
             paths(&fields),
@@ -564,7 +564,7 @@ mod tests {
             .await
             .unwrap();
 
-        let updated = targets::update(&db, Actor::Admin, created.id, &web(22, "secret"))
+        let (updated, _) = targets::update(&db, Actor::Admin, created.id, &web(22, "secret"))
             .await
             .unwrap();
         let Write::Updated { before, after } = &updated.0 else {

@@ -176,12 +176,29 @@ pub async fn create<C: ConnectionTrait>(
     Ok(Unaudited::created(target))
 }
 
+fn options_changed(old_json: &serde_json::Value, new_options: &TargetOptions) -> bool {
+    let Ok(mut old_options) = serde_json::from_value::<TargetOptions>(old_json.clone()) else {
+        return true;
+    };
+    let mut new_options = new_options.clone();
+    for slot in old_options
+        .secrets_mut()
+        .into_iter()
+        .chain(new_options.secrets_mut())
+    {
+        if reveal_inline(slot).is_err() {
+            return true;
+        }
+    }
+    old_options != new_options
+}
+
 pub async fn update<C: ConnectionTrait>(
     db: &C,
     actor: Actor,
     id: TargetId,
     data: &TargetDataRequest,
-) -> Result<Unaudited<Target::Model>, ResourceError> {
+) -> Result<(Unaudited<Target::Model>, AdmittedSessions), ResourceError> {
     check_name(&data.name)?;
     let before = Target::Entity::find_by_id(id)
         .one(db)
@@ -192,10 +209,18 @@ pub async fn update<C: ConnectionTrait>(
         return Err(ResourceError::ProtocolChange);
     }
 
+    let should_close_sessions = (!before.require_approval && data.require_approval)
+        || options_changed(&before.options, &data.options);
+
     let mut model: Target::ActiveModel = before.clone().into();
     set_data(&mut model, data)?;
     let after = model.update(db).await.map_err(name_taken)?;
-    Ok(Unaudited::updated(before, after))
+    let admitted = if should_close_sessions {
+        TargetSession::open_user_sessions_for_target(db, id).await?
+    } else {
+        vec![]
+    };
+    Ok((Unaudited::updated(before, after), AdmittedSessions(admitted)))
 }
 
 pub async fn delete<C: ConnectionTrait + TransactionTrait>(
@@ -220,11 +245,7 @@ pub async fn delete<C: ConnectionTrait + TransactionTrait>(
         .exec(&txn)
         .await?;
 
-    let admitted = TargetSession::open_user_sessions_admitted_by_tickets(
-        &txn,
-        Ticket::Column::TargetId.eq(target.id),
-    )
-    .await?;
+    let admitted = TargetSession::open_user_sessions_for_target(&txn, target.id).await?;
     Ticket::Entity::delete_many()
         .filter(Ticket::Column::TargetId.eq(target.id))
         .exec(&txn)
