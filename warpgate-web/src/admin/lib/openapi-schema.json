@@ -7185,6 +7185,9 @@
           "ssh_host_key_verification": {
             "$ref": "#/components/schemas/SshHostKeyVerificationMode"
           },
+          "ssh_show_qr_code": {
+            "type": "boolean"
+          },
           "password_login_mode": {
             "$ref": "#/components/schemas/PasswordLoginMode"
           },
@@ -7371,6 +7374,7 @@
           "ssh_client_auth_password",
           "ssh_client_auth_keyboard_interactive",
           "ssh_host_key_verification",
+          "ssh_show_qr_code",
           "password_login_mode",
           "mfa_enforcement",
           "mfa_policy_exempt_sso_users",
@@ -7428,6 +7432,9 @@
           },
           "ssh_host_key_verification": {
             "$ref": "#/components/schemas/SshHostKeyVerificationMode"
+          },
+          "ssh_show_qr_code": {
+            "type": "boolean"
           },
           "password_login_mode": {
             "$ref": "#/components/schemas/PasswordLoginMode"

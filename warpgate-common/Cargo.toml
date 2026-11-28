@@ -30,6 +30,7 @@ nucleo-matcher = "0.3.1"
 poem.workspace = true
 poem-openapi.workspace = true
 ppp.workspace = true
+qrcode.workspace = true
 rand.workspace = true
 rand_chacha.workspace = true
 rand_core.workspace = true
