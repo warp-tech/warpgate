@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.30.0-modified"
+    "version": "v0.31.0-beta.3-1-g4c42c581f-modified"
   },
   "servers": [
     {
@@ -327,16 +327,6 @@
               }
             }
           },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
           "400": {
             "description": "",
             "content": {
@@ -479,6 +469,16 @@
           "204": {
             "description": ""
           },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "404": {
             "description": ""
           }
@@ -492,6 +492,47 @@
           }
         ],
         "operationId": "delete_role"
+      }
+    },
+    "/role/{id}/release": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/Role"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "release_role"
       }
     },
     "/role/{id}/targets": {
@@ -642,6 +683,16 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -729,6 +780,19 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
           },
           "404": {
             "description": ""
@@ -1389,6 +1453,26 @@
               }
             }
           },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "404": {
             "description": ""
           }
@@ -1431,6 +1515,16 @@
               }
             }
           },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "404": {
             "description": ""
           }
@@ -1444,6 +1538,48 @@
           }
         ],
         "operationId": "delete_ssh_own_key"
+      }
+    },
+    "/ssh/own-keys/{id}/release": {
+      "post": {
+        "summary": "Hands a managed key back to manual editing",
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/SSHClientKey"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "release_ssh_own_key"
       }
     },
     "/logs": {
@@ -1552,16 +1688,6 @@
               "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/Target"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "string"
                 }
               }
             }
@@ -1708,6 +1834,16 @@
           "204": {
             "description": ""
           },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "404": {
             "description": ""
           }
@@ -1721,6 +1857,47 @@
           }
         ],
         "operationId": "delete_target"
+      }
+    },
+    "/targets/{id}/release": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/Target"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "release_target"
       }
     },
     "/targets/{id}/known-ssh-host-keys": {
@@ -1845,6 +2022,16 @@
             "description": ""
           },
           "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
             "description": ""
           }
         },
@@ -1886,6 +2073,16 @@
         "responses": {
           "204": {
             "description": ""
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "404": {
             "description": ""
@@ -1947,16 +2144,6 @@
               "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/TargetGroup"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "string"
                 }
               }
             }
@@ -2103,6 +2290,16 @@
           "204": {
             "description": ""
           },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "404": {
             "description": ""
           }
@@ -2116,6 +2313,47 @@
           }
         ],
         "operationId": "delete_target_group"
+      }
+    },
+    "/target-groups/{id}/release": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "required": true,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/TargetGroup"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "release_target_group"
       }
     },
     "/users": {
@@ -3600,16 +3838,6 @@
               }
             }
           },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
           "400": {
             "description": "",
             "content": {
@@ -4003,6 +4231,51 @@
           }
         ],
         "operationId": "get_analytics_preview"
+      }
+    },
+    "/parameters/logo": {
+      "put": {
+        "summary": "Replaces the Warpgate logo in the web UI. `GET /@warpgate/api/logo`\nserves it.",
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/LogoUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "set_logo"
+      },
+      "delete": {
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "delete_logo"
       }
     },
     "/parameters/recordings-storage/test": {
@@ -4988,6 +5261,199 @@
         ],
         "operationId": "get_secret_reference_usage"
       }
+    },
+    "/gitops/sync": {
+      "post": {
+        "summary": "Syncs the GitOps source now and waits for the outcome",
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/SyncGitopsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderSync"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "sync_gitops"
+      }
+    },
+    "/gitops/dry-run": {
+      "post": {
+        "summary": "Fetches and plans the GitOps source like a sync, without applying anything",
+        "requestBody": {
+          "content": {
+            "application/json; charset=utf-8": {
+              "schema": {
+                "$ref": "#/components/schemas/SyncGitopsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/DryRun"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "dry_run_gitops"
+      }
+    },
+    "/gitops/export": {
+      "get": {
+        "summary": "Every target, group, role and SSH client key that GitOps doesn't\nmanage yet, as resource documents that adopt them. Contains their\ncredentials in plain text.",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/plain; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "export_gitops_unmanaged"
+      }
+    },
+    "/gitops/history": {
+      "get": {
+        "parameters": [
+          {
+            "name": "offset",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          },
+          {
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "format": "uint64",
+              "maximum": 1000.0
+            },
+            "in": "query",
+            "required": false,
+            "deprecated": false,
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_ProviderSync"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_gitops_history"
+      }
+    },
+    "/gitops/history/latest": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitopsHistoryLatest"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "TokenSecurityScheme": []
+          },
+          {
+            "CookieSecurityScheme": []
+          }
+        ],
+        "operationId": "get_gitops_history_latest"
+      }
     }
   },
   "components": {
@@ -5038,6 +5504,7 @@
           "id",
           "name",
           "description",
+          "builtin",
           "targets_create",
           "targets_edit",
           "targets_delete",
@@ -5068,6 +5535,9 @@
           },
           "description": {
             "type": "string"
+          },
+          "builtin": {
+            "type": "boolean"
           },
           "targets_create": {
             "type": "boolean"
@@ -5284,6 +5754,168 @@
       "AutoCredentials": {
         "type": "object",
         "title": "AutoCredentials"
+      },
+      "AzureBlobConfig": {
+        "type": "object",
+        "title": "AzureBlobConfig",
+        "description": "Everything needed to reach one blob container. Serves as both the stored\n(serde) and admin-API (poem-openapi) representation.",
+        "required": [
+          "account",
+          "container",
+          "prefix",
+          "credentials"
+        ],
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "Storage account name, e.g. `mywarpgatestorage`.",
+            "pattern": "^[a-z0-9]{3,24}$"
+          },
+          "container": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]{3,63}$"
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "Service endpoint for a sovereign cloud; `None` = public Azure.",
+            "pattern": "^https://[a-z0-9.-]+\\.blob\\.(core\\.windows\\.net|core\\.usgovcloudapi\\.net|core\\.chinacloudapi\\.cn|storage\\.azure\\.net)/?$"
+          },
+          "prefix": {
+            "type": "string",
+            "description": "Blob-name prefix prepended to every recording path."
+          },
+          "credentials": {
+            "$ref": "#/components/schemas/AzureCredentials"
+          },
+          "scratch_path": {
+            "type": "string",
+            "description": "Local directory buffering recordings before upload, resolved against the\nconfig file's directory unless absolute. Defaults to `data/recordings-scratch`."
+          },
+          "serve_through_warpgate": {
+            "type": "boolean",
+            "description": "Stream recordings through Warpgate instead of redirecting the browser to\na SAS URL.\n\nRedirecting is cheaper — the bytes never touch Warpgate — but it needs\nthe container to carry a CORS policy allowing this origin to issue Range\nrequests, and it needs the browser to be able to reach the storage\naccount at all, which it cannot when the account sits behind a private\nendpoint.",
+            "default": false
+          }
+        }
+      },
+      "AzureCredentials": {
+        "type": "object",
+        "description": "How a client authenticates to Azure Storage.\n\nEvery mode is Entra ID, because that is all the SDK has: `azure_storage_blob`\n1.x accepts an `Option<Arc<dyn TokenCredential>>` and ships no shared-key\ncredential, so a storage-account key cannot be used to authenticate here.\n`ServicePrincipal` is the way to hand Warpgate explicit credentials.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/AzureCredentials_ManagedIdentityCredentials"
+          },
+          {
+            "$ref": "#/components/schemas/AzureCredentials_WorkloadIdentityCredentials"
+          },
+          {
+            "$ref": "#/components/schemas/AzureCredentials_ServicePrincipalCredentials"
+          },
+          {
+            "$ref": "#/components/schemas/AzureCredentials_DeveloperToolsCredentials"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "mode",
+          "mapping": {
+            "ManagedIdentity": "#/components/schemas/AzureCredentials_ManagedIdentityCredentials",
+            "WorkloadIdentity": "#/components/schemas/AzureCredentials_WorkloadIdentityCredentials",
+            "ServicePrincipal": "#/components/schemas/AzureCredentials_ServicePrincipalCredentials",
+            "DeveloperTools": "#/components/schemas/AzureCredentials_DeveloperToolsCredentials"
+          }
+        }
+      },
+      "AzureCredentials_DeveloperToolsCredentials": {
+        "description": "How a client authenticates to Azure Storage.\n\nEvery mode is Entra ID, because that is all the SDK has: `azure_storage_blob`\n1.x accepts an `Option<Arc<dyn TokenCredential>>` and ships no shared-key\ncredential, so a storage-account key cannot be used to authenticate here.\n`ServicePrincipal` is the way to hand Warpgate explicit credentials.",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "DeveloperTools"
+                ],
+                "example": "DeveloperTools"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/DeveloperToolsCredentials"
+          }
+        ]
+      },
+      "AzureCredentials_ManagedIdentityCredentials": {
+        "description": "How a client authenticates to Azure Storage.\n\nEvery mode is Entra ID, because that is all the SDK has: `azure_storage_blob`\n1.x accepts an `Option<Arc<dyn TokenCredential>>` and ships no shared-key\ncredential, so a storage-account key cannot be used to authenticate here.\n`ServicePrincipal` is the way to hand Warpgate explicit credentials.",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "ManagedIdentity"
+                ],
+                "example": "ManagedIdentity"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/ManagedIdentityCredentials"
+          }
+        ]
+      },
+      "AzureCredentials_ServicePrincipalCredentials": {
+        "description": "How a client authenticates to Azure Storage.\n\nEvery mode is Entra ID, because that is all the SDK has: `azure_storage_blob`\n1.x accepts an `Option<Arc<dyn TokenCredential>>` and ships no shared-key\ncredential, so a storage-account key cannot be used to authenticate here.\n`ServicePrincipal` is the way to hand Warpgate explicit credentials.",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "ServicePrincipal"
+                ],
+                "example": "ServicePrincipal"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/ServicePrincipalCredentials"
+          }
+        ]
+      },
+      "AzureCredentials_WorkloadIdentityCredentials": {
+        "description": "How a client authenticates to Azure Storage.\n\nEvery mode is Entra ID, because that is all the SDK has: `azure_storage_blob`\n1.x accepts an `Option<Arc<dyn TokenCredential>>` and ships no shared-key\ncredential, so a storage-account key cannot be used to authenticate here.\n`ServicePrincipal` is the way to hand Warpgate explicit credentials.",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "WorkloadIdentity"
+                ],
+                "example": "WorkloadIdentity"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/WorkloadIdentityCredentials"
+          }
+        ]
       },
       "BackendType": {
         "type": "string",
@@ -5596,6 +6228,46 @@
           }
         }
       },
+      "DeveloperToolsCredentials": {
+        "type": "object",
+        "title": "DeveloperToolsCredentials"
+      },
+      "DryRun": {
+        "type": "object",
+        "title": "DryRun",
+        "description": "What a sync would do",
+        "required": [
+          "source",
+          "unchanged",
+          "pending"
+        ],
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "plan": {
+            "type": "array",
+            "title": "A sync's plan, one entry per resource",
+            "items": {
+              "$ref": "#/components/schemas/PlannedChange"
+            }
+          },
+          "unchanged": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "pending": {
+            "type": "boolean",
+            "description": "if anything would be written"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
       "ExistingCertificateCredential": {
         "type": "object",
         "title": "ExistingCertificateCredential",
@@ -5761,6 +6433,137 @@
             "format": "uuid"
           }
         }
+      },
+      "GitopsDirectorySource": {
+        "type": "object",
+        "title": "GitopsDirectorySource",
+        "description": "A directory on the node, such as a mounted ConfigMap or git-sync volume.\nIn a cluster every node must see the same files.",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 1
+          }
+        }
+      },
+      "GitopsGitSource": {
+        "type": "object",
+        "title": "GitopsGitSource",
+        "required": [
+          "url",
+          "reference"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "`https://` URL without credentials; `file://` is for tests",
+            "maxLength": 2048,
+            "pattern": "^(https|file)://[^@/]*(/.*)?$"
+          },
+          "reference": {
+            "type": "string",
+            "description": "Branch, tag, full ref name or commit",
+            "maxLength": 255,
+            "minLength": 1
+          },
+          "username": {
+            "type": "string",
+            "description": "Optional. Without it, a password or token is sent as user `git`. With\nneither, the connection is anonymous.",
+            "maxLength": 255,
+            "minLength": 1
+          },
+          "password": {
+            "type": "string",
+            "description": "Password or access token, inline or a `secret://` reference. The admin\nAPI returns an inline value empty, and an empty one on update keeps the\nstored value while the URL stays the same",
+            "default": ""
+          },
+          "path": {
+            "type": "string",
+            "description": "Directory inside the repository that holds the files; the root if unset.\nRelative, and no segment starts with a dot, so it can't leave the checkout.",
+            "maxLength": 4096,
+            "pattern": "^[^/\\\\.][^/\\\\]*(/[^/\\\\.][^/\\\\]*)*$"
+          }
+        }
+      },
+      "GitopsHistoryLatest": {
+        "type": "object",
+        "title": "GitopsHistoryLatest",
+        "properties": {
+          "latest": {
+            "$ref": "#/components/schemas/ProviderSync"
+          },
+          "latest_success": {
+            "$ref": "#/components/schemas/ProviderSync"
+          }
+        }
+      },
+      "GitopsSource": {
+        "type": "object",
+        "description": "Where the GitOps provider reads resource files from. Serves as both the\nstored and the admin-API representation.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/GitopsSource_GitopsDirectorySource"
+          },
+          {
+            "$ref": "#/components/schemas/GitopsSource_GitopsGitSource"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind",
+          "mapping": {
+            "Directory": "#/components/schemas/GitopsSource_GitopsDirectorySource",
+            "Git": "#/components/schemas/GitopsSource_GitopsGitSource"
+          }
+        }
+      },
+      "GitopsSource_GitopsDirectorySource": {
+        "description": "Where the GitOps provider reads resource files from. Serves as both the\nstored and the admin-API representation.",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Directory"
+                ],
+                "example": "Directory"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/GitopsDirectorySource"
+          }
+        ]
+      },
+      "GitopsSource_GitopsGitSource": {
+        "description": "Where the GitOps provider reads resource files from. Serves as both the\nstored and the admin-API representation.",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Git"
+                ],
+                "example": "Git"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/GitopsGitSource"
+          }
+        ]
       },
       "ImportLdapUsersRequest": {
         "type": "object",
@@ -6209,6 +7012,31 @@
           }
         }
       },
+      "LogoUpdate": {
+        "type": "object",
+        "title": "LogoUpdate",
+        "required": [
+          "logo"
+        ],
+        "properties": {
+          "logo": {
+            "type": "string",
+            "description": "Only browser-renderable image data URLs are stored: the value is served\nto every visitor as an image, so nothing else must ever end up in it.\nThe size cap is mirrored in the Parameters UI.",
+            "maxLength": 4194304,
+            "pattern": "^data:image/(png|jpeg|gif|webp|svg\\+xml);base64,[A-Za-z0-9+/]+={0,2}$"
+          }
+        }
+      },
+      "ManagedIdentityCredentials": {
+        "type": "object",
+        "title": "ManagedIdentityCredentials",
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "description": "Client ID of a user-assigned identity; `None` selects the system-assigned one."
+          }
+        }
+      },
       "MfaEnforcement": {
         "type": "string",
         "enum": [
@@ -6289,6 +7117,31 @@
           "ForcedOn",
           "ForcedOff"
         ]
+      },
+      "PaginatedResponse_ProviderSync": {
+        "type": "object",
+        "title": "PaginatedResponse_ProviderSync",
+        "required": [
+          "items",
+          "offset",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderSync"
+            }
+          },
+          "offset": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "total": {
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
       },
       "PaginatedResponse_UserSessionSnapshot": {
         "type": "object",
@@ -6458,12 +7311,6 @@
           "banner": {
             "type": "string"
           },
-          "logo": {
-            "type": "string",
-            "description": "Only browser-renderable image data URLs are stored: the value is served\nto every visitor as an image, so nothing else must ever end up in it.\n`null` clears the logo. The size cap is mirrored in the Parameters UI.",
-            "maxLength": 4194304,
-            "pattern": "^data:image/(png|jpeg|gif|webp|svg\\+xml);base64,[A-Za-z0-9+/]+={0,2}$"
-          },
           "web_clients_enabled": {
             "type": "boolean"
           },
@@ -6498,6 +7345,27 @@
           },
           "recordings_storage": {
             "$ref": "#/components/schemas/RecordingsStorageConfig"
+          },
+          "gitops_source": {
+            "$ref": "#/components/schemas/GitopsSource"
+          },
+          "gitops_sync_interval_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Checked every 15 seconds; `null` syncs at startup and on request only",
+            "minimum": 1.0
+          },
+          "gitops_sync_on_startup": {
+            "type": "boolean"
+          },
+          "gitops_webhook_secret": {
+            "type": "string",
+            "description": "Authenticates pushes to `/@warpgate/api/gitops/webhook`, sent as\n`X-Hub-Signature-256` or `X-Gitlab-Token`. Write-only; `null` turns the\nwebhook off",
+            "maxLength": 255,
+            "minLength": 16
+          },
+          "gitops_prune": {
+            "type": "boolean"
           }
         }
       },
@@ -6542,7 +7410,11 @@
           "analytics_consent",
           "analytics_normal",
           "recordings_enable",
-          "recordings_storage"
+          "recordings_storage",
+          "gitops_sync_on_startup",
+          "gitops_webhook_secret_set",
+          "gitops_git_password_set",
+          "gitops_prune"
         ],
         "properties": {
           "allow_own_credential_management": {
@@ -6703,6 +7575,26 @@
           },
           "recordings_storage": {
             "$ref": "#/components/schemas/RecordingsStorageConfig"
+          },
+          "gitops_source": {
+            "$ref": "#/components/schemas/GitopsSource"
+          },
+          "gitops_sync_interval_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "gitops_sync_on_startup": {
+            "type": "boolean"
+          },
+          "gitops_webhook_secret_set": {
+            "type": "boolean"
+          },
+          "gitops_git_password_set": {
+            "type": "boolean",
+            "description": "Whether the Git source has a stored password or token. `gitops_source`\nis redacted and can't show it."
+          },
+          "gitops_prune": {
+            "type": "boolean"
           }
         }
       },
@@ -6757,12 +7649,201 @@
           "MissingSpecial"
         ]
       },
+      "PlanAction": {
+        "type": "string",
+        "enum": [
+          "create",
+          "update",
+          "adopt",
+          "unchanged",
+          "collision",
+          "blocked",
+          "guarded",
+          "would_prune",
+          "delete"
+        ]
+      },
+      "PlanStats": {
+        "type": "object",
+        "title": "PlanStats",
+        "description": "How many resources of a plan fall under each [`PlanAction`]",
+        "required": [
+          "create",
+          "update",
+          "adopt",
+          "delete",
+          "collision",
+          "blocked",
+          "guarded",
+          "would_prune"
+        ],
+        "properties": {
+          "create": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "update": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "adopt": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "delete": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "collision": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "blocked": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "guarded": {
+            "type": "integer",
+            "format": "uint32"
+          },
+          "would_prune": {
+            "type": "integer",
+            "format": "uint32"
+          }
+        }
+      },
+      "PlannedChange": {
+        "type": "object",
+        "title": "PlannedChange",
+        "description": "One resource in a plan",
+        "required": [
+          "kind",
+          "name",
+          "action",
+          "fields"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "action": {
+            "$ref": "#/components/schemas/PlanAction"
+          },
+          "fields": {
+            "type": "array",
+            "description": "For an update or adoption",
+            "items": {
+              "$ref": "#/components/schemas/PlannedField"
+            }
+          },
+          "reason": {
+            "type": "string",
+            "description": "For a collision or a blocked change"
+          }
+        }
+      },
+      "PlannedField": {
+        "type": "object",
+        "title": "PlannedField",
+        "description": "A changed field of a resource",
+        "required": [
+          "path",
+          "credential"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Where in the resource, e.g. `spec.options.ssh.port`"
+          },
+          "credential": {
+            "type": "boolean",
+            "description": "Set for a credential. Its values are never in a plan, so `from` and\n`to` are absent."
+          },
+          "from": {},
+          "to": {}
+        }
+      },
       "PostgresProtocolVersion": {
         "type": "string",
         "enum": [
           "3.0",
           "3.2"
         ]
+      },
+      "Provider": {
+        "type": "object",
+        "title": "Provider",
+        "description": "A provider as the API returns it: its ID and display name",
+        "required": [
+          "id",
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
+      "ProviderSync": {
+        "type": "object",
+        "title": "ProviderSync",
+        "required": [
+          "id",
+          "provider",
+          "triggered_by",
+          "status",
+          "started_at",
+          "checked_at",
+          "source",
+          "needs_force"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/Provider"
+          },
+          "triggered_by": {
+            "$ref": "#/components/schemas/SyncTrigger"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SyncStatus"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "source": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string",
+            "description": "The commit, or a hash of the files"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/PlanStats"
+          },
+          "needs_force": {
+            "type": "boolean",
+            "description": "mass-deletion guard refuses the sync"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
       },
       "RdpTargetAuth": {
         "type": "object",
@@ -6903,15 +7984,42 @@
           },
           {
             "$ref": "#/components/schemas/RecordingsStorageConfig_S3StorageConfig"
+          },
+          {
+            "$ref": "#/components/schemas/RecordingsStorageConfig_AzureBlobConfig"
           }
         ],
         "discriminator": {
           "propertyName": "kind",
           "mapping": {
             "Disk": "#/components/schemas/RecordingsStorageConfig_RecordingsDiskConfig",
-            "S3": "#/components/schemas/RecordingsStorageConfig_S3StorageConfig"
+            "S3": "#/components/schemas/RecordingsStorageConfig_S3StorageConfig",
+            "Azure": "#/components/schemas/RecordingsStorageConfig_AzureBlobConfig"
           }
         }
+      },
+      "RecordingsStorageConfig_AzureBlobConfig": {
+        "description": "Where session recordings are stored, and everything that backend needs.\nServes as both the stored (serde) and admin-API (poem-openapi)\nrepresentation, so only valid field combinations can exist (e.g. no S3\nsettings while on disk).",
+        "allOf": [
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Azure"
+                ],
+                "example": "Azure"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/AzureBlobConfig"
+          }
+        ]
       },
       "RecordingsStorageConfig_RecordingsDiskConfig": {
         "description": "Where session recordings are stored, and everything that backend needs.\nServes as both the stored (serde) and admin-API (poem-openapi)\nrepresentation, so only valid field combinations can exist (e.g. no S3\nsettings while on disk).",
@@ -6993,6 +8101,9 @@
           },
           "is_default": {
             "type": "boolean"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/Provider"
           }
         }
       },
@@ -7112,6 +8223,11 @@
           "scratch_path": {
             "type": "string",
             "description": "Local directory buffering recordings before upload, resolved against the\nconfig file's directory unless absolute. Defaults to `data/recordings-scratch`."
+          },
+          "serve_through_warpgate": {
+            "type": "boolean",
+            "description": "Stream recordings through Warpgate instead of redirecting the browser to\na presigned URL. Needed when the browser cannot reach the bucket, e.g.\nbehind a private endpoint. Off by default, so existing setups keep\nredirecting.",
+            "default": false
           }
         }
       },
@@ -7144,6 +8260,9 @@
           },
           "secret_backend": {
             "type": "string"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/Provider"
           }
         }
       },
@@ -7645,6 +8764,31 @@
           }
         }
       },
+      "ServicePrincipalCredentials": {
+        "type": "object",
+        "title": "ServicePrincipalCredentials",
+        "required": [
+          "tenant_id",
+          "client_id",
+          "client_secret"
+        ],
+        "properties": {
+          "tenant_id": {
+            "type": "string",
+            "description": "Directory (tenant) ID.",
+            "minLength": 1
+          },
+          "client_id": {
+            "type": "string",
+            "description": "Application (client) ID.",
+            "minLength": 1
+          },
+          "client_secret": {
+            "type": "string",
+            "description": "Blank in responses; blank in an update keeps the stored secret."
+          }
+        }
+      },
       "SessionApprovalItem": {
         "type": "object",
         "title": "SessionApprovalItem",
@@ -7792,9 +8936,43 @@
           },
           "secret_access_key": {
             "type": "string",
-            "description": "`None` on the admin API means \"keep the stored secret\" (it's never sent\nout); always `Some` in a stored config."
+            "description": "Encrypted at rest. Blank in responses; absent or blank in an update\nkeeps the stored secret."
           }
         }
+      },
+      "SyncGitopsRequest": {
+        "type": "object",
+        "title": "SyncGitopsRequest",
+        "properties": {
+          "force_prune": {
+            "type": "boolean",
+            "description": "Prunes even when that deletes most of the managed resources. Has no\neffect while pruning is off.",
+            "default": false
+          },
+          "yaml": {
+            "type": "string",
+            "description": "Resource documents to use as the full desired state. A sync refuses\nthem while a source is configured; a dry run doesn't.",
+            "maxLength": 16000000
+          }
+        }
+      },
+      "SyncStatus": {
+        "type": "string",
+        "enum": [
+          "Applied",
+          "Unchanged",
+          "Failed"
+        ]
+      },
+      "SyncTrigger": {
+        "type": "string",
+        "enum": [
+          "Startup",
+          "Interval",
+          "Api",
+          "Webhook",
+          "Cli"
+        ]
       },
       "Target": {
         "type": "object",
@@ -7853,6 +9031,9 @@
           "ticket_max_uses": {
             "type": "integer",
             "format": "int16"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/Provider"
           }
         }
       },
@@ -7933,6 +9114,9 @@
           },
           "color": {
             "$ref": "#/components/schemas/BootstrapThemeColor"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/Provider"
           }
         }
       },
@@ -9167,6 +10351,10 @@
             "type": "string"
           }
         }
+      },
+      "WorkloadIdentityCredentials": {
+        "type": "object",
+        "title": "WorkloadIdentityCredentials"
       }
     },
     "securitySchemes": {

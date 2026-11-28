@@ -1,6 +1,7 @@
 <script lang="ts">
     import { Input } from '@sveltestrap/sveltestrap'
     import { autosave } from 'common/autosave'
+    import OnboardingHint from 'common/OnboardingHint.svelte'
     import LogViewer from './log-viewer/LogViewer.svelte'
 
     interface Props {
@@ -60,6 +61,11 @@
             {/if}
         </div>
     </div>
+
+    <OnboardingHint>
+        This is the global system and session log. Tick "audit log only" for
+        important events. You can forward this log to your SIEM.
+    </OnboardingHint>
 
     {#key `${$target}-${filterKind}-${params?.id}`}
         <LogViewer {filters} />

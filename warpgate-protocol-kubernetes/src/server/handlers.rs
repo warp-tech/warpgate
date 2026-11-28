@@ -21,17 +21,39 @@ use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
+use warpgate_common_http::{
+    UpstreamBody, buffer_response, is_same_authority_location, passthrough_accept_encoding,
+    read_body_limited_with_timeout,
+};
 use warpgate_core::logging::KubernetesAuditSubject;
 use warpgate_core::recordings::{TerminalRecorder, TerminalRecordingStreamId};
 use warpgate_core::{Services, WarpgateServerHandle};
 
-use crate::audit::{StreamOperation, classify_mutating, classify_stream};
-use crate::correlator::{AdmittedSession, RequestCorrelator, correlated_authorization};
-use crate::recording::{start_recording_api, start_recording_exec};
+use crate::audit::{
+    PendingRun, StreamOperation, classify_node_run, classify_pod_write, classify_stream,
+};
+use crate::correlator::{
+    KubernetesTargetSession, RequestCorrelator, SessionTarget, correlated_authorization,
+};
+use crate::recording::decode_response_body_for_recording;
 use crate::server::UpstreamClientCache;
 use crate::server::auth::{
-    KubernetesIdentity, authenticate_kubernetes_user, create_authenticated_client, unauthorized,
+    KubernetesIdentity, authenticate_kubernetes_user, create_authenticated_client,
+    resolve_kubernetes_target, unauthorized,
 };
+
+/// The kube-apiserver's hardcoded cap on a write request body (twice etcd's
+/// 1.5 MiB request limit). The apiserver does not apply it to `.../proxy`
+/// subresources; this does.
+const MAX_REQUEST_BODY_BYTES: usize = 3 * 1024 * 1024;
+
+/// Responses up to this size are buffered. Larger ones are streamed and
+/// recorded without their body. The limit equals [`MAX_REQUEST_BODY_BYTES`]
+/// because a write usually returns the object it was sent. It applies to the
+/// body as received, which may be gzip-encoded: responses are not decoded on
+/// their way to the client. A recording stores the decoded body only if that
+/// also fits the limit.
+const MAX_BUFFERED_RESPONSE_BYTES: usize = 3 * 1024 * 1024;
 
 /// A client-supplied impersonation header (`Impersonate-User`,
 /// `Impersonate-Group`, `Impersonate-Uid`, `Impersonate-Extra-*`). These let a
@@ -100,6 +122,22 @@ fn construct_target_url(
     })?)
 }
 
+/// A request that has joined its session, with what the plain and the
+/// websocket handler both need to proxy it
+struct AdmittedRequest<'a> {
+    req: &'a Request,
+    /// The path exactly as the API server will see it
+    api_path: &'a str,
+    /// A borrow, so a handler cannot move the session into a response stream.
+    /// That would keep its API recording open until the stream ends
+    session: &'a KubernetesTargetSession,
+    target: &'a SessionTarget,
+    audit_subject: &'a KubernetesAuditSubject,
+    services: &'a Services,
+    closed: CancellationToken,
+    handle: Arc<Mutex<WarpgateServerHandle>>,
+}
+
 #[handler]
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_api_request(
@@ -120,14 +158,21 @@ pub async fn handle_api_request(
     // resolved once per correlated session and reused, so a single `kubectl`
     // command's fan-out of requests only prompts for approval once.
     let identity = authenticate_kubernetes_user(req, ctx.services()).await?;
-    let (target_name, path) = match &identity {
+    // The target is resolved on every request. A session lasts up to
+    // `session_max_age`, and a rename or an edited credential or URL must
+    // apply to its next request
+    let (target, path) = match &identity {
         // Ticket credentials select the target; the entire URI belongs to the
         // upstream API, including discovery endpoints such as /api and /version.
         KubernetesIdentity::Ticket(ticket) => (
-            ticket.target().name.clone(),
+            ticket.target().clone(),
             req.uri().path().trim_start_matches('/').to_owned(),
         ),
-        KubernetesIdentity::User { .. } => named_target_path(req.uri().path())?,
+        KubernetesIdentity::User { .. } => {
+            let (target_name, path) = named_target_path(req.uri().path())?;
+            let target = resolve_kubernetes_target(ctx.services(), &target_name).await?;
+            (target, path)
+        }
     };
 
     // The path exactly as the API server will see it. The url crate resolves
@@ -140,7 +185,7 @@ pub async fn handle_api_request(
         .to_owned();
 
     let (handle, admitted, closed) =
-        correlated_authorization(correlator.0, req, identity, &target_name, ctx.services()).await?;
+        correlated_authorization(correlator.0, req, identity, &target, ctx.services()).await?;
     // Close may have arrived after the correlator lookup.
     if closed.is_cancelled() {
         return Err(unauthorized());
@@ -156,59 +201,54 @@ pub async fn handle_api_request(
         )
     };
 
-    // Built once per request and handed to both branches, so every Kubernetes
-    // audit event names the same actor, session and target. The *user* session
-    // id is the one the log layer keys entries by — recordings key off the
-    // target session id instead, and the two must not be confused.
-    let audit_subject = {
-        let target = admitted.target();
-        KubernetesAuditSubject {
-            session_id: user_session_id.0,
-            user_id: admitted.user_info().id,
-            username: admitted.user_info().username.clone(),
-            target_id: target.id,
-            target_name: target.name.clone(),
-        }
-    };
-
     async {
-        let response = if let Some(ws) = ws {
-            _handle_websocket_request_inner(
-                ws,
+        let response = async {
+            let target = admitted.target_for_request(target)?;
+
+            // Built once per request and handed to both branches, so every
+            // Kubernetes audit event names the same actor, session and target.
+            // The *user* session id is the one the log layer keys entries by —
+            // recordings key off the target session id instead, and the two
+            // must not be confused.
+            let audit_subject = KubernetesAuditSubject {
+                session_id: user_session_id.0,
+                user_id: admitted.user_info().id,
+                username: admitted.user_info().username.clone(),
+                target_id: target.id,
+                target_name: target.name.clone(),
+            };
+
+            let request = AdmittedRequest {
                 req,
-                admitted,
-                &api_path,
-                &audit_subject,
-                ctx.services(),
-                closed.clone(),
-                handle.clone(),
-            )
-            .await
-            .map(IntoResponse::into_response)
-            .map_err(poem::Error::from)
-        } else {
-            // Not `.context(...)`: that converts the `WarpgateError` to an
-            // `anyhow::Error`, which poem renders through `Display` instead
-            // of `as_response()`.
-            _handle_normal_request_inner(
-                req,
-                body,
-                admitted,
-                upstream_clients.0,
-                &api_path,
-                &audit_subject,
-                ctx.services(),
+                api_path: &api_path,
+                session: &admitted,
+                target: &target,
+                audit_subject: &audit_subject,
+                services: ctx.services(),
                 closed,
-                handle.clone(),
-            )
-            .await
-            .map(IntoResponse::into_response)
-            .map_err(|error| match error {
-                // Closed mid-request: the caller is no longer authorized.
-                WarpgateError::UserSessionEnded => unauthorized(),
-                error => poem::Error::from(error),
-            })
-        };
+                handle,
+            };
+
+            if let Some(ws) = ws {
+                _handle_websocket_request_inner(request, ws)
+                    .await
+                    .map(IntoResponse::into_response)
+                    .map_err(poem::Error::from)
+            } else {
+                // Not `.context(...)`: that converts the `WarpgateError` to an
+                // `anyhow::Error`, which poem renders through `Display` instead
+                // of `as_response()`.
+                _handle_normal_request_inner(request, body, upstream_clients.0)
+                    .await
+                    .map(IntoResponse::into_response)
+                    .map_err(|error| match error {
+                        // Closed mid-request: the caller is no longer authorized.
+                        WarpgateError::UserSessionEnded => unauthorized(),
+                        error => poem::Error::from(error),
+                    })
+            }
+        }
+        .await;
 
         let client_ip = get_client_ip(req, ctx.services()).await;
         let response = response.inspect_err(|e| {
@@ -273,14 +313,21 @@ where
     })
 }
 
-/// Copies every upstream response header onto a poem response builder.
+/// Copies upstream response headers onto a poem response builder.
 /// Shared by the normal request path and a websocket upgrade the API server
 /// refused, so both forward an upstream response the same way.
+///
+/// A `Location` to another authority is dropped. client-go follows redirects
+/// and re-sends its Warpgate bearer token to the new host
 fn copy_response_headers(
     mut builder: poem::ResponseBuilder,
     headers: &http::HeaderMap,
 ) -> poem::ResponseBuilder {
     for (name, value) in headers {
+        if name == http::header::LOCATION && !is_same_authority_location(value.as_bytes()) {
+            warn!(location = ?value, "Dropping cross-authority redirect from upstream Kubernetes API");
+            continue;
+        }
         if let Ok(poem_name) = poem::http::HeaderName::from_bytes(name.as_str().as_bytes())
             && let Ok(poem_value) = poem::http::HeaderValue::from_bytes(value.as_bytes())
         {
@@ -290,20 +337,62 @@ fn copy_response_headers(
     builder
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Streams chunked, watch and follow responses as they arrive and buffers the
+/// rest up to [`MAX_BUFFERED_RESPONSE_BYTES`]. A write's response is buffered
+/// even if it is chunked, and reading it ignores `closed`, so a close can't
+/// truncate a response that fits in the buffer.
+async fn take_response_body(
+    response: reqwest::Response,
+    is_write: bool,
+    query: Option<&str>,
+    closed: &CancellationToken,
+) -> Result<UpstreamBody, WarpgateError> {
+    let is_chunked = response
+        .headers()
+        .get(http::header::TRANSFER_ENCODING)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.eq_ignore_ascii_case("chunked"));
+
+    // watch: used by kubectl to await changes
+    // follow: used by kubectl logs
+    let is_streaming_response = query.is_some_and(|q| {
+        url::form_urlencoded::parse(q.as_bytes())
+            .any(|(k, v)| (k == "watch" || k == "follow") && crate::audit::parse_bool(&v))
+    });
+
+    if !is_write && (is_chunked || is_streaming_response) {
+        return Ok(UpstreamBody::Streamed(response.bytes_stream().boxed()));
+    }
+
+    let read = buffer_response(response, MAX_BUFFERED_RESPONSE_BYTES);
+    Ok(if is_write {
+        read.await
+    } else {
+        closed
+            .run_until_cancelled(read)
+            .await
+            .ok_or(WarpgateError::UserSessionEnded)?
+    }
+    .context("reading kubernetes response")?)
+}
+
 async fn _handle_normal_request_inner(
-    req: &Request,
+    request: AdmittedRequest<'_>,
     body: Body,
-    admitted: AdmittedSession,
     upstream_clients: &UpstreamClientCache,
-    api_path: &str,
-    audit_subject: &KubernetesAuditSubject,
-    services: &Services,
-    closed: CancellationToken,
-    handle: Arc<Mutex<WarpgateServerHandle>>,
 ) -> Result<Response, WarpgateError> {
-    let k8s_options = admitted.options();
-    let target_id = admitted.target().id;
+    let AdmittedRequest {
+        req,
+        api_path,
+        session,
+        target,
+        audit_subject,
+        services,
+        closed,
+        handle,
+    } = request;
+    let k8s_options = target.options();
+    let target_id = target.id;
     let client = upstream_clients
         .get_or_build(&target_id, k8s_options, || async {
             create_authenticated_client(k8s_options, services)
@@ -361,18 +450,13 @@ async fn _handle_normal_request_inner(
 
     // Cancel slow uploads when the session closes.
     let body_bytes = closed
-        .run_until_cancelled(body.into_bytes())
+        .run_until_cancelled(read_body_limited_with_timeout(
+            req.headers(),
+            body,
+            MAX_REQUEST_BODY_BYTES,
+        ))
         .await
-        .ok_or(WarpgateError::UserSessionEnded)?
-        .context("reading request body")?;
-
-    let mut recorder_opt = match start_recording_api(&admitted.id(), &services.recordings).await {
-        Ok(recorder) => recorder,
-        Err(e) => {
-            warn!("Failed to start recording: {}", e);
-            None
-        }
-    };
+        .ok_or(WarpgateError::UserSessionEnded)??;
 
     // Forward request to Kubernetes API
     let mut request_builder = client.request(
@@ -380,7 +464,8 @@ async fn _handle_normal_request_inner(
         full_url.clone(),
     );
 
-    // Add headers (excluding authorization, host, and content-length as they'll be set by reqwest)
+    // Add headers (excluding authorization, host, and content-length as they'll be set by reqwest,
+    // and accept-encoding, which is set below)
     let mut upstream_headers = HashMap::new();
     for (name, value) in &headers {
         let header_name_lower = name.to_lowercase();
@@ -390,6 +475,7 @@ async fn _handle_normal_request_inner(
             "connection",
             "transfer-encoding",
             "authorization",
+            "accept-encoding",
         ]
         .contains(&header_name_lower.as_str())
         {
@@ -402,6 +488,10 @@ async fn _handle_normal_request_inner(
             upstream_headers.insert(name.clone(), value.clone());
         }
     }
+    request_builder = request_builder.header(
+        http::header::ACCEPT_ENCODING,
+        passthrough_accept_encoding(req.headers()),
+    );
 
     debug!(
         filtered_headers = ?redact_headers(&upstream_headers),
@@ -409,7 +499,7 @@ async fn _handle_normal_request_inner(
     );
 
     if !body_bytes.is_empty() {
-        request_builder = request_builder.body(body_bytes.to_vec());
+        request_builder = request_builder.body(body_bytes.clone());
     }
 
     // Debug logging for upstream request
@@ -425,34 +515,51 @@ async fn _handle_normal_request_inner(
     // the client learns whether it was applied and an audited one keeps its
     // event. A close before dispatch still refuses it.
     let is_write = !req.method().is_safe();
-    let response = if is_write {
-        if closed.is_cancelled() {
-            return Err(WarpgateError::UserSessionEnded);
-        }
-        request_builder.send().await?
+    if is_write && closed.is_cancelled() {
+        return Err(WarpgateError::UserSessionEnded);
+    }
+
+    // A kubelet `/run` must be audited once it is sent, even if no answer
+    // arrives, so the guard is created before the send.
+    let pending_run = classify_node_run(method, api_path, req.uri().query())
+        .map(|run| PendingRun::new(run, audit_subject));
+
+    let sent = if is_write {
+        request_builder.send().await
     } else {
         closed
             .run_until_cancelled(request_builder.send())
             .await
-            .ok_or(WarpgateError::UserSessionEnded)??
+            .ok_or(WarpgateError::UserSessionEnded)?
     };
 
+    // Audit before a response read error aborts this task.
+    if let Some(write) = classify_pod_write(method, api_path, req.uri().query()) {
+        let content_type = req
+            .headers()
+            .get(http::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok());
+        let status = sent.as_ref().ok().map(|r| r.status().as_u16());
+        for event in write
+            .read(content_type, &body_bytes)
+            .audit_events(audit_subject, status)
+        {
+            event.emit();
+        }
+    }
+
+    let response = sent?;
     let status = response.status();
     let response_headers = response.headers().clone();
+
+    if let Some(run) = pending_run {
+        run.answered(status.as_u16());
+    }
 
     // The cached client's credential may have been rotated or expired upstream;
     // build a fresh one for the next request.
     if status == http::StatusCode::UNAUTHORIZED {
         upstream_clients.remove(&target_id);
-    }
-
-    // Emitted after the response so a refused `kubectl debug` is audited as
-    // clearly as an accepted one, and before the body is consumed so a failure
-    // to read it cannot lose the event.
-    if let Some(operation) = classify_mutating(method, api_path, req.uri().query(), &body_bytes) {
-        for event in operation.audit_events(audit_subject, status.as_u16()) {
-            event.emit();
-        }
     }
 
     debug!(
@@ -463,64 +570,39 @@ async fn _handle_normal_request_inner(
         "Received response from upstream Kubernetes API"
     );
 
-    let (response_body, body_for_recording) = {
-        // k8s uses streaming chunked responses for watch API
-        let transfer_encoding = response_headers
-            .get(poem::http::header::TRANSFER_ENCODING)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or_default()
-            .to_lowercase();
+    // A streamed body is recorded as empty.
+    let (response_body, body_for_recording) =
+        match take_response_body(response, is_write, req.uri().query(), &closed).await? {
+            UpstreamBody::Buffered(bytes) => (Body::from_bytes(bytes.clone()), bytes),
+            UpstreamBody::Streamed(upstream) => (
+                Body::from_bytes_stream(end_on_close(
+                    upstream.map_err(std::io::Error::other),
+                    closed,
+                    handle,
+                )),
+                bytes::Bytes::new(),
+            ),
+        };
 
-        let query_pairs: Vec<_> = req
-            .uri()
-            .query()
-            .map(|q| url::form_urlencoded::parse(q.as_bytes()).collect())
-            .unwrap_or_default();
-
-        // watch: used by kubectl to await changes
-        // follow: used by kubectl logs
-        let is_streaming_response = query_pairs
-            .iter()
-            .any(|(k, v)| (k == "watch" || k == "follow") && crate::audit::parse_bool(v));
-
-        // A write's response is always read in full, even if it is framed as
-        // chunked, so a close can't cut off its answer.
-        if !is_write && (transfer_encoding == "chunked" || is_streaming_response) {
-            let upstream = response.bytes_stream().map_err(std::io::Error::other);
-            (
-                Body::from_bytes_stream(end_on_close(upstream, closed, handle)),
-                None,
-            )
-        } else {
-            let bytes = if is_write {
-                response.bytes().await
-            } else {
-                closed
-                    .run_until_cancelled(response.bytes())
-                    .await
-                    .ok_or(WarpgateError::UserSessionEnded)?
-            }
-            .context("reading kubernetes response")?;
-
-            (Body::from_bytes(bytes.clone()), Some(bytes.to_vec()))
-        }
-    };
-
-    // Record the response
-    if let Some(ref mut recorder) = recorder_opt
-        && let Err(e) = recorder
-            .record_response(
-                method,
-                full_url.as_ref(),
-                redacted_headers,
-                &body_bytes,
-                status.as_u16(),
-                body_for_recording.unwrap_or_default().as_ref(),
-            )
-            .await
-    {
-        warn!("Failed to record Kubernetes response: {}", e);
-    }
+    session
+        .record_api(&services.recordings, async |recorder| {
+            let body_for_recording = decode_response_body_for_recording(
+                response_headers.get(http::header::CONTENT_ENCODING),
+                &body_for_recording,
+                MAX_BUFFERED_RESPONSE_BYTES,
+            );
+            recorder
+                .record_response(
+                    method,
+                    full_url.as_ref(),
+                    redacted_headers,
+                    &body_bytes,
+                    status.as_u16(),
+                    &body_for_recording,
+                )
+                .await
+        })
+        .await;
 
     let poem_response =
         copy_response_headers(Response::builder().status(status), &response_headers);
@@ -573,18 +655,21 @@ async fn run_websocket_recording(recorder: TerminalRecorder, mut rx: mpsc::Recei
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn _handle_websocket_request_inner(
+    request: AdmittedRequest<'_>,
     ws: WebSocket,
-    req: &Request,
-    admitted: AdmittedSession,
-    api_path: &str,
-    audit_subject: &KubernetesAuditSubject,
-    services: &Services,
-    closed: CancellationToken,
-    handle: Arc<Mutex<WarpgateServerHandle>>,
 ) -> anyhow::Result<impl IntoResponse> {
-    let k8s_options = admitted.options();
+    let AdmittedRequest {
+        req,
+        api_path,
+        session,
+        target,
+        audit_subject,
+        services,
+        closed,
+        handle,
+    } = request;
+    let k8s_options = target.options();
     let full_url = construct_target_url(req, api_path, k8s_options)?;
 
     let client = create_authenticated_client(k8s_options, services)
@@ -601,7 +686,11 @@ async fn _handle_websocket_request_inner(
         .as_ref()
         .and_then(StreamOperation::recording_metadata)
     {
-        match start_recording_exec(&admitted.id(), &services.recordings, metadata).await {
+        match services
+            .recordings
+            .start::<TerminalRecorder, _>(&session.id(), metadata)
+            .await
+        {
             Err(e) => {
                 error!("Failed to start recording: {}", e);
             }
@@ -628,19 +717,17 @@ async fn _handle_websocket_request_inner(
     };
     let (client_socket, selected_protocol) = match connection {
         Ok(UpstreamWebsocket::Established { socket, protocol }) => (socket, protocol),
-        // Audit before reading the body, then forward the cluster's refusal.
+        // Audit, then forward the cluster's refusal.
         Ok(UpstreamWebsocket::Rejected(response)) => {
             if let Some(operation) = &operation {
                 operation
                     .rejection_event(audit_subject, response.status().as_u16())
                     .emit();
             }
-            let response = tokio::select! {
-                biased;
-                () = closed.cancelled() => bail!("Session closed while reading the Kubernetes websocket refusal"),
-                result = forward_rejected_upstream_response(response) => result?,
-            };
-            return Ok(response.into_response());
+            let mut response = forward_rejected_upstream_response(response);
+            let body = Box::pin(response.take_body().into_bytes_stream());
+            response.set_body(Body::from_bytes_stream(end_on_close(body, closed, handle)));
+            return Ok(response);
         }
         // Transport or invalid-handshake failures have no response to forward.
         Err(error) => {
@@ -795,21 +882,15 @@ enum UpstreamWebsocket {
     Rejected(reqwest::Response),
 }
 
-async fn forward_rejected_upstream_response(
-    response: reqwest::Response,
-) -> anyhow::Result<Response> {
+fn forward_rejected_upstream_response(response: reqwest::Response) -> Response {
     let status = response.status();
-    // The body is re-sent in full, so the upstream framing headers no longer
-    // describe it; Poem sets the length itself.
+    // Poem sets the transfer encoding for the streamed body.
     let mut headers = response.headers().clone();
     headers.remove(http::header::TRANSFER_ENCODING);
-    headers.remove(http::header::CONTENT_LENGTH);
-    let body = response
-        .bytes()
-        .await
-        .context("reading Kubernetes API response")?;
+    let body = response.bytes_stream().map_err(std::io::Error::other);
 
-    Ok(copy_response_headers(Response::builder().status(status), &headers).body(body))
+    copy_response_headers(Response::builder().status(status), &headers)
+        .body(Body::from_bytes_stream(body))
 }
 
 /// Connect before replying downstream so both sides use the selected protocol.
@@ -897,6 +978,148 @@ mod tests {
                 break;
             }
         }
+    }
+
+    #[tokio::test]
+    async fn watchlist_gzip_members_reach_the_client_whole() {
+        use std::io::Read;
+
+        use futures::TryStreamExt;
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::TcpListener;
+        use tokio_util::sync::CancellationToken;
+        use warpgate_common_http::UpstreamBody;
+
+        use super::take_response_body;
+        use crate::recording::tests::gzip_member;
+        use crate::server::auth::upstream_client_builder;
+
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let mut events: String = (0..4)
+            .map(|i| {
+                format!(r#"{{"type":"ADDED","object":{{"metadata":{{"name":"svc-{i}"}}}}}}"#) + "\n"
+            })
+            .collect();
+        events.push_str(
+            r#"{"type":"BOOKMARK","object":{"metadata":{"annotations":{"k8s.io/initial-events-end":"true"}}}}"#,
+        );
+        events.push('\n');
+
+        // One gzip member per event, each in its own chunk.
+        let members: Vec<Vec<u8>> = events
+            .split_inclusive('\n')
+            .map(|line| gzip_member(line.as_bytes()))
+            .collect();
+        let mut wire = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Encoding: gzip\r\nTransfer-Encoding: chunked\r\n\r\n".to_vec();
+        for member in &members {
+            wire.extend_from_slice(format!("{:x}\r\n", member.len()).as_bytes());
+            wire.extend_from_slice(member);
+            wire.extend_from_slice(b"\r\n");
+        }
+        wire.extend_from_slice(b"0\r\n\r\n");
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            drain_request_head(&mut stream).await;
+            stream.write_all(&wire).await.unwrap();
+            stream.flush().await.unwrap();
+        });
+
+        let client = upstream_client_builder(&format!("http://{address}"))
+            .build()
+            .unwrap();
+        let query = "watch=true&sendInitialEvents=true&resourceVersionMatch=NotOlderThan";
+        let response = client
+            .get(format!("http://{address}/api/v1/services?{query}"))
+            .header(reqwest::header::ACCEPT_ENCODING, "gzip")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response
+                .headers()
+                .get(http::header::CONTENT_ENCODING)
+                .unwrap(),
+            "gzip"
+        );
+
+        let taken = take_response_body(response, false, Some(query), &CancellationToken::new())
+            .await
+            .unwrap();
+        let UpstreamBody::Streamed(stream) = taken else {
+            panic!("a watch response must be streamed");
+        };
+        let received = stream
+            .try_collect::<Vec<bytes::Bytes>>()
+            .await
+            .unwrap()
+            .concat();
+        assert_eq!(received, members.concat());
+
+        let mut decoded = String::new();
+        flate2::read::MultiGzDecoder::new(received.as_slice())
+            .read_to_string(&mut decoded)
+            .unwrap();
+        assert_eq!(decoded, events);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn gzipped_list_is_buffered_as_received() {
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::TcpListener;
+        use tokio_util::sync::CancellationToken;
+        use warpgate_common_http::UpstreamBody;
+
+        use super::take_response_body;
+        use crate::server::auth::upstream_client_builder;
+
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let gz = crate::recording::tests::gzip_member(br#"{"kind":"ServiceList","items":[]}"#);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let reply = gz.clone();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            drain_request_head(&mut stream).await;
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n",
+                reply.len()
+            );
+            stream.write_all(head.as_bytes()).await.unwrap();
+            stream.write_all(&reply).await.unwrap();
+            stream.flush().await.unwrap();
+        });
+
+        let client = upstream_client_builder(&format!("http://{address}"))
+            .build()
+            .unwrap();
+        let response = client
+            .get(format!("http://{address}/api/v1/services"))
+            .header(reqwest::header::ACCEPT_ENCODING, "gzip")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response
+                .headers()
+                .get(http::header::CONTENT_LENGTH)
+                .unwrap(),
+            gz.len().to_string().as_str()
+        );
+
+        let taken = take_response_body(response, false, None, &CancellationToken::new())
+            .await
+            .unwrap();
+        let UpstreamBody::Buffered(raw) = taken else {
+            panic!("a small list must be buffered");
+        };
+        assert_eq!(raw.as_ref(), gz.as_slice());
+        server.await.unwrap();
     }
 
     #[test]
@@ -1129,7 +1352,7 @@ mod tests {
         };
         assert_eq!(response.status(), http::StatusCode::FORBIDDEN);
 
-        let forwarded = forward_rejected_upstream_response(response).await.unwrap();
+        let forwarded = forward_rejected_upstream_response(response);
         assert_eq!(forwarded.status(), http::StatusCode::FORBIDDEN);
         assert_eq!(
             forwarded.headers().get(http::header::CONTENT_TYPE).unwrap(),
@@ -1143,9 +1366,97 @@ mod tests {
         server.await.unwrap();
     }
 
+    fn upstream_response(body: &[u8]) -> reqwest::Response {
+        let chunks: Vec<_> = body
+            .chunks(64 * 1024)
+            .map(|chunk| Ok::<_, std::io::Error>(chunk.to_vec()))
+            .collect();
+        http::Response::new(reqwest::Body::wrap_stream(futures::stream::iter(chunks))).into()
+    }
+
+    fn body_of_len(len: usize) -> Vec<u8> {
+        b"0123456789".iter().copied().cycle().take(len).collect()
+    }
+
+    #[tokio::test]
+    async fn response_within_the_buffer_limit_is_held_in_memory() {
+        use tokio_util::sync::CancellationToken;
+        use warpgate_common_http::UpstreamBody;
+
+        use super::{MAX_BUFFERED_RESPONSE_BYTES, take_response_body};
+
+        let body = body_of_len(MAX_BUFFERED_RESPONSE_BYTES);
+        let taken = take_response_body(
+            upstream_response(&body),
+            false,
+            None,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        let UpstreamBody::Buffered(taken) = taken else {
+            panic!("a response within the limit must be buffered, so that it is recorded");
+        };
+        assert_eq!(taken, body);
+    }
+
+    #[tokio::test]
+    async fn response_over_the_buffer_limit_is_streamed_whole() {
+        use futures::TryStreamExt;
+        use tokio_util::sync::CancellationToken;
+        use warpgate_common_http::UpstreamBody;
+
+        use super::{MAX_BUFFERED_RESPONSE_BYTES, take_response_body};
+
+        let body = body_of_len(MAX_BUFFERED_RESPONSE_BYTES + 1);
+        for is_write in [false, true] {
+            let taken = take_response_body(
+                upstream_response(&body),
+                is_write,
+                None,
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+            let UpstreamBody::Streamed(taken) = taken else {
+                panic!("a response over the limit must not be buffered (is_write={is_write})");
+            };
+            let chunks: Vec<bytes::Bytes> = taken.try_collect().await.unwrap();
+            assert_eq!(chunks.concat(), body, "is_write={is_write}");
+        }
+    }
+
     use std::collections::HashMap;
 
     use super::{is_impersonation_header, named_target_path, redact_headers};
+
+    #[test]
+    fn cross_authority_redirects_are_dropped() {
+        use super::copy_response_headers;
+
+        for (location, kept) in [
+            ("/api/v1/namespaces/x/services/y/proxy/", true),
+            ("http://collector.example/collect", false),
+            ("//collector.example/collect", false),
+            ("/\\collector.example/collect", false),
+            ("collect", false),
+        ] {
+            let mut headers = http::HeaderMap::new();
+            headers.insert(http::header::LOCATION, location.parse().unwrap());
+            headers.insert(http::header::CONTENT_LENGTH, "0".parse().unwrap());
+            let response = copy_response_headers(poem::Response::builder(), &headers).finish();
+            assert_eq!(
+                response.headers().contains_key(http::header::LOCATION),
+                kept,
+                "{location}"
+            );
+            assert!(
+                response
+                    .headers()
+                    .contains_key(http::header::CONTENT_LENGTH)
+            );
+        }
+    }
 
     #[test]
     fn named_routes_decode_only_the_target_selector() {

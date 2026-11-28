@@ -1,6 +1,6 @@
 <script lang="ts">
     import { Alert, FormGroup, Input } from '@sveltestrap/sveltestrap'
-    import { type AdminRole, api } from 'admin/lib/api'
+    import { type AdminRoleDataRequest, api } from 'admin/lib/api'
     import PermissionGate from 'admin/lib/PermissionGate.svelte'
     import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
@@ -8,8 +8,7 @@
     import { emptyPermissions } from '../lib/store'
 
     let error: string | null = $state(null)
-    let role: AdminRole = $state({
-        id: '',
+    let role: AdminRoleDataRequest = $state({
         name: '',
         description: '',
         ...emptyPermissions(),

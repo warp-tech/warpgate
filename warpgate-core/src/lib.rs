@@ -23,6 +23,7 @@ mod secret_backend_registry;
 mod services;
 mod state;
 pub mod ticket_requests;
+pub mod user_sessions;
 pub use auth_state_store::*;
 pub use config_providers::*;
 pub use credential_encryption::*;

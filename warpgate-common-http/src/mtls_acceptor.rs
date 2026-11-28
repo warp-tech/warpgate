@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 use poem::http::uri::Scheme;
 use poem::listener::Acceptor;
 use poem::web::RemoteAddr;
@@ -11,26 +11,40 @@ use rustls::pki_types::CertificateDer;
 use rustls::server::ClientHello;
 use tokio::time::timeout;
 use tokio_rustls::LazyConfigAcceptor;
-use tokio_rustls::server::TlsStream;
 use warpgate_common::helpers::concurrent_acceptor::ConcurrentAcceptor;
+use warpgate_common::helpers::proxy_protocol::{ProxyHeader, read_header_before_tls};
+use warpgate_tls::ServerTlsStream;
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The result of a listener's `verify`, with the `RemoteAddr` poem will see
+pub enum Verified {
+    /// Must have sent a PROXY header if the listener expects one
+    Ordinary(RemoteAddr),
+    /// Authenticated as a client that connects directly, so it may omit the
+    /// PROXY header
+    HeaderExempt(RemoteAddr),
+}
 
 /// Accepts TLS connections with a dynamic per-connection rustls config and a per-connection
 /// mTLS verifier procedure
 ///
 /// It lets `verify` smuggle connection-specific data (e.g. mTLS peer cert) through the peer's RemoteAddr
 /// since this is the only thing that is readable in a poem request handler
+///
+/// With `proxy_protocol`, a client that sent no PROXY header is dropped
+/// unless `verify` returns [`Verified::HeaderExempt`]
 pub fn extracting_mtls_acceptor<A, S, V, Fut>(
     inner: A,
+    proxy_protocol: bool,
     config_for: S,
     verify: V,
-) -> ConcurrentAcceptor<TlsStream<A::Io>>
+) -> ConcurrentAcceptor<ServerTlsStream<A::Io>>
 where
     A: Acceptor + 'static,
     S: Fn(&ClientHello<'_>) -> Arc<ServerConfig> + Send + Sync + 'static,
     V: Fn(Option<CertificateDer<'static>>, RemoteAddr) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = anyhow::Result<RemoteAddr>> + Send + 'static,
+    Fut: Future<Output = anyhow::Result<Verified>> + Send + 'static,
 {
     let config_for = Arc::new(config_for);
     let verify = Arc::new(verify);
@@ -38,6 +52,12 @@ where
         let config_for = config_for.clone();
         let verify = verify.clone();
         async move {
+            let (stream, proxy_header) = read_header_before_tls(stream, proxy_protocol).await?;
+            let remote_addr = match proxy_header {
+                ProxyHeader::Present(Some(address)) => RemoteAddr(address.into()),
+                _ => remote_addr,
+            };
+
             let tls_stream = timeout(HANDSHAKE_TIMEOUT, async {
                 let start = LazyConfigAcceptor::new(rustls::server::Acceptor::default(), stream)
                     .await
@@ -58,7 +78,14 @@ where
                 .and_then(|chain| chain.first())
                 .map(|cert| cert.clone().into_owned());
 
-            let remote_addr = verify(client_certificate, remote_addr).await?;
+            let remote_addr = match verify(client_certificate, remote_addr).await? {
+                Verified::Ordinary(_) if proxy_header == ProxyHeader::Missing => {
+                    bail!("client sent no PROXY protocol header")
+                }
+                Verified::Ordinary(remote_addr) | Verified::HeaderExempt(remote_addr) => {
+                    remote_addr
+                }
+            };
             Ok((tls_stream, local_addr, remote_addr, Scheme::HTTPS))
         }
     })

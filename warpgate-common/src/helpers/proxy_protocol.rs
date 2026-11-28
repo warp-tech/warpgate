@@ -1,16 +1,16 @@
-use std::io::Result as IoResult;
 use std::net::SocketAddr;
 use std::time::Duration;
 
 use anyhow::{Context, bail};
-use poem::listener::Acceptor;
-use poem::web::{LocalAddr, RemoteAddr};
+use bytes::Bytes;
 use ppp::{HeaderResult, PartialResult};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
+use warpgate_tls::PrefixedStream;
 
-use crate::helpers::concurrent_acceptor::{Accepted, ConcurrentAcceptor};
+/// Content type of a TLS handshake record. No PROXY header starts with it
+const TLS_HANDSHAKE_RECORD_TYPE: u8 = 0x16;
 
 const V2_MINIMUM_HEADER_LENGTH: usize = 16;
 const V1_MAX_HEADER_LENGTH: usize = 108;
@@ -32,45 +32,47 @@ pub async fn remote_address(
     Ok(read_header(stream).await?.unwrap_or(peer_address))
 }
 
-pub enum MaybeProxyProtocolAcceptor<A: Acceptor> {
-    Direct(A),
-    Reading(ConcurrentAcceptor<A::Io>),
+/// The PROXY header found before a TLS handshake
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProxyHeader {
+    /// The listener does not use the PROXY protocol
+    NotExpected,
+    /// `None` for a `LOCAL` or `UNKNOWN` header, which has no client address
+    Present(Option<SocketAddr>),
+    /// The listener uses the PROXY protocol, but the stream starts with a TLS
+    /// handshake. This is not an error, because the client is only identified
+    /// once TLS completes
+    Missing,
 }
 
-impl<A: Acceptor + 'static> MaybeProxyProtocolAcceptor<A> {
-    pub fn new(inner: A, proxy_protocol: bool) -> Self {
-        if !proxy_protocol {
-            return Self::Direct(inner);
-        }
-        Self::Reading(ConcurrentAcceptor::new(
-            inner,
-            |(mut io, local_addr, remote_addr, scheme): Accepted<A::Io>| async move {
-                let remote_addr = match read_header(&mut io).await? {
-                    Some(address) => RemoteAddr(address.into()),
-                    None => remote_addr,
-                };
-                Ok((io, local_addr, remote_addr, scheme))
-            },
-        ))
-    }
-}
-
-impl<A: Acceptor + 'static> Acceptor for MaybeProxyProtocolAcceptor<A> {
-    type Io = A::Io;
-
-    fn local_addr(&self) -> Vec<LocalAddr> {
-        match self {
-            Self::Direct(inner) => inner.local_addr(),
-            Self::Reading(inner) => inner.local_addr(),
-        }
+/// Reads the PROXY header, if any. The returned stream starts at the TLS
+/// handshake
+pub async fn read_header_before_tls<Io: AsyncRead + Unpin>(
+    mut io: Io,
+    proxy_protocol: bool,
+) -> anyhow::Result<(PrefixedStream<Io>, ProxyHeader)> {
+    if !proxy_protocol {
+        return Ok((
+            PrefixedStream::new(io, Bytes::new()),
+            ProxyHeader::NotExpected,
+        ));
     }
 
-    async fn accept(&mut self) -> IoResult<Accepted<Self::Io>> {
-        match self {
-            Self::Direct(inner) => inner.accept().await,
-            Self::Reading(inner) => inner.accept().await,
+    let (header, prefix) = timeout(READ_TIMEOUT, async {
+        let mut first = [0u8; 1];
+        io.read_exact(&mut first)
+            .await
+            .context("reading PROXY protocol header")?;
+        if first == [TLS_HANDSHAKE_RECORD_TYPE] {
+            return Ok((ProxyHeader::Missing, Bytes::copy_from_slice(&first)));
         }
-    }
+        let address = read_header_inner(&mut first.as_slice().chain(&mut io)).await?;
+        anyhow::Ok((ProxyHeader::Present(address), Bytes::new()))
+    })
+    .await
+    .context("timed out reading PROXY protocol header")??;
+
+    Ok((PrefixedStream::new(io, prefix), header))
 }
 
 async fn read_header<R: AsyncRead + Unpin>(stream: &mut R) -> anyhow::Result<Option<SocketAddr>> {
@@ -183,42 +185,54 @@ fn source_address_v2(header: &ppp::v2::Header<'_>) -> anyhow::Result<Option<Sock
 mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr};
 
-    use poem::listener::{Listener, TcpListener};
-    use tokio::io::AsyncWriteExt;
-    use tokio::net::TcpStream;
-
     use super::*;
 
+    async fn remainder<R: AsyncRead + Unpin>(mut stream: R) -> Vec<u8> {
+        let mut rest = Vec::new();
+        stream.read_to_end(&mut rest).await.unwrap();
+        rest
+    }
+
     #[tokio::test]
-    async fn stalled_header_does_not_block_later_connections() {
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .into_acceptor()
+    async fn tls_without_header_is_reported_missing_and_left_intact() {
+        let client_hello = [0x16, 0x03, 0x01, 0x00, 0x05, 0x01, 0x02];
+        let (stream, header) = read_header_before_tls(client_hello.as_slice(), true)
             .await
             .unwrap();
-        let address = listener
-            .local_addr()
-            .into_iter()
-            .find_map(|address| address.0.as_socket_addr().copied())
-            .unwrap();
+        assert_eq!(header, ProxyHeader::Missing);
+        assert_eq!(remainder(stream).await, client_hello);
+    }
 
-        // Queued before the acceptor starts polling, so it is accepted first.
-        let _stalled = TcpStream::connect(address).await.unwrap();
-        let mut acceptor = MaybeProxyProtocolAcceptor::new(listener, true);
-
-        let mut second = TcpStream::connect(address).await.unwrap();
-        second
-            .write_all(b"PROXY TCP4 203.0.113.10 10.0.0.2 42300 443\r\n")
+    #[tokio::test]
+    async fn header_before_tls_is_consumed() {
+        let input = b"PROXY TCP4 203.0.113.10 10.0.0.2 42300 443\r\n\x16NEXT";
+        let (stream, header) = read_header_before_tls(input.as_slice(), true)
             .await
-            .unwrap();
-
-        let (_io, _, remote_addr, _) = timeout(Duration::from_secs(5), acceptor.accept())
-            .await
-            .expect("a peer that sent no header blocked the next connection")
             .unwrap();
         assert_eq!(
-            remote_addr.as_socket_addr(),
-            Some(&"203.0.113.10:42300".parse().unwrap())
+            header,
+            ProxyHeader::Present(Some("203.0.113.10:42300".parse().unwrap()))
         );
+        assert_eq!(remainder(stream).await, b"\x16NEXT");
+    }
+
+    #[tokio::test]
+    async fn neither_header_nor_tls_is_rejected() {
+        let error = read_header_before_tls(b"GET / HTTP/1.1\r\n".as_slice(), true)
+            .await
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("invalid PROXY protocol"));
+    }
+
+    #[tokio::test]
+    async fn nothing_is_read_when_the_listener_expects_no_header() {
+        let input = b"PROXY UNKNOWN\r\nNEXT";
+        let (stream, header) = read_header_before_tls(input.as_slice(), false)
+            .await
+            .unwrap();
+        assert_eq!(header, ProxyHeader::NotExpected);
+        assert_eq!(remainder(stream).await, input);
     }
 
     async fn read_header_from(bytes: &[u8]) -> anyhow::Result<Option<SocketAddr>> {

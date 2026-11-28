@@ -2,6 +2,8 @@ use std::collections::HashSet;
 use std::net::IpAddr;
 use std::ops::Deref;
 
+use warpgate_common::{TargetId, UserId};
+
 mod db;
 mod sso_user;
 
@@ -40,7 +42,7 @@ pub trait ConfigProvider {
 
     async fn get_target_by_name(&self, name: &str) -> Result<Option<Target>, WarpgateError>;
 
-    async fn get_target_by_id(&self, id: Uuid) -> Result<Option<Target>, WarpgateError>;
+    async fn get_target_by_id(&self, id: TargetId) -> Result<Option<Target>, WarpgateError>;
 
     async fn get_target_by_hostname(&self, hostname: &str)
     -> Result<Option<Target>, WarpgateError>;
@@ -83,12 +85,15 @@ pub trait ConfigProvider {
 
     async fn authorize_target_by_id(
         &self,
-        user_id: Uuid,
-        target_id: Uuid,
+        user_id: UserId,
+        target_id: TargetId,
     ) -> Result<bool, WarpgateError>;
 
     /// IDs of all targets the user is authorized for, in a single query.
-    async fn authorized_target_ids(&self, user_id: Uuid) -> Result<HashSet<Uuid>, WarpgateError>;
+    async fn authorized_target_ids(
+        &self,
+        user_id: UserId,
+    ) -> Result<HashSet<TargetId>, WarpgateError>;
 
     async fn update_public_key_last_used(
         &self,
@@ -462,7 +467,7 @@ mod tests {
 
     fn http_target() -> Target {
         Target {
-            id: Uuid::new_v4(),
+            id: TargetId(Uuid::new_v4()),
             name: "web".into(),
             description: String::new(),
             allow_roles: vec![],
@@ -479,13 +484,14 @@ mod tests {
             ticket_require_approval: false,
             require_approval: false,
             ticket_max_uses: None,
+            provider: None,
         }
     }
 
     #[test]
     fn specific_narrows_only_matching_kind_and_protocol() {
         let user = AuthStateUserInfo {
-            id: Uuid::new_v4(),
+            id: UserId(Uuid::new_v4()),
             username: "alice".into(),
         };
 
@@ -527,7 +533,7 @@ mod tests {
         let login_protection = LoginProtectionService::new(db.clone()).await.unwrap();
 
         let target = http_target();
-        let user_id = Uuid::new_v4();
+        let user_id = UserId(Uuid::new_v4());
         e::User::ActiveModel {
             id: Set(user_id),
             username: Set("alice".into()),
@@ -537,6 +543,7 @@ mod tests {
             ldap_server_id: Set(None),
             ldap_object_uuid: Set(None),
             allowed_ip_ranges: Set(serde_json::Value::Null),
+            ..Default::default()
         }
         .insert(&db)
         .await
@@ -554,6 +561,7 @@ mod tests {
             ticket_require_approval: Set(false),
             ticket_max_uses: Set(None),
             require_approval: Set(require_approval),
+            ..Default::default()
         }
         .insert(&db)
         .await
@@ -687,7 +695,7 @@ mod tests {
             UserSessionId(Uuid::new_v4()),
             None,
             AuthStateUserInfo {
-                id: Uuid::nil(),
+                id: UserId(Uuid::nil()),
                 username: "alice".into(),
             },
             Protocol::Kubernetes,

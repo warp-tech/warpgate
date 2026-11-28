@@ -1,7 +1,7 @@
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, SqlErr};
 use tracing::info;
 use uuid::Uuid;
-use warpgate_common::{GlobalParams, Secret, UserPasswordCredential, WarpgateError};
+use warpgate_common::{GlobalParams, Secret, UserId, UserPasswordCredential, WarpgateError};
 use warpgate_core::Services;
 use warpgate_db_entities::{
     AdminRole, Parameters, PasswordCredential, Role, User, UserAdminRoleAssignment,
@@ -34,7 +34,7 @@ pub async fn command(
         (x, false)
     } else {
         let values = User::ActiveModel {
-            id: Set(Uuid::new_v4()),
+            id: Set(UserId(Uuid::new_v4())),
             username: Set(username.to_owned()),
             description: Set("".into()),
             credential_policy: Set(serde_json::to_value(
@@ -44,6 +44,7 @@ pub async fn command(
             ldap_server_id: Set(None),
             ldap_object_uuid: Set(None),
             allowed_ip_ranges: Set(serde_json::Value::Null),
+            ..Default::default()
         };
         match values.insert(db).await {
             Ok(user) => {

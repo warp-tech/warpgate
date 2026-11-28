@@ -1,29 +1,29 @@
-from datetime import datetime, timezone, timedelta
+import asyncio
 import base64
-import json
-import os
 import hashlib
 import html
+import json
+import os
 import re
-import asyncio
 import secrets
+import socket
+import ssl
+import subprocess
 import time
 import uuid
-import subprocess
+from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlencode, urlparse
-
-import requests
-
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
 
 import aiohttp
 import pytest
+import requests
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 from .api_client import admin_client, sdk
 from .approval_util import wait_for_pending_approval
-from .conftest import ProcessManager, WarpgateProcess, K3sInstance
-from .util import alloc_port, wait_port
+from .conftest import K3sInstance, ProcessManager, WarpgateProcess
+from .util import alloc_port, post_declaring_length, wait_port
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -49,6 +49,8 @@ OIDC_CLIENT_SECRET = "warpgate-test-secret"
 # Its tokens have aud == KUBECTL_CLIENT_ID (not warpgate-test).
 KUBECTL_CLIENT_ID = "kubectl-client"
 KUBECTL_CLIENT_SECRET = "kubectl-client-secret"
+
+
 # Used as the OIDC redirect_uri for our own (non-warpgate) authorization-code
 # flow.  We register it explicitly with the mock so the token exchange below
 # validates the redirect_uri.  Warpgate never sees this URL.  The mock's
@@ -65,7 +67,9 @@ def _provision_kubernetes_target(processes, shared_wg, label):
     with admin_client(url) as api:
         role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid.uuid4()}"))
         user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid.uuid4()}"))
-        api.create_password_credential(user.id, sdk.NewPasswordCredential(password="123"))
+        api.create_password_credential(
+            user.id, sdk.NewPasswordCredential(password="123")
+        )
         api.add_user_role(user.id, role.id)
 
         target_name = f"k8s-{label}-{uuid.uuid4()}"
@@ -134,7 +138,14 @@ def _create_running_pod(k3s, pod_name, *, command="['sleep', '3600']", stdin=Fal
         ).encode(),
     )
     k3s.kubectl(
-        ["wait", "--for=condition=Ready", f"pod/{pod_name}", "-n", "default", "--timeout=120s"]
+        [
+            "wait",
+            "--for=condition=Ready",
+            f"pod/{pod_name}",
+            "-n",
+            "default",
+            "--timeout=120s",
+        ]
     )
 
 
@@ -151,8 +162,9 @@ def _log_value(entry, key):
     return str(raw).strip('"')
 
 
-def _wait_for_audit_event(url, username, event_type, timeout=60):
-    """The first audit entry of ``event_type`` recorded for ``username``.
+def _wait_for_audit_event(url, username, event_type, timeout=60, **fields):
+    """The first audit entry of ``event_type`` recorded for ``username`` whose
+    values match ``fields``.
 
     Filters on the indexed username column rather than the free-text search so
     the assertion does not depend on how the backend searches the JSON values
@@ -161,11 +173,11 @@ def _wait_for_audit_event(url, username, event_type, timeout=60):
     deadline = time.time() + timeout
     while True:
         with admin_client(url) as api:
-            entries = api.get_logs(
-                sdk.GetLogsRequest(username=username, limit=200)
-            )
+            entries = api.get_logs(sdk.GetLogsRequest(username=username, limit=200))
         for entry in entries:
-            if _log_value(entry, "_type") == event_type:
+            if _log_value(entry, "_type") == event_type and all(
+                _log_value(entry, key) == value for key, value in fields.items()
+            ):
                 return entry
         if time.time() > deadline:
             seen = sorted(
@@ -257,9 +269,7 @@ def _obtain_oidc_id_token(
         base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
     )
     code_challenge = (
-        base64.urlsafe_b64encode(
-            hashlib.sha256(code_verifier.encode()).digest()
-        )
+        base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode()).digest())
         .rstrip(b"=")
         .decode()
     )
@@ -349,7 +359,9 @@ def _obtain_oidc_id_token(
     return id_token
 
 
-def _obtain_kubectl_client_id_token(oidc_port, redirect_uri, *, username="User1", password="pwd"):
+def _obtain_kubectl_client_id_token(
+    oidc_port, redirect_uri, *, username="User1", password="pwd"
+):
     """Like _obtain_oidc_id_token but uses KUBECTL_CLIENT_ID as the client.
 
     The resulting ID token will have ``aud == kubectl-client``, which is NOT
@@ -379,9 +391,7 @@ def _oidc_user_with_roles(roles):
         },
     ]
     for r in roles:
-        claims.append(
-            {"Type": "warpgate_roles", "Value": r, "ValueType": "string"}
-        )
+        claims.append({"Type": "warpgate_roles", "Value": r, "ValueType": "string"})
     return [
         {
             "SubjectId": "1",
@@ -510,6 +520,18 @@ class TestKubernetesIntegration:
         ]
         p = run_kubectl(token_cmd)
         assert p.returncode == 0, f"should accept the correct token: {p.stderr!r}"
+
+        # a second kubectl joins the session and appends to its API recording
+        p = run_kubectl(token_cmd)
+        assert p.returncode == 0, p.stderr
+        with admin_client(url) as api:
+            api_recordings = [
+                recording
+                for session in api.get_sessions(username=user.username).items
+                for recording in api.get_session_recordings(session.id)
+                if recording.kind == sdk.RecordingKind.KUBERNETES
+            ]
+        assert len(api_recordings) == 1, api_recordings
 
         # negative token case
         bad_cmd = token_cmd.copy()
@@ -670,9 +692,7 @@ class TestKubernetesIntegration:
                     )
                     r.raise_for_status()
                     pending = [
-                        s
-                        for s in await r.json()
-                        if s["protocol"] == "Kubernetes"
+                        s for s in await r.json() if s["protocol"] == "Kubernetes"
                     ]
                     if pending:
                         assert pending[0]["state"] == "WebUserApprovalNeeded"
@@ -680,13 +700,13 @@ class TestKubernetesIntegration:
                         break
                     await asyncio.sleep(0.25)
 
-                assert (
-                    auth_id is not None
-                ), "Kubernetes request never became a pending web approval"
+                assert auth_id is not None, (
+                    "Kubernetes request never became a pending web approval"
+                )
                 # Enforcement: the request is held, not already through.
-                assert (
-                    kubectl.poll() is None
-                ), "kubectl was let through without web approval"
+                assert kubectl.poll() is None, (
+                    "kubectl was let through without web approval"
+                )
 
                 r = await session.post(
                     f"{url}/@warpgate/api/auth/state/{auth_id}/approve",
@@ -915,6 +935,163 @@ class TestKubernetesIntegration:
                         process.communicate()
 
     @pytest.mark.asyncio
+    async def test_oversized_body_never_reaches_upstream(
+        self, processes, shared_wg: WarpgateProcess
+    ):
+        _, user, target_name, url = _provision_kubernetes_target(
+            processes, shared_wg, "body-limit"
+        )
+        user_token = await _issue_user_token(url, user, "body-limit-token")
+        status, body = post_declaring_length(
+            shared_wg.kubernetes_port,
+            f"/{target_name}/api/v1/namespaces/default/configmaps",
+            4 * 1024 * 1024,
+            headers={"Authorization": f"Bearer {user_token}"},
+        )
+        assert status == 413
+        # The apiserver refuses this size too, but with a JSON Status object.
+        assert body == "request body too large"
+
+    @pytest.mark.asyncio
+    async def test_response_too_large_to_buffer_arrives_whole(
+        self, processes, shared_wg: WarpgateProcess
+    ):
+        k3s, user, target_name, url = _provision_kubernetes_target(
+            processes, shared_wg, "big-list"
+        )
+        user_token = await _issue_user_token(url, user, "big-list-token")
+
+        # A ConfigMap holds 1 MiB at most. Five of them make a list over the
+        # 3 MiB buffer limit.
+        namespace = f"big-list-{uuid.uuid4().hex[:8]}"
+        payload = "x" * (800 * 1024)
+        k3s.kubectl(["create", "namespace", namespace])
+        for index in range(5):
+            k3s.kubectl(
+                ["create", "-f", "-"],
+                input=json.dumps(
+                    {
+                        "apiVersion": "v1",
+                        "kind": "ConfigMap",
+                        "metadata": {"name": f"big-{index}", "namespace": namespace},
+                        "data": {"payload": payload},
+                    }
+                ).encode(),
+            )
+
+        resp = requests.get(
+            f"https://127.0.0.1:{shared_wg.kubernetes_port}/{target_name}"
+            f"/api/v1/namespaces/{namespace}/configmaps",
+            headers={
+                "Authorization": f"Bearer {user_token}",
+                # Gzipped, the 4 MiB of "x" would fit the buffer limit.
+                "Accept-Encoding": "identity",
+            },
+            verify=False,
+        )
+        assert resp.status_code == 200, resp.text[:300]
+        assert len(resp.content) > 3 * 1024 * 1024
+        payloads = [
+            item["data"]["payload"]
+            for item in resp.json()["items"]
+            if item["metadata"]["name"].startswith("big-")
+        ]
+        assert payloads == [payload] * 5
+
+    @pytest.mark.asyncio
+    async def test_watchlist_arrives_whole_through_warpgate(
+        self, processes, shared_wg: WarpgateProcess
+    ):
+        """A WatchList stream (sendInitialEvents) must reach the client with its
+        initial-events-end bookmark and the upstream Content-Encoding.
+        Kubernetes 1.37+ gzips WatchList responses as one member per flush,
+        which a decoder that stops after the first member cuts short. Against
+        an apiserver that doesn't compress watches this covers only the
+        uncompressed path; the Rust test
+        `watchlist_gzip_members_reach_the_client_whole` covers the gzip one."""
+        k3s, user, target_name, url = _provision_kubernetes_target(
+            processes, shared_wg, "watchlist"
+        )
+        user_token = await _issue_user_token(url, user, "watchlist-token")
+
+        namespace = f"watchlist-{uuid.uuid4().hex[:8]}"
+        names = [f"cm-{index}" for index in range(20)]
+        k3s.kubectl(["create", "namespace", namespace])
+        try:
+            for name in names:
+                k3s.kubectl(
+                    ["create", "-f", "-"],
+                    input=json.dumps(
+                        {
+                            "apiVersion": "v1",
+                            "kind": "ConfigMap",
+                            "metadata": {"name": name, "namespace": namespace},
+                            "data": {"k": "v"},
+                        }
+                    ).encode(),
+                )
+
+            path = (
+                f"/api/v1/namespaces/{namespace}/configmaps"
+                "?watch=true&sendInitialEvents=true"
+                "&resourceVersionMatch=NotOlderThan"
+                "&allowWatchBookmarks=true&timeoutSeconds=5"
+            )
+
+            def read_events(base, token):
+                resp = requests.get(
+                    base + path,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Accept-Encoding": "gzip",
+                    },
+                    verify=False,
+                    stream=True,
+                    timeout=30,
+                )
+                assert resp.status_code == 200, resp.text[:300]
+                events = [
+                    json.loads(line) for line in resp.iter_lines() if line.strip()
+                ]
+                return events, resp.headers.get("Content-Encoding")
+
+            def summarize(events):
+                added = {
+                    e["object"]["metadata"]["name"]
+                    for e in events
+                    if e["type"] == "ADDED"
+                }
+                bookmark = any(
+                    e["type"] == "BOOKMARK"
+                    and e["object"]["metadata"]
+                    .get("annotations", {})
+                    .get("k8s.io/initial-events-end")
+                    == "true"
+                    for e in events
+                )
+                return added, bookmark
+
+            direct_events, direct_encoding = read_events(
+                f"https://127.0.0.1:{k3s.port}", k3s.token
+            )
+            _, direct_bookmark = summarize(direct_events)
+            if not direct_bookmark:
+                pytest.skip("this k3s does not send the initial-events-end bookmark")
+
+            proxied_events, proxied_encoding = read_events(
+                f"https://127.0.0.1:{shared_wg.kubernetes_port}/{target_name}",
+                user_token,
+            )
+            added, bookmark = summarize(proxied_events)
+            assert proxied_encoding == direct_encoding
+            assert set(names) <= added
+            assert bookmark, "initial-events-end bookmark missing: stream truncated"
+        finally:
+            k3s.kubectl(
+                ["delete", "namespace", namespace, "--wait=false"], check=False
+            )
+
+    @pytest.mark.asyncio
     async def test_kubectl_run(self, processes, shared_wg: WarpgateProcess):
         """Ensure that write requests such as ``kubectl run`` are proxied."""
         k3s, user, target_name, url = _provision_kubernetes_target(
@@ -1128,7 +1305,9 @@ class TestKubernetesIntegration:
     # -- Audit events ------------------------------------------------------
 
     @pytest.mark.asyncio
-    async def test_kubectl_exec_audit_event(self, processes, shared_wg: WarpgateProcess):
+    async def test_kubectl_exec_audit_event(
+        self, processes, shared_wg: WarpgateProcess
+    ):
         """`kubectl exec` is audited with the pod and the *whole* command line."""
         k3s, user, target_name, url = _provision_kubernetes_target(
             processes, shared_wg, "exec-audit"
@@ -1142,11 +1321,18 @@ class TestKubernetesIntegration:
         p = run_kubectl(
             [
                 "kubectl",
-                "--server", server,
+                "--server",
+                server,
                 "--insecure-skip-tls-verify",
-                "--token", user_token,
-                "exec", "-n", "default", pod_name,
-                "--", "ls", "-la",
+                "--token",
+                user_token,
+                "exec",
+                "-n",
+                "default",
+                pod_name,
+                "--",
+                "ls",
+                "-la",
             ],
             timeout=30,
         )
@@ -1161,7 +1347,9 @@ class TestKubernetesIntegration:
         assert json.loads(_log_value(entry, "command")) == ["ls", "-la"]
 
     @pytest.mark.asyncio
-    async def test_kubectl_debug_audit_event(self, processes, shared_wg: WarpgateProcess):
+    async def test_kubectl_debug_audit_event(
+        self, processes, shared_wg: WarpgateProcess
+    ):
         """`kubectl debug` is audited with the debug image and target container.
 
         The interesting detail lives in the request body rather than the URL, so
@@ -1179,14 +1367,20 @@ class TestKubernetesIntegration:
         p = run_kubectl(
             [
                 "kubectl",
-                "--server", server,
+                "--server",
+                server,
                 "--insecure-skip-tls-verify",
-                "--token", user_token,
-                "debug", "-n", "default", pod_name,
+                "--token",
+                user_token,
+                "debug",
+                "-n",
+                "default",
+                pod_name,
                 "--image=alpine:3",
                 "--target=alpine",
                 "--container=debugger",
-                "--", "true",
+                "--",
+                "true",
             ],
             timeout=120,
         )
@@ -1200,6 +1394,134 @@ class TestKubernetesIntegration:
         assert _log_value(entry, "debug_container") == "debugger"
         assert _log_value(entry, "image") == "alpine:3"
         assert _log_value(entry, "target_container") == "alpine"
+
+    @pytest.mark.asyncio
+    async def test_pod_writes_kubectl_would_not_send_are_audited(
+        self, processes, shared_wg: WarpgateProcess
+    ):
+        """Pod writes that `kubectl debug` never sends are still audited.
+
+        Covers a YAML body, a JSON Patch array, a server-side apply and a
+        `dryRun` the API server ignores.
+        """
+        k3s, user, target_name, url = _provision_kubernetes_target(
+            processes, shared_wg, "raw-audit"
+        )
+        user_token = await _issue_user_token(url, user, "raw-audit-token")
+        server = f"https://127.0.0.1:{shared_wg.kubernetes_port}/{target_name}"
+        pods = f"{server}/api/v1/namespaces/default/pods"
+        auth = {"Authorization": f"Bearer {user_token}"}
+
+        def manifest(name):
+            return (
+                f"apiVersion: v1\n"
+                f"kind: Pod\n"
+                f"metadata:\n"
+                f"  name: {name}\n"
+                f"  namespace: default\n"
+                f"spec:\n"
+                f"  containers:\n"
+                f"  - name: alpine\n"
+                f"    image: alpine:3\n"
+                f"    command: ['sleep', '3600']\n"
+            )
+
+        # Warpgate cannot parse YAML, so the event has no detail.
+        yaml_pod = f"yaml-audit-{uuid.uuid4().hex[:8]}"
+        resp = requests.post(
+            pods,
+            headers={**auth, "Content-Type": "application/yaml"},
+            data=manifest(yaml_pod),
+            verify=False,
+        )
+        assert resp.status_code == 201, resp.text[:300]
+        entry = _wait_for_audit_event(
+            url, user.username, "KubernetesUnknownRequest1", method="POST"
+        )
+        assert _log_value(entry, "namespace") == "default"
+        assert _log_value(entry, "content_type") == "application/yaml"
+        assert _log_value(entry, "response_status") == "201"
+
+        # `kubectl debug` sends a strategic merge patch. This adds the container
+        # with a JSON Patch array.
+        resp = requests.patch(
+            f"{pods}/{yaml_pod}/ephemeralcontainers",
+            headers={**auth, "Content-Type": "application/json-patch+json"},
+            data=json.dumps(
+                [
+                    {
+                        "op": "add",
+                        "path": "/spec/ephemeralContainers",
+                        "value": [
+                            {
+                                "name": "debugger",
+                                "image": "alpine:3",
+                                "command": ["true"],
+                            }
+                        ],
+                    }
+                ]
+            ),
+            verify=False,
+        )
+        assert resp.status_code == 200, resp.text[:300]
+        entry = _wait_for_audit_event(
+            url, user.username, "KubernetesUnknownRequest1", method="PATCH"
+        )
+        assert _log_value(entry, "pod") == yaml_pod
+        assert _log_value(entry, "content_type") == "application/json-patch+json"
+        assert _log_value(entry, "response_status") == "200"
+
+        # A server-side apply creates the pod with a PATCH of its name.
+        applied_pod = f"apply-audit-{uuid.uuid4().hex[:8]}"
+        p = run_kubectl(
+            [
+                "kubectl",
+                "--server",
+                server,
+                "--insecure-skip-tls-verify",
+                "--token",
+                user_token,
+                "apply",
+                "--server-side",
+                "-f",
+                "-",
+            ],
+            input=manifest(applied_pod).encode(),
+            timeout=60,
+        )
+        assert p.returncode == 0, f"kubectl apply --server-side failed: {p.stderr!r}"
+        entry = _wait_for_audit_event(
+            url, user.username, "KubernetesPodCreated1", pod=applied_pod
+        )
+        assert json.loads(_log_value(entry, "images")) == ["alpine:3"]
+        assert _log_value(entry, "response_status") == "201"
+
+        # Go drops a query pair containing `;`, so the API server sees no
+        # `dryRun` and creates the pod.
+        real_pod = f"not-dry-audit-{uuid.uuid4().hex[:8]}"
+        resp = requests.post(
+            f"{pods}?dryRun=All;",
+            headers=auth,
+            json={
+                "apiVersion": "v1",
+                "kind": "Pod",
+                "metadata": {"name": real_pod},
+                "spec": {
+                    "containers": [
+                        {
+                            "name": "alpine",
+                            "image": "alpine:3",
+                            "command": ["sleep", "3600"],
+                        }
+                    ]
+                },
+            },
+            verify=False,
+        )
+        assert resp.status_code == 201, resp.text[:300]
+        k3s.kubectl(["get", "pod", real_pod, "-n", "default"])
+        _wait_for_audit_event(url, user.username, "KubernetesPodCreated1", pod=real_pod)
 
     @pytest.mark.asyncio
     async def test_kubectl_port_forward_audit_event(
@@ -1219,10 +1541,15 @@ class TestKubernetesIntegration:
         forward = subprocess.Popen(
             [
                 "kubectl",
-                "--server", server,
+                "--server",
+                server,
                 "--insecure-skip-tls-verify",
-                "--token", user_token,
-                "port-forward", "-n", "default", pod_name,
+                "--token",
+                user_token,
+                "port-forward",
+                "-n",
+                "default",
+                pod_name,
                 f"{local_port}:8080",
             ],
             # Warpgate proxies the websocket port-forward protocol, not SPDY.
@@ -1246,6 +1573,180 @@ class TestKubernetesIntegration:
         # No assertion on ports: the websocket port-forward protocol negotiates
         # them per stream and sends no query, so the event carries none. Only
         # the SPDY variant puts them in the URL.
+
+    @pytest.mark.asyncio
+    async def test_kubelet_run_audit_event(self, processes, shared_wg: WarpgateProcess):
+        """A command run through the kubelet's ``/run`` is audited as an exec.
+
+        ``nodes/{node}/proxy`` forwards a plain request to the kubelet. Its
+        ``/run`` endpoint executes a command and returns the output without a
+        pod subresource or a websocket.
+        """
+        k3s, user, target_name, url = _provision_kubernetes_target(
+            processes, shared_wg, "run-audit"
+        )
+        user_token = await _issue_user_token(url, user, "run-audit-token")
+        auth = {"Authorization": f"Bearer {user_token}"}
+
+        pod_name = f"run-audit-{uuid.uuid4().hex[:8]}"
+        _create_running_pod(k3s, pod_name)
+        node = k3s.kubectl(
+            ["get", "nodes", "-o", "jsonpath={.items[0].metadata.name}"]
+        ).stdout.decode()
+        proxy_path = f"/{target_name}/api/v1/nodes/{node}/proxy"
+        proxy = f"https://127.0.0.1:{shared_wg.kubernetes_port}{proxy_path}"
+
+        def exec_event(command):
+            return _wait_for_audit_event(
+                url,
+                user.username,
+                "KubernetesExecStarted1",
+                command=json.dumps(command, separators=(",", ":")),
+            )
+
+        resp = requests.post(
+            f"{proxy}/run/default/{pod_name}/alpine?cmd=echo+via-run",
+            headers=auth,
+            verify=False,
+        )
+        assert resp.status_code == 200, resp.text[:300]
+        assert resp.text == "via-run\n"
+        entry = exec_event(["echo", "via-run"])
+        assert _log_value(entry, "namespace") == "default"
+        assert _log_value(entry, "pod") == pod_name
+        assert _log_value(entry, "container") == "alpine"
+        assert _log_value(entry, "target_name") == target_name
+
+        # The API server resolves `..` after decoding the path, so this is the
+        # same endpoint.
+        resp = requests.post(
+            f"{proxy}/logs%2F..%2Frun/default/{pod_name}/alpine?cmd=echo+dot-dot",
+            headers=auth,
+            verify=False,
+        )
+        assert resp.status_code == 200, resp.text[:300]
+        assert resp.text == "dot-dot\n"
+        exec_event(["echo", "dot-dot"])
+
+        # A refused request gets a rejection event, not an exec event.
+        resp = requests.post(
+            f"{proxy}/run/default/{pod_name}-missing/alpine?cmd=id",
+            headers=auth,
+            verify=False,
+        )
+        assert resp.status_code == 404, resp.text[:300]
+        entry = _wait_for_audit_event(
+            url, user.username, "KubernetesStreamRejected1", pod=f"{pod_name}-missing"
+        )
+        assert _log_value(entry, "status") == "404"
+
+        # The client disconnects while its command is running. The command is
+        # still audited.
+        tls = ssl.create_default_context()
+        tls.check_hostname = False
+        tls.verify_mode = ssl.CERT_NONE
+        with socket.create_connection(("127.0.0.1", shared_wg.kubernetes_port)) as tcp:
+            with tls.wrap_socket(tcp) as conn:
+                conn.sendall(
+                    (
+                        f"POST {proxy_path}/run/default/{pod_name}/alpine?cmd=sleep+31 HTTP/1.1\r\n"
+                        f"Host: 127.0.0.1\r\n"
+                        f"Authorization: Bearer {user_token}\r\n"
+                        f"Content-Length: 0\r\n\r\n"
+                    ).encode()
+                )
+                deadline = time.time() + 60
+                while k3s.kubectl(
+                    ["exec", "-n", "default", pod_name, "--", "pgrep", "-f", "sleep 31"],
+                    check=False,
+                ).returncode:
+                    assert time.time() < deadline, "the command never started"
+                    time.sleep(0.5)
+        exec_event(["sleep", "31"])
+
+        # The kubelet's streaming endpoints are not audited because they cannot
+        # work through the node proxy: the API server drops the query when it
+        # forwards an upgrade, so the kubelet gets no command and no streams.
+        # If a cluster ever runs this command, they need classifying too.
+        # Warpgate reports the refusal as a failed handshake or by closing the
+        # websocket at once.
+        received = b""
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.ws_connect(
+                    f"{proxy}/exec/default/{pod_name}/alpine"
+                    "?command=echo&command=kubelet-exec&output=1",
+                    headers=auth,
+                    protocols=["v4.channel.k8s.io"],
+                    ssl=False,
+                ) as ws:
+                    async for message in ws:
+                        if message.type == aiohttp.WSMsgType.BINARY:
+                            received += message.data
+            except aiohttp.WSServerHandshakeError as refused:
+                assert refused.status == 400
+        assert b"kubelet-exec" not in received
+
+    @pytest.mark.asyncio
+    async def test_exec_audit_names_the_container_that_ran(
+        self, processes, shared_wg: WarpgateProcess
+    ):
+        """The audit event has the container the command actually ran in.
+
+        The API server uses the first of a repeated ``container`` parameter and
+        ignores the rest.
+        """
+        k3s, user, target_name, url = _provision_kubernetes_target(
+            processes, shared_wg, "container-audit"
+        )
+        user_token = await _issue_user_token(url, user, "container-audit-token")
+
+        # The containers run different commands, so PID 1's command line shows
+        # which one the exec ran in.
+        pod_name = f"container-audit-{uuid.uuid4().hex[:8]}"
+        k3s.kubectl(
+            ["apply", "-f", "-"],
+            input=(
+                f"apiVersion: v1\n"
+                f"kind: Pod\n"
+                f"metadata:\n"
+                f"  name: {pod_name}\n"
+                f"  namespace: default\n"
+                f"spec:\n"
+                f"  containers:\n"
+                f"  - name: first\n"
+                f"    image: alpine:3\n"
+                f"    command: ['sleep', '1111']\n"
+                f"  - name: second\n"
+                f"    image: alpine:3\n"
+                f"    command: ['sleep', '2222']\n"
+            ).encode(),
+        )
+        k3s.kubectl(
+            ["wait", "--for=condition=Ready", f"pod/{pod_name}", "-n", "default", "--timeout=120s"]
+        )
+
+        output = b""
+        async with aiohttp.ClientSession() as session:
+            async with session.ws_connect(
+                f"https://127.0.0.1:{shared_wg.kubernetes_port}/{target_name}"
+                f"/api/v1/namespaces/default/pods/{pod_name}/exec"
+                "?command=cat&command=/proc/1/cmdline&stdout=1"
+                "&container=first&container=second",
+                headers={"Authorization": f"Bearer {user_token}"},
+                protocols=["v4.channel.k8s.io"],
+                ssl=False,
+            ) as ws:
+                async for message in ws:
+                    # Channel 1 is stdout.
+                    if message.type == aiohttp.WSMsgType.BINARY and message.data[:1] == b"\x01":
+                        output += message.data[1:]
+        assert output == b"sleep\x001111\x00"
+
+        entry = _wait_for_audit_event(
+            url, user.username, "KubernetesExecStarted1", pod=pod_name
+        )
+        assert _log_value(entry, "container") == "first"
 
     # -- OIDC Bearer authentication ----------------------------------------
 
@@ -1346,9 +1847,7 @@ class TestKubernetesIntegration:
 
         target_name = f"k8s-oidc-{uuid.uuid4()}"
         with admin_client(url) as api:
-            role = api.create_role(
-                sdk.RoleDataRequest(name=target_role_name)
-            )
+            role = api.create_role(sdk.RoleDataRequest(name=target_role_name))
             target = api.create_target(
                 sdk.TargetDataRequest(
                     name=target_name,
@@ -1359,9 +1858,7 @@ class TestKubernetesIntegration:
                         sdk.TargetOptionsTargetKubernetesOptions(
                             kind="Kubernetes",
                             cluster_url=f"https://127.0.0.1:{k3s.port}",
-                            tls=sdk.Tls(
-                                mode=sdk.TlsMode.PREFERRED, verify=False
-                            ),
+                            tls=sdk.Tls(mode=sdk.TlsMode.PREFERRED, verify=False),
                             auth=sdk.KubernetesTargetAuth(
                                 sdk.KubernetesTargetAuthKubernetesTargetTokenAuth(
                                     kind="Token", token=k3s.token
@@ -1376,9 +1873,7 @@ class TestKubernetesIntegration:
         return wg, target_name, k3s
 
     @pytest.mark.asyncio
-    async def test_kubectl_oidc_bearer_authenticates(
-        self, processes: ProcessManager
-    ):
+    async def test_kubectl_oidc_bearer_authenticates(self, processes: ProcessManager):
         """A valid OIDC ID token for an authorized user -> 200."""
         target_role = f"k8s-oidc-role-{uuid.uuid4()}"
         oidc_port, redirect_uri = self._start_oidc_mock_for_roles(
@@ -1404,9 +1899,7 @@ class TestKubernetesIntegration:
         )
 
     @pytest.mark.asyncio
-    async def test_kubectl_oidc_invalid_token_rejected(
-        self, processes: ProcessManager
-    ):
+    async def test_kubectl_oidc_invalid_token_rejected(self, processes: ProcessManager):
         """A garbage / unverifiable Bearer token -> 401.
 
         The Rust auth path (auth.rs) only performs target lookup *after* a token
@@ -1420,9 +1913,7 @@ class TestKubernetesIntegration:
         # but skip k3s and target creation — auth fails before target lookup.
         wg = processes.start_wg(
             config_patch={
-                "sso_providers": [
-                    _make_oidc_sso_provider_config(oidc_port)
-                ],
+                "sso_providers": [_make_oidc_sso_provider_config(oidc_port)],
             },
         )
         wait_port(wg.http_port, for_process=wg.process, recv=False)

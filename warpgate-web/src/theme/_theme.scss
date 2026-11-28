@@ -205,7 +205,7 @@ input:-webkit-autofill:focus {
 
 @include media-breakpoint-up(md) {
     .narrow-page {
-        width: map.get($grid-breakpoints, "md");
+        max-width: map.get($grid-breakpoints, "md");
     }
 }
 

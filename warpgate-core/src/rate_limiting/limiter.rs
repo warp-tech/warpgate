@@ -15,14 +15,11 @@ pub fn new_rate_limiter(bytes_per_second: NonZeroU32) -> InnerRateLimiter {
     // Keep the burst capacity high to allow checking in large buffers but
     // consume (burst - per_second) cells initially to ensure that
     // the rate limiter is in its "normal" state
-    #[allow(clippy::unwrap_used)] // checked
-    for key in [RateLimiterDirection::Read, RateLimiterDirection::Write] {
-        let _ = rate_limiter.check_key_n(
-            &key,
-            (u32::from(max_cells) - u32::from(bytes_per_second))
-                .try_into()
-                .unwrap(),
-        );
+    if let Some(initial_drain) = NonZeroU32::new(u32::from(max_cells) - u32::from(bytes_per_second))
+    {
+        for key in [RateLimiterDirection::Read, RateLimiterDirection::Write] {
+            let _ = rate_limiter.check_key_n(&key, initial_drain);
+        }
     }
     rate_limiter
 }
@@ -108,5 +105,16 @@ impl WarpgateRateLimiter {
 
     fn share(self) -> SharedWarpgateRateLimiter {
         SharedWarpgateRateLimiter::new(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_rate_limiter_handles_max_u32() {
+        let _ = new_rate_limiter(NonZeroU32::MAX);
+        let _ = WarpgateRateLimiter::limited(NonZeroU32::MAX);
     }
 }

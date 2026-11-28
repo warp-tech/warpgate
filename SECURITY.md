@@ -17,6 +17,8 @@ Warpgate considers the following trusted inputs:
 
 In particular, this does not include the traffic from known Warpgate targets.
 
+Targets themselves are considered semi-trusted. If a vulnerability relies on attacker control of a target, it should note that and indicate Complexity: High. 
+
 ## Additional notes
 
 Additional scope clarifications:
@@ -27,6 +29,8 @@ Additional scope clarifications:
 * A trusted IdP's own authenticated users acting maliciously is between them and the IdP, not Warpgate.
 * Only code that shipped in a tagged release needs a formal advisory.
 * Judge severity against the most direct alternative attack the same actor already has.
+* Secrets and protocol data appearing in the log on DEBUG/TRACE level are expected.
+* User-supplied protocol requests (e.g. database queries) appearing on the INFO level are expected.
 
 ## Advisory structure
 

@@ -68,7 +68,6 @@ impl MigrationTrait for Migration {
 
 async fn backfill_user_session_ids(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     let db = manager.get_connection();
-    let backend = db.get_database_backend();
 
     let table = Alias::new("http_sessions");
     let id_col = Alias::new("id");
@@ -90,7 +89,7 @@ async fn backfill_user_session_ids(manager: &SchemaManager<'_>) -> Result<(), Db
             select.and_where(Expr::col(id_col.clone()).gt(last_id.clone()));
         }
 
-        let rows = db.query_all(backend.build(&select)).await?;
+        let rows = db.query_all(&select).await?;
         let done = (rows.len() as u64) < BACKFILL_BATCH;
 
         for row in &rows {
@@ -106,7 +105,7 @@ async fn backfill_user_session_ids(manager: &SchemaManager<'_>) -> Result<(), Db
                 .value(user_session_id_col.clone(), user_session_id)
                 .and_where(Expr::col(id_col.clone()).eq(id))
                 .to_owned();
-            db.execute(backend.build(&update)).await?;
+            db.execute(&update).await?;
         }
 
         if done {

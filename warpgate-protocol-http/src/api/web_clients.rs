@@ -8,11 +8,10 @@ use poem::session::Session;
 use poem::{Request, Response};
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object};
-use uuid::Uuid;
 use warpgate_admin::api::cluster_proxy::{
     ReparseForwardedResponse, forwarded_error, parse_forwarded_body, proxy_or_serve,
 };
-use warpgate_common::{UserSessionId, WarpgateError};
+use warpgate_common::{TargetId, UserSessionId, WarpgateError};
 use warpgate_core::TargetAuthorization;
 use warpgate_db_entities::Target::TargetKind;
 use warpgate_web_clients_common::{
@@ -69,7 +68,7 @@ pub enum DeleteWebClientSessionResponse {
 pub async fn create_web_client_session<F, Fut>(
     ctx: &AuthedSession,
     session: &Session,
-    target_id: Uuid,
+    target_id: TargetId,
     start: F,
 ) -> poem::Result<CreateWebClientSessionResponse>
 where

@@ -7,7 +7,7 @@ use bytes::Bytes;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, DbErr, EntityTrait};
 use serde::Serialize;
 use time::OffsetDateTime;
-use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
+use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::error;
@@ -44,7 +44,7 @@ pub struct RawRecordingWriter {
     live_sender: broadcast::Sender<LiveChunk>,
     /// Running byte offset to hand out. Live viewers rely on this matching the
     /// on-disk byte order, which holds because every write to a recording is
-    /// serialized by `NDJsonRecordingWriter`'s `buf` lock: that writer is not
+    /// serialized by `NDJsonRecordingWriter`'s `write_order` lock: that writer is not
     /// `Clone`, so tasks share the one instance (through an `Arc`) and its single
     /// lock, and the counter can't diverge from disk order.
     offset: Arc<AtomicU64>,
@@ -156,24 +156,25 @@ impl Drop for RawRecordingWriter {
 
 pub struct NDJsonRecordingWriter {
     pub(crate) inner: RawRecordingWriter,
-    buf: RwLock<Vec<u8>>,
+    write_order: Mutex<()>,
 }
 
 impl NDJsonRecordingWriter {
     pub(crate) fn new(inner: RawRecordingWriter) -> Self {
         Self {
             inner,
-            buf: RwLock::new(Vec::new()),
+            write_order: Mutex::new(()),
         }
     }
 
     pub async fn write_json_line<I: Serialize>(&self, value: I) -> Result<usize> {
-        let buf = &mut self.buf.write().await;
-        buf.clear();
-        serde_json::to_writer(&mut **buf, &value).map_err(Error::Serialization)?;
-        buf.push(b'\n');
-        self.inner.write(buf).await?;
-        Ok(buf.len())
+        // A fresh buffer per line: one kept across lines would stay as large
+        // as the largest line for as long as the writer lives
+        let mut line = serde_json::to_vec(&value).map_err(Error::Serialization)?;
+        line.push(b'\n');
+        let _order = self.write_order.lock().await;
+        self.inner.write(&line).await?;
+        Ok(line.len())
     }
 }
 

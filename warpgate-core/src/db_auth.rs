@@ -23,6 +23,16 @@ use crate::{
     authorize_for_target_by_name, wait_for_auth_completion,
 };
 
+/// Credential kinds the database protocols can collect. In-browser approval
+/// is only offered where the protocol can show the prompt.
+const fn supported_credential_kinds(web_approval: bool) -> &'static [CredentialKind] {
+    if web_approval {
+        &[CredentialKind::Password, CredentialKind::WebUserApproval]
+    } else {
+        &[CredentialKind::Password]
+    }
+}
+
 /// Proof that the success message has not been sent yet. Exactly one is minted
 /// per login and consumed by [`DbAuthTransport::send_auth_ok`], so a second send
 /// doesn't compile — both protocols' clients treat a repeat as a protocol error.
@@ -213,7 +223,7 @@ async fn authorize_user<T: DbAuthTransport>(
             username,
             T::PROTOCOL,
             target_name,
-            &[CredentialKind::Password],
+            supported_credential_kinds(T::SUPPORTS_WEB_APPROVAL),
             Some(remote_ip),
             Some("password"),
         )
@@ -391,4 +401,20 @@ async fn record_password_failure(
             credential_type: "password".to_owned(),
         })
         .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn supported_credentials_follow_web_approval_capability() {
+        let kinds = supported_credential_kinds(true);
+        assert!(kinds.contains(&CredentialKind::Password));
+        assert!(kinds.contains(&CredentialKind::WebUserApproval));
+        assert_eq!(
+            supported_credential_kinds(false),
+            &[CredentialKind::Password]
+        );
+    }
 }

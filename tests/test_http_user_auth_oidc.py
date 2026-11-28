@@ -837,6 +837,46 @@ class TestHTTPUserAuthOIDC:
             admin_roles = api.get_user_admin_roles(user.id)
             assert admin_roles == []
 
+    # https://github.com/warp-tech/warpgate/issues/2398
+    def test_oidc_group_sync_without_claim_removes_mapped_roles(
+        self,
+        processes: ProcessManager,
+    ):
+        """With role_mappings set, an identity provider that sends no roles
+        claim is saying the user has no groups: the mapped roles go, roles
+        outside the mapping stay."""
+        wg_http_port = alloc_port()
+        oidc_port = processes.start_oidc_server(wg_http_port)
+        wg = _start_wg_with_oidc(
+            processes,
+            wg_http_port,
+            oidc_port,
+            role_mappings={"oidc-admins": "wg-mapped-role"},
+        )
+        wg_url = f"https://127.0.0.1:{wg.http_port}"
+
+        with admin_client(wg_url) as api:
+            mapped = api.create_role(sdk.RoleDataRequest(name="wg-mapped-role"))
+            unmapped = api.create_role(sdk.RoleDataRequest(name="wg-unmapped-role"))
+            user = api.create_user(sdk.CreateUserRequest(username=f"user-{uuid4()}"))
+            api.create_sso_credential(
+                user.id,
+                sdk.NewSsoCredential(
+                    email="sam.tailor@gmail.com",
+                    provider="test-oidc",
+                ),
+            )
+            api.add_user_role(user.id, mapped.id)
+            api.add_user_role(user.id, unmapped.id)
+
+        _, resp = _do_oidc_login(wg_url, oidc_port)
+        assert resp.status_code in (302, 307)
+
+        with admin_client(wg_url) as api:
+            active = {r.name for r in api.get_user_roles(user.id) if r.is_active}
+            assert "wg-mapped-role" not in active
+            assert "wg-unmapped-role" in active
+
     def test_oidc_group_sync_removes_stale_roles(
         self,
         echo_server_port,

@@ -7,6 +7,7 @@
     import { stringifyError } from 'common/errors'
     import { routeQueryParams } from 'common/helpers'
     import Loadable from 'common/Loadable.svelte'
+    import OnboardingHint from 'common/OnboardingHint.svelte'
     import { api, type ExistingApiToken } from 'gateway/lib/api'
     import Fa from 'svelte-fa'
     import CreateApiTokenModal from './CreateApiTokenModal.svelte'
@@ -66,6 +67,11 @@
     </Button>
 </div>
 
+<OnboardingHint>
+    Warpgate has full REST API coverage, as well as a Terraform provider and a
+    community-maintained Kubernetes operator.
+</OnboardingHint>
+
 {#if error}
     <Alert color="danger">{error}</Alert>
 {/if}
@@ -95,9 +101,9 @@
                     {#if token.expiry.getTime() < now}
                         <Badge color="danger" class="ms-2">Expired</Badge>
                     {:else}
-                        <Badge color="success" class="ms-2"
-                            >{token.expiry.toLocaleDateString()}</Badge
-                        >
+                        <Badge color="success" class="ms-2">
+                            {token.expiry.toLocaleDateString()}
+                        </Badge>
                     {/if}
                     <span class="ms-auto"></span>
                     <Button

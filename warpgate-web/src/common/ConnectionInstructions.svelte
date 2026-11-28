@@ -195,6 +195,7 @@
 
     let commonSelectorUsername = $derived(makeCommonSelectorUsername(opts))
     let authHeader = $derived(`Authorization: Warpgate ${ticketSecret}`)
+    let xTicketHeader = $derived(`X-Warpgate-Ticket: ${ticketSecret}`)
     let kubeconfig = $derived(makeKubeconfig(opts))
     let oidcKubeconfig = $derived(makeOidcKubeconfig(opts))
     let exampleKubectlCommand = $derived(makeExampleKubectlCommand(opts))
@@ -239,9 +240,14 @@
     />
 
     {#if ticketSecret}
-        Alternatively, set the <code>Authorization</code> header when accessing
-        the URL:
+        Alternatively, set the <code>Authorization</code> or
+        <code>X-Warpgate-Ticket</code>
+        header when accessing the URL:
         <CopyableTextArea label="Authorization header" value={authHeader} />
+        <CopyableTextArea
+            label="X-Warpgate-Ticket header"
+            value={xTicketHeader}
+        />
     {/if}
 {/if}
 

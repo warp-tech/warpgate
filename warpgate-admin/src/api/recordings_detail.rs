@@ -1,10 +1,12 @@
 use std::io::SeekFrom;
+use std::ops::Bound;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use poem::error::{InternalServerError, NotFoundError};
+use poem::web::headers::{HeaderMapExt, Range};
 use poem::web::websocket::{Message, WebSocket, WebSocketStream};
 use poem::web::{Data, Redirect, StaticFileRequest};
 use poem::{IntoResponse, handler};
@@ -18,7 +20,7 @@ use tracing::error;
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, WarpgateError};
 use warpgate_common_http::AuthenticatedRequestContext;
-use warpgate_core::recordings::{LiveChunk, RecordingFile};
+use warpgate_core::recordings::{FileAccess, LiveChunk, RecordingFile};
 use warpgate_db_entities::Recording::{self, RecordingKind};
 use warpgate_db_entities::TargetSession;
 
@@ -91,7 +93,13 @@ pub async fn api_get_recording_tcpdump(
     let recording = find_recording(&ctx, id.0, Some(RecordingKind::Traffic)).await?;
     let owner = recording_owner(&ctx, &recording).await?;
     proxy_or_serve(&ctx, req, owner, None::<&()>, || {
-        serve_recording_file(&ctx, &recording, RecordingFile::TcpDumpData, static_req)
+        serve_recording_file(
+            &ctx,
+            &recording,
+            RecordingFile::TcpDumpData,
+            static_req,
+            req.headers().typed_get(),
+        )
     })
     .await
 }
@@ -108,7 +116,13 @@ pub async fn api_get_recording_data(
     let recording = find_recording(&ctx, id.0, None).await?;
     let owner = recording_owner(&ctx, &recording).await?;
     proxy_or_serve(&ctx, req, owner, None::<&()>, || {
-        serve_recording_file(&ctx, &recording, RecordingFile::NDJsonData, static_req)
+        serve_recording_file(
+            &ctx,
+            &recording,
+            RecordingFile::NDJsonData,
+            static_req,
+            req.headers().typed_get(),
+        )
     })
     .await
 }
@@ -125,7 +139,13 @@ pub async fn api_get_recording_index(
     let recording = find_recording(&ctx, id.0, None).await?;
     let owner = recording_owner(&ctx, &recording).await?;
     proxy_or_serve(&ctx, req, owner, None::<&()>, || {
-        serve_recording_file(&ctx, &recording, RecordingFile::Index, static_req)
+        serve_recording_file(
+            &ctx,
+            &recording,
+            RecordingFile::Index,
+            static_req,
+            req.headers().typed_get(),
+        )
     })
     .await
 }
@@ -135,6 +155,7 @@ async fn serve_recording_file(
     recording: &Recording::Model,
     file: RecordingFile,
     static_req: StaticFileRequest,
+    range: Option<Range>,
 ) -> poem::Result<poem::Response> {
     let access = ctx
         .services()
@@ -155,10 +176,79 @@ async fn serve_recording_file(
             .with_content_type(file.mime_type())
             .into_response())
     } else {
-        Err(InternalServerError(std::io::Error::other(
-            "recording file access has neither an external URL nor a local path",
-        )))
+        stream_recording_file(&access, file, range.as_ref()).await
     }
+}
+
+/// The first and last byte positions the header asks for in a file of `total`
+/// bytes, or `None` when it asks for nothing the file has.
+///
+/// Only the first range is honoured: a multipart response is not something
+/// the players ask for.
+fn resolve_range(range: &Range, total: u64) -> Option<(u64, u64)> {
+    let end_of_file = total.checked_sub(1)?;
+    let (start, end) = range.satisfiable_ranges(total).next()?;
+    let start = match start {
+        Bound::Included(start) => start,
+        Bound::Excluded(start) => start.checked_add(1)?,
+        Bound::Unbounded => 0,
+    };
+    let last = match end {
+        Bound::Included(end) => end.min(end_of_file),
+        Bound::Excluded(end) => end.checked_sub(1)?.min(end_of_file),
+        Bound::Unbounded => end_of_file,
+    };
+    (start <= last).then_some((start, last))
+}
+
+/// Serve a recording's bytes through Warpgate rather than redirecting.
+///
+/// The players fetch with `Range: bytes=N-` and seek by reopening at a new
+/// offset (`rangeStream.ts`), reading a 416 as the end of the recording.
+async fn stream_recording_file(
+    access: &FileAccess,
+    file: RecordingFile,
+    range: Option<&Range>,
+) -> poem::Result<poem::Response> {
+    let total = access
+        .streamed_len()
+        .await
+        .map_err(InternalServerError)?
+        .ok_or_else(|| {
+            InternalServerError(std::io::Error::other(
+                "recording file access has neither an external URL nor a local path",
+            ))
+        })?;
+
+    let Some(range) = range else {
+        let reader = access.open_read().await.map_err(InternalServerError)?;
+        return Ok(poem::Response::builder()
+            .content_type(file.mime_type())
+            .header("accept-ranges", "bytes")
+            .header("content-length", total.to_string())
+            .body(poem::Body::from_async_read(reader)));
+    };
+
+    let Some((start, last)) = resolve_range(range, total) else {
+        return Ok(poem::Response::builder()
+            .status(poem::http::StatusCode::RANGE_NOT_SATISFIABLE)
+            .header("content-range", format!("bytes */{total}"))
+            .header("accept-ranges", "bytes")
+            .finish());
+    };
+    let len = last - start + 1;
+    let reader = access
+        .open_read_from(start)
+        .await
+        .map_err(InternalServerError)?;
+
+    Ok(poem::Response::builder()
+        .status(poem::http::StatusCode::PARTIAL_CONTENT)
+        .content_type(file.mime_type())
+        .header("accept-ranges", "bytes")
+        .header("content-length", len.to_string())
+        .header("content-range", format!("bytes {start}-{last}/{total}"))
+        .body(poem::Body::from_async_read(reader.take(len))))
 }
 
 /// Messages pushed to a recording live-view WebSocket, serialised with a `type`
@@ -403,6 +493,9 @@ pub async fn recording_owner(
     if recording.ended.is_some() {
         return Ok(Owner::Local);
     }
+    if recording.node_id.is_some() {
+        return ctx.services().cluster.owner(recording.node_id).await;
+    }
     let Some(session) = TargetSession::Entity::find_by_id(recording.session_id)
         .one(&ctx.services().db)
         .await?
@@ -417,6 +510,30 @@ mod tests {
     use futures::StreamExt;
 
     use super::*;
+
+    fn resolve(header: &'static str, total: u64) -> Option<(u64, u64)> {
+        let mut headers = poem::http::HeaderMap::new();
+        headers.insert("range", poem::http::HeaderValue::from_static(header));
+        resolve_range(&headers.typed_get::<Range>().unwrap(), total)
+    }
+
+    #[test]
+    fn ranges_resolve_against_the_file_size() {
+        for (header, total, expected) in [
+            ("bytes=0-", 10, Some((0, 9))),
+            ("bytes=4-", 10, Some((4, 9))),
+            ("bytes=2-5", 10, Some((2, 5))),
+            ("bytes=5-99", 10, Some((5, 9))),
+            ("bytes=-3", 10, Some((7, 9))),
+            ("bytes=0-1,4-5", 10, Some((0, 1))),
+            // The players open at the end of the file to learn they reached it.
+            ("bytes=10-", 10, None),
+            ("bytes=0-", 0, None),
+            ("bytes=9-3", 10, None),
+        ] {
+            assert_eq!(resolve(header, total), expected, "{header} of {total}");
+        }
+    }
 
     /// `replay_scratch_span_awaiting` replays exactly the complete lines in `sent..target`,
     /// with each offset being the line's end position in the file.

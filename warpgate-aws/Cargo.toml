@@ -6,6 +6,7 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
+anyhow.workspace = true
 aws-config = { version = "1", default-features = false, features = [
     "behavior-version-latest",
     "rustls",
@@ -47,4 +48,5 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 url.workspace = true
+warpgate-common = { path = "../warpgate-common", default-features = false }
 warpgate-common-cache = { path = "../warpgate-common-cache" }

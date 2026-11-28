@@ -74,6 +74,9 @@ class TestHTTPUserAuthTicket:
         )
         assert response.status_code // 100 != 2
 
+        def target_headers(response):
+            return {k.lower(): v for k, v in response.json()["headers"]}
+
         # Ticket as a header
         response = session.get(
             f"{url}/some/path?warpgate-target={echo_target.name}",
@@ -84,6 +87,22 @@ class TestHTTPUserAuthTicket:
         )
         assert response.status_code // 100 == 2
         assert response.json()["path"] == "/some/path"
+        assert "authorization" not in target_headers(response)
+
+        # Ticket as X-Warpgate-Ticket header, next to the target's own credentials
+        response = session.get(
+            f"{url}/some/path?warpgate-target={echo_target.name}",
+            allow_redirects=False,
+            headers={
+                "X-Warpgate-Ticket": secret,
+                "Authorization": "Basic dXNlcjpwYXNz",
+            },
+        )
+        assert response.status_code // 100 == 2
+        assert response.json()["path"] == "/some/path"
+        headers = target_headers(response)
+        assert "x-warpgate-ticket" not in headers
+        assert headers["authorization"] == "Basic dXNlcjpwYXNz"
 
         # Bad ticket
         response = session.get(

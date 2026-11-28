@@ -7,7 +7,7 @@ replicaCount: 1
 image:
   repository: ghcr.io/warp-tech/warpgate
   pullPolicy: IfNotPresent
-  tag: "0.30.3"
+  tag: "0.31.0-beta.3"
 
 # References to Kubernetes secrets for pulling images (if using a private registry)
 imagePullSecrets: []
@@ -44,6 +44,17 @@ securityContext: {}
   # readOnlyRootFilesystem: true
   # runAsNonRoot: true
   # runAsUser: 1000
+
+# Readiness probe for the Warpgate container. When empty, the chart runs
+# `warpgate healthcheck`, which sends an HTTPS request to the http listener.
+# A value here replaces the default probe completely (it is not merged with it).
+# Example: a plain TCP check, e.g. when http.proxy_protocol is enabled and the
+# healthcheck command can't send a PROXY header:
+readinessProbe: {}
+  # tcpSocket:
+  #   port: http
+  # periodSeconds: 10
+  # timeoutSeconds: 5
 
 # Resource requests/limits for the Warpgate container
 resources: {}

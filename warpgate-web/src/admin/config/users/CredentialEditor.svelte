@@ -37,6 +37,7 @@
     import CredentialUsedStateBadge from 'common/CredentialUsedStateBadge.svelte'
     import EmptyState from 'common/EmptyState.svelte'
     import Loadable from 'common/Loadable.svelte'
+    import OnboardingHint from 'common/OnboardingHint.svelte'
     import {
         abbreviatePublicKey,
         getEffectivePossibleCredentials,
@@ -369,6 +370,11 @@
     {/if}
 </div>
 
+<OnboardingHint>
+    This is how this user will authenticate themselves against Warpgate's native
+    protocol endpoints.
+</OnboardingHint>
+
 <Loadable promise={loadPromise}>
     {#if credentials.length === 0}
         <EmptyState
@@ -468,6 +474,13 @@
     </div>
 
     <h4>Auth policy</h4>
+
+    <OnboardingHint>
+        Auth policy decides which minimum set of credentials is required for
+        each protocol. For example, you can force SSH authentication to require
+        both a key and an OTP (given the user has them).
+    </OnboardingHint>
+
     <AuthPolicyEditor
         bind:value={credentialPolicy}
         existingCredentials={credentials}
