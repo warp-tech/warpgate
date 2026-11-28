@@ -10,6 +10,7 @@
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
     import ListOverflowMenu from 'common/ListOverflowMenu.svelte'
+    import OnboardingHint from 'common/OnboardingHint.svelte'
     import { compare as naturalCompareFactory } from 'natural-orderby'
     import { from, map, type Observable } from 'rxjs'
     import { link } from 'svelte-spa-router'
@@ -84,6 +85,10 @@
             Add a group
         </a>
     </div>
+
+    <OnboardingHint>
+        Target groups are for visual organization only.
+    </OnboardingHint>
 
     <ItemList
         load={getTargetGroups}

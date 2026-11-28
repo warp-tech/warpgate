@@ -1,12 +1,15 @@
 use poem_openapi::param::{Path, Query};
 use poem_openapi::payload::Json;
+use poem_openapi::types::ToJSON;
 use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, ModelTrait, QueryFilter,
+    QueryOrder, Set,
 };
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, Secret, UserId, WarpgateError};
 use warpgate_common_http::errors::bad_request;
+use warpgate_core::resources::audit::{self, Audited, ComparableValues, RowKind, Subject};
 use warpgate_db_entities::{LdapServer, Parameters};
 use warpgate_ldap::LdapUsernameAttribute;
 use warpgate_tls::TlsMode;
@@ -88,6 +91,36 @@ impl ImportApi {
             }
         }
         Ok(ImportLdapUsersResponse::Ok(Json(imported)))
+    }
+}
+
+/// The audit log compares the fields of `LdapServerResponse`, plus
+/// `bind_password` as a credential. A column that the API doesn't return is
+/// not logged
+struct Audit<'a>(&'a LdapServer::Model);
+
+impl Audited for Audit<'_> {
+    fn subject(&self) -> Subject {
+        Subject::Row(RowKind::LdapServer, self.0.id)
+    }
+
+    fn name(&self) -> String {
+        self.0.name.clone()
+    }
+
+    async fn compared<C: ConnectionTrait>(
+        &self,
+        _db: &C,
+    ) -> Result<ComparableValues, WarpgateError> {
+        let view = LdapServerResponse::from(self.0.clone()).to_json();
+        let with_password = |password: &str| {
+            let mut columns = view.clone();
+            if let Some(serde_json::Value::Object(columns)) = &mut columns {
+                columns.insert("bind_password".into(), password.into());
+            }
+            columns
+        };
+        audit::columns(&with_password(&self.0.bind_password), &with_password(""))
     }
 }
 
@@ -265,9 +298,6 @@ enum CreateLdapServerResponse {
     #[oai(status = 201)]
     Created(Json<LdapServerResponse>),
 
-    #[oai(status = 409)]
-    Conflict(Json<String>),
-
     #[oai(status = 400)]
     BadRequest(Json<String>),
 }
@@ -340,9 +370,7 @@ impl ListApi {
             .await?;
 
         if existing.is_some() {
-            return Ok(CreateLdapServerResponse::Conflict(Json(
-                "Name already exists".into(),
-            )));
+            return Err(WarpgateError::NameTaken);
         }
 
         // Create LDAP config for discovery
@@ -396,6 +424,7 @@ impl ListApi {
         };
 
         let server = values.insert(db).await.map_err(WarpgateError::from)?;
+        audit::created(db, admin.changed_by(), &Audit(&server)).await;
 
         Ok(CreateLdapServerResponse::Created(Json(server.into())))
     }
@@ -432,6 +461,7 @@ impl ListApi {
         {
             match warpgate_ldap::test_connection(&ldap_config).await {
                 Ok(_) => {
+                    tracing::info!(host = ?body.host, port = body.port, "LDAP connection test succeeded");
                     // Try to discover base DNs
                     let base_dns = warpgate_ldap::discover_base_dns(&ldap_config).await.ok();
 
@@ -443,13 +473,16 @@ impl ListApi {
                         },
                     )))
                 }
-                Err(e) => Ok(TestLdapServerConnectionResponse::Ok(Json(
-                    TestLdapServerResponse {
-                        success: false,
-                        message: format!("Connection failed: {e:#}"),
-                        base_dns: None,
-                    },
-                ))),
+                Err(e) => {
+                    tracing::warn!(host = ?body.host, port = body.port, "LDAP connection test failed");
+                    Ok(TestLdapServerConnectionResponse::Ok(Json(
+                        TestLdapServerResponse {
+                            success: false,
+                            message: format!("Connection failed: {e:#}"),
+                            base_dns: None,
+                        },
+                    )))
+                }
             }
         } else {
             Ok(TestLdapServerConnectionResponse::Ok(Json(
@@ -473,8 +506,37 @@ enum GetLdapServerResponse {
     NotFound,
 }
 
+/// Saving runs base DN discovery, which binds to the server with the stored
+/// password
+fn bind_destination_changed(server: &LdapServer::Model, body: &UpdateLdapServerRequest) -> bool {
+    // Every field is listed so that a new one does not compile until it is
+    // either compared or ignored here
+    let LdapServer::Model {
+        host,
+        port,
+        bind_dn,
+        tls_mode,
+        tls_verify,
+        id: _,
+        name: _,
+        bind_password: _,
+        user_filter: _,
+        base_dns: _,
+        enabled: _,
+        auto_link_sso_users: _,
+        description: _,
+        username_attribute: _,
+        ssh_key_attribute: _,
+        uuid_attribute: _,
+    } = server;
+    *host != body.host
+        || *port != body.port
+        || *bind_dn != body.bind_dn
+        || body.tls_mode < TlsMode::from(tls_mode.as_str())
+        || (*tls_verify && !body.tls_verify)
+}
+
 #[derive(ApiResponse)]
-#[allow(dead_code)]
 enum UpdateLdapServerResponse {
     #[oai(status = 200)]
     Ok(Json<LdapServerResponse>),
@@ -539,7 +601,13 @@ impl DetailApi {
             return Ok(UpdateLdapServerResponse::NotFound);
         };
 
-        let mut model: LdapServer::ActiveModel = server.into();
+        if body.bind_password.is_none() && bind_destination_changed(&server, &body) {
+            return Ok(UpdateLdapServerResponse::BadRequest(bad_request(
+                "The bind password is required when changing the host, port or bind DN, or weakening TLS",
+            )));
+        }
+
+        let mut model: LdapServer::ActiveModel = server.clone().into();
 
         // Update fields
         model.name = Set(body.name.clone());
@@ -581,9 +649,10 @@ impl DetailApi {
             model.base_dns = Set(serde_json::to_value(&base_dns)?);
         }
 
-        let server = model.update(db).await?;
+        let updated = model.update(db).await?;
+        audit::updated(db, admin.changed_by(), &Audit(&server), &Audit(&updated)).await;
 
-        Ok(UpdateLdapServerResponse::Ok(Json(server.into())))
+        Ok(UpdateLdapServerResponse::Ok(Json(updated.into())))
     }
 
     #[oai(
@@ -604,7 +673,12 @@ impl DetailApi {
             return Ok(DeleteLdapServerResponse::NotFound);
         };
 
-        server.delete(db).await.map_err(WarpgateError::from)?;
+        server
+            .clone()
+            .delete(db)
+            .await
+            .map_err(WarpgateError::from)?;
+        audit::deleted(admin.changed_by(), &Audit(&server));
 
         Ok(DeleteLdapServerResponse::Deleted)
     }

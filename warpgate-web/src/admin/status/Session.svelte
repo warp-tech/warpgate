@@ -23,6 +23,7 @@
     import AsyncButton from 'common/AsyncButton.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import { stringifyError } from 'common/errors'
+    import OnboardingHint from 'common/OnboardingHint.svelte'
     import { PROTOCOL_PROPERTIES } from 'common/protocols'
     import RelativeDate from 'common/RelativeDate.svelte'
     import {
@@ -100,6 +101,10 @@
             {/if}
         </div>
     </div>
+
+    <OnboardingHint>
+        This page shows the overview and the log of a single user's session.
+    </OnboardingHint>
 
     <div class="list-group list-group-flush tree">
         <div class="list-group-item">

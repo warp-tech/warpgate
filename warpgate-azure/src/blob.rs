@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::error;
 use warpgate_common::StoredSecret;
+use warpgate_common::helpers::object_key;
 
 use crate::AzureError;
 
@@ -153,6 +154,9 @@ pub struct AzureBlobConfig {
     /// Blob-name prefix prepended to every recording path.
     pub prefix: String,
     pub credentials: AzureCredentials,
+    /// Local directory buffering recordings before upload, resolved against the
+    /// config file's directory unless absolute. Defaults to `data/recordings-scratch`.
+    pub scratch_path: Option<String>,
     /// Stream recordings through Warpgate instead of redirecting the browser to
     /// a SAS URL.
     ///
@@ -271,7 +275,7 @@ impl AzureBlobStorage {
     }
 
     fn blob_name(&self, path: &str) -> String {
-        blob_name(&self.prefix, path)
+        object_key::prefixed(&self.prefix, path)
     }
 
     fn block_blob_client(&self, path: &str) -> BlockBlobClient {
@@ -517,14 +521,6 @@ fn block_id(index: usize) -> Vec<u8> {
     format!("{index:0BLOCK_ID_WIDTH$}").into_bytes()
 }
 
-fn blob_name(prefix: &str, path: &str) -> String {
-    if prefix.is_empty() {
-        path.to_owned()
-    } else {
-        format!("{}/{}", prefix.trim_end_matches('/'), path)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -536,6 +532,7 @@ mod tests {
             endpoint: endpoint.map(Into::into),
             prefix: String::new(),
             credentials: AzureCredentials::ManagedIdentity(ManagedIdentityCredentials::default()),
+            scratch_path: None,
             serve_through_warpgate: true,
         }
     }
@@ -664,17 +661,6 @@ mod tests {
             let parsed: AzureCredentials =
                 serde_json::from_str(json).unwrap_or_else(|e| panic!("{json} did not parse: {e}"));
             assert_eq!(parsed, expected, "{json}");
-        }
-    }
-
-    #[test]
-    fn a_prefix_is_applied_to_blob_names() {
-        for (prefix, expected) in [
-            ("", "rec/1"),
-            ("warpgate", "warpgate/rec/1"),
-            ("warpgate/", "warpgate/rec/1"),
-        ] {
-            assert_eq!(blob_name(prefix, "rec/1"), expected, "{prefix:?}");
         }
     }
 }

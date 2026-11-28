@@ -6,21 +6,23 @@ use sea_orm::{
 };
 use uuid::Uuid;
 use warpgate_common::{
-    MaybeSecretRef, ProviderId, RoleId, RowId, SSHTargetAuth, SecretResolver, SshClientKeyId,
-    StoredSecret, Target as TargetConfig, TargetGroupId, TargetId, TargetOptions, TargetSecrets,
-    WarpgateError,
+    ProviderId, RoleId, RowId, SSHTargetAuth, SecretResolver, SshClientKeyId,
+    Target as TargetConfig, TargetGroupId, TargetId, TargetOptions, WarpgateError,
 };
-use warpgate_db_entities::{Role, SshClientKey, Target, TargetGroup, TargetRoleAssignment};
-use warpgate_gitops::plan::{Change, Current, Plan, References, Row, plan};
-use warpgate_gitops::types::{
-    Manifest, OptionReferences, Resource, ResourceKind, RoleSpec, SshClientKeySpec,
-    TargetGroupSpec, TargetSpec,
+use warpgate_db_entities::{
+    Role, SshClientKey, Target, TargetGroup, TargetRoleAssignment, begin_write,
+};
+use warpgate_gitops::plan::{Change, Current, Plan, References, plan};
+use warpgate_gitops::types::{Manifest, Resource};
+use warpgate_resources::{
+    OptionReferences, ResourceKind, RoleSpec, SshClientKeySpec, TargetGroupSpec, TargetSpec,
 };
 
+use super::audit::{Audited, Entry, Unaudited};
 use super::roles::{self, RoleDataRequest};
 use super::ssh_client_keys::{self, KeyMaterial, SshClientKeyDataRequest};
 use super::target_groups::{self, TargetGroupDataRequest};
-use super::targets::{self, TargetDataRequest};
+use super::targets::{self, Names, RoleAssignmentChange, TargetDataRequest};
 use super::{Actor, AdmittedSessions, OwnedEntity, ResourceError, set_owner};
 
 /// The rows a plan is computed against, with references by name. Inline
@@ -29,8 +31,6 @@ use super::{Actor, AdmittedSessions, OwnedEntity, ResourceError, set_owner};
 pub async fn load_current<C: ConnectionTrait>(db: &C) -> Result<Current, WarpgateError> {
     let groups = TargetGroup::Entity::find().all(db).await?;
     let roles = Role::Entity::find().all(db).await?;
-    let group_names: HashMap<TargetGroupId, &str> =
-        groups.iter().map(|g| (g.id, g.name.as_str())).collect();
     let role_names: HashMap<RoleId, &str> = roles.iter().map(|r| (r.id, r.name.as_str())).collect();
 
     let mut target_roles: HashMap<TargetId, Vec<String>> = HashMap::new();
@@ -44,115 +44,40 @@ pub async fn load_current<C: ConnectionTrait>(db: &C) -> Result<Current, Warpgat
     }
 
     let keys = SshClientKey::Entity::find().all(db).await?;
-    let key_names: HashMap<SshClientKeyId, String> =
-        keys.iter().map(|k| (k.id, k.label.clone())).collect();
     let models = Target::Entity::find().all(db).await?;
-    let target_names: HashMap<TargetId, String> =
-        models.iter().map(|t| (t.id, t.name.clone())).collect();
-    let mut targets = Vec::new();
-    for model in models {
-        let mut target = TargetConfig::try_from(model)?;
-        let mut references = OptionReferences::default();
-        if let TargetOptions::Ssh(ssh) = &mut target.options {
-            // A deleted jump host keeps its ID as the name. No row is called
-            // that, so a plan refuses the target.
-            references.jump_host = ssh.jump_host.take().map(|id| {
-                let name = target_names.get(&id).cloned();
-                name.unwrap_or_else(|| id.to_string())
-            });
-            if let SSHTargetAuth::PublicKey(auth) = &mut ssh.auth {
-                // A deleted key is treated as no key. A connection falls back
-                // to the default keys in the same way.
-                references.client_key = auth
-                    .key_id
-                    .take()
-                    .and_then(|id| key_names.get(&id).cloned());
-            }
-        }
-        for slot in target.options.secrets_mut() {
-            reveal_inline(slot)?;
-        }
-        targets.push(Row {
-            id: target.id.uuid(),
-            name: target.name,
-            provider: target.provider,
-            live: TargetSpec {
-                description: target.description,
-                group: target
-                    .group_id
-                    .and_then(|id| group_names.get(&id))
-                    .map(|name| (*name).to_owned()),
-                roles: target_roles.remove(&target.id).unwrap_or_default(),
-                options: target.options,
-                rate_limit_bytes_per_second: target.rate_limit_bytes_per_second,
-                ticket_max_duration_seconds: target.ticket_max_duration_seconds,
-                ticket_requests_disabled: target.ticket_requests_disabled,
-                ticket_require_approval: target.ticket_require_approval,
-                require_approval: target.require_approval,
-                ticket_max_uses: target.ticket_max_uses,
-                references,
-            },
-        });
-    }
+    let names = Names {
+        groups: groups.iter().map(|g| (g.id, g.name.clone())).collect(),
+        keys: keys.iter().map(|k| (k.id, k.label.clone())).collect(),
+        targets: models.iter().map(|t| (t.id, t.name.clone())).collect(),
+    };
+    let targets = models
+        .into_iter()
+        .map(|model| {
+            let target = TargetConfig::try_from(model)?;
+            let roles = target_roles.remove(&target.id).unwrap_or_default();
+            targets::row(target, roles, &names)
+        })
+        .collect::<Result<_, WarpgateError>>()?;
 
     Ok(Current {
-        groups: groups
-            .into_iter()
-            .map(|group| Row {
-                id: group.id.uuid(),
-                name: group.name,
-                provider: group.provider,
-                live: TargetGroupSpec {
-                    description: group.description,
-                    color: group.color,
-                },
-            })
-            .collect(),
-        roles: roles
-            .into_iter()
-            .map(|role| Row {
-                id: role.id.uuid(),
-                name: role.name,
-                provider: role.provider,
-                live: RoleSpec {
-                    description: role.description,
-                    is_default: role.is_default,
-                },
-            })
-            .collect(),
+        groups: groups.into_iter().map(target_groups::row).collect(),
+        roles: roles.into_iter().map(roles::row).collect(),
         targets,
         ssh_client_keys: keys
             .into_iter()
-            .map(|mut key| {
-                reveal_inline(&mut key.secret_key)?;
-                Ok(Row {
-                    id: key.id.uuid(),
-                    name: key.label,
-                    provider: key.provider,
-                    live: SshClientKeySpec {
-                        private_key: key.secret_key,
-                        is_default: key.is_default,
-                    },
-                })
-            })
-            .collect::<Result<_, WarpgateError>>()?,
+            .map(ssh_client_keys::row)
+            .collect::<Result<_, _>>()?,
     })
-}
-
-/// Decrypts an inline credential, so that it compares with a file's literal
-fn reveal_inline(slot: &mut MaybeSecretRef) -> Result<(), WarpgateError> {
-    if let MaybeSecretRef::Inline(secret) = slot {
-        *secret = StoredSecret::from(secret.reveal()?.expose_secret().clone());
-    }
-    Ok(())
 }
 
 /// What [`apply`] committed
 #[derive(Debug)]
 #[must_use]
-pub struct Applied<'p> {
-    /// Each written change with its row ID, in write order
-    pub changes: Vec<(&'p Change, Uuid)>,
+pub struct Applied {
+    /// One log entry per written row, in write order, not logged yet
+    pub entries: Vec<Entry>,
+    /// Role assignments added and removed by the target changes
+    pub role_assignments: Vec<RoleAssignmentChange>,
     /// Sessions that deleted targets had admitted, for the caller to close
     pub admitted: AdmittedSessions,
 }
@@ -187,23 +112,24 @@ impl From<DbErr> for ApplyError {
 /// If another apply of the same files already ran (a webhook delivered to two
 /// nodes), nothing is left to write and the result is empty.
 /// `secrets` resolves client key references, to derive their public keys.
-pub async fn apply<'p, C: ConnectionTrait + TransactionTrait>(
+pub async fn apply<C: ConnectionTrait + TransactionTrait>(
     db: &C,
     provider: ProviderId,
     desired: &[Resource],
-    confirmed: &'p Plan,
+    confirmed: &Plan,
     secrets: &dyn SecretResolver,
-) -> Result<Applied<'p>, ApplyError> {
+) -> Result<Applied, ApplyError> {
     if confirmed.has_errors() {
         return Err(ApplyError::PlanHasErrors);
     }
-    let txn = db.begin().await?;
+    let txn = begin_write(db).await?;
     let current = load_current(&txn).await?;
     let fresh = plan(provider, desired, &current, confirmed.prune);
     if fresh != *confirmed {
         if !fresh.has_pending() && !fresh.has_errors() {
             return Ok(Applied {
-                changes: vec![],
+                entries: vec![],
+                role_assignments: vec![],
                 admitted: AdmittedSessions(vec![]),
             });
         }
@@ -216,7 +142,8 @@ pub async fn apply<'p, C: ConnectionTrait + TransactionTrait>(
         references: &references,
         written: HashMap::new(),
     };
-    let mut written = Vec::new();
+    let mut entries = Vec::new();
+    let mut role_assignments = Vec::new();
     let (targets, others): (Vec<&Change>, Vec<&Change>) = confirmed
         .changes
         .iter()
@@ -241,23 +168,26 @@ pub async fn apply<'p, C: ConnectionTrait + TransactionTrait>(
             adopt,
         };
         let result = match desired {
-            Resource::TargetGroup(manifest) => write.group(manifest).await.map(RowId::uuid),
-            Resource::Role(manifest) => write.role(manifest).await.map(RowId::uuid),
+            Resource::TargetGroup(manifest) => write.group(manifest).await.map(untyped),
+            Resource::Role(manifest) => write.role(manifest).await.map(untyped),
             // ponytail: resolves a reference while the transaction is open;
             // resolve before it if backend latency starts holding locks too long
             Resource::SshClientKey(manifest) => {
-                write.client_key(manifest, secrets).await.map(RowId::uuid)
+                write.client_key(manifest, secrets).await.map(untyped)
             }
-            Resource::Target(manifest) => write.target(manifest, &ids).await.map(RowId::uuid),
+            Resource::Target(manifest) => write
+                .target(manifest, &ids, &mut role_assignments)
+                .await
+                .map(untyped),
         };
-        let id = result.map_err(|source| ApplyError::Resource {
+        let (id, entry) = result.map_err(|source| ApplyError::Resource {
             kind: change.kind(),
             name: change.name().to_owned(),
             source,
         })?;
         ids.written
             .insert((change.kind(), change.name().to_owned()), id);
-        written.push((change, id));
+        entries.push(entry);
     }
 
     // Deletes run after the writes. By then a replacement client key exists
@@ -268,31 +198,51 @@ pub async fn apply<'p, C: ConnectionTrait + TransactionTrait>(
         let Change::Delete { kind, id, .. } = change else {
             continue;
         };
-        let result = match kind {
-            ResourceKind::Target => targets::delete(&txn, actor, TargetId(*id))
-                .await
-                .map(|sessions| admitted.extend(sessions.0)),
-            ResourceKind::SshClientKey => {
-                ssh_client_keys::delete(&txn, actor, SshClientKeyId(*id)).await
+        let deleted = match kind {
+            ResourceKind::Target => {
+                let deleted = targets::delete(&txn, actor, TargetId(*id)).await;
+                let deleted = deleted.map(|(target, sessions)| {
+                    admitted.extend(sessions.0);
+                    target
+                });
+                entry_of(&txn, deleted).await
             }
-            ResourceKind::Role => roles::delete(&txn, actor, RoleId(*id)).await,
+            ResourceKind::SshClientKey => {
+                let deleted = ssh_client_keys::delete(&txn, actor, SshClientKeyId(*id)).await;
+                entry_of(&txn, deleted).await
+            }
+            ResourceKind::Role => {
+                entry_of(&txn, roles::delete(&txn, actor, RoleId(*id)).await).await
+            }
             ResourceKind::TargetGroup => {
-                target_groups::delete(&txn, actor, TargetGroupId(*id)).await
+                let deleted = target_groups::delete(&txn, actor, TargetGroupId(*id)).await;
+                entry_of(&txn, deleted).await
             }
         };
-        result.map_err(|source| ApplyError::Resource {
+        entries.push(deleted.map_err(|source| ApplyError::Resource {
             kind: *kind,
             name: change.name().to_owned(),
             source,
-        })?;
-        written.push((change, *id));
+        })?);
     }
 
     txn.commit().await?;
     Ok(Applied {
-        changes: written,
+        entries,
+        role_assignments,
         admitted: AdmittedSessions(admitted),
     })
+}
+
+fn untyped<I: RowId>((id, entry): (I, Entry)) -> (Uuid, Entry) {
+    (id.uuid(), entry)
+}
+
+async fn entry_of<M: Audited, C: ConnectionTrait>(
+    db: &C,
+    write: Result<Unaudited<M>, ResourceError>,
+) -> Result<Entry, ResourceError> {
+    Ok(write?.deferred(db).await.1)
 }
 
 /// One create, update or adoption. `id` is the row an update or adoption
@@ -308,20 +258,23 @@ struct Write<'a, C> {
 /// The service layer's writes for one kind of resource, keyed by its spec
 trait Store {
     type Entity: OwnedEntity;
+    type Row: Audited;
     type Data;
+
+    fn id(row: &Self::Row) -> Id<Self>;
 
     async fn create<C: ConnectionTrait>(
         db: &C,
         actor: Actor,
         data: Self::Data,
-    ) -> Result<Id<Self>, ResourceError>;
+    ) -> Result<Unaudited<Self::Row>, ResourceError>;
 
     async fn update<C: ConnectionTrait>(
         db: &C,
         actor: Actor,
         id: Id<Self>,
         data: Self::Data,
-    ) -> Result<(), ResourceError>;
+    ) -> Result<Unaudited<Self::Row>, ResourceError>;
 }
 
 /// The ID type of the rows that a spec is stored as
@@ -332,14 +285,19 @@ macro_rules! store {
     ($spec:ty, $module:ident, $entity:ident, $data:ty) => {
         impl Store for $spec {
             type Entity = $entity::Entity;
+            type Row = $entity::Model;
             type Data = $data;
+
+            fn id(row: &Self::Row) -> Id<Self> {
+                row.id
+            }
 
             async fn create<C: ConnectionTrait>(
                 db: &C,
                 actor: Actor,
                 data: $data,
-            ) -> Result<Id<Self>, ResourceError> {
-                Ok($module::create(db, actor, &data).await?.id)
+            ) -> Result<Unaudited<Self::Row>, ResourceError> {
+                $module::create(db, actor, &data).await
             }
 
             async fn update<C: ConnectionTrait>(
@@ -347,9 +305,8 @@ macro_rules! store {
                 actor: Actor,
                 id: Id<Self>,
                 data: $data,
-            ) -> Result<(), ResourceError> {
-                $module::update(db, actor, id, &data).await?;
-                Ok(())
+            ) -> Result<Unaudited<Self::Row>, ResourceError> {
+                $module::update(db, actor, id, &data).await
             }
         }
     };
@@ -366,16 +323,19 @@ store!(TargetSpec, targets, Target, TargetDataRequest);
 
 impl Store for SshClientKeySpec {
     type Entity = SshClientKey::Entity;
+    type Row = SshClientKey::Model;
     type Data = (SshClientKeyDataRequest, KeyMaterial);
+
+    fn id(row: &Self::Row) -> Id<Self> {
+        row.id
+    }
 
     async fn create<C: ConnectionTrait>(
         db: &C,
         actor: Actor,
         (data, material): Self::Data,
-    ) -> Result<Id<Self>, ResourceError> {
-        Ok(ssh_client_keys::create(db, actor, &data, material)
-            .await?
-            .id)
+    ) -> Result<Unaudited<Self::Row>, ResourceError> {
+        ssh_client_keys::create(db, actor, &data, material).await
     }
 
     async fn update<C: ConnectionTrait>(
@@ -383,29 +343,31 @@ impl Store for SshClientKeySpec {
         actor: Actor,
         id: Id<Self>,
         (data, material): Self::Data,
-    ) -> Result<(), ResourceError> {
-        ssh_client_keys::update(db, actor, id, &data, Some(material)).await?;
-        Ok(())
+    ) -> Result<Unaudited<Self::Row>, ResourceError> {
+        ssh_client_keys::update(db, actor, id, &data, Some(material)).await
     }
 }
 
 impl<C: ConnectionTrait> Write<'_, C> {
     /// Creates the row, or updates it after taking it over for an adoption
-    async fn save<S: Store>(&self, data: S::Data) -> Result<Id<S>, ResourceError> {
-        let Some(id) = self.id.map(Id::<S>::from_uuid) else {
-            return S::create(self.db, self.actor, data).await;
+    async fn save<S: Store>(&self, data: S::Data) -> Result<(Id<S>, Entry), ResourceError> {
+        let write = match self.id.map(Id::<S>::from_uuid) {
+            None => S::create(self.db, self.actor, data).await?,
+            Some(id) if self.adopt => {
+                set_owner::<S::Entity, _>(self.db, id, Some(self.provider)).await?;
+                let update = S::update(self.db, self.actor, id, data).await?;
+                update.adopted()
+            }
+            Some(id) => S::update(self.db, self.actor, id, data).await?,
         };
-        if self.adopt {
-            set_owner::<S::Entity, _>(self.db, id, Some(self.provider)).await?;
-        }
-        S::update(self.db, self.actor, id, data).await?;
-        Ok(id)
+        let (row, entry) = write.deferred(self.db).await;
+        Ok((S::id(&row), entry))
     }
 
     async fn group(
         &self,
         manifest: &Manifest<TargetGroupSpec>,
-    ) -> Result<TargetGroupId, ResourceError> {
+    ) -> Result<(TargetGroupId, Entry), ResourceError> {
         let TargetGroupSpec { description, color } = &manifest.spec;
         let data = TargetGroupDataRequest {
             name: manifest.metadata.name.clone(),
@@ -415,7 +377,7 @@ impl<C: ConnectionTrait> Write<'_, C> {
         self.save::<TargetGroupSpec>(data).await
     }
 
-    async fn role(&self, manifest: &Manifest<RoleSpec>) -> Result<RoleId, ResourceError> {
+    async fn role(&self, manifest: &Manifest<RoleSpec>) -> Result<(RoleId, Entry), ResourceError> {
         let RoleSpec {
             description,
             is_default,
@@ -432,7 +394,7 @@ impl<C: ConnectionTrait> Write<'_, C> {
         &self,
         manifest: &Manifest<SshClientKeySpec>,
         secrets: &dyn SecretResolver,
-    ) -> Result<SshClientKeyId, ResourceError> {
+    ) -> Result<(SshClientKeyId, Entry), ResourceError> {
         let SshClientKeySpec {
             private_key,
             is_default,
@@ -449,7 +411,8 @@ impl<C: ConnectionTrait> Write<'_, C> {
         &self,
         manifest: &Manifest<TargetSpec>,
         ids: &Ids<'_>,
-    ) -> Result<TargetId, ResourceError> {
+        role_assignments: &mut Vec<RoleAssignmentChange>,
+    ) -> Result<(TargetId, Entry), ResourceError> {
         let spec = &manifest.spec;
         let OptionReferences {
             jump_host,
@@ -474,7 +437,7 @@ impl<C: ConnectionTrait> Write<'_, C> {
             .map(|group| ids.find::<TargetGroupSpec>(group))
             .transpose()?;
         let data = spec.data_request(&manifest.metadata.name, options, group_id);
-        let id = self.save::<TargetSpec>(data).await?;
+        let (id, entry) = self.save::<TargetSpec>(data).await?;
 
         let wanted = spec
             .roles
@@ -489,12 +452,12 @@ impl<C: ConnectionTrait> Write<'_, C> {
             .map(|assignment| assignment.role_id)
             .collect();
         for role in wanted.difference(&assigned) {
-            targets::add_role(self.db, self.actor, id, *role).await?;
+            role_assignments.push(targets::add_role(self.db, self.actor, id, *role).await?);
         }
         for role in assigned.difference(&wanted) {
-            targets::remove_role(self.db, self.actor, id, *role).await?;
+            role_assignments.push(targets::remove_role(self.db, self.actor, id, *role).await?);
         }
-        Ok(id)
+        Ok((id, entry))
     }
 }
 
@@ -643,16 +606,25 @@ mod tests {
                  spec: {{roles: [{roles}], options: {{ssh: {{host: h, port: {port}}}}}}}\n"
             ))
         };
+        let assignments = |applied: &Applied| -> Vec<(String, bool)> {
+            let changes = applied.role_assignments.iter();
+            let mut changes: Vec<_> = changes
+                .map(|change| {
+                    assert_eq!(change.target.name, "web");
+                    (change.role.name.clone(), change.added)
+                })
+                .collect();
+            changes.sort();
+            changes
+        };
         let before = fileset(22, "dba, ops");
-        let _ = apply(
-            &db,
-            GITOPS,
-            &before,
-            &plan_against(&db, &before).await,
-            &Keys,
-        )
-        .await
-        .unwrap();
+        let plan = plan_against(&db, &before).await;
+        let applied = apply(&db, GITOPS, &before, &plan, &Keys).await.unwrap();
+        assert_eq!(applied.entries.len(), 3, "one for each role and the target");
+        assert_eq!(
+            assignments(&applied),
+            [("dba".to_owned(), true), ("ops".to_owned(), true)]
+        );
         assert_eq!(
             TargetRoleAssignment::Entity::find()
                 .all(&db)
@@ -668,7 +640,9 @@ mod tests {
             summary(&plan),
             ["unchanged dba", "unchanged ops", "update web"]
         );
-        let _ = apply(&db, GITOPS, &after, &plan, &Keys).await.unwrap();
+        let applied = apply(&db, GITOPS, &after, &plan, &Keys).await.unwrap();
+        assert_eq!(applied.entries.len(), 1);
+        assert_eq!(assignments(&applied), [("ops".to_owned(), false)]);
 
         let target = Target::Entity::find().one(&db).await.unwrap().unwrap();
         assert_eq!(target.options["ssh"]["port"], 2222);
@@ -703,7 +677,8 @@ mod tests {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .skip_audit();
         let role = |adopt: &str| {
             resources(&format!(
                 "apiVersion: warpgate/v1\nkind: Role\n\
@@ -746,7 +721,8 @@ mod tests {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .skip_audit();
         let desired = resources(
             "apiVersion: warpgate/v1\nkind: Target\nmetadata: {name: web}\n\
              spec: {roles: [admins], options: {ssh: {host: h}}}\n",
@@ -787,7 +763,8 @@ mod tests {
                 },
             )
             .await
-            .unwrap();
+            .unwrap()
+            .skip_audit();
         }
         let desired = resources(
             "apiVersion: warpgate/v1\nkind: Target\nmetadata: {name: web}\n\
@@ -905,7 +882,8 @@ mod tests {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .skip_audit();
 
         assert!(matches!(
             apply(&db, GITOPS, &desired, &confirmed, &Keys).await,

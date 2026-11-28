@@ -1,6 +1,6 @@
 [package]
 name = "warpgate"
-version = "0.30.6"
+version = "0.31.0-beta.3"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -20,6 +20,7 @@ console = { version = "0.16", default-features = false }
 data-encoding.workspace = true
 dialoguer.workspace = true
 dotenv = "0.15.0"
+dunce = "1.0"
 enum_dispatch.workspace = true
 futures.workspace = true
 humantime = { version = "2.1", default-features = false }

@@ -5,6 +5,7 @@ pub mod ipnet;
 pub mod locks;
 pub mod logging;
 pub mod net;
+pub mod object_key;
 pub mod otp;
 pub mod password_policy;
 pub mod proxy_protocol;

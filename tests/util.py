@@ -1,9 +1,11 @@
+import contextlib
 import http.client
 import logging
 import os
 import requests
 import select
 import socket
+import socketserver
 import sqlite3
 import ssl
 import subprocess
@@ -83,6 +85,16 @@ def _wait_timeout(fn, msg, timeout=60):
         raise Exception(msg() if callable(msg) else msg)
     if failure:
         raise failure[0]
+
+
+def poll(fn, deadline_s=15):
+    deadline = time.monotonic() + deadline_s
+    while time.monotonic() < deadline:
+        value = fn()
+        if value:
+            return value
+        time.sleep(0.25)
+    return fn()
 
 
 def wait_port(port, recv=True, timeout=60, for_process: subprocess.Popen = None, connect_timeout=5, read_timeout=5):
@@ -206,3 +218,34 @@ def post_declaring_length(
         return response.status, response.read().decode()
     finally:
         conn.close()
+
+
+@contextlib.contextmanager
+def proxy_protocol_relay(target_port, client_address="203.0.113.10"):
+    """A stand-in for a TCP load balancer: yields a local port that relays to
+    `target_port` behind a PROXY v1 header naming `client_address`."""
+
+    class Relay(socketserver.BaseRequestHandler):
+        def handle(self):
+            with socket.create_connection(("127.0.0.1", target_port)) as upstream:
+                upstream.sendall(
+                    f"PROXY TCP4 {client_address} 127.0.0.1 40000 {target_port}\r\n".encode()
+                )
+                # ponytail: closes both ways on the first EOF, no half-close
+                while True:
+                    ready, _, _ = select.select([self.request, upstream], [], [])
+                    for source in ready:
+                        data = source.recv(65536)
+                        if not data:
+                            return
+                        (upstream if source is self.request else self.request).sendall(data)
+
+    class Server(socketserver.ThreadingTCPServer):
+        daemon_threads = True
+
+    with Server(("127.0.0.1", 0), Relay) as server:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            yield server.server_address[1]
+        finally:
+            server.shutdown()

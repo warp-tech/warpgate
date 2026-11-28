@@ -22,7 +22,7 @@ use poem::{Body, Request};
 use warpgate_common::WarpgateError;
 pub use warpgate_common::http_headers::{
     X_WARPGATE_CLUSTER_CLIENT_IP, X_WARPGATE_CLUSTER_IDENTITY, X_WARPGATE_CLUSTER_IDENTITY_TOKEN,
-    X_WARPGATE_CLUSTER_NODE, X_WARPGATE_TOKEN,
+    X_WARPGATE_CLUSTER_NODE, X_WARPGATE_TICKET, X_WARPGATE_TOKEN,
 };
 
 const BODY_READ_TIMEOUT: Duration = Duration::from_secs(30);
@@ -48,6 +48,16 @@ pub async fn read_body_limited_with_timeout(
             ReadBodyError::PayloadTooLarge => WarpgateError::RequestBodyTooLarge,
             error => WarpgateError::InvalidRequest(format!("reading request body: {error}")),
         })
+}
+
+/// The `Accept-Encoding` to send upstream when the response body is forwarded
+/// to the client still encoded: the client's own, or `identity` if it sent
+/// none, so the upstream never picks an encoding the client didn't offer.
+pub fn passthrough_accept_encoding(headers: &HeaderMap) -> HeaderValue {
+    headers
+        .get(header::ACCEPT_ENCODING)
+        .cloned()
+        .unwrap_or(HeaderValue::from_static("identity"))
 }
 
 pub enum UpstreamBody {
@@ -76,18 +86,32 @@ pub async fn buffer_response(
     Ok(UpstreamBody::Buffered(head.freeze()))
 }
 
-/// The credential from the first `Authorization` header using `scheme`
+/// The `Authorization` scheme a client presents a Warpgate ticket with. It is
+/// Warpgate's credential, never the target's.
+pub const WARPGATE_AUTH_SCHEME: &str = "Warpgate";
+
+/// The credential in an `Authorization` header value using `scheme`
 /// (compared case-insensitively, as RFC 7235 requires).
+pub fn authorization_credential<'a>(value: &'a str, scheme: &str) -> Option<&'a str> {
+    value
+        .split_once(' ')
+        .filter(|(s, _)| s.eq_ignore_ascii_case(scheme))
+        .map(|(_, token)| token)
+}
+
+/// The credential from the first `Authorization` header using `scheme`.
 pub fn authorization_token<'a>(req: &'a Request, scheme: &str) -> Option<&'a str> {
     req.headers()
         .get_all(poem::http::header::AUTHORIZATION)
         .iter()
         .filter_map(|v| v.to_str().ok())
-        .find_map(|v| {
-            v.split_once(' ')
-                .filter(|(s, _)| s.eq_ignore_ascii_case(scheme))
-                .map(|(_, token)| token)
-        })
+        .find_map(|v| authorization_credential(v, scheme))
+}
+
+/// A redirect to this `Location` stays on the host that sent it.
+/// Browsers treat `/\host` as `//host`
+pub fn is_same_authority_location(value: &[u8]) -> bool {
+    value.first() == Some(&b'/') && !matches!(value.get(1), Some(b'/' | b'\\'))
 }
 
 // style-src unsafe-inline for Svelte
@@ -162,6 +186,17 @@ mod tests {
     use futures::TryStreamExt;
 
     use super::*;
+
+    #[test]
+    fn passthrough_accept_encoding_defaults_to_identity() {
+        let mut headers = HeaderMap::new();
+        assert_eq!(passthrough_accept_encoding(&headers), "identity");
+        headers.insert(
+            header::ACCEPT_ENCODING,
+            HeaderValue::from_static("br, gzip"),
+        );
+        assert_eq!(passthrough_accept_encoding(&headers), "br, gzip");
+    }
 
     /// With `ends` unset, the body stalls forever after the last chunk.
     fn response_of(chunks: &[&'static str], ends: bool) -> reqwest::Response {

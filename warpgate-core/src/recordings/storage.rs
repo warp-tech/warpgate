@@ -233,7 +233,6 @@ impl FileAccess {
 /// config change takes effect on the next recording / read. Owns the disk-vs-S3
 /// decisions so callers never inspect the backend themselves.
 pub struct Storage {
-    enable: bool,
     /// Absolute local root — final location for disk storage, scratch for S3.
     local_root: PathBuf,
     backend: Backend,
@@ -254,20 +253,15 @@ impl Storage {
                 Backend::Remote(RemoteStorage::S3(S3Storage::new(&s3).await?))
             }
             RecordingsStorageConfig::Azure(azure) => {
-                local_root.push(SCRATCH_SUBDIR);
+                local_root.push(azure.scratch_path.as_deref().unwrap_or(SCRATCH_SUBDIR));
                 Backend::Remote(RemoteStorage::Azure(AzureBlobStorage::new(&azure).await?))
             }
         };
 
         Ok(Self {
-            enable: p.recordings_enable,
             local_root,
             backend,
         })
-    }
-
-    pub(crate) const fn enabled(&self) -> bool {
-        self.enable
     }
 
     /// Local folder holding a recording's files (final on disk, scratch on S3).
@@ -398,6 +392,7 @@ mod tests {
             kind: RecordingKind::Terminal,
             metadata: "{}".into(),
             generation,
+            node_id: None,
         }
     }
 

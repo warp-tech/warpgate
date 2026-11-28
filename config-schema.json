@@ -4,6 +4,7 @@
   "type": "object",
   "properties": {
     "database_url": {
+      "description": "For SQLite, `sqlite:<directory>`: the database is\n`<directory>/db.sqlite3`, relative to the config file's directory.\nAs in any URL, write `%`, `?` and `#` in the path as `%25`, `%3F` and\n`%23`.",
       "type": "string",
       "default": "sqlite:data/db"
     },
@@ -172,7 +173,7 @@
           "default": "[::]:8888"
         },
         "proxy_protocol": {
-          "description": "Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.",
+          "description": "Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.\nOther cluster nodes connect directly and are exempt",
           "type": "boolean",
           "default": false
         },
@@ -660,6 +661,7 @@
               }
             },
             "admin_role_mappings": {
+              "description": "Like role_mappings, for admin roles and the admin roles claim.",
               "type": [
                 "object",
                 "null"
@@ -680,10 +682,18 @@
             "client_secret": {
               "type": "string"
             },
+            "discovery_url": {
+              "description": "Full discovery document URL when it is hosted separately from the issuer.\nThe document and ID tokens must still match issuer_url exactly.\nKubernetes OIDC clients discover from issuer_url and ignore this",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "issuer_url": {
               "type": "string"
             },
             "role_mappings": {
+              "description": "Maps the groups in the roles claim to Warpgate role names. The\nmapped roles follow the claim: a login without it removes them.",
               "type": [
                 "object",
                 "null"

@@ -34,6 +34,7 @@
     import { stringifyError } from 'common/errors'
     import { toLocalISO } from 'common/helpers'
     import Loadable from 'common/Loadable.svelte'
+    import OnboardingHint from 'common/OnboardingHint.svelte'
     import PageSummaryBar from 'common/PageSummaryBar.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
     import RelativeDate from 'common/RelativeDate.svelte'
@@ -387,6 +388,13 @@
                 {/if}
 
                 <Section id="roles" title="Access roles">
+                    <OnboardingHint>
+                        <em>Access roles</em>
+                        decide which targets this user is allowed to access. Add
+                        the same access role to both the user and the target to
+                        grant access.
+                    </OnboardingHint>
+
                     <div class="list-group list-group-flush">
                         {#each allRoles as role (role.id)}
                             {@const activeAssignment = userRoles.find(
@@ -503,6 +511,13 @@
                 </Section>
 
                 <Section id="admin-roles" title="Admin roles">
+                    <OnboardingHint>
+                        Assigning an <em>Admin role</em>
+                        will give this user access to this admin area. The
+                        default <code>warpgate:admin</code> role gives full
+                        access, but you can create more limited roles.
+                    </OnboardingHint>
+
                     <div class="list-group list-group-flush">
                         {#each allAdminRoles as role (role.id)}
                             <label

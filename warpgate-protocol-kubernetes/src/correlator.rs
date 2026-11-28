@@ -9,26 +9,31 @@ use tokio_util::sync::CancellationToken;
 use tracing::warn;
 use warpgate_common::auth::{AuthResult, AuthStateUserInfo, RememberApprovalBy};
 use warpgate_common::{
-    Target, TargetKubernetesOptions, TargetSessionId, UserId, UserSessionId, WarpgateError,
+    SpecificTarget, Target, TargetId, TargetKubernetesOptions, TargetSessionId, UserId,
+    UserSessionId, WarpgateError,
 };
 use warpgate_common_http::logging::get_client_ip;
 use warpgate_core::approvals::{Admission, GatedConnection, admit_target_session};
+use warpgate_core::recordings::SessionRecordings;
 use warpgate_core::{
     AdmittedTarget, AuthStateStore, Services, State, TargetAuthorization, TargetSessionStart,
     UserSessionStateInit, WarpgateServerHandle,
 };
 use warpgate_db_entities::KubernetesSession::{self, Claim};
 
+use crate::recording::{KubernetesRecorder, SessionRecordingMetadata};
 use crate::server::auth::{
     KubernetesIdentity, TransportCredential, authorize_kubernetes_join,
-    authorize_kubernetes_target, resolve_kubernetes_target, unauthorized,
+    authorize_kubernetes_target, unauthorized,
 };
 use crate::session_handle::KubernetesSessionHandle;
 
+/// The key uses the target id, like the DB claim key. A renamed target keeps
+/// its session. Another target that takes over the name gets a new one
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct CorrelationKey {
     user_id: UserId,
-    target_name: String,
+    target_id: TargetId,
     ip: Option<String>,
     credential: TransportCredential,
 }
@@ -38,21 +43,20 @@ impl CorrelationKey {
         request: &Request,
         identity: &KubernetesIdentity,
         services: &Services,
-        target_name: String,
+        target_id: TargetId,
     ) -> Self {
         Self {
             user_id: identity.user_info().id,
-            target_name,
+            target_id,
             ip: get_client_ip(request, services).await,
             credential: identity.credential(),
         }
     }
 
-    /// Needs the resolved target id, so it is only built on a local cache miss.
-    fn db_key(&self, target: &Target) -> String {
+    fn db_key(&self) -> String {
         KubernetesSession::key(
             self.user_id,
-            target.id,
+            self.target_id,
             self.ip.as_deref(),
             &self.credential.key_segment(),
         )
@@ -71,7 +75,146 @@ const MAX_PASSES: usize = 5;
 const CLAIM_POLL_INITIAL: Duration = Duration::from_millis(50);
 const CLAIM_POLL_MAX: Duration = Duration::from_secs(1);
 
-pub type AdmittedSession = Arc<AdmittedTarget<TargetKubernetesOptions>>;
+/// How often a session rechecks whether its API recording should run. A
+/// `kubectl` command's burst of requests then makes one lookup, not one each
+const RECORDER_CHECK_INTERVAL: Duration = Duration::from_secs(5);
+
+pub type AdmittedSession = Arc<KubernetesTargetSession>;
+
+/// Shared by every request of one correlated session on this node
+pub struct KubernetesTargetSession {
+    /// Contains the target as it was at admission, up to `session_max_age`
+    /// ago, so it stays private. Each request resolves the target again and
+    /// passes it through [`Self::target_for_request`]
+    admitted: AdmittedTarget<TargetKubernetesOptions>,
+    /// Ends when the last [`AdmittedSession`] is dropped. Each node has its own
+    /// recording because the files take a single writer
+    api_recording: Mutex<ApiRecording>,
+}
+
+/// The target as the current request resolved it, checked to be the one the
+/// session was admitted to. Code that connects to the cluster takes this
+/// type, so it cannot be given an unchecked target
+pub struct SessionTarget(SpecificTarget<TargetKubernetesOptions>);
+
+impl std::ops::Deref for SessionTarget {
+    type Target = SpecificTarget<TargetKubernetesOptions>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[derive(Default)]
+struct ApiRecording {
+    /// `None` while recording is disabled or failed to start
+    recorder: Option<Arc<KubernetesRecorder>>,
+    /// `None` before the first check and after the writer closed
+    checked: Option<Instant>,
+}
+
+impl ApiRecording {
+    /// The next state. A recording continues while recording is still
+    /// enabled. Without one, a new one is started
+    async fn checked(&self, id: &TargetSessionId, recordings: &SessionRecordings) -> Self {
+        let recorder = match &self.recorder {
+            Some(recorder) => recordings
+                .enabled()
+                .await
+                .inspect_err(|error| warn!("Failed to read the recording settings: {error}"))
+                // A failed read does not stop the recording
+                .unwrap_or(true)
+                .then(|| recorder.clone()),
+            None => recordings
+                .start::<KubernetesRecorder, _>(id, SessionRecordingMetadata::Api)
+                .await
+                .inspect_err(|error| warn!("Failed to start recording: {error}"))
+                .ok()
+                .flatten()
+                .map(Arc::new),
+        };
+        Self {
+            recorder,
+            checked: Some(Instant::now()),
+        }
+    }
+}
+
+impl KubernetesTargetSession {
+    fn new(admitted: AdmittedTarget<TargetKubernetesOptions>) -> AdmittedSession {
+        Arc::new(Self {
+            admitted,
+            api_recording: Mutex::default(),
+        })
+    }
+
+    pub fn id(&self) -> TargetSessionId {
+        self.admitted.id()
+    }
+
+    pub fn user_info(&self) -> &AuthStateUserInfo {
+        self.admitted.user_info()
+    }
+
+    /// `current` is the target as this request resolved it. Fails unless it
+    /// is the target the session was admitted to
+    pub fn target_for_request(&self, current: Target) -> Result<SessionTarget, WarpgateError> {
+        if current.id != self.admitted.target().id {
+            return Err(WarpgateError::InvalidTarget);
+        }
+        SpecificTarget::new(current).map(SessionTarget)
+    }
+
+    /// Runs `write` on the session's API recording, starting one if needed.
+    /// Does nothing while recording is unavailable
+    pub async fn record_api(
+        &self,
+        recordings: &SessionRecordings,
+        write: impl AsyncFnOnce(&KubernetesRecorder) -> warpgate_core::recordings::Result<()>,
+    ) {
+        let Some(recorder) = self.api_recorder(recordings).await else {
+            return;
+        };
+        // The lock is released before the write, so the session's requests
+        // do not queue behind each other's writes
+        if let Err(error) = write(&recorder).await {
+            warn!("Failed to record Kubernetes response: {error}");
+            // Other errors lose only this exchange
+            if !matches!(error, warpgate_core::recordings::Error::Closed) {
+                return;
+            }
+            // A closed writer cannot be reopened, so the next call starts a
+            // new recording unless a concurrent request already did
+            let mut recording = self.api_recording.lock().await;
+            if recording
+                .recorder
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, &recorder))
+            {
+                *recording = ApiRecording::default();
+            }
+        }
+    }
+
+    /// `None` if recording is disabled or could not start. The answer is
+    /// rechecked every [`RECORDER_CHECK_INTERVAL`]
+    async fn api_recorder(
+        &self,
+        recordings: &SessionRecordings,
+    ) -> Option<Arc<KubernetesRecorder>> {
+        // The lock is held across the start, so concurrent requests share one
+        // recording
+        let mut recording = self.api_recording.lock().await;
+        if recording
+            .checked
+            .is_none_or(|at| at.elapsed() >= RECORDER_CHECK_INTERVAL)
+        {
+            let checked = recording.checked(&self.admitted.id(), recordings).await;
+            *recording = checked;
+        }
+        recording.recorder.clone()
+    }
+}
 
 type CorrelatedSession = (
     Arc<Mutex<WarpgateServerHandle>>,
@@ -137,22 +280,18 @@ pub async fn correlated_authorization(
     correlator: &Arc<Mutex<RequestCorrelator>>,
     request: &Request,
     identity: KubernetesIdentity,
-    target_name: &str,
+    target: &Target,
     services: &Services,
 ) -> poem::Result<CorrelatedSession> {
     let user_info = identity.user_info();
-    let key = CorrelationKey::for_request(request, &identity, services, target_name.into()).await;
+    let key = CorrelationKey::for_request(request, &identity, services, target.id).await;
     let max_age = session_max_age(services).await;
 
     if let Some(joined) = local_session(correlator, &key, max_age, services).await? {
         return Ok(joined);
     }
 
-    let target = match &identity {
-        KubernetesIdentity::Ticket(ticket) => ticket.target().clone(),
-        KubernetesIdentity::User { .. } => resolve_kubernetes_target(services, target_name).await?,
-    };
-    let db_key = key.db_key(&target);
+    let db_key = key.db_key();
 
     for _ in 0..MAX_PASSES {
         if let Some(joined) = local_session(correlator, &key, max_age, services).await? {
@@ -183,7 +322,7 @@ pub async fn correlated_authorization(
                     &key,
                     services,
                     identity,
-                    target,
+                    target.clone(),
                     target_session_id,
                     local,
                 )
@@ -219,14 +358,21 @@ pub async fn correlated_authorization(
         }
 
         let result = open_session(
-            correlator, &key, request, services, identity, target, &db_key, local,
+            correlator,
+            &key,
+            request,
+            services,
+            identity,
+            target.clone(),
+            &db_key,
+            local,
         )
         .await;
         abandoned.disarm();
         return result;
     }
 
-    warn!(user_id = %user_info.id, %target_name, "Kubernetes session correlation did not settle");
+    warn!(user_id = %user_info.id, target = %target.name, "Kubernetes session correlation did not settle");
     Err(poem::Error::from_status(
         poem::http::StatusCode::SERVICE_UNAVAILABLE,
     ))
@@ -415,7 +561,7 @@ async fn join_admitted(
         let started = handle.lock().await.start_target_session(resolved).await;
         match started {
             Ok(TargetSessionStart::Started(admitted)) if admitted.id() == target_session_id => {
-                Ok(Arc::new(admitted))
+                Ok(KubernetesTargetSession::new(admitted))
             }
             Err(WarpgateError::UserSessionEnded) => Err(unauthorized()),
             Err(error) => Err(error.into()),
@@ -507,7 +653,7 @@ async fn open_session(
             };
             match admission {
                 Ok(admitted) => {
-                    let admitted = Arc::new(admitted);
+                    let admitted = KubernetesTargetSession::new(admitted);
                     *authorization = Authorization::Authorized(admitted.clone());
                     Ok((handle, admitted, closed))
                 }
@@ -849,9 +995,10 @@ mod tests {
     #[test]
     fn keys_separate_credentials_of_one_user() {
         let user_id = UserId(Uuid::new_v4());
+        let target_id = TargetId(Uuid::new_v4());
         let key = |credential| CorrelationKey {
             user_id,
-            target_name: "k8s".into(),
+            target_id,
             ip: Some("10.0.0.1".into()),
             credential,
         };

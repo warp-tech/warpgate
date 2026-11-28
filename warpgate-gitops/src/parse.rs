@@ -12,8 +12,9 @@ use std::collections::{HashMap, HashSet};
 use saphyr::{MarkedYaml, Scalar, YamlData, YamlLoader};
 use saphyr_parser::{Event, Marker, Parser, ScalarStyle, ScanError, Span, SpannedEventReceiver};
 use serde_json::{Map, Number, Value};
+use warpgate_resources::{Path, Segment};
 
-use crate::diagnostic::{Diagnostic, Location, Path, Segment};
+use crate::diagnostic::{Diagnostic, Location};
 
 /// Deeper input is rejected before it is loaded: converting a node tree and
 /// dropping it both recurse once per level.

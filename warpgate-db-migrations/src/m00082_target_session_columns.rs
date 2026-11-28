@@ -278,6 +278,7 @@ mod tests {
             kind: Set(Recording::RecordingKind::Terminal),
             metadata: Set(String::new()),
             generation: Set(3),
+            ..Default::default()
         })
         .exec_without_returning(&db)
         .await

@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate Web Admin",
-    "version": "v0.30.4-50-g2777b4eb-modified"
+    "version": "v0.31.0-beta.3-1-g4c42c581f-modified"
   },
   "servers": [
     {
@@ -323,16 +323,6 @@
               "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/Role"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "string"
                 }
               }
             }
@@ -693,6 +683,16 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -780,6 +780,19 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
           },
           "404": {
             "description": ""
@@ -1679,16 +1692,6 @@
               }
             }
           },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
           "400": {
             "description": "",
             "content": {
@@ -2141,16 +2144,6 @@
               "application/json; charset=utf-8": {
                 "schema": {
                   "$ref": "#/components/schemas/TargetGroup"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "string"
                 }
               }
             }
@@ -3845,16 +3838,6 @@
               }
             }
           },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json; charset=utf-8": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
           "400": {
             "description": "",
             "content": {
@@ -5521,6 +5504,7 @@
           "id",
           "name",
           "description",
+          "builtin",
           "targets_create",
           "targets_edit",
           "targets_delete",
@@ -5551,6 +5535,9 @@
           },
           "description": {
             "type": "string"
+          },
+          "builtin": {
+            "type": "boolean"
           },
           "targets_create": {
             "type": "boolean"
@@ -5799,6 +5786,10 @@
           },
           "credentials": {
             "$ref": "#/components/schemas/AzureCredentials"
+          },
+          "scratch_path": {
+            "type": "string",
+            "description": "Local directory buffering recordings before upload, resolved against the\nconfig file's directory unless absolute. Defaults to `data/recordings-scratch`."
           },
           "serve_through_warpgate": {
             "type": "boolean",

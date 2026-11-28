@@ -201,9 +201,7 @@ async fn revoking_a_session_abandons_its_pending_requests() {
     pending_row(&db, revoked, "a-target").await;
     pending_row(&db, other, "a-target").await;
 
-    warpgate_db_entities::UserSession::revoke(&db, revoked)
-        .await
-        .unwrap();
+    crate::user_sessions::revoke(&db, revoked).await.unwrap();
 
     assert_eq!(status_of(&db, revoked, "a-target").await, Status::Abandoned);
     assert_eq!(status_of(&db, other, "a-target").await, Status::Pending);
@@ -1408,7 +1406,7 @@ mod delivery {
         let secret_backends = Arc::new(crate::SecretBackendRegistry::new(db.clone()));
         Services {
             db: db.clone(),
-            recordings: Arc::new(SessionRecordings::new(db.clone(), &params)),
+            recordings: Arc::new(SessionRecordings::new(db.clone(), &params, cluster.node_id)),
             config: Arc::new(Mutex::new(WarpgateConfig {
                 store: WarpgateConfigStore::default(),
             })),

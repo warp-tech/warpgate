@@ -11,6 +11,7 @@
         type PaginatedResponse,
     } from 'common/ItemList.svelte'
     import ListOverflowMenu from 'common/ListOverflowMenu.svelte'
+    import OnboardingHint from 'common/OnboardingHint.svelte'
     import RelativeDate from 'common/RelativeDate.svelte'
     import { formatDistance } from 'date-fns'
     import { serverInfo } from 'gateway/lib/store'
@@ -170,6 +171,11 @@
 {#if $serverInfo?.setupState}
     <GettingStarted setupState={$serverInfo?.setupState} />
 {/if}
+
+<OnboardingHint>
+    This is the <em>admin area</em>. On this page you can see the connection
+    history between your users and your targets.
+</OnboardingHint>
 
 <PermissionGate
     perm="sessionsView"

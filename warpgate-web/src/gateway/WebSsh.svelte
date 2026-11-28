@@ -430,7 +430,7 @@
                         <Fa icon={faMinus} />
                     </button>
                     <span class="text-nowrap ms-auto me-auto">
-                        {fontSize}px
+                        {$fontSize}px
                     </span>
                     <button
                         type="button"

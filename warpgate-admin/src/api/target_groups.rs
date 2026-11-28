@@ -10,6 +10,7 @@ use warpgate_core::resources::{Actor, ResourceError};
 use warpgate_db_entities::TargetGroup;
 
 use super::AdminContext;
+use super::common::audited;
 
 #[derive(ApiResponse)]
 enum GetTargetGroupsResponse {
@@ -21,9 +22,6 @@ enum GetTargetGroupsResponse {
 enum CreateTargetGroupResponse {
     #[oai(status = 201)]
     Created(Json<TargetGroup::Model>),
-
-    #[oai(status = 409)]
-    Conflict(Json<String>),
 
     #[oai(status = 400)]
     BadRequest(Json<String>),
@@ -64,13 +62,12 @@ impl ListApi {
         admin.require(AdminPermission::TargetsCreate)?;
 
         match store::create(&admin.services().db, Actor::Admin, &body).await {
-            Ok(group) => Ok(CreateTargetGroupResponse::Created(Json(group))),
+            Ok(group) => Ok(CreateTargetGroupResponse::Created(Json(
+                audited(&admin, group).await,
+            ))),
             Err(ResourceError::EmptyName) => Ok(CreateTargetGroupResponse::BadRequest(
                 invalid_field("name", "target group name is empty"),
             )),
-            Err(ResourceError::NameTaken) => Ok(CreateTargetGroupResponse::Conflict(Json(
-                "Name already exists".into(),
-            ))),
             Err(err) => Err(err.into()),
         }
     }
@@ -159,14 +156,13 @@ impl DetailApi {
         admin.require(AdminPermission::TargetsEdit)?;
 
         match store::update(&admin.services().db, Actor::Admin, id.0, &body).await {
-            Ok(group) => Ok(UpdateTargetGroupResponse::Ok(Json(group))),
+            Ok(group) => Ok(UpdateTargetGroupResponse::Ok(Json(
+                audited(&admin, group).await,
+            ))),
             Err(ResourceError::EmptyName) => {
                 warn!("Rejecting request: target group name is empty");
                 Ok(UpdateTargetGroupResponse::BadRequest)
             }
-            Err(ResourceError::NameTaken) => Ok(UpdateTargetGroupResponse::Conflict(Json(
-                "Name already exists".into(),
-            ))),
             Err(ResourceError::NotFound) => Ok(UpdateTargetGroupResponse::NotFound),
             Err(err @ ResourceError::OwnedBy(_)) => {
                 Ok(UpdateTargetGroupResponse::Conflict(Json(err.to_string())))
@@ -188,7 +184,10 @@ impl DetailApi {
         admin.require(AdminPermission::TargetsDelete)?;
 
         match store::delete(&admin.services().db, Actor::Admin, id.0).await {
-            Ok(()) => Ok(DeleteTargetGroupResponse::Deleted),
+            Ok(group) => {
+                audited(&admin, group).await;
+                Ok(DeleteTargetGroupResponse::Deleted)
+            }
             Err(ResourceError::NotFound) => Ok(DeleteTargetGroupResponse::NotFound),
             Err(err @ ResourceError::OwnedBy(_)) => {
                 Ok(DeleteTargetGroupResponse::Conflict(Json(err.to_string())))

@@ -30,7 +30,6 @@ use tokio::sync::Mutex;
 use tracing::{Instrument, warn};
 use warpgate_admin::admin_api_app;
 use warpgate_common::ListenEndpoint;
-use warpgate_common::helpers::proxy_protocol::MaybeProxyProtocolAcceptor;
 use warpgate_common::version::warpgate_version;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::cluster_tls::{ClusterTlsConfigs, cluster_aware_tls_acceptor};
@@ -258,7 +257,13 @@ impl ProtocolServer for HTTPProtocolServer {
                 .at(
                     "",
                     EmbeddedFileEndpoint::<Assets>::new("src/gateway/index.html")
-                        .with(cache_bust()),
+                        .with(cache_bust())
+                        // #/authorize-terminal hands its token to a client
+                        // listening on the loopback address.
+                        .with(SetHeader::new().overriding(
+                            http::header::CONTENT_SECURITY_POLICY,
+                            warpgate_csp_with_connect_src(Some("http://127.0.0.1:*")),
+                        )),
                 )
                 .around(limit_request_body)
                 .around({
@@ -359,7 +364,8 @@ impl ProtocolServer for HTTPProtocolServer {
         // returned future drives the accept loop (errors there restart the listener).
         let acceptor = address.poem_acceptor().await?;
         let acceptor = cluster_aware_tls_acceptor(
-            MaybeProxyProtocolAcceptor::new(acceptor, proxy_protocol),
+            acceptor,
+            proxy_protocol,
             tls_configs,
             self.services.cluster.clone(),
         );

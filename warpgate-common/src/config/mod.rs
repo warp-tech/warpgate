@@ -114,8 +114,12 @@ impl UserRequireCredentialsPolicy {
     pub fn upgrade_to_otp(&self, with_existing_credentials: &[UserAuthCredential]) -> Self {
         let mut copy = self.clone();
 
-        if let Some(policy) = &mut copy.http {
-            policy.push(CredentialKind::Totp);
+        if let Some(policy) = &mut copy.http
+            && !policy.is_empty()
+        {
+            if !policy.contains(&CredentialKind::Totp) {
+                policy.push(CredentialKind::Totp);
+            }
         } else {
             // Upgrade to OTP only if there is a password credential
             let mut kinds = vec![];
@@ -131,15 +135,25 @@ impl UserRequireCredentialsPolicy {
             }
         }
 
-        if let Some(policy) = &mut copy.ssh {
-            policy.push(CredentialKind::Totp);
+        if let Some(policy) = &mut copy.ssh
+            && !policy.is_empty()
+        {
+            if !policy.contains(&CredentialKind::Totp) {
+                policy.push(CredentialKind::Totp);
+            }
         } else {
             // Upgrade to OTP only if there is a password or public key credential
+            let has_password = with_existing_credentials
+                .iter()
+                .any(|c| c.kind() == CredentialKind::Password);
+            let has_pubkey = with_existing_credentials
+                .iter()
+                .any(|c| c.kind() == CredentialKind::PublicKey);
             let mut kinds = vec![];
-            if with_existing_credentials.iter().any(|c| {
-                c.kind() == CredentialKind::Password || c.kind() == CredentialKind::PublicKey
-            }) {
+            if has_password {
                 kinds.push(CredentialKind::Password);
+            } else if has_pubkey {
+                kinds.push(CredentialKind::PublicKey);
             }
             if !kinds.is_empty() {
                 kinds.push(CredentialKind::Totp);
@@ -190,6 +204,7 @@ pub struct AdminRole {
     pub id: Uuid,
     pub name: String,
     pub description: String,
+    pub builtin: bool,
 
     pub targets_create: bool,
     pub targets_edit: bool,
@@ -220,7 +235,7 @@ pub struct AdminRole {
     pub ticket_requests_manage: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, JsonSchema, strum::EnumIter)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema, strum::EnumIter)]
 #[serde(rename_all = "snake_case")]
 pub enum AdminPermission {
     TargetsCreate,
@@ -345,6 +360,7 @@ mod admin_permission_set_tests {
             id: Uuid::nil(),
             name: String::new(),
             description: String::new(),
+            builtin: false,
             targets_create: false,
             targets_edit: false,
             targets_delete: false,
@@ -535,6 +551,7 @@ pub struct HttpConfig {
     pub listen: ListenEndpoint,
 
     /// Accept HAProxy PROXY protocol v1/v2 headers from the listener's peer.
+    /// Other cluster nodes connect directly and are exempt
     #[serde(default)]
     pub proxy_protocol: bool,
 
@@ -937,6 +954,10 @@ pub struct WarpgateConfigStore {
     #[serde(default)]
     pub external_host: Option<String>,
 
+    /// For SQLite, `sqlite:<directory>`: the database is
+    /// `<directory>/db.sqlite3`, relative to the config file's directory.
+    /// As in any URL, write `%`, `?` and `#` in the path as `%25`, `%3F` and
+    /// `%23`.
     #[serde(default = "_default_database_url")]
     #[schemars(with = "String")]
     pub database_url: Secret<String>,
@@ -1035,7 +1056,10 @@ impl WarpgateConfig {
 mod tests {
     use std::time::Duration;
 
-    use super::{SshConfig, WarpgateConfig, WarpgateConfigStore};
+    use super::{
+        CredentialKind, Secret, SshConfig, UserAuthCredential, UserPasswordCredential,
+        UserPublicKeyCredential, UserRequireCredentialsPolicy, WarpgateConfig, WarpgateConfigStore,
+    };
 
     #[test]
     fn keepalive_interval_is_a_humantime_string() {
@@ -1105,6 +1129,59 @@ mod tests {
         assert_eq!(
             host(Some("example.com"), Some("portal.example.com:8443")).as_deref(),
             Some("portal.example.com")
+        );
+    }
+
+    #[test]
+    fn upgrade_to_otp_preserves_ssh_pubkey_and_avoids_duplicate_totp() {
+        let pubkey_cred = UserAuthCredential::PublicKey(UserPublicKeyCredential {
+            key: Secret::new("ssh-ed25519 AAAA".into()),
+        });
+        let pubkey_only = [pubkey_cred.clone()];
+        let upgraded = UserRequireCredentialsPolicy::default().upgrade_to_otp(&pubkey_only);
+        assert_eq!(upgraded.http, None);
+        assert_eq!(
+            upgraded.ssh,
+            Some(vec![CredentialKind::PublicKey, CredentialKind::Totp])
+        );
+
+        let password_and_pubkey = [
+            UserAuthCredential::Password(UserPasswordCredential {
+                hash: Secret::new("hash".into()),
+            }),
+            pubkey_cred,
+        ];
+        let upgraded_both =
+            UserRequireCredentialsPolicy::default().upgrade_to_otp(&password_and_pubkey);
+        assert_eq!(
+            upgraded_both.http,
+            Some(vec![CredentialKind::Password, CredentialKind::Totp])
+        );
+        assert_eq!(
+            upgraded_both.ssh,
+            Some(vec![CredentialKind::Password, CredentialKind::Totp])
+        );
+
+        let already_upgraded = upgraded_both.upgrade_to_otp(&password_and_pubkey);
+        assert_eq!(
+            already_upgraded.http,
+            Some(vec![CredentialKind::Password, CredentialKind::Totp])
+        );
+        assert_eq!(
+            already_upgraded.ssh,
+            Some(vec![CredentialKind::Password, CredentialKind::Totp])
+        );
+
+        let empty_vecs = UserRequireCredentialsPolicy {
+            http: Some(vec![]),
+            ssh: Some(vec![]),
+            ..Default::default()
+        }
+        .upgrade_to_otp(&pubkey_only);
+        assert_eq!(empty_vecs.http, Some(vec![]));
+        assert_eq!(
+            empty_vecs.ssh,
+            Some(vec![CredentialKind::PublicKey, CredentialKind::Totp])
         );
     }
 }

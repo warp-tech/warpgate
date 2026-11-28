@@ -26,10 +26,6 @@
 </section>
 
 <style>
-    section {
-        scroll-margin-top: 50px;
-    }
-
     .sectioned-form-section {
         margin: 0 0 3rem;
     }

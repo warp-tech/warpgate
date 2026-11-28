@@ -1,6 +1,7 @@
 <script lang="ts">
     import { faCircle } from '@fortawesome/free-regular-svg-icons'
     import {
+        faBolt,
         faCircleCheck,
         faExternalLink,
     } from '@fortawesome/free-solid-svg-icons'
@@ -12,14 +13,23 @@
     export let setupState: SetupState
 
     async function dismiss() {
-        await api.dismissTutorial()
-        await reloadServerInfo()
+        if (
+            confirm(
+                'Dismissing the tutorial will hide the green hints throughout the UI',
+            )
+        ) {
+            await api.dismissTutorial()
+            await reloadServerInfo()
+        }
     }
 </script>
 
-<div class="getting-started-help border-secondary">
+<div class="getting-started-help border-success">
     <div class="d-flex align-items-center mb-3">
-        <h2 class="mb-0">getting started</h2>
+        <h2 class="mb-0 text-success d-flex align-items-center gap-3">
+            <Fa icon={faBolt} />
+            getting started
+        </h2>
         <button
             type="button"
             class="btn btn-link ms-auto p-0 text-muted"

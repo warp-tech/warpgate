@@ -8,7 +8,7 @@ use anyhow::Result;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, JoinType, PaginatorTrait, QueryFilter,
-    QuerySelect, RelationTrait, TransactionTrait,
+    QuerySelect, RelationTrait,
 };
 use time::OffsetDateTime;
 use tokio::sync::{Mutex, broadcast};
@@ -21,6 +21,7 @@ use warpgate_common::{
 use warpgate_db_entities::Parameters::MfaEnforcement;
 use warpgate_db_entities::{
     OtpCredential, Parameters, SsoCredential, TargetSession, Ticket, TicketRequest, UserSession,
+    begin_write,
 };
 
 use crate::auth_state_store::ApprovalRequestSink;
@@ -119,7 +120,7 @@ impl Services {
         )
         .await?;
 
-        let txn = self.db.begin().await?;
+        let txn = begin_write(&self.db).await?;
         TicketRequest::Entity::delete_many()
             .filter(TicketRequest::Column::TicketId.eq(Some(ticket_id)))
             .exec(&txn)
@@ -186,9 +187,8 @@ impl Services {
         params: GlobalParams,
     ) -> Result<Self> {
         let db = connect_to_db_and_migrate(&config, &params).await?;
-        let recordings = Arc::new(SessionRecordings::new(db.clone(), &params));
-
         let cluster = Arc::new(Cluster::new(db.clone(), config.store.http.listen.port()).await?);
+        let recordings = Arc::new(SessionRecordings::new(db.clone(), &params, cluster.node_id));
 
         let config = Arc::new(Mutex::new(config));
 

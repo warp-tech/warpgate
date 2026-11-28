@@ -14,6 +14,7 @@ use warpgate_db_entities::Target::fuzzy_filter_targets;
 use warpgate_db_entities::{KnownHost, Role, Target, TargetGroup};
 
 use super::AdminContext;
+use super::common::audited;
 
 pub(crate) fn maybe_redacted_target(
     admin: &AdminContext,
@@ -37,9 +38,6 @@ enum GetTargetsResponse {
 enum CreateTargetResponse {
     #[oai(status = 201)]
     Created(Json<TargetConfig>),
-
-    #[oai(status = 409)]
-    Conflict(Json<String>),
 
     #[oai(status = 400)]
     BadRequest(Json<String>),
@@ -88,14 +86,12 @@ impl ListApi {
 
         match store::create(&admin.services().db, Actor::Admin, &body).await {
             Ok(target) => Ok(CreateTargetResponse::Created(Json(maybe_redacted_target(
-                &admin, target,
+                &admin,
+                audited(&admin, target).await,
             )?))),
             Err(ResourceError::EmptyName) => Ok(CreateTargetResponse::BadRequest(invalid_field(
                 "name",
                 "target name is empty",
-            ))),
-            Err(ResourceError::NameTaken) => Ok(CreateTargetResponse::Conflict(Json(
-                "Name already exists".into(),
             ))),
             Err(err) => Err(err.into()),
         }
@@ -194,7 +190,7 @@ impl DetailApi {
 
         let services = admin.services();
         let target = match store::update(&services.db, Actor::Admin, id.0, &body).await {
-            Ok(target) => target,
+            Ok(target) => audited(&admin, target).await,
             Err(ResourceError::EmptyName) => {
                 warn!("Rejecting request: target name is empty");
                 return Ok(UpdateTargetResponse::BadRequest);
@@ -202,11 +198,6 @@ impl DetailApi {
             Err(ResourceError::ProtocolChange) => {
                 warn!("Rejecting request: a target's protocol cannot be changed after creation");
                 return Ok(UpdateTargetResponse::BadRequest);
-            }
-            Err(ResourceError::NameTaken) => {
-                return Ok(UpdateTargetResponse::Conflict(Json(
-                    "Name already exists".into(),
-                )));
             }
             Err(ResourceError::NotFound) => return Ok(UpdateTargetResponse::NotFound),
             Err(err @ ResourceError::OwnedBy(_)) => {
@@ -240,7 +231,8 @@ impl DetailApi {
 
         let services = admin.services();
         match store::delete(&services.db, Actor::Admin, id.0).await {
-            Ok(admitted) => {
+            Ok((target, admitted)) => {
+                audited(&admin, target).await;
                 services.close_admitted_sessions(admitted).await?;
                 Ok(DeleteTargetResponse::Deleted)
             }
@@ -366,7 +358,10 @@ impl RolesApi {
         admin.require(AdminPermission::AccessRolesAssign)?;
 
         match store::add_role(&admin.services().db, Actor::Admin, id.0, role_id.0).await {
-            Ok(()) => Ok(AddTargetRoleResponse::Created),
+            Ok(change) => {
+                change.audit(admin.changed_by());
+                Ok(AddTargetRoleResponse::Created)
+            }
             Err(err @ (ResourceError::RoleAlreadyAssigned | ResourceError::OwnedBy(_))) => {
                 Ok(AddTargetRoleResponse::Conflict(Json(err.to_string())))
             }
@@ -389,7 +384,10 @@ impl RolesApi {
         admin.require(AdminPermission::AccessRolesAssign)?;
 
         match store::remove_role(&admin.services().db, Actor::Admin, id.0, role_id.0).await {
-            Ok(()) => Ok(DeleteTargetRoleResponse::Deleted),
+            Ok(change) => {
+                change.audit(admin.changed_by());
+                Ok(DeleteTargetRoleResponse::Deleted)
+            }
             Err(ResourceError::NotFound) => Ok(DeleteTargetRoleResponse::NotFound),
             Err(err @ ResourceError::OwnedBy(_)) => {
                 Ok(DeleteTargetRoleResponse::Conflict(Json(err.to_string())))

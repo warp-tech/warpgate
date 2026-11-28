@@ -8,9 +8,10 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
 use warpgate_common::{AdminPermission, UserId, WarpgateError};
-use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
+use warpgate_core::logging::CredentialChange;
 use warpgate_db_entities::{CertificateCredential, CertificateRevocation, User};
 
+use super::common::audit_credential;
 use super::{AdminContext, guard_user_mutation};
 
 fn certificate_fingerprint(certificate_pem: &str) -> Result<String, WarpgateError> {
@@ -153,15 +154,13 @@ impl ListApi {
         .map_err(WarpgateError::from)?;
 
         let credential_name = body.label.clone();
-        AuditEvent::CredentialCreated {
-            credential_type: "certificate".to_string(),
-            credential_name: Some(credential_name),
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username: user.username.clone(),
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        audit_credential(
+            &admin,
+            CredentialChange::Created,
+            "certificate",
+            Some(&credential_name),
+            &user,
+        );
 
         Ok(IssueCertificateCredentialResponse::Issued(Json(
             IssuedCertificateCredential {
@@ -208,10 +207,22 @@ impl DetailApi {
             return Ok(UpdateCertificateCredentialResponse::NotFound);
         };
 
+        let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
+            return Ok(UpdateCertificateCredentialResponse::NotFound);
+        };
+
         let mut am = cred.into_active_model();
 
         am.label = Set(body.label.clone());
         let model = am.update(db).await?;
+
+        audit_credential(
+            &admin,
+            CredentialChange::Updated,
+            "certificate",
+            Some(&model.label),
+            &user,
+        );
 
         Ok(UpdateCertificateCredentialResponse::Updated(Json(
             model.into(),
@@ -259,15 +270,13 @@ impl DetailApi {
             return Ok(RevokeCertificateCredentialResponse::NotFound);
         };
 
-        AuditEvent::CredentialDeleted {
-            credential_type: "certificate".to_string(),
-            credential_name: Some(credential_name.clone()),
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username: user.username,
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        audit_credential(
+            &admin,
+            CredentialChange::Deleted,
+            "certificate",
+            Some(&credential_name),
+            &user,
+        );
 
         Ok(RevokeCertificateCredentialResponse::Revoked)
     }

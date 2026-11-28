@@ -1,4 +1,3 @@
-use warpgate_common::UserId;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, OnceLock};
@@ -9,7 +8,7 @@ use tokio::sync::{Mutex, oneshot};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 use uuid::Uuid;
-use warpgate_common::{TargetSSHOptions, TargetSessionId, UserSessionId};
+use warpgate_common::{TargetSSHOptions, TargetSessionId, UserId, UserSessionId};
 use warpgate_core::WarpgateServerHandle;
 use warpgate_core::recordings::{self, SessionRecordings, TerminalRecorder};
 use warpgate_db_entities::Target::TargetKind;
@@ -106,7 +105,6 @@ impl WebSshSession {
         self.recordings
             .start::<TerminalRecorder, _>(
                 target_session_id,
-                None,
                 SshRecordingMetadata::Shell {
                     channel: channel_number,
                 },

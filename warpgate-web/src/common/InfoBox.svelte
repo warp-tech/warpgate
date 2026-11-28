@@ -10,7 +10,7 @@
     interface Props {
         class?: string
         children: Snippet
-        variant?: 'info' | 'warning'
+        variant?: 'info' | 'warning' | 'success'
         icon?: IconDefinition
     }
 
@@ -27,7 +27,7 @@
             (variant === 'warning' ? faTriangleExclamation : faInfoCircle),
     )
     let variantClass = $derived.by(() =>
-        variant === 'warning' ? 'text-warning' : 'text-muted',
+        variant ? `text-${variant}` : 'text-muted',
     )
 </script>
 

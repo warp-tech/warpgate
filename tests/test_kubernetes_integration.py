@@ -521,6 +521,18 @@ class TestKubernetesIntegration:
         p = run_kubectl(token_cmd)
         assert p.returncode == 0, f"should accept the correct token: {p.stderr!r}"
 
+        # a second kubectl joins the session and appends to its API recording
+        p = run_kubectl(token_cmd)
+        assert p.returncode == 0, p.stderr
+        with admin_client(url) as api:
+            api_recordings = [
+                recording
+                for session in api.get_sessions(username=user.username).items
+                for recording in api.get_session_recordings(session.id)
+                if recording.kind == sdk.RecordingKind.KUBERNETES
+            ]
+        assert len(api_recordings) == 1, api_recordings
+
         # negative token case
         bad_cmd = token_cmd.copy()
         bad_cmd[bad_cmd.index(user_token)] = user_token + "x"
@@ -970,7 +982,11 @@ class TestKubernetesIntegration:
         resp = requests.get(
             f"https://127.0.0.1:{shared_wg.kubernetes_port}/{target_name}"
             f"/api/v1/namespaces/{namespace}/configmaps",
-            headers={"Authorization": f"Bearer {user_token}"},
+            headers={
+                "Authorization": f"Bearer {user_token}",
+                # Gzipped, the 4 MiB of "x" would fit the buffer limit.
+                "Accept-Encoding": "identity",
+            },
             verify=False,
         )
         assert resp.status_code == 200, resp.text[:300]
@@ -981,6 +997,99 @@ class TestKubernetesIntegration:
             if item["metadata"]["name"].startswith("big-")
         ]
         assert payloads == [payload] * 5
+
+    @pytest.mark.asyncio
+    async def test_watchlist_arrives_whole_through_warpgate(
+        self, processes, shared_wg: WarpgateProcess
+    ):
+        """A WatchList stream (sendInitialEvents) must reach the client with its
+        initial-events-end bookmark and the upstream Content-Encoding.
+        Kubernetes 1.37+ gzips WatchList responses as one member per flush,
+        which a decoder that stops after the first member cuts short. Against
+        an apiserver that doesn't compress watches this covers only the
+        uncompressed path; the Rust test
+        `watchlist_gzip_members_reach_the_client_whole` covers the gzip one."""
+        k3s, user, target_name, url = _provision_kubernetes_target(
+            processes, shared_wg, "watchlist"
+        )
+        user_token = await _issue_user_token(url, user, "watchlist-token")
+
+        namespace = f"watchlist-{uuid.uuid4().hex[:8]}"
+        names = [f"cm-{index}" for index in range(20)]
+        k3s.kubectl(["create", "namespace", namespace])
+        try:
+            for name in names:
+                k3s.kubectl(
+                    ["create", "-f", "-"],
+                    input=json.dumps(
+                        {
+                            "apiVersion": "v1",
+                            "kind": "ConfigMap",
+                            "metadata": {"name": name, "namespace": namespace},
+                            "data": {"k": "v"},
+                        }
+                    ).encode(),
+                )
+
+            path = (
+                f"/api/v1/namespaces/{namespace}/configmaps"
+                "?watch=true&sendInitialEvents=true"
+                "&resourceVersionMatch=NotOlderThan"
+                "&allowWatchBookmarks=true&timeoutSeconds=5"
+            )
+
+            def read_events(base, token):
+                resp = requests.get(
+                    base + path,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Accept-Encoding": "gzip",
+                    },
+                    verify=False,
+                    stream=True,
+                    timeout=30,
+                )
+                assert resp.status_code == 200, resp.text[:300]
+                events = [
+                    json.loads(line) for line in resp.iter_lines() if line.strip()
+                ]
+                return events, resp.headers.get("Content-Encoding")
+
+            def summarize(events):
+                added = {
+                    e["object"]["metadata"]["name"]
+                    for e in events
+                    if e["type"] == "ADDED"
+                }
+                bookmark = any(
+                    e["type"] == "BOOKMARK"
+                    and e["object"]["metadata"]
+                    .get("annotations", {})
+                    .get("k8s.io/initial-events-end")
+                    == "true"
+                    for e in events
+                )
+                return added, bookmark
+
+            direct_events, direct_encoding = read_events(
+                f"https://127.0.0.1:{k3s.port}", k3s.token
+            )
+            _, direct_bookmark = summarize(direct_events)
+            if not direct_bookmark:
+                pytest.skip("this k3s does not send the initial-events-end bookmark")
+
+            proxied_events, proxied_encoding = read_events(
+                f"https://127.0.0.1:{shared_wg.kubernetes_port}/{target_name}",
+                user_token,
+            )
+            added, bookmark = summarize(proxied_events)
+            assert proxied_encoding == direct_encoding
+            assert set(names) <= added
+            assert bookmark, "initial-events-end bookmark missing: stream truncated"
+        finally:
+            k3s.kubectl(
+                ["delete", "namespace", namespace, "--wait=false"], check=False
+            )
 
     @pytest.mark.asyncio
     async def test_kubectl_run(self, processes, shared_wg: WarpgateProcess):

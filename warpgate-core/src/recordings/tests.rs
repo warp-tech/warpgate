@@ -7,10 +7,10 @@ use poem::http::{Method, StatusCode};
 use poem::listener::{Acceptor, Listener, TcpListener};
 use poem::{Request, Response};
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ConnectionTrait, Database, IntoActiveModel};
+use sea_orm::{ConnectionTrait, Database, EntityTrait, IntoActiveModel};
 use tokio::io::AsyncReadExt;
 use warpgate_aws::{S3Credentials, S3Storage, S3StorageConfig, StaticCredentials};
-use warpgate_common::TargetId;
+use warpgate_common::{NodeId, TargetId};
 use warpgate_db_entities::Parameters::{
     self, ConfigMigrationValues, RecordingsStorageConfig, set_config_migration_values,
 };
@@ -145,6 +145,8 @@ impl FakeS3 {
     }
 }
 
+const NODE_ID: NodeId = NodeId(Uuid::from_u128(1));
+
 struct Harness {
     db: DatabaseConnection,
     recordings: SessionRecordings,
@@ -194,7 +196,7 @@ impl Harness {
         parameters.update(&db).await.unwrap();
 
         let params = GlobalParams::new(root.join("warpgate.yaml"), false).unwrap();
-        let recordings = SessionRecordings::new(db.clone(), &params);
+        let recordings = SessionRecordings::new(db.clone(), &params, NODE_ID);
 
         let session_id = TargetSessionId(Uuid::new_v4());
         warpgate_db_entities::TargetSession::ActiveModel {
@@ -307,7 +309,7 @@ async fn a_recording_ends_only_after_its_last_file_is_finalized() {
 
     let recording: TwoFiles = h
         .recordings
-        .start(&h.session_id, None, ())
+        .start(&h.session_id, ())
         .await
         .unwrap()
         .unwrap();
@@ -320,6 +322,24 @@ async fn a_recording_ends_only_after_its_last_file_is_finalized() {
     drop(recording.data);
     h.wait_for_writers(0).await;
     assert!(h.ended().await.is_some(), "never ended");
+}
+
+/// A storage config that fails to load must not fail `start` while recording
+/// is off
+#[tokio::test]
+async fn a_disabled_recording_does_not_load_its_storage() {
+    let h = Harness::new(None).await;
+    let mut parameters = Parameters::Entity::get(&h.db)
+        .await
+        .unwrap()
+        .into_active_model();
+    parameters.recordings_enable = Set(false);
+    parameters.recordings_storage = Set("not a storage config".into());
+    parameters.update(&h.db).await.unwrap();
+
+    assert!(!h.recordings.enabled().await.unwrap());
+    let recording: Option<TwoFiles> = h.recordings.start(&h.session_id, ()).await.unwrap();
+    assert!(recording.is_none());
 }
 
 /// index.ndjson fails to complete on S3. The recording is rightly not ended,
@@ -335,7 +355,7 @@ async fn a_failed_finalize_keeps_the_other_files_scratch() {
 
     let recording: TwoFiles = h
         .recordings
-        .start(&h.session_id, None, ())
+        .start(&h.session_id, ())
         .await
         .unwrap()
         .unwrap();
@@ -380,10 +400,7 @@ async fn a_recorder_that_fails_to_open_all_files_does_not_end() {
     }))
     .await;
 
-    let started = h
-        .recordings
-        .start::<TwoFiles, _>(&h.session_id, None, ())
-        .await;
+    let started = h.recordings.start::<TwoFiles, _>(&h.session_id, ()).await;
     assert!(
         started.is_err(),
         "index.ndjson opened despite the injected failure"
@@ -486,7 +503,7 @@ async fn a_failed_s3_part_does_not_end() {
 
     let recording: TwoFiles = h
         .recordings
-        .start(&h.session_id, None, ())
+        .start(&h.session_id, ())
         .await
         .unwrap()
         .unwrap();
@@ -538,7 +555,7 @@ async fn a_failed_ended_update_keeps_the_scratch() {
 
     let recording: TwoFiles = h
         .recordings
-        .start(&h.session_id, None, ())
+        .start(&h.session_id, ())
         .await
         .unwrap()
         .unwrap();
@@ -595,7 +612,7 @@ async fn a_recorder_cancelled_while_opening_its_files_does_not_end() {
     let h = Harness::new(Some(FakeS3::default())).await;
 
     let constructed = tokio::select! {
-        _ = h.recordings.start::<Stalls, _>(&h.session_id, None, ()) => true,
+        _ = h.recordings.start::<Stalls, _>(&h.session_id, ()) => true,
         () = h.wait_for_writers(1) => false,
     };
     assert!(!constructed, "construction finished");

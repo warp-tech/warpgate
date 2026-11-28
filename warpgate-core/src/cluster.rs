@@ -3,6 +3,7 @@ use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Context;
 use futures::future::join_all;
 use futures::{SinkExt, StreamExt};
 use poem::IntoResponse;
@@ -12,7 +13,7 @@ use sea_orm::sea_query::{Expr, ExprTrait, IntoCondition, OnConflict};
 use sea_orm::{ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use tokio::sync::broadcast;
+use tokio::sync::{Mutex, broadcast};
 use tokio::time::timeout;
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -85,6 +86,9 @@ pub struct Cluster {
     /// cached warpgate root CA
     ca_certificate_pem: String,
     notifications: broadcast::Sender<ClusterNotification>,
+    /// Held across every write of this node's row. A heartbeat racing
+    /// `shutdown` would otherwise re-register the node after its row is deleted
+    deregistered: Mutex<bool>,
 }
 
 impl Cluster {
@@ -100,6 +104,7 @@ impl Cluster {
             hostname: std::net::hostname()?.to_string_lossy().to_string(),
             ca_certificate_pem: params.ca_certificate_pem,
             notifications: broadcast::channel(256).0,
+            deregistered: Mutex::new(false),
             db,
         })
     }
@@ -295,6 +300,10 @@ impl Cluster {
     }
 
     async fn heartbeat(&self) -> Result<(), WarpgateError> {
+        let deregistered = self.deregistered.lock().await;
+        if *deregistered {
+            return Ok(());
+        }
         let model = Node::ActiveModel {
             id: Set(self.node_id),
             address: Set(self.address.clone()),
@@ -333,6 +342,8 @@ impl Cluster {
         end_connection_bound_sessions(&self.db, UserSession::Column::NodeId.eq(self.node_id))
             .await?;
         end_children_of_ended_parents(&self.db).await?;
+        let mut deregistered = self.deregistered.lock().await;
+        *deregistered = true;
         Node::Entity::delete_by_id(self.node_id)
             .exec(&self.db)
             .await?;
@@ -385,7 +396,7 @@ async fn end_connection_bound_sessions(
     db: &DatabaseConnection,
     node_filter: impl IntoCondition,
 ) -> Result<Vec<UserSessionId>, WarpgateError> {
-    UserSession::revoke_open_matching(
+    crate::user_sessions::revoke_open_matching(
         db,
         Condition::all()
             .add(node_filter.into_condition())
@@ -400,7 +411,7 @@ async fn end_sessions_without_cookie(
     db: &DatabaseConnection,
 ) -> Result<Vec<UserSessionId>, WarpgateError> {
     let grace_cutoff = OffsetDateTime::now_utc() - SHARED_SESSION_ORPHAN_GRACE;
-    UserSession::revoke_open_matching(
+    crate::user_sessions::revoke_open_matching(
         db,
         Condition::all()
             .add(UserSession::Column::Protocol.eq(Protocol::Http.name()))
@@ -489,22 +500,32 @@ pub async fn reap(db: &DatabaseConnection) -> Result<Vec<UserSessionId>, Warpgat
 /// * WARPGATE_PEER_ADDRESS
 /// * POD_IP (kubernetes)
 /// * local outbound IP
-fn advertised_peer_address(http_port: u16) -> std::io::Result<String> {
+fn advertised_peer_address(http_port: u16) -> anyhow::Result<String> {
     if let Some(addr) = non_empty_env("WARPGATE_PEER_ADDRESS") {
         return Ok(addr);
     }
-    if let Some(ip) = non_empty_env("POD_IP") {
-        return Ok(format!("{ip}:{http_port}"));
-    }
+    let ip = match non_empty_env("POD_IP") {
+        Some(ip) => ip.parse().context("Invalid POD_IP")?,
+        None => local_ip()?,
+    };
 
-    let ip = local_ip()?;
-    Ok(format!("{ip}:{http_port}"))
+    Ok(format_peer_address(ip, http_port))
 }
 
-fn local_ip() -> std::io::Result<IpAddr> {
-    let socket = UdpSocket::bind(("0.0.0.0", 0))?;
-    socket.connect(("1.1.1.1", 80))?; // no traffic here yet, just a route resolve
-    socket.local_addr().map(|a| a.ip())
+fn format_peer_address(ip: IpAddr, port: u16) -> String {
+    SocketAddr::new(ip, port).to_string()
+}
+
+fn local_ip() -> anyhow::Result<IpAddr> {
+    let probe = |bind_ip: &str, peer_ip: &str| -> std::io::Result<IpAddr> {
+        let socket = UdpSocket::bind((bind_ip, 0))?;
+        socket.connect((peer_ip, 80))?; // no traffic here yet, just a route resolve
+        socket.local_addr().map(|a| a.ip())
+    };
+
+    probe("0.0.0.0", "1.1.1.1")
+        .or_else(|_| probe("::", "2606:4700:4700::1111"))
+        .context("Failed to determine local IP address; set WARPGATE_PEER_ADDRESS")
 }
 
 /// An environment variable's value, trimmed, or `None` if unset or blank.
@@ -513,6 +534,23 @@ fn non_empty_env(key: &str) -> Option<String> {
         .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
+}
+
+#[cfg(test)]
+mod address_tests {
+    use super::*;
+
+    #[test]
+    fn peer_address_formats_ip_and_port() {
+        assert_eq!(
+            format_peer_address("192.0.2.1".parse().unwrap(), 8443),
+            "192.0.2.1:8443"
+        );
+        assert_eq!(
+            format_peer_address("2001:db8::1".parse().unwrap(), 8443),
+            "[2001:db8::1]:8443"
+        );
+    }
 }
 
 #[cfg(all(test, feature = "sqlite"))]
@@ -530,6 +568,18 @@ mod tests {
         let db = Database::connect("sqlite::memory:").await.unwrap();
         migrate_database(&db).await.unwrap();
         db
+    }
+
+    #[tokio::test]
+    async fn heartbeat_after_shutdown_does_not_reregister() {
+        let db = migrated_db().await;
+        let cluster = Cluster::new(db.clone(), 1).await.unwrap();
+        cluster.heartbeat().await.unwrap();
+        assert_eq!(Node::Entity::find().all(&db).await.unwrap().len(), 1);
+
+        cluster.shutdown().await.unwrap();
+        cluster.heartbeat().await.unwrap();
+        assert!(Node::Entity::find().all(&db).await.unwrap().is_empty());
     }
 
     async fn target_session(db: &DatabaseConnection, parent: Uuid, node_id: Option<Uuid>) -> Uuid {
@@ -807,7 +857,7 @@ mod tests {
         target_session(&db, password, None).await;
         let ended = user_session_started(&db, None, Protocol::Ssh, now).await;
         admitted_by(&db, target_session(&db, ended, None).await, expired).await;
-        UserSession::revoke(&db, UserSessionId(ended))
+        crate::user_sessions::revoke(&db, UserSessionId(ended))
             .await
             .unwrap();
 

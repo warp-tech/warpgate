@@ -35,7 +35,7 @@ impl CredentialKind {
             Self::Certificate => "client certificate",
             Self::Totp => "one-time password",
             Self::Sso => "SSO",
-            Self::WebUserApproval => "in-browser auth",
+            Self::WebUserApproval => "in-browser approval",
         }
     }
 }
@@ -235,7 +235,7 @@ impl ValidCredential {
                     credential.id
                 )
             }
-            Self::WebUserApproval => "in-browser auth".to_string(),
+            Self::WebUserApproval => "in-browser approval".to_string(),
         }
     }
 }

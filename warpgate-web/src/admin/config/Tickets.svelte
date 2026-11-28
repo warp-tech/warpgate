@@ -17,6 +17,7 @@
     import EmptyState from 'common/EmptyState.svelte'
     import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
+    import OnboardingHint from 'common/OnboardingHint.svelte'
     import RelativeDate from 'common/RelativeDate.svelte'
     import { statusColor, statusIcon } from 'common/ticketRequestStatus'
     import Fa from 'svelte-fa'
@@ -87,6 +88,15 @@
             Create a ticket
         </a>
     </div>
+
+    <OnboardingHint>
+        Tickets are narrow credential that grant a user temporary access to a
+        specific target that they might not normally have access to. Tickets
+        also bypass other authentication credentials, allowing programmatic
+        access. <br>
+        If enabled in <em>Config</em>, users can also request tickets
+        themselves.
+    </OnboardingHint>
 
     <Loadable promise={initPromise}>
         {#if $adminPermissions.ticketRequestsManage && pendingRequestCount}

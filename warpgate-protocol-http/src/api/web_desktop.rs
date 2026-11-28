@@ -2,11 +2,12 @@ use std::sync::Arc;
 
 use poem::Request;
 use poem::session::Session;
-use poem::web::{Data, RemoteAddr};
+use poem::web::Data;
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{Object, OpenApi};
 use warpgate_common::{TargetId, UserSessionId};
+use warpgate_common_http::logging::get_client_socket_addr;
 use warpgate_web_desktop::WebDesktopClientManager;
 
 use crate::api::auth_scheme::AuthedSession;
@@ -35,17 +36,18 @@ impl Api {
     )]
     async fn api_create_web_desktop_session(
         &self,
-        remote_addr: &RemoteAddr,
+        req: &Request,
         session: &Session,
         ctx: AuthedSession,
         body: Json<CreateWebDesktopSessionBody>,
         manager: Data<&Arc<WebDesktopClientManager>>,
     ) -> poem::Result<CreateWebClientSessionResponse> {
+        let remote_address = get_client_socket_addr(req, ctx.services()).await;
         create_web_client_session(&ctx, session, body.target_id, |authorization| {
             manager.create_session(
                 ctx.services(),
                 authorization,
-                remote_addr.0.as_socket_addr().copied(),
+                remote_address,
                 body.width.zip(body.height),
             )
         })
