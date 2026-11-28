@@ -8,6 +8,7 @@ parameters, and the timeout is a global parameter.
 
 import os
 import subprocess
+import time
 
 from .api_client import admin_client, sdk
 from .approval_util import (
@@ -255,6 +256,14 @@ class Test:
 
         # The expiry is audited, and the request stops being listed.
         with admin_client(url) as api:
+            for _ in range(20):
+                if not [
+                    a
+                    for a in api.get_session_approvals()
+                    if a.target == target.name
+                ]:
+                    break
+                time.sleep(0.25)
             assert not [
                 a
                 for a in api.get_session_approvals()

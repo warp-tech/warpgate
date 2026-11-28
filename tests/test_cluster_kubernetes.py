@@ -128,7 +128,7 @@ def user_needing_web_approval(api, target):
         api,
         target,
         credential_policy=sdk.UserRequireCredentialsPolicy(
-            kubernetes=[sdk.CredentialKind.WEBUSERAPPROVAL],
+            kubernetes=[[sdk.CredentialKind.WEBUSERAPPROVAL]],
         ),
     )
 
