@@ -107,6 +107,7 @@ mod m00099_unique_admin_role_names;
 mod m00100_admin_role_builtin;
 mod m00101_s3_blank_prefix_keys;
 mod m00102_recording_node_id;
+mod m00103_sso_credential_subject;
 
 pub(crate) mod helpers;
 
@@ -218,6 +219,7 @@ impl MigratorTrait for Migrator {
             Box::new(m00100_admin_role_builtin::Migration),
             Box::new(m00101_s3_blank_prefix_keys::Migration),
             Box::new(m00102_recording_node_id::Migration),
+            Box::new(m00103_sso_credential_subject::Migration),
         ]
     }
 }

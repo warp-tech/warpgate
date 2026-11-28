@@ -14,6 +14,7 @@ pub struct Model {
     pub user_id: UserId,
     pub provider: Option<String>,
     pub email: String,
+    pub subject: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]
@@ -46,6 +47,7 @@ impl From<Model> for UserSsoCredential {
         Self {
             provider: credential.provider,
             email: credential.email,
+            subject: credential.subject,
         }
     }
 }
@@ -61,6 +63,7 @@ impl From<UserSsoCredential> for ActiveModel {
         Self {
             provider: Set(credential.provider),
             email: Set(credential.email),
+            subject: Set(credential.subject),
             ..Default::default()
         }
     }

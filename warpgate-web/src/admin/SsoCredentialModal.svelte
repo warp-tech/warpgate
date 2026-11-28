@@ -16,21 +16,26 @@
     interface Props {
         isOpen: boolean
         instance: ExistingSsoCredential | null
-        save: (provider: string | null, email: string) => void
+        save: (
+            provider: string | null,
+            email: string,
+            subject: string | null,
+        ) => void
     }
 
     let { isOpen = $bindable(true), instance, save }: Props = $props()
 
     let provider: string | null = $state(null)
     let email: string = $state('')
+    let subject: string = $state('')
     let validated = $state(false)
 
     function _save() {
-        if (!email) {
+        if (!email && !subject) {
             return
         }
         isOpen = false
-        save(provider, email)
+        save(provider, email, subject.trim() || null)
     }
 
     function _cancel() {
@@ -45,6 +50,7 @@
         if (instance) {
             provider = instance.provider ?? null
             email = instance.email
+            subject = instance.subject ?? ''
         }
     }}
 >
@@ -57,8 +63,16 @@
     >
         <ModalBody>
             <FormGroup floating label="E-mail">
-                <Input type="email" required bind:value={email} />
+                <Input type="email" required={!subject} bind:value={email} />
             </FormGroup>
+
+            <FormGroup floating label="Subject (sub)">
+                <Input type="text" bind:value={subject} />
+            </FormGroup>
+            <p class="text-muted small">
+                Used when the provider has <code>match_by: subject</code>; that
+                mode also needs a specific provider below, not "Any".
+            </p>
 
             <Loadable promise={api.getSsoProviders()}>
                 {#snippet children(providers)}
