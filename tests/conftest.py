@@ -419,10 +419,18 @@ class ProcessManager:
         )
         return port
 
-    def start_mysql_server(self):
+    def start_mysql_server(self, *mysqld_args):
         port = alloc_port()
         self.start(
-            ["docker", "run", "--rm", "-p", f"{port}:3306", "warpgate-e2e-mysql-server"]
+            [
+                "docker",
+                "run",
+                "--rm",
+                "-p",
+                f"{port}:3306",
+                "warpgate-e2e-mysql-server",
+                *mysqld_args,
+            ]
         )
         return port
 
@@ -463,9 +471,14 @@ class ProcessManager:
         )
         return port
 
-    def start_postgres_server(self):
+    def start_postgres_server(self, host_auth_method=None):
         port = alloc_port()
         container_name = f"warpgate-e2e-postgres-server-{uuid.uuid4()}"
+        env = (
+            ["-e", f"POSTGRES_HOST_AUTH_METHOD={host_auth_method}"]
+            if host_auth_method
+            else []
+        )
         self.start(
             [
                 "docker",
@@ -475,6 +488,7 @@ class ProcessManager:
                 container_name,
                 "-p",
                 f"{port}:5432",
+                *env,
                 "warpgate-e2e-postgres-server",
             ]
         )
@@ -968,6 +982,7 @@ class ProcessManager:
         config_patch=None,
         args=None,
         share_with: Optional[WarpgateProcess] = None,
+        own_config_dir=False,
         stderr=None,
         stdout=None,
         http_port=None,
@@ -1005,7 +1020,16 @@ class ProcessManager:
             if config_patch:
                 always_merger.merge(config, config_patch)
             # Same directory as the shared config so relative DB/cert paths resolve.
-            config_path = share_with.config_path.parent / f"warpgate-{uuid.uuid4()}.yaml"
+            config_dir = share_with.config_path.parent
+            if own_config_dir:
+                # Relative paths in the config, such as the recordings path,
+                # resolve to this node's own directory
+                config_dir = self.ctx.tmpdir / f"wg-peer-{uuid.uuid4()}"
+                config_dir.mkdir()
+                # The VNC and RDP listeners use a relative certificate path
+                for name in ["tls.certificate.pem", "tls.key.pem"]:
+                    shutil.copy(share_with.config_path.parent / name, config_dir / name)
+            config_path = config_dir / f"warpgate-{uuid.uuid4()}.yaml"
             with config_path.open("w") as f:
                 yaml.safe_dump(config, f)
         else:

@@ -1,10 +1,8 @@
-use std::collections::hash_map::Entry::Vacant;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::pin::Pin;
 use std::str::FromStr;
-use std::sync::Arc;
-use std::task::Poll;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -34,7 +32,10 @@ use warpgate_common_http::ext::construct_external_url;
 use warpgate_core::approvals::{GateOutcome, GatedConnection};
 use warpgate_core::auth::submit_credential;
 use warpgate_core::login_protection::FailedAttemptInfo;
-use warpgate_core::recordings::{self, TerminalRecorder, TrafficConnectionParams, TrafficRecorder};
+use warpgate_core::recordings::{
+    ConnectionRecorder, SessionRecordings, TerminalRecorder, TrafficConnectionParams,
+    TrafficRecorder,
+};
 use warpgate_core::{
     AdmittedTarget, ApprovedTarget, AuthorizedIdentity, ConfigProvider, Services,
     TargetAuthorization, TargetSessionStart, WarpgateServerHandle, authorize_and_spend_ticket,
@@ -43,8 +44,9 @@ use warpgate_core::{
 use warpgate_db_entities::Parameters;
 use warpgate_db_entities::Parameters::SshHostKeyVerificationMode;
 
-use super::channel_registry::{Channel, ChannelRegistry};
+use super::channel_registry::{Channel, ChannelRegistry, DeferredEvent};
 use super::channel_writer::ChannelWriter;
+use super::client_closer::ClientCloser;
 use super::event_intake::EventIntake;
 use super::russh_handler::ServerHandlerEvent;
 use super::service_output::ServiceOutput;
@@ -68,6 +70,13 @@ const DISCONNECT_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 /// disconnect. A client that reads both in one batch acts on the disconnect
 /// and exits without printing the message.
 const DISCONNECT_NOTICE_GAP: Duration = Duration::from_secs(1);
+/// How long the client has to answer a channel open requested by the target.
+/// Output deferred on an unanswered open keeps outbound slots from the other
+/// channels
+const SERVER_CHANNEL_OPEN_TIMEOUT: Duration = Duration::from_secs(60);
+/// Target-requested channel opens that may await the client at once. More are
+/// refused
+const MAX_PENDING_SERVER_CHANNEL_OPENS: usize = 64;
 
 #[allow(clippy::large_enum_variant)]
 enum TargetSelection {
@@ -88,6 +97,7 @@ enum TargetSelection {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum Event {
     Command(SessionHandleCommand),
     ServerHandler(ServerHandlerEvent),
@@ -96,6 +106,9 @@ pub enum Event {
     Client(RCEvent),
     MenuRedraw(u16, u16),
     Menu(MenuEvent),
+    /// The target answered a channel open the client asked for
+    ClientChannelOpenResult(Uuid, Result<(), SshClientError>),
+    /// The client answered a channel open the target asked for
     ServerChannelOpenResult(Uuid, Result<ServerChannelId, russh::Error>),
     AdminApprovalPending,
     AdminApprovalResolved {
@@ -147,9 +160,6 @@ pub struct ServerSession {
     /// the client id (and thus the owning channel) is unknown, so unlike
     /// target-side events they can't be held on the channel itself.
     deferred_server_events: Vec<ServerHandlerEvent>,
-    /// Events taken off the queue while a command reply was being awaited
-    /// (see [`Self::send_command_and_wait`]), replayed by the main event loop.
-    pending_events: VecDeque<Event>,
     rc_tx: UnboundedSender<(RCCommand, Option<RCCommandReply>)>,
     rc_abort_tx: UnboundedSender<()>,
     rc_state: RCState,
@@ -157,16 +167,7 @@ pub struct ServerSession {
     services: Services,
     server_handle: Arc<Mutex<WarpgateServerHandle>>,
     target: TargetSelection,
-    /// The child session minted by `start_target_session`. Recordings key on
-    /// it; recordings requested before it exists (the target-selection menu,
-    /// or an exec/subsystem dispatched through an approval gate) are held in
-    /// [`Self::pending_recordings`] and started by
-    /// [`Self::start_pending_recordings`] when it is stamped.
-    target_session_id: Option<TargetSessionId>,
-    /// Recording requests made while [`Self::target_session_id`] was still
-    /// `None`, in arrival order. Drained on stamp.
-    pending_recordings: Vec<(Uuid, SshRecordingMetadata)>,
-    traffic_recorders: HashMap<TrafficRecorderKey, TrafficRecorder>,
+    target_session: TargetSessionState,
     hub: EventHub<Event>,
     event_sender: EventSender<Event>,
     intake: EventIntake<Event>,
@@ -183,10 +184,9 @@ pub struct ServerSession {
     allowed_auth_methods: MethodSet,
     /// Track the state of a client snooping around pre-auth
     probe: ProbeState,
-    /// A duplicate of the client's socket descriptor, shut down at teardown
-    /// so the connection ends with the session rather than with russh's
-    /// inactivity timer. `None` once used.
-    client_socket: Option<std::net::TcpStream>,
+    /// Closes the client connection at teardown. Without it the connection
+    /// would last until russh's inactivity timer. `None` once used
+    client_closer: Option<ClientCloser>,
 }
 
 fn session_debug_tag(id: &UserSessionId, remote_address: &SocketAddr) -> String {
@@ -220,6 +220,70 @@ fn reject_with_allowed_auth_methods(allowed_auth_methods: MethodSet) -> russh::s
     russh::server::Auth::Reject {
         proceed_with_methods: Some(allowed_auth_methods),
         partial_success: false,
+    }
+}
+
+pub(super) type TrafficRecording = (
+    TrafficRecorderKey,
+    SshRecordingMetadata,
+    TrafficConnectionParams,
+);
+
+struct PendingDirectOpen {
+    channel: ServerChannelId,
+    operation: ChannelOperation,
+    recording: TrafficRecording,
+    open_handle: ChannelOpenHandle,
+}
+
+/// Recordings are keyed on the target session id. It does not exist while the
+/// target menu is open or an approval is pending. Requests that need it wait
+/// in `Awaiting` until `stamp_approved_target`
+enum TargetSessionState {
+    Awaiting {
+        /// Terminal recordings for the menu's shell and for shell/exec
+        /// requests made while an approval is pending
+        recordings: Vec<(Uuid, SshRecordingMetadata)>,
+        /// Port-forward opens. They stay unanswered, so the client cannot
+        /// send data that would go unrecorded. Dropping a handle rejects its
+        /// open
+        direct_opens: Vec<PendingDirectOpen>,
+    },
+    Stamped(StampedTargetSession),
+}
+
+struct StampedTargetSession {
+    id: TargetSessionId,
+    /// Channels open at the same time to the same destination share a
+    /// recording. Each channel's `ConnectionRecorder` holds it, so it ends
+    /// when the last of them closes
+    traffic_recorders: HashMap<TrafficRecorderKey, Weak<TrafficRecorder>>,
+}
+
+impl StampedTargetSession {
+    /// `None` when recording is disabled
+    async fn record_connection(
+        &mut self,
+        recordings: &SessionRecordings,
+        (key, metadata, params): TrafficRecording,
+    ) -> Result<Option<ConnectionRecorder>> {
+        let recorder =
+            if let Some(recorder) = self.traffic_recorders.get(&key).and_then(Weak::upgrade) {
+                recorder
+            } else {
+                let Some(recorder) = recordings.start(&self.id, metadata).await? else {
+                    return Ok(None);
+                };
+                let recorder = Arc::new(recorder);
+                self.traffic_recorders
+                    .retain(|_, recorder| recorder.strong_count() > 0);
+                self.traffic_recorders
+                    .insert(key, Arc::downgrade(&recorder));
+                recorder
+            };
+        let mut connection = recorder.connection(params);
+        connection.write_connection_setup().await?;
+        Ok(Some(connection))
     }
 }
 
@@ -261,7 +325,7 @@ impl ServerSession {
         server_handle: Arc<Mutex<WarpgateServerHandle>>,
         mut session_handle_rx: UnboundedReceiver<SessionHandleCommand>,
         mut handler_event_rx: UnboundedReceiver<ServerHandlerEvent>,
-        client_socket: std::net::TcpStream,
+        client_closer: ClientCloser,
     ) -> Result<impl Future<Output = Result<()>> + use<>> {
         let id = server_handle.lock().await.user_session_id();
 
@@ -285,7 +349,6 @@ impl ServerSession {
             session_handle: None,
             channels: ChannelRegistry::new(),
             deferred_server_events: vec![],
-            pending_events: VecDeque::new(),
             rc_tx: rc_handles.command_tx.clone(),
             rc_abort_tx: rc_handles.abort_tx,
             rc_state: RCState::NotInitialized,
@@ -293,9 +356,10 @@ impl ServerSession {
             services: services.clone(),
             server_handle,
             target: TargetSelection::None,
-            target_session_id: None,
-            pending_recordings: vec![],
-            traffic_recorders: HashMap::new(),
+            target_session: TargetSessionState::Awaiting {
+                recordings: vec![],
+                direct_opens: vec![],
+            },
             hub,
             event_sender: event_sender.clone(),
             intake,
@@ -307,7 +371,7 @@ impl ServerSession {
             cached_successful_ticket_auth: None,
             allowed_auth_methods: get_allowed_auth_methods(services).await?,
             probe: ProbeState::NoAttempt,
-            client_socket: Some(client_socket),
+            client_closer: Some(client_closer),
         };
 
         let mut so_rx = this.service_output.subscribe();
@@ -380,12 +444,6 @@ impl ServerSession {
 
         Ok(async move {
             let result = loop {
-                if let Some(event) = this.pending_events.pop_front() {
-                    if let Err(error) = this.handle_event(event).await {
-                        break Err(error);
-                    }
-                    continue;
-                }
                 let inactivity_timeout = if matches!(this.target, TargetSelection::AwaitingApproval)
                 {
                     // Session waiting for approval will produce no events either way
@@ -394,7 +452,7 @@ impl ServerSession {
                 } else {
                     Some(inactivity_timeout)
                 };
-                let next_event_fut = this.get_next_event();
+                let next_event_fut = this.intake.next();
                 let next_event = match inactivity_timeout {
                     Some(timeout) => tokio::time::timeout(timeout, next_event_fut).await,
                     None => Ok(next_event_fut.await),
@@ -420,10 +478,6 @@ impl ServerSession {
             result?;
             Ok::<_, anyhow::Error>(())
         })
-    }
-
-    async fn get_next_event(&mut self) -> Option<Event> {
-        self.intake.next().await
     }
 
     /// Based on the global params (#1957)
@@ -564,6 +618,22 @@ impl ServerSession {
             .map(|handle| (handle, server_channel_id.0)))
     }
 
+    fn release_held_eof(
+        &mut self,
+        channel: &Uuid,
+        handle: &russh::server::Handle,
+        id: ChannelId,
+    ) -> Result<()> {
+        if self
+            .channels
+            .get_mut(channel)
+            .is_some_and(Channel::release_eof)
+        {
+            self.channel_writer.eof(handle.clone(), id)?;
+        }
+        Ok(())
+    }
+
     /// Opens a server->client channel in the background and delivers the
     /// resulting channel id back into the event loop as an event. Awaiting
     /// the client's confirmation inline would deadlock: the russh session
@@ -577,14 +647,60 @@ impl ServerSession {
         + Send
         + 'static,
     ) {
+        if self.channels.pending_server_opens() >= MAX_PENDING_SERVER_CHANNEL_OPENS {
+            warn!(channel=%id, "Too many channel opens awaiting the client, refusing");
+            let _ = self.send_command(RCCommand::Channel(id, ChannelOperation::Close));
+            return;
+        }
         self.channels.begin_server_open(id);
         let sender = self.event_sender.clone();
         tokio::spawn(async move {
-            let result = open.await.map(|channel| ServerChannelId(channel.id()));
+            let result = match tokio::time::timeout(SERVER_CHANNEL_OPEN_TIMEOUT, open).await {
+                Ok(result) => result.map(|channel| ServerChannelId(channel.id())),
+                Err(elapsed) => Err(elapsed.into()),
+            };
             let _ = sender
                 .send_once(Event::ServerChannelOpenResult(id, result))
                 .await;
         });
+    }
+
+    /// Opens a target-initiated port forward to the client. The forward is
+    /// refused if its traffic cannot be recorded
+    async fn open_forwarded_channel(
+        &mut self,
+        id: Uuid,
+        recording: TrafficRecording,
+        open: impl Future<Output = Result<russh::Channel<russh::server::Msg>, russh::Error>>
+        + Send
+        + 'static,
+    ) {
+        let recorder = match self.record_connection(recording).await {
+            Ok(recorder) => recorder,
+            Err(error) => {
+                error!(channel=%id, ?error, "Refusing a port forward that cannot be recorded");
+                let _ = self.send_command(RCCommand::Channel(id, ChannelOperation::Close));
+                return;
+            }
+        };
+        self.open_server_channel_in_background(id, open);
+        if let Some(channel_state) = self.channels.get_mut(&id) {
+            channel_state.traffic_recorder = recorder;
+        }
+    }
+
+    /// `None` when recording is disabled. On an error the connection must
+    /// not be forwarded
+    async fn record_connection(
+        &mut self,
+        recording: TrafficRecording,
+    ) -> Result<Option<ConnectionRecorder>> {
+        let TargetSessionState::Stamped(session) = &mut self.target_session else {
+            anyhow::bail!("No target session to record a port forward under");
+        };
+        session
+            .record_connection(&self.services.recordings, recording)
+            .await
     }
 
     pub fn emit_pty_output(&self, data: &[u8]) -> Result<()> {
@@ -625,6 +741,15 @@ impl ServerSession {
 
     async fn fail_on_channel_writer_error(&mut self, error: anyhow::Error) -> Result<()> {
         warn!(?error, "Failed to send SSH channel data");
+        self.request_disconnect();
+        self.disconnect_server().await;
+        Err(error)
+    }
+
+    /// A recorded session must not continue unrecorded
+    async fn fail_on_recording_error(&mut self, error: anyhow::Error) -> Result<()> {
+        error!(?error, "Session recording failed, closing the session");
+        let _ = self.emit_pty_error("Session recording failed");
         self.request_disconnect();
         self.disconnect_server().await;
         Err(error)
@@ -767,6 +892,9 @@ impl ServerSession {
     }
 
     async fn handle_menu_event(&mut self, action: MenuEvent) -> Result<()> {
+        if !matches!(self.target, TargetSelection::Menu) {
+            return Ok(());
+        }
         match action {
             MenuEvent::Render(data) => {
                 self.emit_pty_output(&data)?;
@@ -813,7 +941,7 @@ impl ServerSession {
                     .await?;
                 match started {
                     TargetSessionStart::Started(admitted) => {
-                        self.stamp_approved_target(admitted).await;
+                        self.stamp_approved_target(admitted).await?;
                     }
                     TargetSessionStart::NeedsApproval(authorization) => {
                         self.target = TargetSelection::PendingApproval(authorization);
@@ -842,7 +970,7 @@ impl ServerSession {
                     let e = if let Some(ch) = e.channel()
                         && let Some(channel) = self.channels.get_mut(&ch)
                     {
-                        match channel.try_defer(e) {
+                        match channel.try_defer(e, || self.intake.take_slot()) {
                             Ok(()) => {
                                 debug!(channel=%ch, "Deferring event until the channel open resolves");
                                 return Ok(());
@@ -867,7 +995,7 @@ impl ServerSession {
                     // id is simply bogus and is left to the handler to reject.
                     if let Some(ch) = e.existing_channel()
                         && self.channels.uuid_for(ch).is_none()
-                        && self.channels.has_opening()
+                        && self.channels.pending_server_opens() > 0
                     {
                         debug!(channel=%ch.0, event=?e, "Deferring event until the channel open resolves");
                         self.deferred_server_events.push(e);
@@ -920,14 +1048,22 @@ impl ServerSession {
                         .register_approved_target_session(approved)
                         .await?;
 
-                    self.stamp_approved_target(admitted).await;
+                    self.stamp_approved_target(admitted).await?;
                     self.maybe_connect_remote().await?;
+                }
+                Event::ClientChannelOpenResult(id, result) => {
+                    let span = self.make_logging_span();
+                    self.finish_client_channel_open(id, result)
+                        .instrument(span)
+                        .await?;
                 }
                 Event::ServerChannelOpenResult(id, result) => {
                     match result {
                         Ok(server_channel_id) => {
-                            if self.channels.assign_server_id(id, server_channel_id) {
-                                self.confirm_channel_open(id).await?;
+                            if let Some(deferred) =
+                                self.channels.confirm_server_open(id, server_channel_id)
+                            {
+                                self.replay_deferred(deferred).await?;
                             } else {
                                 debug!(channel=%id, "Open resolved for an already-closed channel");
                                 self.replay_deferred_server_events().await?;
@@ -953,17 +1089,47 @@ impl ServerSession {
         .boxed()
     }
 
-    async fn stamp_approved_target(&mut self, admitted: AdmittedTarget<TargetSSHOptions>) {
-        self.target_session_id = Some(admitted.id());
+    async fn stamp_approved_target(
+        &mut self,
+        admitted: AdmittedTarget<TargetSSHOptions>,
+    ) -> Result<()> {
+        let awaiting = std::mem::replace(
+            &mut self.target_session,
+            TargetSessionState::Stamped(StampedTargetSession {
+                id: admitted.id(),
+                traffic_recorders: HashMap::new(),
+            }),
+        );
         self.target = TargetSelection::Found(admitted);
-        self.start_pending_recordings().await;
+        let TargetSessionState::Awaiting {
+            recordings,
+            direct_opens,
+        } = awaiting
+        else {
+            return Ok(());
+        };
+        for (channel_id, metadata) in recordings {
+            self.start_terminal_recording(channel_id, metadata).await?;
+        }
+        for open in direct_opens {
+            self._channel_open(
+                open.channel,
+                open.operation,
+                Some(open.recording),
+                open.open_handle,
+            );
+        }
+        Ok(())
     }
 
-    /// Confirm `channel` as open and re-dispatch everything held back while its
-    /// open was in flight. Events whose channel is still opening are deferred
-    /// again by [`Self::handle_event`], so overlapping opens replay safely.
-    async fn confirm_channel_open(&mut self, channel: Uuid) -> Result<(), WarpgateError> {
-        for event in self.channels.confirm(channel).unwrap_or_default() {
+    /// Re-dispatch everything held back while a channel's open was in flight.
+    /// Events whose channel is still opening are deferred again by
+    /// [`Self::handle_event`], so overlapping opens replay safely
+    async fn replay_deferred(&mut self, deferred: Vec<DeferredEvent>) -> Result<(), WarpgateError> {
+        for (event, slot) in deferred {
+            if let Some(slot) = slot {
+                self.intake.restore_slot(slot);
+            }
             self.handle_event(Event::Client(event)).await?;
         }
         self.replay_deferred_server_events().await
@@ -982,41 +1148,35 @@ impl ServerSession {
             .subscribe(|e| matches!(e, Event::MenuRedraw(_, _) | Event::ConsoleInput(_)))
             .await;
 
-        let username = self
+        let user_info = self
             .user_info
             .as_ref()
-            .map(|u| u.username.as_str())
             .ok_or(WarpgateError::InconsistentState("No username".into()))?;
+        let username = user_info.username.as_str();
 
-        let ssh_targets = {
-            self.services
-                .config_provider
-                .list_targets()
-                .await?
-                .into_iter()
-                .filter_map(|target| match target.options.clone() {
-                    TargetOptions::Ssh(options) => Some((target, options)),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-        };
+        let authorized_ids = self
+            .services
+            .config_provider
+            .authorized_target_ids(user_info.id)
+            .await?;
 
-        let mut authorized_targets = Vec::new();
-
-        for (target, mut ssh_options) in ssh_targets {
-            let is_authorized = self
-                .services
-                .config_provider
-                .authorize_target(username, &target.name)
-                .await?;
-
-            if is_authorized {
-                if ssh_options.username.is_empty() {
-                    ssh_options.username = username.to_string();
+        let mut authorized_targets = self
+            .services
+            .config_provider
+            .list_targets()
+            .await?
+            .into_iter()
+            .filter(|target| authorized_ids.contains(&target.id))
+            .filter_map(|target| match target.options.clone() {
+                TargetOptions::Ssh(mut options) => {
+                    if options.username.is_empty() {
+                        options.username = username.to_string();
+                    }
+                    Some((target, options))
                 }
-                authorized_targets.push((target, ssh_options));
-            }
-        }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
 
         authorized_targets.sort_by(|(left, _), (right, _)| left.name.cmp(&right.name));
 
@@ -1061,25 +1221,13 @@ impl ServerSession {
                     ChannelOperation::OpenShell,
                     None,
                     reply.0,
-                )
-                .await?;
+                );
             }
 
             ServerHandlerEvent::SubsystemRequest(server_channel_id, name, reply) => {
-                return match self
-                    ._channel_subsystem_request(server_channel_id, name)
-                    .await
-                {
-                    Ok(()) => {
-                        let _ = reply.send(true);
-                        Ok(())
-                    }
-                    Err(SshClientError::Russh(russh::Error::ChannelOpenFailure(_))) => {
-                        let _ = reply.send(false);
-                        Ok(())
-                    }
-                    Err(x) => Err(x.into()),
-                };
+                self._channel_subsystem_request(server_channel_id, name)
+                    .await?;
+                let _ = reply.send(true);
             }
 
             ServerHandlerEvent::PtyRequest(server_channel_id, request, reply) => {
@@ -1091,13 +1239,14 @@ impl ServerSession {
                     .into());
                 };
                 channel_state.pty_size = Some(request.clone());
-                channel_state.audit.on_resize(&request).await;
+                if let Err(error) = channel_state.audit.on_resize(&request).await {
+                    return self.fail_on_recording_error(error.into()).await;
+                }
 
-                self.send_command_and_wait(RCCommand::Channel(
+                self.send_command(RCCommand::Channel(
                     channel_id,
                     ChannelOperation::RequestPty(request),
-                ))
-                .await?;
+                ))?;
                 let handle = self
                     .session_handle
                     .clone()
@@ -1105,9 +1254,6 @@ impl ServerSession {
                 let _ = self
                     .channel_writer
                     .channel_success(handle, server_channel_id.0);
-                // Waiting for the target above pumps the event loop, so the
-                // channel may have been closed in the meantime — hence the
-                // re-lookup instead of holding the entry across the await.
                 if let Some(channel_state) = self.channels.get_mut(&channel_id) {
                     channel_state.mark_pty();
                 }
@@ -1119,16 +1265,15 @@ impl ServerSession {
                 self.maybe_connect_remote().await?;
                 self.maybe_start_target_selection_menu(channel_id).await?;
 
-                let _ = self.send_command(RCCommand::Channel(
-                    channel_id,
-                    ChannelOperation::RequestShell,
-                ));
-
                 self.start_terminal_recording(
                     channel_id,
                     shell_recording_metadata(server_channel_id),
                 )
-                .await;
+                .await?;
+                let _ = self.send_command(RCCommand::Channel(
+                    channel_id,
+                    ChannelOperation::RequestShell,
+                ));
                 self.maybe_start_command_detector(channel_id);
 
                 info!(%channel_id, "Opening shell");
@@ -1171,7 +1316,7 @@ impl ServerSession {
             }
 
             ServerHandlerEvent::ChannelClose(channel, reply) => {
-                self._channel_close(channel).await?;
+                self._channel_close(channel)?;
                 let _ = reply.send(());
             }
 
@@ -1186,7 +1331,7 @@ impl ServerSession {
             }
 
             ServerHandlerEvent::Signal(channel, signal, reply) => {
-                self._channel_signal(channel, signal).await?;
+                self._channel_signal(channel, signal)?;
                 let _ = reply.send(());
             }
 
@@ -1197,16 +1342,16 @@ impl ServerSession {
 
             ServerHandlerEvent::ChannelOpenDirectTcpIp(channel, params, reply) => {
                 self._channel_open_direct_tcpip(channel, params, reply.0)
-                    .await?;
+                    .await;
             }
 
             ServerHandlerEvent::ChannelOpenDirectStreamlocal(channel, path, reply) => {
                 self._channel_open_direct_streamlocal(channel, path, reply.0)
-                    .await?;
+                    .await;
             }
 
             ServerHandlerEvent::EnvRequest(channel, name, value, reply) => {
-                self._channel_env_request(channel, name, value).await?;
+                self._channel_env_request(channel, name, value)?;
                 let _ = reply.send(());
             }
 
@@ -1216,27 +1361,23 @@ impl ServerSession {
             }
 
             ServerHandlerEvent::TcpIpForward(address, port, reply) => {
-                self._tcpip_forward(address, port).await?;
-                let _ = reply.send(true);
+                self._tcpip_forward(address, port, reply).await;
             }
 
             ServerHandlerEvent::CancelTcpIpForward(address, port, reply) => {
-                self._cancel_tcpip_forward(address, port).await?;
-                let _ = reply.send(true);
+                self._cancel_tcpip_forward(address, port, reply);
             }
 
             ServerHandlerEvent::StreamlocalForward(socket_path, reply) => {
-                self._streamlocal_forward(socket_path).await?;
-                let _ = reply.send(true);
+                self._streamlocal_forward(socket_path, reply).await;
             }
 
             ServerHandlerEvent::CancelStreamlocalForward(socket_path, reply) => {
-                self._cancel_streamlocal_forward(socket_path).await?;
-                let _ = reply.send(true);
+                self._cancel_streamlocal_forward(socket_path, reply);
             }
 
             ServerHandlerEvent::AgentForward(channel, reply) => {
-                self._agent_forward(channel).await?;
+                self._agent_forward(channel)?;
                 let _ = reply.send(true);
             }
 
@@ -1325,15 +1466,10 @@ impl ServerSession {
                 self.disconnect_server().await;
             }
             RCEvent::Output(channel, data) => {
-                if let Some(channel_state) = self.channels.get_mut(&channel) {
-                    channel_state.audit.on_output(&data).await;
-
-                    if let Some(recorder) = channel_state.traffic_recorder.as_mut()
-                        && let Err(error) = recorder.write_rx(&data).await
-                    {
-                        error!(%channel, ?error, "Failed to record traffic data");
-                        channel_state.traffic_recorder = None;
-                    }
+                if let Some(channel_state) = self.channels.get_mut(&channel)
+                    && let Err(error) = channel_state.record_output(&data).await
+                {
+                    return self.fail_on_recording_error(error).await;
                 }
 
                 let slot = self.intake.take_slot();
@@ -1355,7 +1491,10 @@ impl ServerSession {
             }
             RCEvent::Close(channel) => {
                 match self.client_channel(&channel) {
-                    Ok(Some((handle, id))) => self.channel_writer.close(handle, id)?,
+                    Ok(Some((handle, id))) => {
+                        self.release_held_eof(&channel, &handle, id)?;
+                        self.channel_writer.close(handle, id)?;
+                    }
                     Ok(None) => {}
                     Err(error) => {
                         // Not necessarily a bug: this is reached from both
@@ -1366,13 +1505,18 @@ impl ServerSession {
                 self.channels.close(channel);
             }
             RCEvent::Eof(channel) => {
-                if let Some((handle, id)) = self.client_channel(&channel)? {
+                let held = self
+                    .channels
+                    .get_mut(&channel)
+                    .is_some_and(Channel::hold_eof);
+                if !held && let Some((handle, id)) = self.client_channel(&channel)? {
                     self.channel_writer.eof(handle, id)?;
                 }
             }
             RCEvent::ExitStatus(channel, code) => {
                 if let Some((handle, id)) = self.client_channel(&channel)? {
-                    self.channel_writer.exit_status(handle, id, code)?;
+                    self.channel_writer.exit_status(handle.clone(), id, code)?;
+                    self.release_held_eof(&channel, &handle, id)?;
                 }
             }
             RCEvent::ExitSignal {
@@ -1384,18 +1528,21 @@ impl ServerSession {
             } => {
                 if let Some((handle, id)) = self.client_channel(&channel)? {
                     self.channel_writer.exit_signal(
-                        handle,
+                        handle.clone(),
                         id,
                         signal_name,
                         core_dumped,
                         error_message,
                         lang_tag,
                     )?;
+                    self.release_held_eof(&channel, &handle, id)?;
                 }
             }
             RCEvent::ExtendedData { channel, data, ext } => {
-                if let Some(channel_state) = self.channels.get_mut(&channel) {
-                    channel_state.audit.on_error_output(&data).await;
+                if let Some(channel_state) = self.channels.get_mut(&channel)
+                    && let Err(error) = channel_state.audit.on_error_output(&data).await
+                {
+                    return self.fail_on_recording_error(error.into()).await;
                 }
                 let slot = self.intake.take_slot();
                 if let Some((handle, id)) = self.client_channel(&channel)?
@@ -1412,76 +1559,53 @@ impl ServerSession {
             }
             RCEvent::ForwardedTcpIp(id, params) => {
                 if let Some(session) = self.session_handle.clone() {
-                    let open_params = params.clone();
-                    self.open_server_channel_in_background(id, async move {
-                        session
-                            .channel_open_forwarded_tcpip(
-                                open_params.connected_address,
-                                open_params.connected_port,
-                                open_params.originator_address,
-                                open_params.originator_port,
-                            )
-                            .await
-                    });
-
-                    let recorder = self
-                        .traffic_recorder_for(
-                            TrafficRecorderKey::Tcp(
-                                params.originator_address.clone(),
-                                params.originator_port,
-                            ),
-                            SshRecordingMetadata::ForwardedTcpIp {
-                                host: params.originator_address,
-                                port: params.originator_port as u16,
-                            },
-                        )
-                        .await;
-                    if let Some(recorder) = recorder {
-                        #[allow(clippy::unwrap_used)]
-                        let mut recorder = recorder.connection(TrafficConnectionParams::Tcp {
+                    #[allow(clippy::unwrap_used)]
+                    let recording = (
+                        TrafficRecorderKey::Tcp(
+                            params.originator_address.clone(),
+                            params.originator_port,
+                        ),
+                        SshRecordingMetadata::ForwardedTcpIp {
+                            host: params.originator_address.clone(),
+                            port: params.originator_port as u16,
+                        },
+                        TrafficConnectionParams::Tcp {
                             dst_addr: Ipv4Addr::from_str("2.2.2.2").unwrap(),
                             dst_port: params.connected_port as u16,
                             src_addr: Ipv4Addr::from_str("1.1.1.1").unwrap(),
                             src_port: params.originator_port as u16,
-                        });
-                        if let Err(error) = recorder.write_connection_setup().await {
-                            error!(channel=%id, ?error, "Failed to record connection setup");
-                        }
-                        if let Some(channel_state) = self.channels.get_mut(&id) {
-                            channel_state.traffic_recorder = Some(recorder);
-                        }
-                    }
+                        },
+                    );
+                    self.open_forwarded_channel(id, recording, async move {
+                        session
+                            .channel_open_forwarded_tcpip(
+                                params.connected_address,
+                                params.connected_port,
+                                params.originator_address,
+                                params.originator_port,
+                            )
+                            .await
+                    })
+                    .await;
                 }
             }
             RCEvent::ForwardedStreamlocal(id, params) => {
                 if let Some(session) = self.session_handle.clone() {
-                    let socket_path = params.socket_path.clone();
-                    self.open_server_channel_in_background(id, async move {
+                    let recording = (
+                        TrafficRecorderKey::Socket(params.socket_path.clone()),
+                        SshRecordingMetadata::ForwardedSocket {
+                            path: params.socket_path.clone(),
+                        },
+                        TrafficConnectionParams::Socket {
+                            socket_path: params.socket_path.clone(),
+                        },
+                    );
+                    self.open_forwarded_channel(id, recording, async move {
                         session
-                            .channel_open_forwarded_streamlocal(socket_path)
+                            .channel_open_forwarded_streamlocal(params.socket_path)
                             .await
-                    });
-
-                    let recorder = self
-                        .traffic_recorder_for(
-                            TrafficRecorderKey::Socket(params.socket_path.clone()),
-                            SshRecordingMetadata::ForwardedSocket {
-                                path: params.socket_path.clone(),
-                            },
-                        )
-                        .await;
-                    if let Some(recorder) = recorder {
-                        #[allow(clippy::unwrap_used)]
-                        let mut recorder = recorder.connection(TrafficConnectionParams::Socket {
-                            socket_path: params.socket_path,
-                        });
-                        if let Err(error) = recorder.write_connection_setup().await {
-                            error!(channel=%id, ?error, "Failed to record connection setup");
-                        }
-                        if let Some(channel_state) = self.channels.get_mut(&id) {
-                            channel_state.traffic_recorder = Some(recorder);
-                        }
-                    }
+                    })
+                    .await;
                 }
             }
             RCEvent::ForwardedAgent(id) => {
@@ -1583,7 +1707,7 @@ impl ServerSession {
         channel: ServerChannelId,
         params: DirectTCPIPParams,
         open_handle: ChannelOpenHandle,
-    ) -> Result<()> {
+    ) {
         info!(%channel, "Opening direct TCP/IP channel from {}:{} to {}:{}", params.originator_address, params.originator_port, params.host_to_connect, params.port_to_connect);
         let key = TrafficRecorderKey::Tcp(params.host_to_connect.clone(), params.port_to_connect);
         let metadata = SshRecordingMetadata::DirectTcpIp {
@@ -1597,17 +1721,13 @@ impl ServerSession {
             src_addr: Ipv4Addr::from_str("1.1.1.1").unwrap(),
             src_port: params.originator_port as u16,
         };
-        // Unlike a session channel — whose later shell/exec/subsystem request
-        // dials the target — a direct channel is the whole interaction, so the
-        // connection must be initiated here.
-        let _ = self.maybe_connect_remote().await;
-        self._channel_open(
+        self._channel_open_direct(
             channel,
             ChannelOperation::OpenDirectTCPIP(params),
-            Some((key, metadata, connection_params)),
+            (key, metadata, connection_params),
             open_handle,
         )
-        .await
+        .await;
     }
 
     async fn _channel_open_direct_streamlocal(
@@ -1615,78 +1735,121 @@ impl ServerSession {
         channel: ServerChannelId,
         path: String,
         open_handle: ChannelOpenHandle,
-    ) -> Result<()> {
+    ) {
         info!(%channel, "Opening direct streamlocal channel to {}", path);
         let key = TrafficRecorderKey::Socket(path.clone());
         let metadata = SshRecordingMetadata::DirectSocket { path: path.clone() };
         let connection_params = TrafficConnectionParams::Socket {
             socket_path: path.clone(),
         };
-        let _ = self.maybe_connect_remote().await;
-        self._channel_open(
+        self._channel_open_direct(
             channel,
             ChannelOperation::OpenDirectStreamlocal(path),
-            Some((key, metadata, connection_params)),
+            (key, metadata, connection_params),
             open_handle,
         )
-        .await
+        .await;
     }
 
-    /// Open a client-initiated channel towards the target and send the client
-    /// its open confirmation from here, the session task. The
-    /// [`ChannelState::Opening`] entry holds the target's output back until
-    /// `accept()` has queued the confirmation, so server-speaks-first bytes
-    /// never precede `CHANNEL_OPEN_CONFIRMATION` (#2328).
-    async fn _channel_open(
+    async fn _channel_open_direct(
         &mut self,
         channel: ServerChannelId,
         operation: ChannelOperation,
-        recording: Option<(
-            TrafficRecorderKey,
-            SshRecordingMetadata,
-            TrafficConnectionParams,
-        )>,
+        recording: TrafficRecording,
         open_handle: ChannelOpenHandle,
-    ) -> Result<()> {
-        let uuid = self.channels.begin_client_open(channel);
+    ) {
+        // Unlike a session channel — whose later shell/exec/subsystem request
+        // dials the target — a direct channel is the whole interaction, so the
+        // connection must be initiated here.
+        let _ = self.maybe_connect_remote().await;
+        if let TargetSessionState::Awaiting { direct_opens, .. } = &mut self.target_session {
+            debug!(%channel, "Holding port forward until the target session starts");
+            direct_opens.push(PendingDirectOpen {
+                channel,
+                operation,
+                recording,
+                open_handle,
+            });
+            return;
+        }
+        self._channel_open(channel, operation, Some(recording), open_handle);
+    }
 
-        match self
-            .send_command_and_wait(RCCommand::Channel(uuid, operation))
-            .await
-        {
+    /// Forward the client's channel open to the target without waiting for
+    /// the answer, which arrives as [`Event::ClientChannelOpenResult`]. A
+    /// target answers a port forward only after its own connect attempt, and
+    /// the event loop must keep running until then
+    fn _channel_open(
+        &mut self,
+        channel: ServerChannelId,
+        operation: ChannelOperation,
+        recording: Option<TrafficRecording>,
+        open_handle: ChannelOpenHandle,
+    ) {
+        let session = matches!(operation, ChannelOperation::OpenShell);
+        let id = self
+            .channels
+            .begin_client_open(channel, session, open_handle, recording);
+        let sender = self.event_sender.clone();
+        self.send_command_with_reply(
+            RCCommand::Channel(id, operation),
+            move |result| async move {
+                let _ = sender
+                    .send_once(Event::ClientChannelOpenResult(id, result))
+                    .await;
+            },
+        );
+    }
+
+    /// Relay the target's answer to the client's channel open. The session
+    /// task sends the confirmation and then replays the deferred target
+    /// output, so server-speaks-first bytes never precede
+    /// `CHANNEL_OPEN_CONFIRMATION` (#2328)
+    async fn finish_client_channel_open(
+        &mut self,
+        id: Uuid,
+        result: Result<(), SshClientError>,
+    ) -> Result<(), WarpgateError> {
+        match result {
             Ok(()) => {
-                open_handle.accept().await;
-
                 // The recorder is attached before the deferred output is
                 // replayed, so the target's first bytes are recorded too.
-                if let Some((key, metadata, connection_params)) = recording {
-                    let recorder = self.traffic_recorder_for(key, metadata).await;
-                    if let Some(recorder) = recorder {
-                        let mut recorder = recorder.connection(connection_params);
-                        if let Err(error) = recorder.write_connection_setup().await {
-                            error!(%channel, ?error, "Failed to record connection setup");
+                let recorder = match self.channels.take_pending_recording(id) {
+                    Some(recording) => match self.record_connection(recording).await {
+                        Ok(recorder) => recorder,
+                        Err(error) => {
+                            error!(channel=%id, ?error, "Refusing a port forward that cannot be recorded");
+                            self.channels
+                                .reject_client_open(
+                                    id,
+                                    ChannelOpenFailure::AdministrativelyProhibited,
+                                )
+                                .await;
+                            let _ =
+                                self.send_command(RCCommand::Channel(id, ChannelOperation::Close));
+                            return Ok(());
                         }
-                        if let Some(channel_state) = self.channels.get_mut(&uuid) {
-                            channel_state.traffic_recorder = Some(recorder);
-                        }
-                    }
+                    },
+                    None => None,
+                };
+                if let Some(deferred) = self.channels.accept_client_open(id, recorder).await {
+                    self.replay_deferred(deferred).await?;
+                } else {
+                    debug!(channel=%id, "Open resolved for an already-closed channel");
+                    let _ = self.send_command(RCCommand::Channel(id, ChannelOperation::Close));
                 }
-
-                self.confirm_channel_open(uuid).await?;
-                Ok(())
             }
             Err(SshClientError::Russh(russh::Error::ChannelOpenFailure(_))) => {
-                open_handle.reject(ChannelOpenFailure::ConnectFailed).await;
-                self.channels.close(uuid);
-                Ok(())
+                self.channels
+                    .reject_client_open(id, ChannelOpenFailure::ConnectFailed)
+                    .await;
             }
-            // Dropping `open_handle` auto-rejects the open, so the client always
-            // gets a reply even on unexpected errors.
-            Err(x) => {
-                self.channels.close(uuid);
-                Err(x.into())
+            Err(error) => {
+                error!(channel=%id, ?error, "Failed to open a channel to the target");
+                self.channels.close(id);
             }
         }
+        Ok(())
     }
 
     async fn _window_change_request(
@@ -1702,7 +1865,9 @@ impl ServerSession {
             .into());
         };
         channel_state.pty_size = Some(request.clone());
-        channel_state.audit.on_resize(&request).await;
+        if let Err(error) = channel_state.audit.on_resize(&request).await {
+            return self.fail_on_recording_error(error.into()).await;
+        }
 
         if matches!(self.target, TargetSelection::Menu) {
             let (cols, rows) = request.screen_size();
@@ -1712,15 +1877,22 @@ impl ServerSession {
                 .await;
         }
 
-        if self.rc_state != RCState::Connected {
+        // Forward the new size even before the target connection is
+        // established: the remote client buffers channel operations and
+        // replays them in order once connected. Dropping it here leaves the
+        // target shell at the size from the original `pty-req`, and clients
+        // such as Tabby open the PTY at 80x24 and send their real size right
+        // after the shell request (#2777). The same applies while the target
+        // selection menu or an approval gate holds the session: the size the
+        // client has by then is the one the target must get.
+        if self.rc_state == RCState::Disconnected {
             return Ok(());
         }
 
-        self.send_command_and_wait(RCCommand::Channel(
+        self.send_command(RCCommand::Channel(
             channel_id,
             ChannelOperation::ResizePty(request),
-        ))
-        .await?;
+        ))?;
         Ok(())
     }
 
@@ -1738,10 +1910,6 @@ impl ServerSession {
         let is_scp = command == "scp" || command.starts_with("scp ");
         let _ = self.maybe_connect_remote().await;
         self.maybe_start_target_selection_menu(channel_id).await?;
-        let _ = self.send_command(RCCommand::Channel(
-            channel_id,
-            ChannelOperation::RequestExec(command.to_string()),
-        ));
 
         let should_record = if is_scp {
             let db = &self.services.db;
@@ -1766,64 +1934,63 @@ impl ServerSession {
                     channel: server_channel_id.0.to_string().parse().unwrap_or_default(),
                 },
             )
-            .await;
+            .await?;
             self.maybe_start_command_detector(channel_id);
         }
+        let _ = self.send_command(RCCommand::Channel(
+            channel_id,
+            ChannelOperation::RequestExec(command.to_string()),
+        ));
         Ok(())
     }
 
-    async fn start_terminal_recording(&mut self, channel_id: Uuid, metadata: SshRecordingMetadata) {
+    async fn start_terminal_recording(
+        &mut self,
+        channel_id: Uuid,
+        metadata: SshRecordingMetadata,
+    ) -> Result<()> {
         // A recording row must reference a target session. Before one exists —
         // the target-selection menu is open, or an approval gate is holding the
         // session — the request is parked and replayed on stamp, so a command
         // run through an approved gate is recorded like any other.
-        let Some(target_session_id) = self.target_session_id else {
-            self.pending_recordings.push((channel_id, metadata));
-            return;
+        let target_session_id = match &mut self.target_session {
+            TargetSessionState::Awaiting { recordings, .. } => {
+                recordings.push((channel_id, metadata));
+                if let Some(channel_state) = self.channels.get_mut(&channel_id) {
+                    channel_state.audit.await_recorder();
+                }
+                return Ok(());
+            }
+            TargetSessionState::Stamped(session) => session.id,
         };
-        let recorder = async {
-            let Some(recorder) = self
+        let started = async {
+            let recorder = self
                 .services
                 .recordings
-                .start::<TerminalRecorder, _>(&target_session_id, None, metadata)
-                .await?
-            else {
-                return Ok(None);
-            };
-            if let Some(request) = self
-                .channels
-                .get(&channel_id)
-                .and_then(|c| c.pty_size.as_ref())
+                .start::<TerminalRecorder, _>(&target_session_id, metadata)
+                .await?;
+            if let Some(recorder) = &recorder
+                && let Some(request) = self
+                    .channels
+                    .get(&channel_id)
+                    .and_then(|c| c.pty_size.as_ref())
             {
                 recorder
                     .write_pty_resize(request.col_width, request.row_height)
                     .await?;
             }
-            Ok::<_, recordings::Error>(Some(recorder))
+            // Starting the recording awaits, so the channel can be gone by
+            // now — e.g. target selection failed and tore the session down.
+            let Some(channel_state) = self.channels.get_mut(&channel_id) else {
+                debug!(channel=%channel_id, "Recording started for a channel that is already gone");
+                return Ok(());
+            };
+            channel_state.audit.set_recorder(recorder).await
         }
         .await;
-        match recorder {
-            Ok(Some(recorder)) => {
-                // Starting the recording awaits, so the channel can be gone by
-                // now — e.g. target selection failed and tore the session down.
-                if let Some(channel_state) = self.channels.get_mut(&channel_id) {
-                    channel_state.audit.set_recorder(recorder);
-                } else {
-                    debug!(channel=%channel_id, "Recording started for a channel that is already gone");
-                }
-            }
-            Ok(None) => (),
-            Err(error) => error!(channel=%channel_id, ?error, "Failed to start recording"),
-        }
-    }
-
-    /// Starts the recordings parked while no target session existed yet — the
-    /// selection menu's shell, and any exec/subsystem dispatched through an
-    /// approval gate before it resolved. Called when the target session is
-    /// stamped; channels opening later record against the now-present session.
-    async fn start_pending_recordings(&mut self) {
-        for (channel_id, metadata) in std::mem::take(&mut self.pending_recordings) {
-            self.start_terminal_recording(channel_id, metadata).await;
+        match started {
+            Ok(()) => Ok(()),
+            Err(error) => self.fail_on_recording_error(error.into()).await,
         }
     }
 
@@ -1849,58 +2016,26 @@ impl ServerSession {
         let channel_id = self.map_channel(server_channel_id)?;
         debug!(channel=%channel_id, "Requested X11");
         let _ = self.maybe_connect_remote().await;
-        self.send_command_and_wait(RCCommand::Channel(
+        self.send_command(RCCommand::Channel(
             channel_id,
             ChannelOperation::RequestX11(request),
-        ))
-        .await?;
+        ))?;
         Ok(())
     }
 
-    async fn _channel_env_request(
-        &mut self,
+    fn _channel_env_request(
+        &self,
         server_channel_id: ServerChannelId,
         name: String,
         value: String,
     ) -> Result<()> {
         let channel_id = self.map_channel(server_channel_id)?;
         debug!(channel=%channel_id, %name, %value, "Environment");
-        self.send_command_and_wait(RCCommand::Channel(
+        self.send_command(RCCommand::Channel(
             channel_id,
             ChannelOperation::RequestEnv(name, value),
-        ))
-        .await?;
+        ))?;
         Ok(())
-    }
-
-    async fn traffic_recorder_for(
-        &mut self,
-        key: TrafficRecorderKey,
-        metadata: SshRecordingMetadata,
-    ) -> Option<&mut TrafficRecorder> {
-        // Traffic flows only through a connected target, so the target session
-        // always exists by now.
-        let Some(target_session_id) = self.target_session_id else {
-            error!(?key, "No target session for traffic recording");
-            return None;
-        };
-        if let Vacant(e) = self.traffic_recorders.entry(key.clone()) {
-            match self
-                .services
-                .recordings
-                .start(&target_session_id, None, metadata)
-                .await
-            {
-                Ok(Some(recorder)) => {
-                    e.insert(recorder);
-                }
-                Ok(None) => (),
-                Err(error) => {
-                    error!(?key, ?error, "Failed to start recording");
-                }
-            }
-        }
-        self.traffic_recorders.get_mut(&key)
     }
 
     pub async fn _channel_subsystem_request(
@@ -1911,12 +2046,10 @@ impl ServerSession {
         let channel_id = self.map_channel(server_channel_id)?;
         info!(channel=%channel_id, "Requesting subsystem {}", &name);
         let _ = self.maybe_connect_remote().await;
-        self.send_command_and_wait(RCCommand::Channel(
+        self.send_command(RCCommand::Channel(
             channel_id,
             ChannelOperation::RequestSubsystem(name),
         ))
-        .await?;
-        Ok(())
     }
 
     async fn _data(&mut self, server_channel_id: ServerChannelId, data: Bytes) -> Result<()> {
@@ -1949,17 +2082,6 @@ impl ServerSession {
             return Ok(());
         }
 
-        if let Some(channel_state) = self.channels.get_mut(&channel_id) {
-            channel_state.audit.on_input(&data).await;
-
-            if let Some(recorder) = channel_state.traffic_recorder.as_mut()
-                && let Err(error) = recorder.write_tx(&data).await
-            {
-                error!(channel=%channel_id, ?error, "Failed to record traffic data");
-                channel_state.traffic_recorder = None;
-            }
-        }
-
         if has_pty {
             let _ = self
                 .event_sender
@@ -1976,6 +2098,12 @@ impl ServerSession {
         // request) must not be dropped (#2065).
         if matches!(self.target, TargetSelection::Menu) {
             return Ok(());
+        }
+
+        if let Some(channel_state) = self.channels.get_mut(&channel_id)
+            && let Err(error) = channel_state.record_input(&data).await
+        {
+            return self.fail_on_recording_error(error).await;
         }
 
         let _ = self.send_command(RCCommand::Channel(channel_id, ChannelOperation::Data(data)));
@@ -1997,44 +2125,45 @@ impl ServerSession {
         Ok(())
     }
 
-    async fn _tcpip_forward(&mut self, address: String, port: u32) -> Result<()> {
+    async fn _tcpip_forward(&mut self, address: String, port: u32, reply: oneshot::Sender<bool>) {
         info!(%address, %port, "Remote port forwarding requested");
         let _ = self.maybe_connect_remote().await;
-        self.send_command_and_wait(RCCommand::ForwardTCPIP(address, port))
-            .await
-            .map_err(anyhow::Error::from)
+        self.forward_request(RCCommand::ForwardTCPIP(address, port), reply);
     }
 
-    pub async fn _cancel_tcpip_forward(&mut self, address: String, port: u32) -> Result<()> {
+    pub fn _cancel_tcpip_forward(&self, address: String, port: u32, reply: oneshot::Sender<bool>) {
         info!(%address, %port, "Remote port forwarding cancelled");
-        self.send_command_and_wait(RCCommand::CancelTCPIPForward(address, port))
-            .await
-            .map_err(anyhow::Error::from)
+        self.forward_request(RCCommand::CancelTCPIPForward(address, port), reply);
     }
 
-    async fn _streamlocal_forward(&mut self, socket_path: String) -> Result<()> {
+    async fn _streamlocal_forward(&mut self, socket_path: String, reply: oneshot::Sender<bool>) {
         info!(%socket_path, "Remote UNIX socket forwarding requested");
         let _ = self.maybe_connect_remote().await;
-        self.send_command_and_wait(RCCommand::StreamlocalForward(socket_path))
-            .await
-            .map_err(anyhow::Error::from)
+        self.forward_request(RCCommand::StreamlocalForward(socket_path), reply);
     }
 
-    pub async fn _cancel_streamlocal_forward(&mut self, socket_path: String) -> Result<()> {
+    pub fn _cancel_streamlocal_forward(&self, socket_path: String, reply: oneshot::Sender<bool>) {
         info!(%socket_path, "Remote UNIX socket forwarding cancelled");
-        self.send_command_and_wait(RCCommand::CancelStreamlocalForward(socket_path))
-            .await
-            .map_err(anyhow::Error::from)
+        self.forward_request(RCCommand::CancelStreamlocalForward(socket_path), reply);
     }
 
-    async fn _agent_forward(&mut self, server_channel_id: ServerChannelId) -> Result<()> {
+    /// `reply` receives whether the target accepted the request
+    fn forward_request(&self, command: RCCommand, reply: oneshot::Sender<bool>) {
+        self.send_command_with_reply(command, move |result| async move {
+            if let Err(error) = &result {
+                warn!(?error, "Target refused a forwarding request");
+            }
+            let _ = reply.send(result.is_ok());
+        });
+    }
+
+    fn _agent_forward(&self, server_channel_id: ServerChannelId) -> Result<()> {
         let channel_id = self.map_channel(server_channel_id)?;
         debug!(channel=%channel_id, "Requested Agent Forwarding");
-        self.send_command_and_wait(RCCommand::Channel(
+        self.send_command(RCCommand::Channel(
             channel_id,
             ChannelOperation::AgentForward,
-        ))
-        .await?;
+        ))?;
         Ok(())
     }
 
@@ -2053,14 +2182,6 @@ impl ServerSession {
 
         if !self.allowed_auth_methods.contains(&MethodKind::PublicKey) {
             warn!("Client attempted public key auth even though it was not advertised");
-            return russh::server::Auth::reject();
-        }
-
-        // Tickets aren't authenticated with public keys, and the eager auth path
-        // consumes a ticket use. Running it here — during the unauthenticated
-        // offer/query phase — would drain the ticket before the client actually
-        // authenticates, so reject and let auth proceed via another method.
-        if let AuthSelector::Ticket { .. } = selector {
             return russh::server::Auth::reject();
         }
 
@@ -2128,9 +2249,12 @@ impl ServerSession {
             Ok(AuthResult::Rejected) => {
                 reject_with_allowed_auth_methods(self.allowed_auth_methods.clone())
             }
+            // Need = required minus valid, so the publickey was accepted unless it is
+            // still needed; say so (RFC 4252 §5.1), or clients that only continue
+            // on partial success give up.
             Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
+                partial_success: !kinds.contains(&CredentialKind::PublicKey),
                 proceed_with_methods: Some(self.get_remaining_auth_methods(kinds)),
-                partial_success: false,
             },
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
@@ -2166,9 +2290,12 @@ impl ServerSession {
         match result {
             Ok(AuthResult::Accepted { .. }) => russh::server::Auth::Accept,
             Ok(AuthResult::Rejected) => russh::server::Auth::reject(),
+            // Need = required minus valid, so the password was accepted unless it is
+            // still needed; say so (RFC 4252 §5.1), or clients that only continue
+            // on partial success give up.
             Ok(AuthResult::Need(kinds)) => russh::server::Auth::Reject {
+                partial_success: !kinds.contains(&CredentialKind::Password),
                 proceed_with_methods: Some(self.get_remaining_auth_methods(kinds)),
-                partial_success: false,
             },
             Err(error) => {
                 error!(?error, "Failed to verify credentials");
@@ -2347,7 +2474,7 @@ impl ServerSession {
 
                 Ok(false)
             }
-            AuthSelector::Ticket { .. } => Ok(false),
+            AuthSelector::Ticket { .. } => Ok(true),
         }
     }
 
@@ -2557,7 +2684,7 @@ impl ServerSession {
             .await?;
         match started {
             TargetSessionStart::Started(admitted) => {
-                self.stamp_approved_target(admitted).await;
+                self.stamp_approved_target(admitted).await?;
             }
             TargetSessionStart::NeedsApproval(authorization) => {
                 self.target = TargetSelection::PendingApproval(authorization);
@@ -2566,7 +2693,7 @@ impl ServerSession {
         Ok(())
     }
 
-    async fn _channel_close(&mut self, server_channel_id: ServerChannelId) -> Result<()> {
+    fn _channel_close(&mut self, server_channel_id: ServerChannelId) -> Result<()> {
         if self.rc_state == RCState::Disconnected || self.session_handle.is_none() {
             debug!(channel=%server_channel_id.0, "Ignoring close after backend shutdown");
             return Ok(());
@@ -2577,8 +2704,7 @@ impl ServerSession {
             return Ok(());
         };
         debug!(channel=%channel_id, "Closing channel");
-        self.send_command_and_wait(RCCommand::Channel(channel_id, ChannelOperation::Close))
-            .await?;
+        self.send_command(RCCommand::Channel(channel_id, ChannelOperation::Close))?;
         self.channels.close(channel_id);
         Ok(())
     }
@@ -2595,11 +2721,7 @@ impl ServerSession {
         Ok(())
     }
 
-    pub async fn _channel_signal(
-        &mut self,
-        server_channel_id: ServerChannelId,
-        signal: Sig,
-    ) -> Result<()> {
+    pub fn _channel_signal(&self, server_channel_id: ServerChannelId, signal: Sig) -> Result<()> {
         if self.rc_state == RCState::Disconnected || self.session_handle.is_none() {
             debug!(channel=%server_channel_id.0, ?signal, "Ignoring signal after backend shutdown");
             return Ok(());
@@ -2607,50 +2729,39 @@ impl ServerSession {
 
         let channel_id = self.map_channel(server_channel_id)?;
         debug!(channel=%channel_id, ?signal, "Signal");
-        self.send_command_and_wait(RCCommand::Channel(
+        self.send_command(RCCommand::Channel(
             channel_id,
             ChannelOperation::Signal(signal),
-        ))
-        .await?;
+        ))?;
         Ok(())
     }
 
-    fn send_command(&self, command: RCCommand) -> Result<(), RCCommand> {
-        self.rc_tx.send((command, None)).map_err(|e| e.0.0)
+    fn send_command(&self, command: RCCommand) -> Result<(), SshClientError> {
+        self.rc_tx
+            .send((command, None))
+            .map_err(|_| SshClientError::MpscError)
     }
 
-    /// Send a command to the target and consume events until its reply arrives
-    /// on the oneshot.
-    ///
-    /// Consuming keeps the queue moving so the reply can't deadlock on
-    /// backpressure; the events themselves wait in [`Self::pending_events`] for
-    /// the main loop. Dispatching them here would let a handler await a command
-    /// of its own and take the next event one stack frame deeper — a client
-    /// that opens its channels in a burst, every open queued behind the same
-    /// unanswered command, walks that chain until the worker stack overflows.
-    /// Holding them back is safe because no reply depends on anything the
-    /// session does: the client task answers commands from a loop that never
-    /// waits on the session, not even for the unknown-host-key prompt.
-    async fn send_command_and_wait(&mut self, command: RCCommand) -> Result<(), SshClientError> {
+    /// Send a command and pass its result to `on_reply` in a separate task.
+    /// The reply can take a round trip to the target, and the event loop
+    /// must not wait for it: the client and the target's other channels
+    /// would stall
+    fn send_command_with_reply<F>(
+        &self,
+        command: RCCommand,
+        on_reply: impl FnOnce(Result<(), SshClientError>) -> F + Send + 'static,
+    ) where
+        F: Future<Output = ()> + Send,
+    {
         let (tx, rx) = oneshot::channel();
-        let mut cmd = match self.rc_tx.send((command, Some(tx))) {
-            Ok(()) => PendingCommand::Waiting(rx),
-            Err(_) => PendingCommand::Failed,
-        };
-
-        loop {
-            tokio::select! {
-                result = &mut cmd => {
-                    break result
-                }
-                event = self.get_next_event() => {
-                    match event {
-                        Some(event) => self.pending_events.push_back(event),
-                        None => break Err(SshClientError::MpscError),
-                    }
-                }
+        // A failed send drops `tx`, so `on_reply` gets an error
+        let _ = self.rc_tx.send((command, Some(tx)));
+        tokio::spawn(
+            async move {
+                on_reply(rx.await.unwrap_or(Err(SshClientError::MpscError))).await;
             }
-        }
+            .in_current_span(),
+        );
     }
 
     pub fn _disconnect(&self) {
@@ -2690,7 +2801,7 @@ impl ServerSession {
             .await
             .is_ok();
 
-        if let Some(socket) = self.client_socket.take() {
+        if let Some(closer) = self.client_closer.take() {
             // A flush only proves the messages reached russh's queue, so a
             // client that is reading gets a moment to receive them; one that
             // is not gets nothing more and is cut immediately. Spawned rather
@@ -2721,7 +2832,7 @@ impl ServerSession {
                     .await;
                 }
                 tokio::time::sleep(delay.saturating_sub(DISCONNECT_NOTICE_GAP)).await;
-                let _ = socket.shutdown(std::net::Shutdown::Both);
+                closer.close();
             });
         }
 
@@ -2734,26 +2845,5 @@ impl Drop for ServerSession {
         let _ = self.rc_abort_tx.send(());
         info!("Closed session");
         debug!("Dropped");
-    }
-}
-
-pub enum PendingCommand {
-    Waiting(oneshot::Receiver<Result<(), SshClientError>>),
-    Failed,
-}
-
-impl Future for PendingCommand {
-    type Output = Result<(), SshClientError>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-        match self.get_mut() {
-            Self::Waiting(rx) => match Pin::new(rx).poll(cx) {
-                Poll::Ready(result) => {
-                    Poll::Ready(result.unwrap_or(Err(SshClientError::MpscError)))
-                }
-                Poll::Pending => Poll::Pending,
-            },
-            Self::Failed => Poll::Ready(Err(SshClientError::MpscError)),
-        }
     }
 }

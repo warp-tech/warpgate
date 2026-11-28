@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-protocol-mysql"
-version = "0.30.2"
+version = "0.31.0-beta.3"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -11,9 +11,9 @@ async-trait.workspace = true
 bytes.workspace = true
 flate2 = { version = "1", features = ["rust_backend"], default-features = false }
 futures.workspace = true
-mysql_common = { version = "0.37", default-features = false }
+mysql_common = { version = "0.38", default-features = false }
 rand.workspace = true
-rsa = { version = "0.10.0-rc.18", default-features = false, features = [
+rsa = { version = "0.10", default-features = false, features = [
     "std",
     "encoding",
 ] }

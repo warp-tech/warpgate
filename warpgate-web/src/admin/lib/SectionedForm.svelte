@@ -115,6 +115,8 @@
         const headingElement = document.getElementById(`${sectionId}-heading`)
         if (headingElement) {
             activeSection = sectionId
+            // help the heading stay just under the (maybe wrapped) tab row
+            headingElement.style.scrollMarginTop = `${(tabsElement?.clientHeight ?? 0) + 20}px`
             headingElement.scrollIntoView({
                 behavior: 'smooth',
                 block: 'start',

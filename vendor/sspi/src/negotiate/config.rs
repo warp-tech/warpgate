@@ -4,6 +4,9 @@ use crate::{NegotiatedProtocol, Result};
 
 pub trait ProtocolConfig: Debug + Send + Sync {
     fn new_instance(&self) -> Result<NegotiatedProtocol>;
+    fn new_server_instance(&self) -> Result<NegotiatedProtocol> {
+        self.new_instance()
+    }
     fn box_clone(&self) -> Box<dyn ProtocolConfig>;
 }
 

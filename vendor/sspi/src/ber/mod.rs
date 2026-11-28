@@ -7,13 +7,24 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 #[repr(u8)]
 #[allow(unused)]
+#[derive(Clone, Copy)]
 pub(crate) enum Pc {
     Primitive = 0x00,
     Construct = 0x20,
 }
 
+impl Pc {
+    fn as_u8(&self) -> u8 {
+        #[expect(clippy::as_conversions, reason = "enum repr cast in as_u8 helper")]
+        {
+            *self as u8
+        }
+    }
+}
+
 #[repr(u8)]
 #[allow(unused)]
+#[derive(Clone, Copy)]
 enum Class {
     Universal = 0x00,
     Application = 0x40,
@@ -21,8 +32,18 @@ enum Class {
     Private = 0xC0,
 }
 
+impl Class {
+    fn as_u8(&self) -> u8 {
+        #[expect(clippy::as_conversions, reason = "enum repr cast in as_u8 helper")]
+        {
+            *self as u8
+        }
+    }
+}
+
 #[repr(u8)]
 #[allow(unused)]
+#[derive(Clone, Copy)]
 enum Tag {
     Mask = 0x1F,
     Boolean = 0x01,
@@ -32,6 +53,15 @@ enum Tag {
     ObjectIdentifier = 0x06,
     Enumerated = 0x0A,
     Sequence = 0x10,
+}
+
+impl Tag {
+    fn as_u8(&self) -> u8 {
+        #[expect(clippy::as_conversions, reason = "enum repr cast in as_u8 helper")]
+        {
+            *self as u8
+        }
+    }
 }
 
 const TAG_MASK: u8 = 0x1F;
@@ -76,7 +106,8 @@ pub(crate) fn write_sequence_tag(mut stream: impl io::Write, length: u16) -> io:
 pub(crate) fn read_sequence_tag(mut stream: impl io::Read) -> io::Result<u16> {
     let identifier = stream.read_u8()?;
 
-    if identifier != Class::Universal as u8 | Pc::Construct as u8 | (TAG_MASK & Tag::Sequence as u8) {
+    let expected = Class::Universal.as_u8() | Pc::Construct.as_u8() | (TAG_MASK & Tag::Sequence.as_u8());
+    if identifier != expected {
         Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "invalid sequence tag identifier",
@@ -87,7 +118,7 @@ pub(crate) fn read_sequence_tag(mut stream: impl io::Read) -> io::Result<u16> {
 }
 
 pub(crate) fn write_contextual_tag(mut stream: impl io::Write, tagnum: u8, length: u16, pc: Pc) -> io::Result<usize> {
-    let identifier = Class::ContextSpecific as u8 | pc as u8 | (TAG_MASK & tagnum);
+    let identifier = Class::ContextSpecific.as_u8() | pc.as_u8() | (TAG_MASK & tagnum);
     stream.write_u8(identifier)?;
 
     write_length(stream, length).map(|length| length + 1)
@@ -96,7 +127,8 @@ pub(crate) fn write_contextual_tag(mut stream: impl io::Write, tagnum: u8, lengt
 pub(crate) fn read_contextual_tag(mut stream: impl io::Read, tagnum: u8, pc: Pc) -> io::Result<u16> {
     let identifier = stream.read_u8()?;
 
-    if identifier != Class::ContextSpecific as u8 | pc as u8 | (TAG_MASK & tagnum) {
+    let expected_tag = Class::ContextSpecific.as_u8() | pc.as_u8() | (TAG_MASK & tagnum);
+    if identifier != expected_tag {
         Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "invalid contextual tag identifier",
@@ -126,18 +158,18 @@ pub(crate) fn write_integer(mut stream: impl io::Write, value: u32) -> io::Resul
 
     if value < 0x80 {
         write_length(&mut stream, 1)?;
-        stream.write_u8(value as u8)?;
+        stream.write_u8(value.try_into().expect("value < 0x80 should fit into u8"))?;
 
         Ok(3)
     } else if value < 0x8000 {
         write_length(&mut stream, 2)?;
-        stream.write_u16::<BigEndian>(value as u16)?;
+        stream.write_u16::<BigEndian>(value.try_into().expect("value < 0x8000 should fit into u16"))?;
 
         Ok(4)
     } else if value < 0x0080_0000 {
         write_length(&mut stream, 3)?;
-        stream.write_u8((value >> 16) as u8)?;
-        stream.write_u16::<BigEndian>((value & 0xFFFF) as u16)?;
+        stream.write_u8((value >> 16).try_into().expect("high byte should fit into u8"))?;
+        stream.write_u16::<BigEndian>((value & 0xFFFF).try_into().expect("low bytes should fit into u16"))?;
 
         Ok(5)
     } else {
@@ -174,7 +206,7 @@ pub(crate) fn write_sequence_octet_string(mut stream: impl io::Write, tagnum: u8
     let tag_len = write_contextual_tag(
         &mut stream,
         tagnum,
-        sizeof_octet_string(value.len() as u16),
+        sizeof_octet_string(u16::try_from(value.len()).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?),
         Pc::Construct,
     )?;
     let string_len = write_octet_string(&mut stream, value)?;
@@ -183,7 +215,10 @@ pub(crate) fn write_sequence_octet_string(mut stream: impl io::Write, tagnum: u8
 }
 
 pub(crate) fn write_octet_string(mut stream: impl io::Write, value: &[u8]) -> io::Result<usize> {
-    let tag_size = write_octet_string_tag(&mut stream, value.len() as u16)?;
+    let tag_size = write_octet_string_tag(
+        &mut stream,
+        u16::try_from(value.len()).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?,
+    )?;
     stream.write_all(value)?;
     Ok(tag_size + value.len())
 }
@@ -199,7 +234,7 @@ pub(crate) fn read_octet_string_tag(mut stream: impl io::Read) -> io::Result<u16
 }
 
 fn write_universal_tag(mut stream: impl io::Write, tag: Tag, pc: Pc) -> io::Result<usize> {
-    let identifier = Class::Universal as u8 | pc as u8 | (TAG_MASK & tag as u8);
+    let identifier = Class::Universal.as_u8() | pc.as_u8() | (TAG_MASK & tag.as_u8());
     stream.write_u8(identifier)?;
 
     Ok(1)
@@ -208,7 +243,8 @@ fn write_universal_tag(mut stream: impl io::Write, tag: Tag, pc: Pc) -> io::Resu
 fn read_universal_tag(mut stream: impl io::Read, tag: Tag, pc: Pc) -> io::Result<()> {
     let identifier = stream.read_u8()?;
 
-    if identifier != Class::Universal as u8 | pc as u8 | (TAG_MASK & tag as u8) {
+    let expected_id = Class::Universal.as_u8() | pc.as_u8() | (TAG_MASK & tag.as_u8());
+    if identifier != expected_id {
         Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "invalid universal tag identifier",
@@ -226,11 +262,11 @@ fn write_length(mut stream: impl io::Write, length: u16) -> io::Result<usize> {
         Ok(3)
     } else if length > 0x7F {
         stream.write_u8(0x80 ^ 0x1)?;
-        stream.write_u8(length as u8)?;
+        stream.write_u8(length.try_into().expect("length <= 0xFF should fit into u8"))?;
 
         Ok(2)
     } else {
-        stream.write_u8(length as u8)?;
+        stream.write_u8(length.try_into().expect("length <= 0x7F should fit into u8"))?;
 
         Ok(1)
     }

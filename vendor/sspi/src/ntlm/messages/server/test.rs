@@ -544,8 +544,11 @@ fn read_authenticate_fails_with_incorrect_encrypted_key_size() {
     context.state = NtlmState::Authenticate;
 
     let mut buffer = DOMAIN_AUTHENTICATE_MESSAGE.to_vec();
+    let session_key_size_u8: u8 = SESSION_KEY_SIZE
+        .try_into()
+        .expect("SESSION_KEY_SIZE should fit into u8");
     buffer[AUTHENTICATE_ENCRYPTED_KEY_START..AUTHENTICATE_ENCRYPTED_KEY_START + 4]
-        .clone_from_slice([SESSION_KEY_SIZE as u8 - 1, 0x00, SESSION_KEY_SIZE as u8 - 1, 0x00].as_ref());
+        .clone_from_slice([session_key_size_u8 - 1, 0x00, session_key_size_u8 - 1, 0x00].as_ref());
     buffer.pop();
 
     assert!(read_authenticate(&mut context, buffer.as_slice()).is_err());

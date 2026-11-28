@@ -22,6 +22,13 @@ pub(crate) async fn accept_security_context(
     yield_point: &mut YieldPointLocal,
     mut builder: FilledAcceptSecurityContext<'_, <Negotiate as SspiImpl>::CredentialsHandle>,
 ) -> Result<AcceptSecurityContextResult> {
+    if matches!(negotiate.protocol, NegotiatedProtocol::Pku2u(_)) {
+        return negotiate
+            .protocol
+            .accept_security_context(yield_point, &mut builder)
+            .await;
+    }
+
     let input = builder
         .input
         .as_mut()

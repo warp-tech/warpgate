@@ -36,7 +36,6 @@ fn recover_target_id(snapshot: &str, targets_by_name: &HashMap<String, Uuid>) ->
 /// NULL tightening after it) can key on `target_snapshot` alone.
 async fn backfill_target_ids(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
     let db = manager.get_connection();
-    let backend = db.get_database_backend();
 
     let sessions = Alias::new("sessions");
     let id_col = Alias::new("id");
@@ -50,7 +49,7 @@ async fn backfill_target_ids(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
             .from(Alias::new("targets"))
             .to_owned();
         let mut map = HashMap::new();
-        for row in db.query_all(backend.build(&select)).await? {
+        for row in db.query_all(&select).await? {
             map.insert(
                 row.try_get::<String>("", "name")?,
                 row.try_get::<Uuid>("", "id")?,
@@ -76,7 +75,7 @@ async fn backfill_target_ids(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
             select.and_where(Expr::col(id_col.clone()).gt(last_id));
         }
 
-        let rows = db.query_all(backend.build(&select)).await?;
+        let rows = db.query_all(&select).await?;
         let done = (rows.len() as u64) < BACKFILL_BATCH;
 
         for row in &rows {
@@ -92,7 +91,7 @@ async fn backfill_target_ids(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
                 )
                 .and_where(Expr::col(id_col.clone()).eq(id))
                 .to_owned();
-            db.execute(backend.build(&update)).await?;
+            db.execute(&update).await?;
         }
 
         if done {
@@ -266,6 +265,7 @@ mod tests {
     use sea_orm_migration::prelude::*;
     use time::OffsetDateTime;
     use uuid::Uuid;
+    use warpgate_common::TargetId;
     use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
     use warpgate_db_entities::{Recording, TargetSession, UserSession};
 
@@ -346,14 +346,14 @@ mod tests {
         assert_eq!(parent.remote_address, "127.0.0.1:22");
         assert_eq!(parent.protocol, "SSH");
         assert_eq!(child.user_session_id.0, id);
-        assert_eq!(child.target_id, target_id);
+        assert_eq!(child.target_id.0, target_id);
 
         let second_id = Uuid::new_v4();
         TargetSession::Entity::insert(TargetSession::ActiveModel {
             id: Set(warpgate_common::TargetSessionId(second_id)),
             user_session_id: Set(warpgate_common::UserSessionId(id)),
             target_snapshot: Set(r#"{"name":"web"}"#.into()),
-            target_id: Set(Uuid::new_v4()),
+            target_id: Set(TargetId(Uuid::new_v4())),
             started: Set(OffsetDateTime::now_utc()),
             ended: Set(None),
             ticket_id: Set(None),
@@ -404,7 +404,7 @@ mod tests {
 
         let target_id = Uuid::new_v4();
         warpgate_db_entities::Target::Entity::insert(warpgate_db_entities::Target::ActiveModel {
-            id: Set(target_id),
+            id: Set(TargetId(target_id)),
             name: Set("web".into()),
             description: Set(String::new()),
             kind: Set(warpgate_db_entities::Target::TargetKind::Http),
@@ -449,6 +449,7 @@ mod tests {
             kind: Set(Recording::RecordingKind::Terminal),
             metadata: Set("{}".into()),
             generation: Set(1),
+            ..Default::default()
         })
         .exec_without_returning(&db)
         .await
@@ -462,13 +463,13 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap();
-        assert_eq!(child.target_id, target_id);
+        assert_eq!(child.target_id.0, target_id);
         let child = TargetSession::Entity::find_by_id(warpgate_common::TargetSessionId(renamed_id))
             .one(&db)
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(child.target_id, embedded);
+        assert_eq!(child.target_id.0, embedded);
         assert_eq!(
             Recording::Entity::find()
                 .filter(Recording::Column::SessionId.eq(resolved_id))
@@ -499,6 +500,7 @@ mod tests {
             kind: Set(Recording::RecordingKind::Terminal),
             metadata: Set("{}".into()),
             generation: Set(1),
+            ..Default::default()
         })
         .exec_without_returning(&db)
         .await

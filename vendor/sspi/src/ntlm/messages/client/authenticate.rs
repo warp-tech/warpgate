@@ -7,18 +7,19 @@ use rand_core::{Rng as _, SeedableRng as _};
 use crate::crypto::Rc4;
 use crate::ntlm::messages::computations::*;
 use crate::ntlm::messages::{
-    CLIENT_SEAL_MAGIC, CLIENT_SIGN_MAGIC, MessageFields, MessageTypes, NTLM_SIGNATURE, NTLM_VERSION_SIZE,
-    SERVER_SEAL_MAGIC, SERVER_SIGN_MAGIC,
+    CLIENT_SEAL_MAGIC, CLIENT_SIGN_MAGIC, MessageFields, MessageTypes, NTLM_SIGNATURE, SERVER_SEAL_MAGIC,
+    SERVER_SIGN_MAGIC,
 };
 use crate::ntlm::{
     AuthIdentityBuffers, AuthenticateMessage, ENCRYPTED_RANDOM_SESSION_KEY_SIZE, MESSAGE_INTEGRITY_CHECK_SIZE, Mic,
     NegotiateFlags, Ntlm, NtlmState, SESSION_KEY_SIZE,
 };
-use crate::{SecurityStatus, Utf16StringExt};
+use crate::{Result, SecurityStatus, Utf16StringExt};
 
-const MIC_SIZE: usize = 16;
-const BASE_OFFSET: usize = 64;
-const AUTH_MESSAGE_OFFSET: usize = BASE_OFFSET + NTLM_VERSION_SIZE + MIC_SIZE; // MIC is always used in NTLMv2
+const MIC_SIZE: u8 = 16;
+const BASE_OFFSET: u8 = 64;
+// NTLM_VERSION_SIZE is 8, which fits in u8
+const AUTH_MESSAGE_OFFSET: u8 = BASE_OFFSET + 8 + MIC_SIZE; // MIC is always used in NTLMv2
 
 struct AuthenticateMessageFields {
     workstation: MessageFields,
@@ -37,7 +38,7 @@ impl AuthenticateMessageFields {
         negotiate_flags: NegotiateFlags,
         encrypted_random_session_key_buffer: &[u8],
         offset: u32,
-    ) -> Self {
+    ) -> Result<Self> {
         let mut workstation = MessageFields::new();
         let mut domain_name = MessageFields::with_buffer(identity.domain.to_bytes_le());
         let mut encrypted_random_session_key = MessageFields::new();
@@ -53,30 +54,34 @@ impl AuthenticateMessageFields {
 
         domain_name.buffer_offset = offset;
 
-        user_name.buffer_offset = domain_name.buffer_offset + domain_name.buffer.len() as u32;
+        let domain_name_len: u32 = domain_name.buffer.len().try_into()?;
+        user_name.buffer_offset = domain_name.buffer_offset + domain_name_len;
 
-        workstation.buffer_offset = user_name.buffer_offset + user_name.buffer.len() as u32;
+        let user_name_len: u32 = user_name.buffer.len().try_into()?;
+        workstation.buffer_offset = user_name.buffer_offset + user_name_len;
 
-        lm_challenge_response.buffer_offset = workstation.buffer_offset + workstation.buffer.len() as u32;
+        let workstation_len: u32 = workstation.buffer.len().try_into()?;
+        lm_challenge_response.buffer_offset = workstation.buffer_offset + workstation_len;
 
-        nt_challenge_response.buffer_offset =
-            lm_challenge_response.buffer_offset + lm_challenge_response.buffer.len() as u32;
+        let lm_challenge_response_len: u32 = lm_challenge_response.buffer.len().try_into()?;
+        nt_challenge_response.buffer_offset = lm_challenge_response.buffer_offset + lm_challenge_response_len;
 
-        encrypted_random_session_key.buffer_offset =
-            nt_challenge_response.buffer_offset + nt_challenge_response.buffer.len() as u32;
+        let nt_challenge_response_len: u32 = nt_challenge_response.buffer.len().try_into()?;
+        encrypted_random_session_key.buffer_offset = nt_challenge_response.buffer_offset + nt_challenge_response_len;
 
-        Self {
+        Ok(Self {
             domain_name,
             user_name,
             workstation,
             lm_challenge_response,
             nt_challenge_response,
             encrypted_random_session_key,
-        }
+        })
     }
 
-    pub(crate) fn data_len(&self) -> usize {
-        self.encrypted_random_session_key.buffer_offset as usize + self.encrypted_random_session_key.buffer.len()
+    pub(crate) fn data_len(&self) -> Result<usize> {
+        let offset: usize = self.encrypted_random_session_key.buffer_offset.try_into()?;
+        Ok(offset + self.encrypted_random_session_key.buffer.len())
     }
 }
 
@@ -84,7 +89,7 @@ pub(crate) fn write_authenticate(
     context: &mut Ntlm,
     credentials: &AuthIdentityBuffers,
     mut transport: impl io::Write,
-) -> crate::Result<SecurityStatus> {
+) -> Result<SecurityStatus> {
     check_state(context.state)?;
 
     let negotiate_message = context
@@ -139,10 +144,10 @@ pub(crate) fn write_authenticate(
         nt_challenge_response.as_ref(),
         context.flags,
         encrypted_session_key.as_ref(),
-        AUTH_MESSAGE_OFFSET as u32,
-    );
+        AUTH_MESSAGE_OFFSET.into(),
+    )?;
 
-    let mut buffer = Vec::with_capacity(message_fields.data_len());
+    let mut buffer = Vec::with_capacity(message_fields.data_len()?);
 
     write_header(context.flags, context.version.as_ref(), &message_fields, &mut buffer)?;
     write_payload(&message_fields, &mut buffer)?;
@@ -155,7 +160,7 @@ pub(crate) fn write_authenticate(
         challenge_message.message.as_ref(),
         message.as_ref(),
         session_key.as_ref(),
-        AUTH_MESSAGE_OFFSET as u8,
+        AUTH_MESSAGE_OFFSET,
         &mut buffer,
     )?;
 
@@ -184,7 +189,7 @@ pub(crate) fn write_authenticate(
     Ok(SecurityStatus::Ok)
 }
 
-fn check_state(state: NtlmState) -> crate::Result<()> {
+fn check_state(state: NtlmState) -> Result<()> {
     if state != NtlmState::Authenticate {
         Err(crate::Error::new(
             crate::ErrorKind::OutOfSequence,
@@ -233,7 +238,7 @@ fn write_header(
     mut buffer: impl io::Write,
 ) -> io::Result<()> {
     buffer.write_all(NTLM_SIGNATURE)?; // signature 8 bytes
-    buffer.write_u32::<LittleEndian>(MessageTypes::Authenticate as u32)?; // message type 4 bytes
+    buffer.write_u32::<LittleEndian>(MessageTypes::Authenticate.as_u32())?; // message type 4 bytes
     message_fields.lm_challenge_response.write_to(&mut buffer)?; // LmChallengeResponseFields (8 bytes)
     message_fields.nt_challenge_response.write_to(&mut buffer)?; // NtChallengeResponseFields (8 bytes)
     message_fields.domain_name.write_to(&mut buffer)?; // DomainNameFields (8 bytes)
@@ -272,9 +277,9 @@ fn write_mic(
     exported_session_key: &[u8],
     offset: u8,
     mut buffer: impl io::Write + io::Seek,
-) -> crate::Result<Mic> {
+) -> Result<Mic> {
     let mic = Mic {
-        offset: offset - MIC_SIZE as u8,
+        offset: offset - MIC_SIZE,
         value: compute_message_integrity_check(
             negotiate_message,
             challenge_message,

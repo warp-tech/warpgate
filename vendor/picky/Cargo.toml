@@ -13,7 +13,7 @@
 edition = "2024"
 rust-version = "1.85"
 name = "picky"
-version = "7.0.0-rc.25"
+version = "7.0.0-rc.26"
 authors = [
     "Benoît CORTIER <bcortier@devolutions.net>",
     "Jonathan Trepanier <jtrepanier@devolutions.net>",
@@ -254,7 +254,7 @@ features = [
 ]
 
 [dependencies.pkcs1]
-version = "=0.8.0-rc.4"
+version = "0.8"
 
 [dependencies.rand]
 version = "0.10"
@@ -273,7 +273,7 @@ optional = true
 default-features = false
 
 [dependencies.rsa]
-version = "=0.10.0-rc.18"
+version = "0.10"
 features = ["std"]
 
 [dependencies.serde]
@@ -335,5 +335,4 @@ version = "0.26"
 version = "3.22"
 
 [lints.rust]
-# Vendored code: silence upstream lints so they do not surface in our builds.
 warnings = "allow"

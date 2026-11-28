@@ -3,7 +3,6 @@ mod channel_direct_tcpip;
 mod channel_session;
 mod error;
 mod handler;
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,6 +13,7 @@ use bytes::Bytes;
 use channel_direct_tcpip::DirectTCPIPChannel;
 use channel_session::SessionChannel;
 pub use error::SshClientError;
+use futures::future::BoxFuture;
 use futures::{FutureExt, pin_mut};
 use handler::ClientHandler;
 use russh::client::{AuthResult, Handle, KeyboardInteractiveAuthResponse};
@@ -29,8 +29,8 @@ use tracing::*;
 use uuid::Uuid;
 use warpgate_aws::AwsError;
 use warpgate_common::{
-    SSHTargetAuth, TargetOptionsVariant, TargetSSHOptions, UserFacingReason, UserSessionId,
-    WarpgateError, io_connect_reason,
+    SSHTargetAuth, TargetId, TargetOptionsVariant, TargetSSHOptions, UserFacingReason,
+    UserSessionId, WarpgateError, io_connect_reason,
 };
 use warpgate_core::{AdmittedTarget, ConfigProvider, Services};
 
@@ -114,7 +114,7 @@ pub struct ResolvedSshChainHost {
 /// A jump host that names a deleted or non-SSH target: a broken configuration
 /// that must fail the connection rather than silently shorten the chain, which
 /// would dial the target more directly than the operator intended.
-fn unresolvable_jump_host(id: Uuid) -> WarpgateError {
+fn unresolvable_jump_host(id: TargetId) -> WarpgateError {
     WarpgateError::InconsistentState(format!(
         "SSH jump host {id} does not resolve to an SSH target"
     ))
@@ -128,9 +128,9 @@ fn unresolvable_jump_host(id: Uuid) -> WarpgateError {
 /// chain; `None` — the id does not resolve to an SSH target. An unresolvable id,
 /// or one that repeats (a cycle), fails resolution.
 fn resolve_chain_ids(
-    start: Uuid,
-    lookup: impl Fn(Uuid) -> Option<Option<Uuid>>,
-) -> Result<Vec<Uuid>, WarpgateError> {
+    start: TargetId,
+    lookup: impl Fn(TargetId) -> Option<Option<TargetId>>,
+) -> Result<Vec<TargetId>, WarpgateError> {
     let mut ids = vec![];
     let mut visited = HashSet::new();
     let mut current = Some(start);
@@ -154,7 +154,7 @@ fn resolve_chain_ids(
 /// in targets' configs
 async fn resolve_ssh_chain(
     services: &Services,
-    target_id: Uuid,
+    target_id: TargetId,
     logged_in_username: Option<&String>,
 ) -> Result<Vec<ResolvedSshChainHost>, WarpgateError> {
     let targets = services.config_provider.list_targets().await?;
@@ -196,7 +196,7 @@ async fn resolve_ssh_chain(
 /// connection paths must use [`resolve_approved_ssh_chain`] instead.
 pub async fn resolve_ssh_chain_for_admin(
     services: &Services,
-    target_id: Uuid,
+    target_id: TargetId,
     admin_username: Option<&String>,
 ) -> Result<Vec<ResolvedSshChainHost>, WarpgateError> {
     resolve_ssh_chain(services, target_id, admin_username).await
@@ -285,6 +285,13 @@ impl RCEvent {
 
 pub type RCCommandReply = oneshot::Sender<Result<(), SshClientError>>;
 
+/// A forwarding request and the reply channel for its result. The reply is
+/// `None` for a request that was acknowledged before the target connected
+type ForwardRequest = (
+    BoxFuture<'static, Result<(), russh::Error>>,
+    Option<RCCommandReply>,
+);
+
 /// subset of ChannelOperation
 enum ChannelOpen {
     Session,
@@ -325,6 +332,8 @@ enum InnerEvent {
     ClientHandlerEvent(ClientHandlerEvent),
     /// `None` = host key check that stopped before auth
     Connected(Result<Option<Connection>, ConnectionError>),
+    /// The target refused a forward that was already acknowledged to the client
+    ForwardFailed(SshClientError),
 }
 
 struct Connection(Handle<ClientHandler>, UnboundedReceiver<ClientHandlerEvent>);
@@ -351,6 +360,7 @@ pub struct RemoteClient {
     pending_ops: Vec<(Uuid, ChannelOperation)>,
     pending_forwards: Vec<(String, u32)>,
     pending_streamlocal_forwards: Vec<String>,
+    forward_requests: UnboundedSender<ForwardRequest>,
     state: RCState,
     abort_rx: UnboundedReceiver<()>,
     connecting: Option<JoinHandle<()>>,
@@ -373,8 +383,9 @@ impl RemoteClient {
         let (abort_tx, abort_rx) = unbounded_channel();
 
         let (inner_event_tx, inner_event_rx) = unbounded_channel();
+        let (forward_requests, forward_requests_rx) = unbounded_channel();
 
-        let this = Self {
+        let mut this = Self {
             id,
             tx: event_tx,
             session: None,
@@ -382,6 +393,7 @@ impl RemoteClient {
             pending_ops: vec![],
             pending_forwards: vec![],
             pending_streamlocal_forwards: vec![],
+            forward_requests,
             state: RCState::NotInitialized,
             inner_event_rx,
             inner_event_tx: inner_event_tx.clone(),
@@ -401,6 +413,15 @@ impl RemoteClient {
                 }
             }
             .instrument(Span::current()),
+        );
+
+        this.child_tasks.push(
+            tokio::task::Builder::new()
+                .name(&format!("SSH {id} forward requests"))
+                .spawn(run_forward_requests(
+                    forward_requests_rx,
+                    this.inner_event_tx.clone(),
+                ))?,
         );
 
         this.start()?;
@@ -558,6 +579,7 @@ impl RemoteClient {
                     }
                 }
             }
+            InnerEvent::ForwardFailed(error) => return Err(error),
             InnerEvent::ClientHandlerEvent(client_event) => {
                 debug!("Client handler event: {:?}", client_event);
                 match client_event {
@@ -645,16 +667,16 @@ impl RemoteClient {
                 self.apply_channel_op(ch, op, reply).await?;
             }
             RCCommand::ForwardTCPIP(address, port) => {
-                self.tcpip_forward(address, port).await?;
+                self.tcpip_forward(address, port, reply);
             }
             RCCommand::CancelTCPIPForward(address, port) => {
-                self.cancel_tcpip_forward(address, port).await?;
+                self.cancel_tcpip_forward(address, port, reply);
             }
             RCCommand::StreamlocalForward(socket_path) => {
-                self.streamlocal_forward(socket_path).await?;
+                self.streamlocal_forward(socket_path, reply);
             }
             RCCommand::CancelStreamlocalForward(socket_path) => {
-                self.cancel_streamlocal_forward(socket_path).await?;
+                self.cancel_streamlocal_forward(socket_path, reply);
             }
             RCCommand::Disconnect => {
                 self.disconnect().await;
@@ -724,88 +746,53 @@ impl RemoteClient {
 
         let forwards = std::mem::take(&mut self.pending_forwards);
         for (address, port) in forwards {
-            self.tcpip_forward(address, port).await?;
+            self.tcpip_forward(address, port, &mut None);
         }
 
         let forwards = std::mem::take(&mut self.pending_streamlocal_forwards);
         for socket_path in forwards {
-            self.streamlocal_forward(socket_path).await?;
+            self.streamlocal_forward(socket_path, &mut None);
         }
         Ok(())
     }
 }
 
+fn preferred_algos(allow_insecure: bool) -> Preferred {
+    let mut algos = Preferred::default();
+    // The only key exchange some FIPS-mode servers offer. Listed
+    // last, so it is picked only when nothing else matches.
+    algos.kex.to_mut().extend([
+        kex::ECDH_SHA2_NISTP256,
+        kex::ECDH_SHA2_NISTP384,
+        kex::ECDH_SHA2_NISTP521,
+    ]);
+    if allow_insecure {
+        algos
+            .kex
+            .to_mut()
+            .extend([kex::DH_GEX_SHA1, kex::DH_G14_SHA1, kex::DH_G1_SHA1]);
+        algos.key.to_mut().push(russh::keys::Algorithm::Dsa);
+        algos.cipher.to_mut().extend([
+            russh::cipher::AES_256_CBC,
+            russh::cipher::AES_192_CBC,
+            russh::cipher::AES_128_CBC,
+            russh::cipher::TRIPLE_DES_CBC,
+        ]);
+        // For legacy devices such as older network switches that only offer
+        // hmac-sha1. https://github.com/warp-tech/warpgate/issues/2066
+        algos
+            .mac
+            .to_mut()
+            .extend([mac::HMAC_SHA1_ETM, mac::HMAC_SHA1]);
+    }
+    algos
+}
+
 impl Connector {
     async fn build_ssh_config(&self, ssh_options: &TargetSSHOptions) -> Arc<russh::client::Config> {
-        let algos = if ssh_options.allow_insecure_algos {
-            Preferred {
-                kex: Cow::Borrowed(&[
-                    kex::MLKEM768X25519_SHA256,
-                    kex::CURVE25519,
-                    kex::CURVE25519_PRE_RFC_8731,
-                    kex::ECDH_SHA2_NISTP256,
-                    kex::ECDH_SHA2_NISTP384,
-                    kex::ECDH_SHA2_NISTP521,
-                    kex::DH_G16_SHA512,
-                    kex::DH_G14_SHA256,
-                    kex::DH_GEX_SHA256,
-                    kex::DH_G1_SHA1,
-                    kex::EXTENSION_SUPPORT_AS_CLIENT,
-                    kex::EXTENSION_SUPPORT_AS_SERVER,
-                    kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
-                    kex::EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
-                ]),
-                key: Cow::Borrowed(&[
-                    russh::keys::Algorithm::Ed25519,
-                    russh::keys::Algorithm::Ecdsa {
-                        curve: russh::keys::EcdsaCurve::NistP256,
-                    },
-                    russh::keys::Algorithm::Ecdsa {
-                        curve: russh::keys::EcdsaCurve::NistP384,
-                    },
-                    russh::keys::Algorithm::Ecdsa {
-                        curve: russh::keys::EcdsaCurve::NistP521,
-                    },
-                    russh::keys::Algorithm::Rsa {
-                        hash: Some(russh::keys::HashAlg::Sha256),
-                    },
-                    russh::keys::Algorithm::Rsa {
-                        hash: Some(russh::keys::HashAlg::Sha512),
-                    },
-                    russh::keys::Algorithm::Rsa { hash: None },
-                    russh::keys::Algorithm::Dsa,
-                ]),
-                cipher: Cow::Borrowed(&[
-                    russh::cipher::CHACHA20_POLY1305,
-                    russh::cipher::AES_256_GCM,
-                    russh::cipher::AES_256_CTR,
-                    russh::cipher::AES_256_CBC,
-                    russh::cipher::AES_192_CTR,
-                    russh::cipher::AES_192_CBC,
-                    russh::cipher::AES_128_CTR,
-                    russh::cipher::AES_128_CBC,
-                    russh::cipher::TRIPLE_DES_CBC,
-                ]),
-                // The secure defaults exclude SHA-1 MACs; append them here for
-                // legacy devices (e.g. older network switches that only offer
-                // hmac-sha1). https://github.com/warp-tech/warpgate/issues/2066
-                mac: Cow::Borrowed(&[
-                    mac::HMAC_SHA512_ETM,
-                    mac::HMAC_SHA256_ETM,
-                    mac::HMAC_SHA512,
-                    mac::HMAC_SHA256,
-                    mac::HMAC_SHA1_ETM,
-                    mac::HMAC_SHA1,
-                ]),
-                ..<_>::default()
-            }
-        } else {
-            Preferred::default()
-        };
-
         let ssh_config = { self.services.config.lock().await.store.ssh.clone() };
         let mut config = russh::client::Config {
-            preferred: algos,
+            preferred: preferred_algos(ssh_options.allow_insecure_algos),
             nodelay: true,
             // Extra time for the "closing due to inactivity" message to be sent
             inactivity_timeout: Some(ssh_config.inactivity_timeout + Duration::from_secs(10)),
@@ -1361,49 +1348,70 @@ impl RemoteClient {
         Ok(())
     }
 
-    async fn tcpip_forward(&mut self, address: String, port: u32) -> Result<(), SshClientError> {
-        if let Some(session) = &self.session {
-            session.tcpip_forward(address, port).await?;
+    /// Queue `request` for [`run_forward_requests`]. `reply` is taken, and
+    /// the worker answers it with the target's result. A `reply` left in
+    /// place is acknowledged as soon as the command returns
+    fn queue_forward_request(
+        &self,
+        request: impl Future<Output = Result<(), russh::Error>> + Send + 'static,
+        reply: &mut Option<RCCommandReply>,
+    ) {
+        let _ = self.forward_requests.send((request.boxed(), reply.take()));
+    }
+
+    fn tcpip_forward(&mut self, address: String, port: u32, reply: &mut Option<RCCommandReply>) {
+        if let Some(session) = self.session.clone() {
+            self.queue_forward_request(
+                async move { session.tcpip_forward(address, port).await.map(drop) },
+                reply,
+            );
         } else {
             self.pending_forwards.push((address, port));
         }
-        Ok(())
     }
 
-    async fn cancel_tcpip_forward(
+    fn cancel_tcpip_forward(
         &mut self,
         address: String,
         port: u32,
-    ) -> Result<(), SshClientError> {
-        if let Some(session) = &self.session {
-            session.cancel_tcpip_forward(address, port).await?;
+        reply: &mut Option<RCCommandReply>,
+    ) {
+        if let Some(session) = self.session.clone() {
+            self.queue_forward_request(
+                async move { session.cancel_tcpip_forward(address, port).await },
+                reply,
+            );
         } else {
             self.pending_forwards
                 .retain(|x| x.0 != address || x.1 != port);
         }
-        Ok(())
     }
 
-    async fn streamlocal_forward(&mut self, socket_path: String) -> Result<(), SshClientError> {
-        if let Some(session) = &self.session {
-            session.streamlocal_forward(socket_path).await?;
+    fn streamlocal_forward(&mut self, socket_path: String, reply: &mut Option<RCCommandReply>) {
+        if let Some(session) = self.session.clone() {
+            self.queue_forward_request(
+                async move { session.streamlocal_forward(socket_path).await },
+                reply,
+            );
         } else {
             self.pending_streamlocal_forwards.push(socket_path);
         }
-        Ok(())
     }
 
-    async fn cancel_streamlocal_forward(
+    fn cancel_streamlocal_forward(
         &mut self,
         socket_path: String,
-    ) -> Result<(), SshClientError> {
-        if let Some(session) = &self.session {
-            session.cancel_streamlocal_forward(socket_path).await?;
+        reply: &mut Option<RCCommandReply>,
+    ) {
+        if let Some(session) = self.session.clone() {
+            self.queue_forward_request(
+                async move { session.cancel_streamlocal_forward(socket_path).await },
+                reply,
+            );
         } else {
             self.pending_streamlocal_forwards
                 .retain(|x| x != &socket_path);
         }
-        Ok(())
     }
 
     async fn disconnect(&mut self) {
@@ -1428,6 +1436,29 @@ impl RemoteClient {
     }
 }
 
+/// Send forwarding requests to the target one at a time, so a cancel cannot
+/// overtake its forward. The target can take arbitrarily long to answer, and
+/// the command loop cannot wait for it: the loop also passes channel data
+async fn run_forward_requests(
+    mut requests: UnboundedReceiver<ForwardRequest>,
+    inner_event_tx: UnboundedSender<InnerEvent>,
+) -> Result<(), SshClientError> {
+    while let Some((request, reply)) = requests.recv().await {
+        let result = request.await.map_err(SshClientError::from);
+        match reply {
+            Some(reply) => {
+                let _ = reply.send(result);
+            }
+            None => {
+                if let Err(error) = result {
+                    let _ = inner_event_tx.send(InnerEvent::ForwardFailed(error));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 impl Drop for RemoteClient {
     fn drop(&mut self) {
         if let Some(attempt) = self.connecting.take() {
@@ -1446,14 +1477,31 @@ mod tests {
     use std::collections::HashMap;
 
     use uuid::Uuid;
-    use warpgate_common::UserFacingReason;
+    use warpgate_common::{TargetId, UserFacingReason};
 
-    use super::{ConnectionError, resolve_chain_ids};
+    use super::{ConnectionError, preferred_algos, resolve_chain_ids};
+
+    fn target_id() -> TargetId {
+        TargetId(Uuid::new_v4())
+    }
+
+    #[test]
+    fn insecure_algos_only_add_to_the_secure_ones() {
+        let secure = preferred_algos(false);
+        let insecure = preferred_algos(true);
+        assert!(insecure.kex.starts_with(&secure.kex));
+        assert!(insecure.key.starts_with(&secure.key));
+        assert!(insecure.cipher.starts_with(&secure.cipher));
+        assert!(insecure.mac.starts_with(&secure.mac));
+        assert!(insecure.kex.contains(&russh::kex::DH_G1_SHA1));
+        assert!(!secure.kex.contains(&russh::kex::DH_G1_SHA1));
+        assert!(insecure.mac.contains(&russh::mac::HMAC_SHA1));
+    }
 
     #[test]
     fn resolve_chain_ids_returns_ordered_chain() {
-        let (a, b, c) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
-        let jumps: HashMap<Uuid, Option<Uuid>> =
+        let (a, b, c) = (target_id(), target_id(), target_id());
+        let jumps: HashMap<TargetId, Option<TargetId>> =
             HashMap::from([(a, Some(b)), (b, Some(c)), (c, None)]);
         let ids = resolve_chain_ids(a, |id| jumps.get(&id).copied()).unwrap();
         assert_eq!(ids, vec![a, b, c]);
@@ -1461,16 +1509,17 @@ mod tests {
 
     #[test]
     fn resolve_chain_ids_detects_cycle() {
-        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
-        let jumps: HashMap<Uuid, Option<Uuid>> = HashMap::from([(a, Some(b)), (b, Some(a))]);
+        let (a, b) = (target_id(), target_id());
+        let jumps: HashMap<TargetId, Option<TargetId>> =
+            HashMap::from([(a, Some(b)), (b, Some(a))]);
         assert!(resolve_chain_ids(a, |id| jumps.get(&id).copied()).is_err());
     }
 
     #[test]
     fn resolve_chain_ids_rejects_unresolvable_jump_host() {
-        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+        let (a, b) = (target_id(), target_id());
         // `a` jumps through `b`, but `b` resolves to no SSH target.
-        let jumps: HashMap<Uuid, Option<Uuid>> = HashMap::from([(a, Some(b))]);
+        let jumps: HashMap<TargetId, Option<TargetId>> = HashMap::from([(a, Some(b))]);
         assert!(resolve_chain_ids(a, |id| jumps.get(&id).copied()).is_err());
     }
 
@@ -1480,5 +1529,60 @@ mod tests {
             "the certificate names [\"root\", \"admin\"]".into(),
         );
         assert!(!error.user_facing_reason().contains("admin"));
+    }
+
+    struct TestHandler;
+
+    impl russh::client::Handler for TestHandler {
+        type Error = russh::Error;
+    }
+
+    #[tokio::test]
+    async fn legacy_ssh_1_99_banner_with_bare_lf_is_accepted() {
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // Regression for https://github.com/warp-tech/warpgate/issues/989.
+        let (client_io, mut server_io) = tokio::io::duplex(65536);
+        let task = tokio::spawn(russh::client::connect_stream(
+            Arc::new(russh::client::Config::default()),
+            client_io,
+            TestHandler,
+        ));
+
+        server_io
+            .write_all(b"SSH-1.99-OpenSSH_6.0\n")
+            .await
+            .expect("failed to write the legacy server banner");
+
+        let mut received = Vec::new();
+        let id_end = tokio::time::timeout(Duration::from_secs(5), async {
+            let mut chunk = [0; 4096];
+            loop {
+                let count = server_io
+                    .read(&mut chunk)
+                    .await
+                    .expect("failed to read the client identification and KEXINIT");
+                assert!(
+                    count > 0,
+                    "client closed the connection before sending KEXINIT"
+                );
+                received.extend_from_slice(&chunk[..count]);
+                if let Some(position) = received.windows(2).position(|bytes| bytes == b"\r\n") {
+                    let id_end = position + 2;
+                    if received.len() >= id_end + 6 {
+                        break id_end;
+                    }
+                }
+            }
+        })
+        .await
+        .expect("client did not send KEXINIT after the bare-LF SSH-1.99 banner");
+
+        assert!(received[..id_end].starts_with(b"SSH-2.0-"));
+        assert_eq!(received[id_end + 5], 20, "expected SSH_MSG_KEXINIT");
+        task.abort();
     }
 }

@@ -1,8 +1,10 @@
-use picky_krb::constants::key_usages::{ACCEPTOR_SEAL, INITIATOR_SEAL};
+use picky_krb::constants::key_usages::{ACCEPTOR_SEAL, INITIATOR_SEAL, INITIATOR_SIGN};
 use picky_krb::crypto::CipherSuite;
+use picky_krb::crypto::aes::{AesSize, checksum_sha_aes};
+use picky_krb::gss_api::MicToken;
 
 use crate::kerberos::{EncryptionParams, KerberosConfig, KerberosState, test_data};
-use crate::{EncryptionFlags, Kerberos, SecurityBufferFlags, SecurityBufferRef, Sspi};
+use crate::{EncryptionFlags, Kerberos, SecurityBufferFlags, SecurityBufferRef, Sspi, SspiEx};
 
 #[test]
 fn stream_buffer_decryption() {
@@ -75,6 +77,8 @@ fn secbuffer_readonly_with_checksum() {
         dh_parameters: None,
         krb5_user_to_user: false,
         server: Some(Box::new(test_data::fake_server_properties())),
+        remote_seq_number: 0,
+        clock_offset: time::Duration::ZERO,
     };
 
     // RPC header
@@ -255,6 +259,8 @@ fn integrity_only_wrap_decryption() {
         dh_parameters: None,
         krb5_user_to_user: false,
         server: None,
+        remote_seq_number: 0,
+        clock_offset: time::Duration::ZERO,
     };
 
     let mut buffer = token_bytes;
@@ -266,4 +272,57 @@ fn integrity_only_wrap_decryption() {
     kerberos_client.decrypt_message(&mut message).unwrap();
 
     assert_eq!(message[1].data(), plaintext);
+}
+
+fn assert_mic_uses_aes_size(encryption_type: CipherSuite, aes_size: AesSize, key: &[u8]) {
+    let data = b"SPNEGO mechTypes";
+    let mut client = test_data::fake_client();
+    client.encryption_params.encryption_type = Some(encryption_type.clone());
+    client.encryption_params.sub_session_key = Some(key.to_vec().into());
+
+    let token = client
+        .generate_mic_token(data, crate::private::Sealed)
+        .expect("MIC generation should use the negotiated AES key size");
+    let mic_token = MicToken::decode(token.as_slice()).unwrap();
+
+    let mut checksum_input = data.to_vec();
+    checksum_input.extend_from_slice(&mic_token.header());
+    let expected_checksum = checksum_sha_aes(key, INITIATOR_SIGN, &checksum_input, &aes_size).unwrap();
+    assert_eq!(mic_token.checksum, expected_checksum);
+
+    let mut server = test_data::fake_server();
+    server.encryption_params.encryption_type = Some(encryption_type);
+    server.encryption_params.sub_session_key = Some(key.to_vec().into());
+    server.remote_seq_number = client.seq_number;
+    server
+        .verify_mic_token(&token, data, crate::private::Sealed)
+        .expect("MIC verification should use the negotiated AES key size");
+}
+
+#[test]
+fn aes128_mic_uses_aes128_checksum() {
+    let key = [
+        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff,
+    ];
+
+    assert_mic_uses_aes_size(CipherSuite::Aes128CtsHmacSha196, AesSize::Aes128, &key);
+}
+
+#[test]
+fn aes256_mic_preserves_aes256_checksum() {
+    let key = [
+        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x10, 0x21,
+        0x32, 0x43, 0x54, 0x65, 0x76, 0x87, 0x98, 0xa9, 0xba, 0xcb, 0xdc, 0xed, 0xfe, 0x0f,
+    ];
+
+    assert_mic_uses_aes_size(CipherSuite::Aes256CtsHmacSha196, AesSize::Aes256, &key);
+}
+
+#[test]
+fn aes128_subkey_mic_uses_subkey_size_with_aes256_ticket_enctype() {
+    let key = [
+        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff,
+    ];
+
+    assert_mic_uses_aes_size(CipherSuite::Aes256CtsHmacSha196, AesSize::Aes128, &key);
 }

@@ -90,7 +90,6 @@ impl MigrationTrait for Migration {
         // Snapshots parse with `.ok()`, so a stale null does not fail anything —
         // it silently blanks the target on every historical session that had
         // one, which for `headers` and `allow_insecure_algos` is most of them.
-        let backend = db.get_database_backend();
         let sessions = Alias::new("target_sessions");
         let id_col = Alias::new("id");
         let snapshot_col = Alias::new("target_snapshot");
@@ -111,7 +110,7 @@ impl MigrationTrait for Migration {
                 select.and_where(Expr::col(id_col.clone()).gt(last_id));
             }
 
-            let rows = db.query_all(backend.build(&select)).await?;
+            let rows = db.query_all(&select).await?;
             let done = (rows.len() as u64) < BATCH;
 
             for row in &rows {
@@ -130,7 +129,7 @@ impl MigrationTrait for Migration {
                         .value(snapshot_col.clone(), value.to_string())
                         .and_where(Expr::col(id_col.clone()).eq(id))
                         .to_owned();
-                    db.execute(backend.build(&update)).await?;
+                    db.execute(&update).await?;
                 }
             }
 

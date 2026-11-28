@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use time::OffsetDateTime;
 
-use crate::kerberos::client::generators::MAX_MICROSECONDS;
+use crate::kerberos::client::generators::{MAX_MICROSECONDS, nonce_to_asn1};
 use crate::{Error, ErrorKind, Result};
 
 /// [Generation of Client Request](https://www.rfc-editor.org/rfc/rfc4556.html#section-3.2.1)
@@ -68,11 +68,18 @@ pub(crate) struct GenerateAsPaDataOptions<'a> {
     pub dh_parameters: DhParameters,
     pub sign_data: SignDataFn,
     pub with_pre_auth: bool,
-    pub authenticator_nonce: [u8; 4],
+    pub authenticator_nonce: u32,
 }
 
 #[instrument(level = "trace", skip_all, ret)]
 pub(crate) fn generate_pa_datas_for_as_req(options: &mut GenerateAsPaDataOptions<'_>) -> Result<Vec<PaData>> {
+    generate_pa_datas_for_as_req_at(options, OffsetDateTime::now_utc())
+}
+
+pub(crate) fn generate_pa_datas_for_as_req_at(
+    options: &mut GenerateAsPaDataOptions<'_>,
+    current_date: OffsetDateTime,
+) -> Result<Vec<PaData>> {
     let GenerateAsPaDataOptions {
         p2p_cert,
         kdc_req_body,
@@ -99,7 +106,6 @@ pub(crate) fn generate_pa_datas_for_as_req(options: &mut GenerateAsPaDataOptions
         ]);
     }
 
-    let current_date = OffsetDateTime::now_utc();
     let mut microseconds = current_date.microsecond();
     if microseconds > MAX_MICROSECONDS {
         microseconds = MAX_MICROSECONDS;
@@ -121,7 +127,7 @@ pub(crate) fn generate_pa_datas_for_as_req(options: &mut GenerateAsPaDataOptions
         pk_authenticator: ExplicitContextTag0::from(PkAuthenticator {
             cusec: ExplicitContextTag0::from(IntegerAsn1::from(microseconds.to_be_bytes().to_vec())),
             ctime: ExplicitContextTag1::from(KerberosTime::from(GeneralizedTime::from(current_date))),
-            nonce: ExplicitContextTag2::from(IntegerAsn1::from(authenticator_nonce.to_vec())),
+            nonce: ExplicitContextTag2::from(nonce_to_asn1(*authenticator_nonce)),
             pa_checksum: Optional::from(Some(ExplicitContextTag3::from(OctetStringAsn1::from(
                 kdc_req_body_sha1_hash,
             )))),

@@ -383,6 +383,7 @@ mod tests {
 
     use ipnet::IpNet;
     use uuid::Uuid;
+    use warpgate_common::UserId;
     use warpgate_common::auth::{AuthStateUserInfo, CredentialPolicyResponse};
 
     use super::*;
@@ -410,7 +411,7 @@ mod tests {
             UserSessionId(Uuid::new_v4()),
             None,
             AuthStateUserInfo {
-                id: Uuid::new_v4(),
+                id: UserId(Uuid::new_v4()),
                 username: "alice".into(),
             },
             Protocol::Ssh,
@@ -422,7 +423,7 @@ mod tests {
 
     fn test_user() -> User {
         User {
-            id: Uuid::new_v4(),
+            id: UserId(Uuid::new_v4()),
             username: "alice".into(),
             description: String::new(),
             credential_policy: None,

@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [[7.0.0-rc.26](https://github.com/Devolutions/picky-rs/compare/picky-v7.0.0-rc.25...picky-v7.0.0-rc.26)] - 2026-07-21
+
+### <!-- 7 -->Build
+
+- Move RustCrypto crates to stable releases and drop obsolete pins ([#512](https://github.com/Devolutions/picky-rs/issues/512)) ([74090c9d1a](https://github.com/Devolutions/picky-rs/commit/74090c9d1ae301c8d46ed04f593acbfb3f5108e8)) 
+
+  Several release-candidate crypto dependencies now have stable releases
+  and are moved off their `=x.y.z-rc.n` pins.
+
+
+
 ## [[7.0.0-rc.25](https://github.com/Devolutions/picky-rs/compare/picky-v7.0.0-rc.24...picky-v7.0.0-rc.25)] - 2026-06-26
 
 ### <!-- 7 -->Build

@@ -44,7 +44,7 @@ pub(super) enum AvPair {
 impl AvPair {
     pub(super) fn from_buffer(mut buffer: impl io::Read) -> io::Result<Self> {
         let av_type = buffer.read_u16::<LittleEndian>()?;
-        let len = buffer.read_u16::<LittleEndian>()? as usize;
+        let len = buffer.read_u16::<LittleEndian>()?.into();
 
         match av_type {
             AV_PAIR_EOL => {
@@ -170,7 +170,9 @@ impl AvPair {
             AvPair::ChannelBindings(value) => (HASH_SIZE, value.to_vec()),
         };
         buffer.write_u16::<LittleEndian>(av_type)?;
-        buffer.write_u16::<LittleEndian>(len as u16)?;
+        buffer.write_u16::<LittleEndian>(
+            u16::try_from(len).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?,
+        )?;
         buffer.write_all(value.as_ref())?;
 
         Ok(())

@@ -29,7 +29,7 @@ jobs:
         with:
           node-version: 24
 
-      - uses: Swatinem/rust-cache@v2.9.2
+      - uses: Swatinem/rust-cache@v2.9.3
         with:
           key: "test"
 
@@ -37,9 +37,9 @@ jobs:
         run: |
           sudo apt-get install openssh-client expect
           cargo install --locked just@1.4.0
-          # Pin cargo-llvm-cov to 0.6.15 because versions 0.6.16+ depend on ruzstd 0.8.x which uses
-          # the unstable `unsigned_is_multiple_of` feature not available in nightly-2025-01-01
-          cargo install --locked cargo-llvm-cov@0.6.15
+          # Older versions can't find test binaries in Cargo's build-dir layout and
+          # silently report no coverage for them.
+          cargo install --locked cargo-llvm-cov@0.9.1
           rustup component add llvm-tools-preview
 
       - name: Build UI
@@ -72,19 +72,19 @@ jobs:
           TIMEOUT=120 poetry run ./run.sh
 
       - name: Upload coverage
-        uses: actions/upload-artifact@2848b2cda0e5190984587ec6bb1f36730ca78d50
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: coverage.lcov
           path: tests/coverage.lcov
 
       - name: Upload coverage (HTML)
-        uses: actions/upload-artifact@2848b2cda0e5190984587ec6bb1f36730ca78d50
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: coverage-html
           path: target/llvm-cov/html
 
       - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@v8.3.0
+        uses: SonarSource/sonarqube-scan-action@v8.5.0
         if: ${{ env.SONAR_TOKEN }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any

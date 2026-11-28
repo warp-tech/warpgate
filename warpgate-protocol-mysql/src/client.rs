@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use rsa::pkcs8::DecodePublicKey;
-use rsa::{Oaep, RsaPublicKey};
+use rsa::{Oaep, PublicKey};
 use sha1::Sha1;
 use tokio::net::TcpStream;
 use tracing::{debug, info};
@@ -105,7 +105,7 @@ impl MySqlClient {
             warpgate_common::DatabaseTargetAuth::IamRole(_) => {
                 warpgate_aws::generate_rds_auth_token(&target.host, target.port, &target.username)
                     .await
-                    .map_err(WarpgateError::Aws)?
+                    .map_err(|e| WarpgateError::Aws(e.into()))?
             }
         };
 
@@ -175,9 +175,13 @@ impl MySqlClient {
                         Some(&3) => (),
                         // Server requests full authentication
                         Some(&4) => {
-                            let response =
-                                caching_sha2_full_auth(&mut stream, &nonce, &effective_password)
-                                    .await?;
+                            let response = caching_sha2_full_auth(
+                                &mut stream,
+                                &nonce,
+                                &effective_password,
+                                target.tls.mode,
+                            )
+                            .await?;
                             stream.push(&&response[..], ())?;
                             stream.flush().await?;
                         }
@@ -265,9 +269,16 @@ async fn caching_sha2_full_auth(
     stream: &mut MySqlStream<TcpStream, ClientTlsStream<TcpStream>>,
     nonce: &[u8],
     password: &str,
+    tls_mode: TlsMode,
 ) -> Result<Vec<u8>, MySqlError> {
     if stream.is_tls() {
         return Ok(password_nul(password));
+    }
+    if tls_mode != TlsMode::Disabled {
+        return Err(MySqlError::ProtocolError(
+            "target requests caching_sha2_password full authentication over a plaintext connection"
+                .to_owned(),
+        ));
     }
 
     stream.push(&&[2_u8][..], ())?;
@@ -281,7 +292,7 @@ async fn caching_sha2_full_auth(
         .ok_or_else(|| {
             MySqlError::ProtocolError("expected an RSA public key response".to_owned())
         })?;
-    let key = RsaPublicKey::from_public_key_pem(std::str::from_utf8(pem)?)?;
+    let key = PublicKey::from_public_key_pem(std::str::from_utf8(pem)?)?;
 
     let mut masked_password = password_nul(password);
     masked_password

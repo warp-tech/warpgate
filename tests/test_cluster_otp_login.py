@@ -1,22 +1,33 @@
 from base64 import b64decode
+from contextlib import ExitStack
 from uuid import uuid4
 
 import pyotp
+import pytest
 import requests
 
 from .api_client import admin_client, sdk
 from .conftest import ProcessManager
 from .test_http_common import echo_server_port  # noqa: F401
-from .util import wait_port
+from .util import proxy_protocol_relay, wait_port
+
+
+@pytest.fixture
+def load_balancer():
+    with ExitStack() as relays:
+        yield lambda port: relays.enter_context(proxy_protocol_relay(port))
 
 
 class Test:
+    @pytest.mark.parametrize("proxy_protocol", [False, True])
     def test_cross_node_otp_login(
         self,
         processes: ProcessManager,
         otp_key_base32,
         otp_key_base64,
         echo_server_port,
+        load_balancer,
+        proxy_protocol,
     ):
         # Two nodes on one database. The password step lands on node A, which
         # holds the in-memory auth state; the OTP step is deliberately sent to
@@ -24,13 +35,29 @@ class Test:
         # the shared sessions table (keyed by the browser session id) and
         # forward the OTP submission to A. Without that forwarding the login
         # thrashes and MFA is impossible behind a non-sticky load balancer.
-        node_a = processes.start_wg()
+        #
+        # With `proxy_protocol`, clients reach both nodes through a relay that
+        # sends a PROXY header, while B still connects to A directly.
+        node_a = processes.start_wg(
+            config_patch={"http": {"proxy_protocol": proxy_protocol}}
+        )
         wait_port(node_a.http_port, recv=False)
         node_b = processes.start_wg(share_with=node_a)
         wait_port(node_b.http_port, recv=False)
 
-        url_a = f"https://localhost:{node_a.http_port}"
-        url_b = f"https://localhost:{node_b.http_port}"
+        def front(node):
+            port = node.http_port
+            return f"https://localhost:{load_balancer(port) if proxy_protocol else port}"
+
+        url_a = front(node_a)
+        url_b = front(node_b)
+
+        if proxy_protocol:
+            with pytest.raises(requests.exceptions.ConnectionError):
+                requests.get(
+                    f"https://localhost:{node_a.http_port}/@warpgate/api/info",
+                    verify=False,
+                )
 
         with admin_client(url_a) as api:
             role = api.create_role(sdk.RoleDataRequest(name=f"role-{uuid4()}"))
@@ -92,7 +119,10 @@ class Test:
         assert response.status_code // 100 != 2
 
         with admin_client(url_a) as api:
-            assert len(api.get_sessions().items) == 1
+            sessions = api.get_sessions().items
+            assert len(sessions) == 1
+            if proxy_protocol:
+                assert sessions[0].remote_address.startswith("203.0.113.10:")
 
         # OTP step on node B: forwarded to A, so it must succeed.
         response = session.post(

@@ -1,31 +1,37 @@
-use poem_openapi::Object;
+use std::collections::HashMap;
+
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, ModelTrait, QueryFilter, Set,
-    TransactionTrait,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, ModelTrait, QueryFilter,
+    Set, TransactionSession, TransactionTrait,
 };
 use uuid::Uuid;
-use warpgate_common::{StoredSecrets, TargetOptions, WarpgateError};
+pub use warpgate_common::TargetDataRequest;
+use warpgate_common::{
+    RoleId, RowId, SSHTargetAuth, SshClientKeyId, StoredSecrets, Target as TargetConfig,
+    TargetGroupId, TargetId, TargetOptions, TargetSecrets, WarpgateError,
+};
 use warpgate_db_entities::{
-    KnownHost, Target, TargetRoleAssignment, TargetSession, Ticket, TicketRequest,
+    KnownHost, Role, SshClientKey, Target, TargetGroup, TargetRoleAssignment, TargetSession,
+    Ticket, TicketRequest, begin_write,
+};
+use warpgate_resources::{
+    Comparable, ComparableValues, OptionReferences, ResourceKind, Row, TargetSpec,
 };
 
-use super::{AdmittedSessions, ResourceError, check_name, name_taken};
+use super::audit::{Audited, ChangedBy, Subject, Unaudited};
+use super::{
+    Actor, AdmittedSessions, OwnedEntity, ResourceError, check_name, name_taken, names_of,
+    reveal_inline,
+};
 use crate::db::is_unique_violation;
+use crate::logging::AuditEvent;
 
-#[derive(Object)]
-pub struct TargetDataRequest {
-    pub name: String,
-    pub description: Option<String>,
-    pub options: TargetOptions,
-    pub rate_limit_bytes_per_second: Option<u32>,
-    pub group_id: Option<Uuid>,
-    #[oai(validator(minimum(value = "1")))]
-    pub ticket_max_duration_seconds: Option<i64>,
-    pub ticket_requests_disabled: bool,
-    pub ticket_require_approval: bool,
-    pub require_approval: bool,
-    #[oai(validator(minimum(value = "1")))]
-    pub ticket_max_uses: Option<i16>,
+impl OwnedEntity for Target::Entity {
+    type Id = TargetId;
+    const KIND: ResourceKind = ResourceKind::Target;
+    const ID: Self::Column = Target::Column::Id;
+    const NAME: Self::Column = Target::Column::Name;
+    const PROVIDER: Self::Column = Target::Column::Provider;
 }
 
 fn serialize_options_for_storage(
@@ -52,48 +58,157 @@ fn set_data(
     Ok(())
 }
 
+/// Names of the rows that targets reference by ID
+#[derive(Default)]
+pub(super) struct Names {
+    pub(super) groups: HashMap<TargetGroupId, String>,
+    pub(super) keys: HashMap<SshClientKeyId, String>,
+    pub(super) targets: HashMap<TargetId, String>,
+}
+
+impl Names {
+    /// Loads only the names that `targets` reference
+    pub(super) async fn referenced_by<C: ConnectionTrait>(
+        db: &C,
+        targets: &[&TargetConfig],
+    ) -> Result<Self, DbErr> {
+        let (mut groups, mut keys, mut jump_hosts) = (vec![], vec![], vec![]);
+        for target in targets {
+            groups.extend(target.group_id);
+            if let TargetOptions::Ssh(ssh) = &target.options {
+                jump_hosts.extend(ssh.jump_host);
+                if let SSHTargetAuth::PublicKey(auth) = &ssh.auth {
+                    keys.extend(auth.key_id);
+                }
+            }
+        }
+
+        Ok(Self {
+            groups: names_of::<TargetGroup::Entity, _>(db, groups).await?,
+            keys: names_of::<SshClientKey::Entity, _>(db, keys).await?,
+            targets: names_of::<Target::Entity, _>(db, jump_hosts).await?,
+        })
+    }
+}
+
+/// Inline credentials come back decrypted, so the result must not be logged
+pub(super) fn row(
+    mut target: TargetConfig,
+    roles: Vec<String>,
+    names: &Names,
+) -> Result<Row<TargetSpec>, WarpgateError> {
+    let mut references = OptionReferences::default();
+    if let TargetOptions::Ssh(ssh) = &mut target.options {
+        // A deleted jump host keeps its ID as the name. No row is called
+        // that, so a plan refuses the target.
+        references.jump_host = ssh.jump_host.take().map(|id| {
+            let name = names.targets.get(&id).cloned();
+            name.unwrap_or_else(|| id.to_string())
+        });
+        if let SSHTargetAuth::PublicKey(auth) = &mut ssh.auth {
+            // A deleted key is treated as no key. A connection falls back
+            // to the default keys in the same way.
+            references.client_key = auth
+                .key_id
+                .take()
+                .and_then(|id| names.keys.get(&id).cloned());
+        }
+    }
+    for slot in target.options.secrets_mut() {
+        reveal_inline(slot)?;
+    }
+    Ok(Row {
+        id: target.id.uuid(),
+        name: target.name,
+        provider: target.provider,
+        live: TargetSpec {
+            description: target.description,
+            group: target
+                .group_id
+                .and_then(|id| names.groups.get(&id).cloned()),
+            roles,
+            options: target.options,
+            rate_limit_bytes_per_second: target.rate_limit_bytes_per_second,
+            ticket_max_duration_seconds: target.ticket_max_duration_seconds,
+            ticket_requests_disabled: target.ticket_requests_disabled,
+            ticket_require_approval: target.ticket_require_approval,
+            require_approval: target.require_approval,
+            ticket_max_uses: target.ticket_max_uses,
+            references,
+        },
+    })
+}
+
+impl Audited for Target::Model {
+    fn subject(&self) -> Subject {
+        Subject::of::<Target::Entity>(self.id)
+    }
+
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    async fn compared<C: ConnectionTrait>(
+        &self,
+        db: &C,
+    ) -> Result<ComparableValues, WarpgateError> {
+        let target = TargetConfig::try_from(self.clone())?;
+        let names = Names::referenced_by(db, &[&target]).await?;
+        // A role assignment has a log entry of its own
+        Ok(row(target, vec![], &names)?.live.compared())
+    }
+}
+
 pub async fn create<C: ConnectionTrait>(
     db: &C,
+    actor: Actor,
     data: &TargetDataRequest,
-) -> Result<Target::Model, ResourceError> {
+) -> Result<Unaudited<Target::Model>, ResourceError> {
     check_name(&data.name)?;
     let mut model = Target::ActiveModel {
-        id: Set(Uuid::new_v4()),
+        id: Set(TargetId(Uuid::new_v4())),
         kind: Set((&data.options).into()),
+        provider: Set(actor.provider_id()),
         ..Default::default()
     };
     set_data(&mut model, data)?;
-    model.insert(db).await.map_err(name_taken)
+    let target = model.insert(db).await.map_err(name_taken)?;
+    Ok(Unaudited::created(target))
 }
 
 pub async fn update<C: ConnectionTrait>(
     db: &C,
-    id: Uuid,
+    actor: Actor,
+    id: TargetId,
     data: &TargetDataRequest,
-) -> Result<Target::Model, ResourceError> {
+) -> Result<Unaudited<Target::Model>, ResourceError> {
     check_name(&data.name)?;
-    let target = Target::Entity::find_by_id(id)
+    let before = Target::Entity::find_by_id(id)
         .one(db)
         .await?
         .ok_or(ResourceError::NotFound)?;
-    if target.kind != (&data.options).into() {
+    actor.may_write(before.provider)?;
+    if before.kind != (&data.options).into() {
         return Err(ResourceError::ProtocolChange);
     }
 
-    let mut model: Target::ActiveModel = target.into();
+    let mut model: Target::ActiveModel = before.clone().into();
     set_data(&mut model, data)?;
-    model.update(db).await.map_err(name_taken)
+    let after = model.update(db).await.map_err(name_taken)?;
+    Ok(Unaudited::updated(before, after))
 }
 
 pub async fn delete<C: ConnectionTrait + TransactionTrait>(
     db: &C,
-    id: Uuid,
-) -> Result<AdmittedSessions, ResourceError> {
-    let txn = db.begin().await?;
+    actor: Actor,
+    id: TargetId,
+) -> Result<(Unaudited<Target::Model>, AdmittedSessions), ResourceError> {
+    let txn = begin_write(db).await?;
     let target = Target::Entity::find_by_id(id)
         .one(&txn)
         .await?
         .ok_or(ResourceError::NotFound)?;
+    actor.may_write(target.provider)?;
 
     TargetRoleAssignment::Entity::delete_many()
         .filter(TargetRoleAssignment::Column::TargetId.eq(target.id))
@@ -125,16 +240,61 @@ pub async fn delete<C: ConnectionTrait + TransactionTrait>(
             .await?;
     }
 
-    target.delete(&txn).await?;
+    target.clone().delete(&txn).await?;
     txn.commit().await?;
-    Ok(AdmittedSessions(admitted))
+    Ok((Unaudited::deleted(target), AdmittedSessions(admitted)))
+}
+
+/// Logged with [`RoleAssignmentChange::audit`]
+#[derive(Debug)]
+#[must_use]
+pub struct RoleAssignmentChange {
+    pub(super) target: Target::Model,
+    pub(super) role: Role::Model,
+    pub(super) added: bool,
+}
+
+impl RoleAssignmentChange {
+    pub fn audit(&self, by: ChangedBy) {
+        AuditEvent::TargetRoleChanged {
+            added: self.added,
+            target_id: self.target.id,
+            target_name: self.target.name.clone(),
+            role_id: self.role.id,
+            role_name: self.role.name.clone(),
+            by,
+        }
+        .emit();
+    }
+}
+
+/// The rows of an assignment that `actor` may change. Role assignments have
+/// no owner column, so the target's owner decides
+async fn assignment_rows<C: ConnectionTrait>(
+    db: &C,
+    actor: Actor,
+    target_id: TargetId,
+    role_id: RoleId,
+) -> Result<(Target::Model, Role::Model), ResourceError> {
+    let target = Target::Entity::find_by_id(target_id)
+        .one(db)
+        .await?
+        .ok_or(ResourceError::NotFound)?;
+    actor.may_write(target.provider)?;
+    let role = Role::Entity::find_by_id(role_id)
+        .one(db)
+        .await?
+        .ok_or(ResourceError::NotFound)?;
+    Ok((target, role))
 }
 
 pub async fn add_role<C: ConnectionTrait>(
     db: &C,
-    target_id: Uuid,
-    role_id: Uuid,
-) -> Result<(), ResourceError> {
+    actor: Actor,
+    target_id: TargetId,
+    role_id: RoleId,
+) -> Result<RoleAssignmentChange, ResourceError> {
+    let (target, role) = assignment_rows(db, actor, target_id, role_id).await?;
     TargetRoleAssignment::ActiveModel {
         target_id: Set(target_id),
         role_id: Set(role_id),
@@ -148,19 +308,29 @@ pub async fn add_role<C: ConnectionTrait>(
             err.into()
         }
     })?;
-    Ok(())
+    Ok(RoleAssignmentChange {
+        target,
+        role,
+        added: true,
+    })
 }
 
 pub async fn remove_role<C: ConnectionTrait>(
     db: &C,
-    target_id: Uuid,
-    role_id: Uuid,
-) -> Result<(), ResourceError> {
+    actor: Actor,
+    target_id: TargetId,
+    role_id: RoleId,
+) -> Result<RoleAssignmentChange, ResourceError> {
+    let (target, role) = assignment_rows(db, actor, target_id, role_id).await?;
     let result = TargetRoleAssignment::Entity::delete_by_id((target_id, role_id))
         .exec(db)
         .await?;
     if result.rows_affected == 0 {
         return Err(ResourceError::NotFound);
     }
-    Ok(())
+    Ok(RoleAssignmentChange {
+        target,
+        role,
+        added: false,
+    })
 }

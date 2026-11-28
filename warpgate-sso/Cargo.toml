@@ -1,6 +1,6 @@
 [package]
 name = "warpgate-sso"
-version = "0.30.2"
+version = "0.31.0-beta.3"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -34,3 +34,4 @@ yup-oauth2 = { version = "12", default-features = false, features = [
 
 [dev-dependencies]
 rcgen.workspace = true
+rustls = { workspace = true, features = ["aws_lc_rs"] }

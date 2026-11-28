@@ -7,11 +7,12 @@ use sea_orm::{
 use time::OffsetDateTime;
 use uuid::Uuid;
 use warpgate_ca::{deserialize_certificate, serialize_certificate_serial};
-use warpgate_common::{AdminPermission, WarpgateError};
-use warpgate_core::logging::{AuditEvent, CredentialChangedVia};
+use warpgate_common::{AdminPermission, UserId, WarpgateError};
+use warpgate_core::logging::CredentialChange;
 use warpgate_db_entities::{CertificateCredential, CertificateRevocation, User};
 
-use super::AdminContext;
+use super::common::audit_credential;
+use super::{AdminContext, guard_user_mutation};
 
 fn certificate_fingerprint(certificate_pem: &str) -> Result<String, WarpgateError> {
     Ok(warpgate_ca::certificate_sha256_hex_fingerprint(
@@ -92,7 +93,7 @@ impl ListApi {
     async fn api_get_all(
         &self,
         admin: AdminContext,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
     ) -> Result<GetCertificateCredentialsResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
 
@@ -111,13 +112,14 @@ impl ListApi {
     #[oai(
         path = "/users/:user_id/credentials/certificates",
         method = "post",
-        operation_id = "issue_certificate_credential"
+        operation_id = "issue_certificate_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_issue(
         &self,
         admin: AdminContext,
         body: Json<IssueCertificateCredentialRequest>,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
     ) -> Result<IssueCertificateCredentialResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
 
@@ -130,8 +132,12 @@ impl ListApi {
         };
 
         let public_key_pem = body.public_key_pem.trim();
-        let client_cert =
-            warpgate_ca::issue_client_certificate(&ca, &user.username, public_key_pem, *user_id)?;
+        let client_cert = warpgate_ca::issue_client_certificate(
+            &ca,
+            &user.username,
+            public_key_pem,
+            user_id.0.0,
+        )?;
 
         let client_cert_pem = warpgate_ca::certificate_to_pem(&client_cert)?;
 
@@ -148,15 +154,13 @@ impl ListApi {
         .map_err(WarpgateError::from)?;
 
         let credential_name = body.label.clone();
-        AuditEvent::CredentialCreated {
-            credential_type: "certificate".to_string(),
-            credential_name: Some(credential_name),
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username: user.username.clone(),
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        audit_credential(
+            &admin,
+            CredentialChange::Created,
+            "certificate",
+            Some(&credential_name),
+            &user,
+        );
 
         Ok(IssueCertificateCredentialResponse::Issued(Json(
             IssuedCertificateCredential {
@@ -182,13 +186,14 @@ impl DetailApi {
     #[oai(
         path = "/users/:user_id/credentials/certificates/:id",
         method = "patch",
-        operation_id = "update_certificate_credential"
+        operation_id = "update_certificate_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_update(
         &self,
         admin: AdminContext,
         body: Json<UpdateCertificateCredential>,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
         id: Path<Uuid>,
     ) -> Result<UpdateCertificateCredentialResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
@@ -202,10 +207,22 @@ impl DetailApi {
             return Ok(UpdateCertificateCredentialResponse::NotFound);
         };
 
+        let Some(user) = User::Entity::find_by_id(*user_id).one(db).await? else {
+            return Ok(UpdateCertificateCredentialResponse::NotFound);
+        };
+
         let mut am = cred.into_active_model();
 
         am.label = Set(body.label.clone());
         let model = am.update(db).await?;
+
+        audit_credential(
+            &admin,
+            CredentialChange::Updated,
+            "certificate",
+            Some(&model.label),
+            &user,
+        );
 
         Ok(UpdateCertificateCredentialResponse::Updated(Json(
             model.into(),
@@ -215,12 +232,13 @@ impl DetailApi {
     #[oai(
         path = "/users/:user_id/credentials/certificates/:id",
         method = "delete",
-        operation_id = "revoke_certificate_credential"
+        operation_id = "revoke_certificate_credential",
+        transform = "guard_user_mutation"
     )]
     async fn api_delete(
         &self,
         admin: AdminContext,
-        user_id: Path<Uuid>,
+        user_id: Path<UserId>,
         id: Path<Uuid>,
     ) -> Result<RevokeCertificateCredentialResponse, WarpgateError> {
         admin.require(AdminPermission::UsersEdit)?;
@@ -252,15 +270,13 @@ impl DetailApi {
             return Ok(RevokeCertificateCredentialResponse::NotFound);
         };
 
-        AuditEvent::CredentialDeleted {
-            credential_type: "certificate".to_string(),
-            credential_name: Some(credential_name.clone()),
-            via: CredentialChangedVia::Admin,
-            user_id: *user_id,
-            username: user.username,
-            actor_user_id: admin.auth.user_id(),
-        }
-        .emit();
+        audit_credential(
+            &admin,
+            CredentialChange::Deleted,
+            "certificate",
+            Some(&credential_name),
+            &user,
+        );
 
         Ok(RevokeCertificateCredentialResponse::Revoked)
     }

@@ -1,0 +1,31 @@
+/// BER-TLV with the tag `0x53` containing in the value field of the
+/// requested data object.
+pub const DATA: u8 = 0x53;
+/// [FASC-N](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-73-4.pdf#page=36).
+pub const FASC_N: u8 = 0x30;
+/// [GUID](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-73-4.pdf#page=36).
+pub const GUID: u8 = 0x34;
+/// [Expiration Date](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-73-4.pdf#page=36).
+pub const EXPIRATION_DATE: u8 = 0x35;
+/// [Issuer Asymmetric Signature](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-73-4.pdf#page=36).
+pub const ISSUER_SIGNATURE: u8 = 0x3E;
+/// [Error Detection Code](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-73-4.pdf#page=39).
+pub const ERROR_DETECTION_CODE: u8 = 0xFE;
+/// [PIV Card Application Property Template](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-73-4.pdf#page=84).
+pub const APPLICATION_PROPERTY_TEMPLATE: u8 = 0x61;
+/// [PIV Card Application AID](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-73-4.pdf#page=36).
+pub const APPLICATION_IDENTIFIER: u8 = 0x4F;
+/// [Coexistent Tag Allocation Authority Template](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-73-4.pdf#page=84).
+pub const COEXISTING_TAG_ALLOCATION_AUTHORITY: u8 = 0x79;
+/// [Tag list](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-73-4.pdf#page=85).
+pub const TAG_LIST: u8 = 0x5C;
+/// [Certificate](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-73-4.pdf#page=40).
+pub const CERTIFICATE: u8 = 0x70;
+/// [CertInfo](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-73-4.pdf#page=40).
+pub const CERT_INFO: u8 = 0x71;
+/// [Dynamic Authentication Template](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-73-4.pdf#page=93).
+pub const DYNAMIC_AUTHENTICATION_TEMPLATE: u8 = 0x7C;
+/// [Challenge](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-73-4.pdf#page=93).
+pub const DAT_CHALLENGE: u8 = 0x81;
+/// [Response](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-73-4.pdf#page=93).
+pub const DAT_RESPONSE: u8 = 0x82;

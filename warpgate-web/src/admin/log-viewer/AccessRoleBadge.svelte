@@ -10,5 +10,5 @@
 
 <Badge color="warning" class="d-flex align-items-center">
     <Fa icon={faCog} class="me-2" />
-    <a href="/config/access-roles/{id}" use:link>{name}</a>
+    <a href="/manage/access-roles/{id}" use:link>{name}</a>
 </Badge>

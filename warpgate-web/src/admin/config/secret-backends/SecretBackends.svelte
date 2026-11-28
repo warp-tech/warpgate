@@ -6,6 +6,7 @@
         type SecretBackend,
         type SecretBackendRequest,
     } from 'admin/lib/api'
+    import PermissionGate from 'admin/lib/PermissionGate.svelte'
     import { adminPermissions } from 'admin/lib/store'
     import EmptyState from 'common/EmptyState.svelte'
     import { stringifyError } from 'common/errors'
@@ -110,24 +111,25 @@
     <Alert color="danger">{error}</Alert>
 {/if}
 
-{#key gen}
-    <ItemList {load} showSearch={false}>
-        {#snippet item(
-            backend,
-        )}
-            {const probe = $derived(health.get(backend.id))}
-            <div class="list-group-item px-0">
-                <div class="d-flex align-items-center gap-2">
-                    <strong>{backend.name}</strong>
-                    <Badge color="secondary">{backend.backendType}</Badge>
-                    {#if probe?.error}
-                        <Badge color="danger" title={probe.error}>
-                            Unhealthy
-                        </Badge>
-                    {:else if probe}
-                        <Badge color="success">Healthy</Badge>
-                    {/if}
-                    {#if $adminPermissions.configEdit}
+<PermissionGate
+    perm="configEdit"
+    message="You have no permission to manage secret backends."
+>
+    {#key gen}
+        <ItemList {load} showSearch={false}>
+            {#snippet item(backend)}
+                {const probe = $derived(health.get(backend.id))}
+                <div class="list-group-item px-0">
+                    <div class="d-flex align-items-center gap-2">
+                        <strong>{backend.name}</strong>
+                        <Badge color="secondary">{backend.backendType}</Badge>
+                        {#if probe?.error}
+                            <Badge color="danger" title={probe.error}>
+                                Unhealthy
+                            </Badge>
+                        {:else if probe}
+                            <Badge color="success">Healthy</Badge>
+                        {/if}
                         <Button
                             class="ms-auto"
                             color="link px-0"
@@ -148,29 +150,29 @@
                         >
                             Delete
                         </Button>
-                    {/if}
-                </div>
-                <div class="text-muted small">
-                    {backend.address}
-                    {#if backend.namespace}
-                        · namespace {backend.namespace}
-                    {/if}
-                    · {backend.auth.method}
+                    </div>
+                    <div class="text-muted small">
+                        {backend.address}
+                        {#if backend.namespace}
+                            · namespace {backend.namespace}
+                        {/if}
+                        · {backend.auth.method}
 
-                    {#if probe?.error}
-                        <span class="text-danger">· {probe.error}</span>
-                    {/if}
+                        {#if probe?.error}
+                            <span class="text-danger">· {probe.error}</span>
+                        {/if}
+                    </div>
                 </div>
-            </div>
-        {/snippet}
-        {#snippet empty()}
-            <EmptyState
-                title="None yet"
-                hint="Secret backends let you reference passwords and private keys from Vault / OpenBao"
-            />
-        {/snippet}
-    </ItemList>
-{/key}
+            {/snippet}
+            {#snippet empty()}
+                <EmptyState
+                    title="None yet"
+                    hint="Secret backends let you reference passwords and private keys from Vault / OpenBao"
+                />
+            {/snippet}
+        </ItemList>
+    {/key}
+</PermissionGate>
 
 {#if modalOpen}
     <SecretBackendModal bind:isOpen={modalOpen} instance={editing} {save} />

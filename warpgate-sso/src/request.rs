@@ -67,15 +67,24 @@ pub async fn map_sso_result(
         };
     }
 
-    // If preferred_username is absent, fall back to `email`
-    let preferred_username = get_claim!(preferred_username)
-        .map(|x| x.as_str())
-        .map(ToString::to_string)
-        .or_else(|| {
-            get_claim!(email)
-                .map(|x| x.as_str())
-                .map(ToString::to_string)
-        });
+    // If preferred_username is absent or empty, fall back to `email`
+    let preferred_username = [
+        result.claims.preferred_username(),
+        result
+            .userinfo_claims
+            .as_ref()
+            .and_then(|x| x.preferred_username()),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|x| x.as_str())
+    .find(|x| !x.is_empty())
+    .map(ToString::to_string)
+    .or_else(|| {
+        get_claim!(email)
+            .map(|x| x.as_str())
+            .map(ToString::to_string)
+    });
 
     let name = get_claim!(name)
         .and_then(|x| x.get(None))
@@ -90,6 +99,7 @@ pub async fn map_sso_result(
     let (access_groups, admin_groups) =
         match crate::google_groups::fetch_groups_if_configured(config, email.as_deref()).await {
             Ok(Some(google_groups)) => (Some(google_groups.clone()), Some(google_groups)),
+            Ok(None) if !config.supports_role_claims() => (None, None),
             Ok(None) => (
                 extract_groups(
                     &result,
@@ -127,7 +137,14 @@ pub async fn map_sso_result(
     }
 }
 
-fn extract_groups(result: &SsoResult, claim: &str, warn_if_missing: bool) -> Option<Vec<String>> {
+/// `None` leaves the user's roles as they are.
+///
+/// `mapped`: the provider maps the claim's groups to roles. The claim is then
+/// the whole list of the user's groups, and identity providers leave it out
+/// for a user who has none, so a login without it has no groups. That only
+/// holds once userinfo was read as well: a failed userinfo request must not
+/// take roles away.
+fn extract_groups(result: &SsoResult, claim: &str, mapped: bool) -> Option<Vec<String>> {
     let userinfo_claims = result
         .userinfo_claims
         .as_ref()
@@ -139,19 +156,23 @@ fn extract_groups(result: &SsoResult, claim: &str, warn_if_missing: bool) -> Opt
         .get(claim)
         .or_else(|| userinfo_claims.and_then(|c| c.get(claim)))
     else {
-        if warn_if_missing {
-            warn!(
-                "Claim {claim:?} not found - roles will not be synced. ID token claims: {:?}, userinfo claims: {:?}",
-                result
-                    .claims
-                    .additional_claims()
-                    .0
-                    .keys()
-                    .collect::<Vec<_>>(),
-                userinfo_claims.map(|c| c.keys().collect::<Vec<_>>()),
-            );
+        if !mapped {
+            return None;
         }
-        return None;
+        let id_token_claims = result.claims.additional_claims().0.keys();
+        let Some(userinfo_claims) = userinfo_claims else {
+            warn!(
+                "Claim {claim:?} not found and userinfo was not read - roles will not be synced. ID token claims: {:?}",
+                id_token_claims.collect::<Vec<_>>(),
+            );
+            return None;
+        };
+        debug!(
+            "Claim {claim:?} not found - the user has no groups. ID token claims: {:?}, userinfo claims: {:?}",
+            id_token_claims.collect::<Vec<_>>(),
+            userinfo_claims.keys().collect::<Vec<_>>(),
+        );
+        return Some(Vec::new());
     };
     match serde_json::from_value::<GroupClaim>(raw.clone()) {
         Ok(claim) => Some(flatten_group_claim(claim)),
@@ -159,5 +180,54 @@ fn extract_groups(result: &SsoResult, claim: &str, warn_if_missing: bool) -> Opt
             warn!("Claim {claim:?} is not a list of role names, ignoring: {e}");
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn empty_preferred_username_falls_back_to_userinfo_email() {
+        let claims = json!({
+            "iss": "https://idp.example.com", "sub": "alice",
+            "aud": "warpgate", "iat": 1, "exp": 2,
+            "preferred_username": "",
+        });
+        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let key =
+            jsonwebtoken::EncodingKey::from_ec_pem(key_pair.serialize_pem().as_bytes()).unwrap();
+        let token = jsonwebtoken::encode(
+            &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::ES256),
+            &claims,
+            &key,
+        )
+        .unwrap()
+        .parse()
+        .unwrap();
+        let result = crate::SsoResult {
+            token,
+            claims: serde_json::from_value(claims).unwrap(),
+            userinfo_claims: Some(
+                openidconnect::UserInfoClaims::from_json::<std::io::Error>(
+                    &serde_json::to_vec(&json!({
+                        "sub": "alice", "email": "alice@example.com", "email_verified": true,
+                    }))
+                    .unwrap(),
+                    None,
+                )
+                .unwrap(),
+            ),
+        };
+        let config = serde_json::from_value(json!({
+            "type": "custom", "client_id": "warpgate", "client_secret": "secret",
+            "issuer_url": "https://idp.example.com", "scopes": [],
+        }))
+        .unwrap();
+        let response = super::map_sso_result(&config, result).await;
+        assert_eq!(
+            response.preferred_username.as_deref(),
+            Some("alice@example.com")
+        );
     }
 }

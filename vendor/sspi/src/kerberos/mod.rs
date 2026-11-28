@@ -7,7 +7,7 @@ mod pa_datas;
 pub mod server;
 #[cfg(test)]
 mod tests;
-mod utils;
+pub(crate) mod utils;
 
 use std::fmt::Debug;
 use std::sync::LazyLock;
@@ -21,6 +21,7 @@ use picky_krb::gss_api::WrapToken;
 use picky_krb::messages::KdcProxyMessage;
 use rand::rngs::{StdRng, SysRng};
 use rand_core::{Rng as _, SeedableRng as _};
+use time::{Duration, OffsetDateTime};
 use url::Url;
 
 pub use self::client::initialize_security_context;
@@ -57,12 +58,12 @@ pub const DEFAULT_ENCRYPTION_TYPE: CipherSuite = CipherSuite::Aes256CtsHmacSha19
 /// The RRC field is 12 if no encryption is requested or 28 if encryption is requested
 pub const RRC: u16 = 28;
 // wrap token header len
-pub const MAX_SIGNATURE: usize = 16;
+pub const MAX_SIGNATURE: u8 = 16;
 /// Required `TOKEN` buffer length during data encryption (`encrypt_message` method call).
 ///
 /// **Note**: Actual security trailer len is `SECURITY_TRAILER` + `EC`. The `EC` field is negotiated
 // during the authentication process.
-pub const SECURITY_TRAILER: usize = 60;
+pub const SECURITY_TRAILER: u8 = 60;
 
 /// [3.4.5.4.1 Kerberos Binding of GSS_WrapEx()](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-kile/e94b3acd-8415-4d0d-9786-749d0c39d550)
 ///
@@ -99,6 +100,9 @@ pub struct Kerberos {
     pub(crate) dh_parameters: Option<DhParameters>,
     pub(crate) krb5_user_to_user: bool,
     pub(crate) server: Option<Box<ServerProperties>>,
+    pub(crate) remote_seq_number: u32,
+    /// KDC time minus local time, learned from a clock-skew error during AS pre-authentication.
+    pub(crate) clock_offset: Duration,
 }
 
 impl Kerberos {
@@ -119,6 +123,8 @@ impl Kerberos {
             dh_parameters: None,
             krb5_user_to_user: false,
             server: None,
+            remote_seq_number: 0,
+            clock_offset: Duration::ZERO,
         })
     }
 
@@ -139,11 +145,19 @@ impl Kerberos {
             dh_parameters: None,
             krb5_user_to_user: false,
             server: Some(Box::new(server_properties)),
+            remote_seq_number: 0,
+            clock_offset: Duration::ZERO,
         })
     }
 
     pub fn is_client(&self) -> bool {
         self.server.is_none()
+    }
+
+    pub(crate) fn current_kdc_time(&self) -> Result<OffsetDateTime> {
+        OffsetDateTime::now_utc()
+            .checked_add(self.clock_offset)
+            .ok_or_else(|| Error::new(ErrorKind::TimeSkew, "KDC clock offset is out of range"))
     }
 
     pub fn config(&self) -> &KerberosConfig {
@@ -219,7 +233,8 @@ impl Kerberos {
                 yield_point.suspend(request).await
             }
             NetworkProtocol::Udp => {
-                if data.len() < 4 {
+                // First 4 bytes are message length and it’s not included when using UDP
+                let Some(data) = data.get(4..) else {
                     return Err(Error::new(
                         ErrorKind::InternalError,
                         format!(
@@ -227,13 +242,12 @@ impl Kerberos {
                             data.len()
                         ),
                     ));
-                }
+                };
 
-                // First 4 bytes are message length and it’s not included when using UDP
                 let request = NetworkRequest {
                     protocol,
                     url: kdc_url,
-                    data: data[4..].to_vec(),
+                    data: data.to_vec(),
                 };
                 yield_point.suspend(request).await
             }
@@ -301,7 +315,7 @@ impl Sspi for Kerberos {
 
         let key_usage = self.encryption_params.sspi_encrypt_key_usage;
 
-        let mut wrap_token = WrapToken::with_seq_number(seq_number as u64);
+        let mut wrap_token = WrapToken::with_seq_number(seq_number.into());
         if self.server.is_some() {
             // [Flags Field](https://datatracker.ietf.org/doc/html/rfc4121#section-4.2.2):
             //
@@ -368,7 +382,8 @@ impl Sspi for Kerberos {
         let security_trailer_len = self.query_context_sizes()?.security_trailer.try_into()?;
 
         let (token, data) = if raw_wrap_token.len() < security_trailer_len {
-            (raw_wrap_token.as_slice(), &[] as &[u8])
+            let empty_data: &[u8] = &[];
+            (raw_wrap_token.as_slice(), empty_data)
         } else {
             raw_wrap_token.split_at(security_trailer_len)
         };
@@ -518,9 +533,9 @@ impl Sspi for Kerberos {
 
         Ok(ContextSizes {
             max_token: PACKAGE_INFO.max_token_len,
-            max_signature: MAX_SIGNATURE as u32,
+            max_signature: MAX_SIGNATURE.into(),
             block: 0,
-            security_trailer: SECURITY_TRAILER as u32 + u32::from(self.encryption_params.ec),
+            security_trailer: u32::from(SECURITY_TRAILER) + u32::from(self.encryption_params.ec),
         })
     }
 
@@ -752,7 +767,13 @@ impl SspiEx for Kerberos {
     }
 
     fn verify_mic_token(&mut self, token: &[u8], data: &[u8], _: crate::private::Sealed) -> Result<()> {
-        utils::validate_mic_token(self.is_client(), token, &self.encryption_params, data)
+        utils::validate_mic_token(
+            self.is_client(),
+            self.remote_seq_number.into(),
+            token,
+            &self.encryption_params,
+            data,
+        )
     }
 
     fn generate_mic_token(&mut self, data: &[u8], _: crate::private::Sealed) -> Result<Vec<u8>> {
@@ -768,7 +789,18 @@ impl SspiEx for Kerberos {
             .sub_session_key
             .as_ref()
             .ok_or_else(|| Error::new(ErrorKind::InternalError, "kerberos sub-session key is not set"))?;
-        utils::generate_mic_token(self.is_client(), u64::from(seq_number), data.to_vec(), session_key)
+        let aes_size = self
+            .encryption_params
+            .active_key_aes_size()
+            .or_else(|| self.encryption_params.aes_size())
+            .unwrap_or(AesSize::Aes256);
+        utils::generate_mic_token(
+            self.is_client(),
+            u64::from(seq_number),
+            data.to_vec(),
+            session_key,
+            &aes_size,
+        )
     }
 }
 
@@ -825,6 +857,8 @@ pub mod test_data {
             dh_parameters: None,
             krb5_user_to_user: false,
             server: None,
+            remote_seq_number: 0,
+            clock_offset: time::Duration::ZERO,
         }
     }
 
@@ -871,6 +905,8 @@ pub mod test_data {
             dh_parameters: None,
             krb5_user_to_user: false,
             server: Some(Box::new(fake_server_properties())),
+            remote_seq_number: 0,
+            clock_offset: time::Duration::ZERO,
         }
     }
 }

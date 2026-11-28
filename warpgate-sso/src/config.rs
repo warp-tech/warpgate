@@ -160,8 +160,16 @@ pub enum SsoInternalProviderConfig {
         client_secret: ClientSecret,
         #[schemars(with = "String")]
         issuer_url: IssuerUrl,
+        /// Full discovery document URL when it is hosted separately from the issuer.
+        /// The document and ID tokens must still match issuer_url exactly.
+        /// Kubernetes OIDC clients discover from issuer_url and ignore this
+        #[schemars(with = "Option<String>")]
+        discovery_url: Option<openidconnect::url::Url>,
         scopes: Vec<String>,
+        /// Maps the groups in the roles claim to Warpgate role names. The
+        /// mapped roles follow the claim: a login without it removes them.
         role_mappings: Option<HashMap<String, RoleMapping>>,
+        /// Like role_mappings, for admin roles and the admin roles claim.
         admin_role_mappings: Option<HashMap<String, RoleMapping>>,
         /// OIDC claim to read group memberships from (e.g. "groups").
         /// Its values are mapped to roles via role_mappings / admin_role_mappings.
@@ -255,6 +263,13 @@ impl SsoInternalProviderConfig {
         })
     }
 
+    pub fn discovery_url(&self) -> Option<&openidconnect::url::Url> {
+        match self {
+            Self::Custom { discovery_url, .. } => discovery_url.as_ref(),
+            _ => None,
+        }
+    }
+
     #[inline]
     pub fn issuer_url(&self) -> Result<IssuerUrl, SsoError> {
         Ok(match self {
@@ -316,6 +331,10 @@ impl SsoInternalProviderConfig {
             Self::Apple { .. } => false,
             _ => true,
         }
+    }
+
+    pub const fn supports_role_claims(&self) -> bool {
+        !matches!(self, Self::Google { .. })
     }
 
     #[inline]

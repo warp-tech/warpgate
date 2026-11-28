@@ -66,7 +66,7 @@
         { kind: CredentialKind.Certificate, label: 'Certificate' },
         { kind: CredentialKind.Totp, label: 'OTP' },
         { kind: CredentialKind.Sso, label: 'SSO' },
-        { kind: CredentialKind.WebUserApproval, label: 'In-browser auth' },
+        { kind: CredentialKind.WebUserApproval, label: 'In-browser approval' },
     ]
 
     const requiresPassword = (id: ProtocolID) => id === 'vnc' || id === 'rdp'

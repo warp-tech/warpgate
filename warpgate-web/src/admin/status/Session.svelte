@@ -14,7 +14,6 @@
         ApprovalRequestStatus,
         api,
         type Recording,
-        type Target,
         type TargetSessionSnapshot,
         type UserSessionSnapshot,
     } from 'admin/lib/api'
@@ -24,6 +23,7 @@
     import AsyncButton from 'common/AsyncButton.svelte'
     import DelayedSpinner from 'common/DelayedSpinner.svelte'
     import { stringifyError } from 'common/errors'
+    import OnboardingHint from 'common/OnboardingHint.svelte'
     import { PROTOCOL_PROPERTIES } from 'common/protocols'
     import RelativeDate from 'common/RelativeDate.svelte'
     import {
@@ -32,6 +32,7 @@
         recordingTypeLabel,
     } from 'common/recordings'
     import StickyActionBar from 'common/StickyActionBar.svelte'
+    import { setCurrentSidebarSubtitle } from 'common/sidebarState.svelte'
     import { formatDistance } from 'date-fns'
     import { onDestroy } from 'svelte'
     import Fa from 'svelte-fa'
@@ -46,6 +47,9 @@
 
     let error: string | null = $state(null)
     let session: UserSessionSnapshot | null = $state(null)
+    setCurrentSidebarSubtitle(
+        () => session && (session.username ?? session.id.slice(0, 8)),
+    )
     let recordings: Recording[] | null = $state(null)
 
     async function load() {
@@ -57,32 +61,6 @@
     async function close() {
         if (!session) return
         api.closeSession(session)
-    }
-
-    function getTargetAddress(target: Target) {
-        let address = '<unknown>'
-        if (target.options.kind === 'Ssh') {
-            address = `${target.options.host}:${target.options?.port}`
-        }
-        if (target.options.kind === 'MySql') {
-            address = `${target.options.host}:${target.options?.port}`
-        }
-        if (target.options.kind === 'Postgres') {
-            address = `${target.options.host}:${target.options?.port}`
-        }
-        if (target.options.kind === 'Http') {
-            address = target.options.url
-        }
-        if (target.options.kind === 'Kubernetes') {
-            address = target.options.clusterUrl
-        }
-        if (target.options.kind === 'Vnc') {
-            address = `${target.options.host}:${target.options?.port}`
-        }
-        if (target.options.kind === 'Rdp') {
-            address = `${target.options.host}:${target.options?.port}`
-        }
-        return address
     }
 
     function getRecordingsForSession(s: TargetSessionSnapshot) {
@@ -123,6 +101,10 @@
             {/if}
         </div>
     </div>
+
+    <OnboardingHint>
+        This page shows the overview and the log of a single user's session.
+    </OnboardingHint>
 
     <div class="list-group list-group-flush tree">
         <div class="list-group-item">

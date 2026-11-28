@@ -14,12 +14,14 @@ macro_rules! with_every_entity {
             HttpSession,
             IpBlock,
             KnownHost,
+            KubernetesSession,
             LdapServer,
             LogEntry,
             Node,
             OtpCredential,
             Parameters,
             PasswordCredential,
+            ProviderSync,
             PublicKeyCredential,
             Recording,
             Role,
@@ -49,3 +51,16 @@ macro_rules! declare_modules {
 }
 
 with_every_entity!(declare_modules);
+
+/// SQLite fails a read transaction's first write without waiting for the busy
+/// timeout if another connection has written since. `BEGIN IMMEDIATE` takes
+/// the write lock up front, so writers queue. Other backends ignore the mode
+pub async fn begin_write<C: sea_orm::TransactionTrait>(
+    db: &C,
+) -> Result<C::Transaction, sea_orm::DbErr> {
+    db.begin_with_options(sea_orm::TransactionOptions {
+        sqlite_transaction_mode: Some(sea_orm::SqliteTransactionMode::Immediate),
+        ..Default::default()
+    })
+    .await
+}

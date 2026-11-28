@@ -11,7 +11,7 @@ use widestring::Utf16String;
 
 use super::CredSspMode;
 use crate::utf16string::ZeroizedUtf16String;
-use crate::{AuthIdentityBuffers, CredentialsBuffers, Error, ErrorKind, Utf16StringExt, ber};
+use crate::{AuthIdentityBuffers, CredentialsBuffers, Error, ErrorKind, Result, Utf16StringExt, ber};
 
 pub(super) const TS_REQUEST_VERSION: u32 = 6;
 
@@ -85,14 +85,15 @@ impl TsRequest {
 
         ber::read_contextual_tag(&mut stream, 0, ber::Pc::Construct)?;
 
-        let version = ber::read_integer(&mut stream)? as u32;
+        let version = u32::try_from(ber::read_integer(&mut stream)?)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         let nego_tokens = if ber::read_contextual_tag_or_unwind(&mut stream, 1, ber::Pc::Construct)?.is_some() {
             ber::read_sequence_tag(&mut stream)?;
             ber::read_sequence_tag(&mut stream)?;
             ber::read_contextual_tag(&mut stream, 0, ber::Pc::Construct)?;
             let length = ber::read_octet_string_tag(&mut stream)?;
-            let mut nego_tokens = vec![0x00; length as usize];
+            let mut nego_tokens = vec![0x00; length.into()];
             stream.read_exact(&mut nego_tokens)?;
 
             Some(nego_tokens)
@@ -102,7 +103,7 @@ impl TsRequest {
 
         let auth_info = if ber::read_contextual_tag_or_unwind(&mut stream, 2, ber::Pc::Construct)?.is_some() {
             let length = ber::read_octet_string_tag(&mut stream)?;
-            let mut auth_info = vec![0x00; length as usize];
+            let mut auth_info = vec![0x00; length.into()];
             stream.read_exact(&mut auth_info)?;
 
             Some(auth_info)
@@ -112,7 +113,7 @@ impl TsRequest {
 
         let pub_key_auth = if ber::read_contextual_tag_or_unwind(&mut stream, 3, ber::Pc::Construct)?.is_some() {
             let length = ber::read_octet_string_tag(&mut stream)?;
-            let mut pub_key_auth = vec![0x00; length as usize];
+            let mut pub_key_auth = vec![0x00; length.into()];
             stream.read_exact(&mut pub_key_auth)?;
 
             Some(pub_key_auth)
@@ -123,7 +124,8 @@ impl TsRequest {
         let error_code =
             if version >= 3 && ber::read_contextual_tag_or_unwind(&mut stream, 4, ber::Pc::Construct)?.is_some() {
                 let read_error_code = ber::read_integer(&mut stream)?;
-                let error_code = read_error_code as u32;
+                let error_code =
+                    u32::try_from(read_error_code).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
                 Some(NStatusCode(error_code))
             } else {
@@ -133,7 +135,7 @@ impl TsRequest {
         let client_nonce =
             if version >= 5 && ber::read_contextual_tag_or_unwind(&mut stream, 5, ber::Pc::Construct)?.is_some() {
                 let length = ber::read_octet_string_tag(&mut stream)?;
-                if length != NONCE_SIZE as u16 {
+                if usize::from(length) != NONCE_SIZE {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!("Got ClientNonce with invalid length: {length}"),
@@ -164,7 +166,7 @@ impl TsRequest {
     ///
     /// * `buffer` - an output buffer
     pub fn encode_ts_request(&self, mut buffer: impl io::Write) -> io::Result<()> {
-        let len = self.ts_request_len();
+        let len = self.ts_request_len()?;
 
         ber::write_sequence_tag(&mut buffer, len)?;
         /* [0] version */
@@ -173,19 +175,18 @@ impl TsRequest {
 
         /* [1] negoTokens (NegoData) */
         if let Some(ref nego_tokens) = self.nego_tokens {
+            let length = ber::sizeof_sequence_octet_string(
+                u16::try_from(nego_tokens.len()).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?,
+            );
+
             ber::write_contextual_tag(
                 &mut buffer,
                 1,
-                ber::sizeof_sequence(ber::sizeof_sequence(ber::sizeof_sequence_octet_string(
-                    nego_tokens.len() as u16,
-                ))),
+                ber::sizeof_sequence(ber::sizeof_sequence(length)),
                 ber::Pc::Construct,
             )?;
-            ber::write_sequence_tag(
-                &mut buffer,
-                ber::sizeof_sequence(ber::sizeof_sequence_octet_string(nego_tokens.len() as u16)),
-            )?; /* SEQUENCE OF NegoDataItem */
-            ber::write_sequence_tag(&mut buffer, ber::sizeof_sequence_octet_string(nego_tokens.len() as u16))?; /* NegoDataItem */
+            ber::write_sequence_tag(&mut buffer, ber::sizeof_sequence(length))?; /* SEQUENCE OF NegoDataItem */
+            ber::write_sequence_tag(&mut buffer, length)?; /* NegoDataItem */
             ber::write_sequence_octet_string(&mut buffer, 0, nego_tokens)?; /* OCTET STRING */
         }
 
@@ -219,11 +220,11 @@ impl TsRequest {
         Ok(())
     }
 
-    pub fn buffer_len(&self) -> u16 {
-        ber::sizeof_sequence(self.ts_request_len())
+    pub fn buffer_len(&self) -> Result<u16> {
+        Ok(ber::sizeof_sequence(self.ts_request_len()?))
     }
 
-    pub fn check_error(&self) -> crate::Result<()> {
+    pub fn check_error(&self) -> Result<()> {
         match self.error_code {
             Some(error_code) if error_code != NStatusCode::SUCCESS => Err(Error::new_with_nstatus(
                 ErrorKind::InvalidToken,
@@ -234,27 +235,27 @@ impl TsRequest {
         }
     }
 
-    fn ts_request_len(&self) -> u16 {
+    fn ts_request_len(&self) -> io::Result<u16> {
         let (error_code_len, error_code_context_len) = get_error_code_len(self.version, self.error_code);
         let client_nonce_len = if self.client_nonce.is_some() && self.version >= 5 {
             NONCE_FIELD_LEN
         } else {
             0
         };
-        let fields_len = get_nego_tokens_len(&self.nego_tokens)
-            + get_field_len(&self.pub_key_auth)
-            + get_field_len(&self.auth_info)
+        let fields_len = get_nego_tokens_len(&self.nego_tokens)?
+            + get_field_len(&self.pub_key_auth)?
+            + get_field_len(&self.auth_info)?
             + client_nonce_len
             + error_code_context_len
             + error_code_len;
 
-        fields_len + ber::sizeof_integer(2) + ber::sizeof_contextual_tag(3)
+        Ok(fields_len + ber::sizeof_integer(2) + ber::sizeof_contextual_tag(3))
     }
 }
 
 #[instrument(ret, level = "debug")]
 #[cfg(feature = "scard")]
-fn write_smart_card_credentials(credentials: &crate::SmartCardIdentityBuffers) -> crate::Result<Vec<u8>> {
+fn write_smart_card_credentials(credentials: &crate::SmartCardIdentityBuffers) -> Result<Vec<u8>> {
     use picky_asn1::wrapper::{ExplicitContextTag2, ExplicitContextTag3, ExplicitContextTag4, Optional};
     use picky_krb::constants::cred_ssp::AT_KEYEXCHANGE;
     use picky_krb::credssp::{TsCspDataDetail, TsSmartCardCreds};
@@ -290,7 +291,7 @@ fn write_smart_card_credentials(credentials: &crate::SmartCardIdentityBuffers) -
 }
 
 #[instrument(level = "trace", ret)]
-pub fn write_ts_credentials(credentials: &CredentialsBuffers, cred_ssp_mode: CredSspMode) -> crate::Result<Vec<u8>> {
+pub fn write_ts_credentials(credentials: &CredentialsBuffers, cred_ssp_mode: CredSspMode) -> Result<Vec<u8>> {
     let (creds_type, encoded_credentials) = match credentials {
         CredentialsBuffers::AuthIdentity(creds) => {
             (TS_PASSWORD_CREDS, write_password_credentials(creds, cred_ssp_mode)?)
@@ -324,11 +325,11 @@ fn write_password_credentials(credentials: &AuthIdentityBuffers, cred_ssp_mode: 
         CredSspMode::CredentialLess => &empty_identity,
     };
 
-    let ts_credentials_len = sizeof_ts_credentials(identity);
+    let ts_credentials_len = sizeof_ts_credentials(identity)?;
     let ts_credentials_sequence_len = ber::sizeof_sequence(ts_credentials_len);
-    let password_credentials_len = sizeof_ts_password_creds(identity);
+    let password_credentials_len = sizeof_ts_password_creds(identity)?;
 
-    let mut buffer = Vec::with_capacity(ts_credentials_sequence_len as usize);
+    let mut buffer = Vec::with_capacity(ts_credentials_sequence_len.into());
 
     /* TSPasswordCreds (SEQUENCE) */
     ber::write_sequence_tag(&mut buffer, password_credentials_len)?;
@@ -342,7 +343,7 @@ fn write_password_credentials(credentials: &AuthIdentityBuffers, cred_ssp_mode: 
     Ok(buffer)
 }
 
-fn read_password_credentials(data: impl AsRef<[u8]>) -> crate::Result<AuthIdentityBuffers> {
+fn read_password_credentials(data: impl AsRef<[u8]>) -> Result<AuthIdentityBuffers> {
     let password_creds: TsPasswordCreds = picky_asn1_der::from_bytes(data.as_ref())?;
 
     let TsPasswordCreds {
@@ -358,7 +359,7 @@ fn read_password_credentials(data: impl AsRef<[u8]>) -> crate::Result<AuthIdenti
     })
 }
 
-pub fn read_ts_credentials(mut buffer: impl Read) -> crate::Result<CredentialsBuffers> {
+pub fn read_ts_credentials(mut buffer: impl Read) -> Result<CredentialsBuffers> {
     let ts_credentials: TsCredentials = picky_asn1_der::from_reader(&mut buffer)?;
 
     match ts_credentials.cred_type.0.0.first() {
@@ -380,31 +381,55 @@ pub fn read_ts_credentials(mut buffer: impl Read) -> crate::Result<CredentialsBu
     }
 }
 
-fn sizeof_ts_credentials(identity: &AuthIdentityBuffers) -> u16 {
-    ber::sizeof_integer(1)
+fn sizeof_ts_credentials(identity: &AuthIdentityBuffers) -> io::Result<u16> {
+    Ok(ber::sizeof_integer(1)
         + ber::sizeof_contextual_tag(ber::sizeof_integer(1))
-        + ber::sizeof_sequence_octet_string(ber::sizeof_sequence(sizeof_ts_password_creds(identity)))
+        + ber::sizeof_sequence_octet_string(ber::sizeof_sequence(sizeof_ts_password_creds(identity)?)))
 }
 
-fn sizeof_ts_password_creds(identity: &AuthIdentityBuffers) -> u16 {
-    ber::sizeof_sequence_octet_string(identity.domain.as_bytes_le().len() as u16)
-        + ber::sizeof_sequence_octet_string(identity.user.as_bytes_le().len() as u16)
-        + ber::sizeof_sequence_octet_string(identity.password.as_ref().0.as_bytes_le().len() as u16)
+fn sizeof_ts_password_creds(identity: &AuthIdentityBuffers) -> io::Result<u16> {
+    let domain_len = identity
+        .domain
+        .as_bytes_le()
+        .len()
+        .try_into()
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+    let user_len = identity
+        .user
+        .as_bytes_le()
+        .len()
+        .try_into()
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+    let password_len = identity
+        .password
+        .as_ref()
+        .0
+        .as_bytes_le()
+        .len()
+        .try_into()
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+
+    Ok(ber::sizeof_sequence_octet_string(domain_len)
+        + ber::sizeof_sequence_octet_string(user_len)
+        + ber::sizeof_sequence_octet_string(password_len))
 }
 
-fn get_nego_tokens_len(nego_tokens: &Option<Vec<u8>>) -> u16 {
+fn get_nego_tokens_len(nego_tokens: &Option<Vec<u8>>) -> io::Result<u16> {
     match nego_tokens {
         Some(nego_tokens) => {
-            let nego_len = nego_tokens.len() as u16;
+            let nego_len = nego_tokens
+                .len()
+                .try_into()
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
             let mut len = ber::sizeof_octet_string(nego_len);
             len += ber::sizeof_contextual_tag(len);
             len += ber::sizeof_sequence_tag(len);
             len += ber::sizeof_sequence_tag(len);
             len += ber::sizeof_contextual_tag(len);
 
-            len
+            Ok(len)
         }
-        None => 0,
+        None => Ok(0),
     }
 }
 
@@ -420,16 +445,19 @@ fn get_error_code_len(version: u32, error_code: impl Into<Option<NStatusCode>>) 
     }
 }
 
-fn get_field_len(field: &Option<Vec<u8>>) -> u16 {
+fn get_field_len(field: &Option<Vec<u8>>) -> io::Result<u16> {
     match field {
         Some(field) => {
-            let field_len = field.len() as u16;
+            let field_len: u16 = field
+                .len()
+                .try_into()
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
             let mut len = ber::sizeof_octet_string(field_len);
             len += ber::sizeof_contextual_tag(len);
 
-            len
+            Ok(len)
         }
-        None => 0,
+        None => Ok(0),
     }
 }
 
@@ -553,7 +581,7 @@ impl fmt::Display for NStatusCode {
 impl TryFrom<windows::core::HRESULT> for NStatusCode {
     type Error = &'static str;
 
-    fn try_from(hresult: windows::core::HRESULT) -> Result<Self, Self::Error> {
+    fn try_from(hresult: windows::core::HRESULT) -> std::result::Result<Self, Self::Error> {
         // More info: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-erref/0642cb2f-2075-4469-918c-4441e69c548a
         const NSTATUS_BIT: i32 = 0x1000_0000;
 

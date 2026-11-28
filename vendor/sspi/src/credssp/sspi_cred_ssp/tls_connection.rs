@@ -10,7 +10,7 @@ use crate::{
 };
 
 // type + version + length
-pub(super) const TLS_PACKET_HEADER_LEN: usize = 1 /* ContentType */ + 2 /* ProtocolVersion */ + 2 /* length: uint16 */;
+pub(super) const TLS_PACKET_HEADER_LEN: u8 = 1 /* ContentType */ + 2 /* ProtocolVersion */ + 2 /* length: uint16 */;
 
 // The Secure Sockets Layer (SSL) Protocol Version 3.0
 // https://datatracker.ietf.org/doc/html/rfc6101#page-14
@@ -174,9 +174,10 @@ impl TlsConnection {
         connection: &Connection,
         payload: &'data mut [u8],
     ) -> Result<FindTlsPacketResult<'data>> {
-        if payload.len() < TLS_PACKET_HEADER_LEN {
+        let header_len = usize::from(TLS_PACKET_HEADER_LEN);
+        if payload.len() < header_len {
             // We need at least TLS_PACKET_HEADER_LEN bytes to recognize the TLS packet, its type, and length.
-            return Ok(FindTlsPacketResult::Missing(TLS_PACKET_HEADER_LEN));
+            return Ok(FindTlsPacketResult::Missing(header_len));
         }
 
         // In the decryption stage, we accept only TLS packets with TLS_APPLICATION_CONTENT_TYPE specified.
@@ -213,10 +214,10 @@ impl TlsConnection {
         // Safe: payload length is checked above.
         let encrypted_application_data_len = usize::from(u16::from_be_bytes(payload[3..5].try_into().unwrap()));
 
-        let tls_packet_len = TLS_PACKET_HEADER_LEN + encrypted_application_data_len;
+        let tls_packet_len = header_len + encrypted_application_data_len;
         if payload.len() < tls_packet_len {
             return Ok(FindTlsPacketResult::Missing(
-                TLS_PACKET_HEADER_LEN + encrypted_application_data_len - payload.len(),
+                header_len + encrypted_application_data_len - payload.len(),
             ));
         }
 
@@ -230,9 +231,9 @@ impl TlsConnection {
     // * extra.
     // See the [TlsTrafficParts] documentation for a more detailed explanation of those buffers.
     fn split_tls_traffic<'a>(connection: &Connection, payload: &'a mut [u8]) -> Result<TlsTrafficParts<'a>> {
-        const TLS_PACKET_PREFIX_LEN: usize = TLS_PACKET_HEADER_LEN + TLS_PACKET_SEQUENCE_NUMBER_LEN;
+        let tls_packet_prefix_len = usize::from(TLS_PACKET_HEADER_LEN) + TLS_PACKET_SEQUENCE_NUMBER_LEN;
 
-        if payload.len() < TLS_PACKET_PREFIX_LEN {
+        if payload.len() < tls_packet_prefix_len {
             return Err(Error::new(ErrorKind::InvalidToken, "Input TLS buffer is too short."));
         }
 
@@ -270,12 +271,12 @@ impl TlsConnection {
         // Safe: payload length is checked above.
         let encrypted_application_data_len = usize::from(u16::from_be_bytes(payload[3..5].try_into().unwrap()));
 
-        if payload.len() < TLS_PACKET_HEADER_LEN + encrypted_application_data_len {
+        if payload.len() < usize::from(TLS_PACKET_HEADER_LEN) + encrypted_application_data_len {
             return Err(Error::new(ErrorKind::InvalidToken, "Input TLS buffer is too short."));
         }
 
         // Safe: payload length is checked above.
-        let (header, rest) = payload.split_at_mut(TLS_PACKET_PREFIX_LEN);
+        let (header, rest) = payload.split_at_mut(tls_packet_prefix_len);
         // `encrypted_application_data_len` is a len of the encrypted data with the sequence number.
         // But here we need the encrypted data *WITHOUT* a sequence number, so we subtract TLS_PACKET_SEQUENCE_NUMBER_LEN
         // from the overall data length.
@@ -295,12 +296,13 @@ impl TlsConnection {
     pub(super) fn decrypt_tls<'a>(&mut self, payload: &'a mut [u8]) -> Result<DecryptionResult<'a>> {
         match self {
             TlsConnection::Rustls(tls_connection) => {
-                let mut tls_packet = match TlsConnection::find_tls_data_to_decrypt(tls_connection, payload)? {
-                    FindTlsPacketResult::TlsPacket(data) => data as &[u8],
+                let mut tls_packet: &[u8] = match TlsConnection::find_tls_data_to_decrypt(tls_connection, payload)? {
+                    FindTlsPacketResult::TlsPacket(data) => data,
                     FindTlsPacketResult::Missing(needed_bytes_amount) => {
                         return Ok(DecryptionResult::IncompleteMessage(needed_bytes_amount));
                     }
                 };
+
                 let mut plain_data = Vec::with_capacity(tls_packet.len());
 
                 while !tls_packet.is_empty() {
@@ -383,7 +385,7 @@ impl TlsConnection {
                 };
 
                 Ok(StreamSizes {
-                    header: TLS_PACKET_HEADER_LEN as u32,
+                    header: u32::from(TLS_PACKET_HEADER_LEN),
                     // trailer = tls mac + padding
                     // this value is taken from the win schannel
                     trailer: 0x2c,

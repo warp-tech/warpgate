@@ -1,5 +1,6 @@
 import { mount } from 'svelte'
 import '../theme'
+import 'common/modifiedLinkClicks'
 import App from './App.svelte'
 
 mount(App, {

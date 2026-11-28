@@ -1,24 +1,27 @@
 use std::collections::HashMap;
 use std::fmt::Display;
-use std::mem;
 use std::str::FromStr;
 
 use poem_openapi::param::Path;
 use poem_openapi::payload::Json;
 use poem_openapi::{ApiResponse, Object, OpenApi, Union};
-use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryOrder, Set};
+use sea_orm::{
+    ActiveModelTrait, ConnectionTrait, DatabaseConnection, EntityTrait, ModelTrait, QueryOrder, Set,
+};
+use serde::Serialize;
 use uuid::Uuid;
 use warpgate_common::secrets::validate_backend_name;
 use warpgate_common::{
     AdminPermission, BackendType, SecretError, SecretRef, SecretResolver as _, StoredSecret,
     StoredSecrets, VaultAuthConfig, WarpgateError,
 };
+use warpgate_core::resources::audit::{self, Audited, ComparableValues, RowKind, Subject};
 use warpgate_db_entities::{SecretBackend, SshClientKey, Target};
 
 use super::AdminContext;
 use crate::api::common::is_unique_violation;
 
-#[derive(Object)]
+#[derive(Serialize, Object)]
 #[oai(rename = "SecretBackend")]
 pub struct SecretBackendModel {
     pub id: Uuid,
@@ -45,6 +48,33 @@ impl From<SecretBackend::Model> for SecretBackendModel {
         }
     }
 }
+
+/// The audit log compares the fields of `SecretBackendModel`, with the stored
+/// `auth` secret as a credential
+struct Audit<'a>(&'a SecretBackend::Model);
+
+impl Audited for Audit<'_> {
+    fn subject(&self) -> Subject {
+        Subject::Row(RowKind::SecretBackend, self.0.id)
+    }
+
+    fn name(&self) -> String {
+        self.0.name.clone()
+    }
+
+    async fn compared<C: ConnectionTrait>(
+        &self,
+        _db: &C,
+    ) -> Result<ComparableValues, WarpgateError> {
+        let redacted = SecretBackendModel::from(self.0.clone());
+        let stored = SecretBackendModel {
+            auth: self.0.auth.clone(),
+            ..self.0.clone().into()
+        };
+        audit::columns(&stored, &redacted)
+    }
+}
+
 #[derive(Object)]
 #[oai(rename = "SecretBackendSummary")]
 pub struct SecretBackendSummary {
@@ -95,13 +125,13 @@ pub struct TestResolveRequest {
 
 #[derive(Object)]
 pub struct SecretReferenceUsageTarget {
-    pub id: Uuid,
+    pub id: warpgate_common::TargetId,
     pub name: String,
 }
 
 #[derive(Object)]
 pub struct SecretReferenceUsageSshClientKey {
-    pub id: Uuid,
+    pub id: warpgate_common::SshClientKeyId,
     pub label: String,
 }
 
@@ -235,24 +265,44 @@ fn update_active_model(
 ) -> Result<(), WarpgateError> {
     validate_backend_name(&body.name)?;
 
-    // existing entry that can be used to restore the full auth field
-    let stored = existing
-        .map(|m| &m.auth)
-        // only if the auth type hasn't changed
-        .filter(|auth| mem::discriminant(*auth) == mem::discriminant(&body.auth))
-        .and_then(VaultAuthConfig::secret);
+    // A blank login secret keeps the stored one. A caller must not be able to
+    // redirect it to another server or to an unverified connection
+    let stored = existing.and_then(|existing| existing.auth.secret());
+    let same_destination = existing.is_some_and(|existing| {
+        // Every field is listed so that a new one does not compile until it
+        // is either compared or ignored here
+        let SecretBackend::Model {
+            address,
+            namespace,
+            auth,
+            tls_skip_verify,
+            id: _,
+            name: _,
+            backend_type: _,
+            allowed_paths: _,
+        } = existing;
+        *address == body.address
+            && *namespace == body.namespace
+            && auth.redacted() == body.auth.redacted()
+            && (*tls_skip_verify || !body.tls_skip_verify)
+    });
 
     let mut auth = body.auth.clone();
     if let Some(provided_secret) = auth.secret_mut() {
         let provided_value = provided_secret.stored_value();
-        *provided_secret = if provided_value.is_empty() {
-            stored.cloned().ok_or_else(|| {
-                WarpgateError::InvalidRequest(
-                    "The login secret is required for this authentication method".into(),
-                )
-            })?
-        } else {
+        *provided_secret = if !provided_value.is_empty() {
             StoredSecret::encrypted(provided_value.to_owned())?
+        } else if let Some(stored) = stored.filter(|_| same_destination) {
+            stored.clone()
+        } else {
+            return Err(WarpgateError::InvalidRequest(
+                if stored.is_some() {
+                    "The login secret is required when changing the address, namespace or authentication settings, or disabling TLS verification"
+                } else {
+                    "The login secret is required for this authentication method"
+                }
+                .into(),
+            ));
         };
     }
 
@@ -379,7 +429,10 @@ impl Api {
         };
         update_active_model(&mut model, &body, None)?;
         match model.insert(db).await {
-            Ok(model) => Ok(CreateSecretBackendResponse::Created(Json(model.into()))),
+            Ok(model) => {
+                audit::created(db, admin.changed_by(), &Audit(&model)).await;
+                Ok(CreateSecretBackendResponse::Created(Json(model.into())))
+            }
             Err(e) if is_unique_violation(&e) => Ok(CreateSecretBackendResponse::Conflict(Json(
                 NAME_TAKEN.into(),
             ))),
@@ -397,6 +450,8 @@ impl Api {
         admin: AdminContext,
         Path(id): Path<Uuid>,
     ) -> Result<GetSecretBackendResponse, WarpgateError> {
+        admin.require(AdminPermission::ConfigEdit)?;
+
         let Some(backend) = SecretBackend::Entity::find_by_id(id)
             .one(&admin.services().db)
             .await?
@@ -435,7 +490,10 @@ impl Api {
         let mut model: SecretBackend::ActiveModel = existing.clone().into();
         update_active_model(&mut model, &body, Some(&existing))?;
         match model.update(db).await {
-            Ok(model) => Ok(UpdateSecretBackendResponse::Ok(Json(model.into()))),
+            Ok(model) => {
+                audit::updated(db, admin.changed_by(), &Audit(&existing), &Audit(&model)).await;
+                Ok(UpdateSecretBackendResponse::Ok(Json(model.into())))
+            }
             Err(e) if is_unique_violation(&e) => Ok(UpdateSecretBackendResponse::Conflict(Json(
                 NAME_TAKEN.into(),
             ))),
@@ -465,7 +523,8 @@ impl Api {
                 &found,
             ))));
         }
-        model.delete(db).await?;
+        model.clone().delete(db).await?;
+        audit::deleted(admin.changed_by(), &Audit(&model));
         Ok(DeleteSecretBackendResponse::Deleted)
     }
 
@@ -559,5 +618,115 @@ impl Api {
 
         usage.sort_by(|a, b| a.reference.cmp(&b.reference));
         Ok(GetSecretReferenceUsageResponse::Ok(Json(usage)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sea_orm::ActiveValue;
+    use uuid::Uuid;
+    use warpgate_common::secrets::{
+        BackendType, VaultAppRoleAuth, VaultAuthConfig, VaultTokenAuth,
+    };
+    use warpgate_db_entities::SecretBackend;
+
+    use super::{SecretBackendRequest, update_active_model};
+
+    fn stored() -> SecretBackend::Model {
+        SecretBackend::Model {
+            id: Uuid::nil(),
+            name: "vault".into(),
+            backend_type: BackendType::Vault,
+            address: "https://vault.example".into(),
+            namespace: None,
+            auth: token("stored-token"),
+            tls_skip_verify: false,
+            allowed_paths: String::new(),
+        }
+    }
+
+    fn token(token: &str) -> VaultAuthConfig {
+        VaultAuthConfig::Token(VaultTokenAuth {
+            token: token.to_owned().into(),
+        })
+    }
+
+    /// Updates `stored` with a blank token and `edit` applied. Returns the
+    /// saved token, or `None` if the update is refused
+    fn update(
+        stored: &SecretBackend::Model,
+        edit: impl FnOnce(&mut SecretBackendRequest),
+    ) -> Option<String> {
+        let mut body = SecretBackendRequest {
+            name: stored.name.clone(),
+            backend_type: stored.backend_type,
+            address: stored.address.clone(),
+            namespace: stored.namespace.clone(),
+            auth: token(""),
+            tls_skip_verify: stored.tls_skip_verify,
+            allowed_paths: vec![],
+        };
+        edit(&mut body);
+        let mut model = SecretBackend::ActiveModel::default();
+        update_active_model(&mut model, &body, Some(stored)).ok()?;
+        let ActiveValue::Set(auth) = model.auth else {
+            return None;
+        };
+        auth.secret().map(|s| s.stored_value().to_owned())
+    }
+
+    #[test]
+    fn a_blank_login_secret_keeps_the_stored_one() {
+        let kept = Some("stored-token".to_owned());
+        assert_eq!(update(&stored(), |_| {}), kept);
+        assert_eq!(update(&stored(), |b| b.name = "renamed".into()), kept);
+        assert_eq!(
+            update(&stored(), |b| b.allowed_paths = vec!["kv/a".into()]),
+            kept
+        );
+
+        let unverified = SecretBackend::Model {
+            tls_skip_verify: true,
+            ..stored()
+        };
+        assert_eq!(update(&unverified, |b| b.tls_skip_verify = false), kept);
+    }
+
+    #[test]
+    fn a_stored_login_secret_does_not_follow_a_change_of_destination() {
+        assert_eq!(
+            update(&stored(), |b| b.address =
+                "https://elsewhere.example".into()),
+            None
+        );
+        assert_eq!(
+            update(&stored(), |b| b.namespace = Some("other".into())),
+            None
+        );
+        assert_eq!(update(&stored(), |b| b.tls_skip_verify = true), None);
+    }
+
+    #[test]
+    fn a_stored_login_secret_does_not_follow_a_change_of_auth_settings() {
+        let approle = |mount: Option<&str>, secret_id: &str| {
+            VaultAuthConfig::AppRole(VaultAppRoleAuth {
+                role_id: "role".into(),
+                secret_id: secret_id.to_owned().into(),
+                mount: mount.map(Into::into),
+            })
+        };
+        let stored = SecretBackend::Model {
+            auth: approle(None, "stored-secret-id"),
+            ..stored()
+        };
+        assert_eq!(
+            update(&stored, |b| b.auth = approle(None, "")),
+            Some("stored-secret-id".into())
+        );
+        assert_eq!(
+            update(&stored, |b| b.auth = approle(Some("other"), "")),
+            None
+        );
+        assert_eq!(update(&stored, |_| {}), None);
     }
 }

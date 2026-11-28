@@ -2,7 +2,7 @@
   "openapi": "3.0.0",
   "info": {
     "title": "Warpgate HTTP proxy",
-    "version": "v0.30.0-modified"
+    "version": "v0.31.0-beta.1-42-gc0f81ca86-modified"
   },
   "servers": [
     {
@@ -579,9 +579,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": ""
           }
         },
         "security": [
@@ -621,9 +618,6 @@
               }
             }
           },
-          "401": {
-            "description": ""
-          },
           "422": {
             "description": "",
             "content": {
@@ -639,9 +633,6 @@
           }
         },
         "security": [
-          {
-            "TokenSecurityScheme": []
-          },
           {
             "CookieSecurityScheme": []
           },
@@ -674,15 +665,9 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": ""
           }
         },
         "security": [
-          {
-            "TokenSecurityScheme": []
-          },
           {
             "CookieSecurityScheme": []
           },
@@ -712,9 +697,6 @@
           "204": {
             "description": ""
           },
-          "401": {
-            "description": ""
-          },
           "403": {
             "description": ""
           },
@@ -723,9 +705,6 @@
           }
         },
         "security": [
-          {
-            "TokenSecurityScheme": []
-          },
           {
             "CookieSecurityScheme": []
           },
@@ -759,17 +738,11 @@
               }
             }
           },
-          "401": {
-            "description": ""
-          },
           "403": {
             "description": ""
           }
         },
         "security": [
-          {
-            "TokenSecurityScheme": []
-          },
           {
             "CookieSecurityScheme": []
           },
@@ -799,9 +772,6 @@
           "204": {
             "description": ""
           },
-          "401": {
-            "description": ""
-          },
           "403": {
             "description": ""
           },
@@ -810,9 +780,6 @@
           }
         },
         "security": [
-          {
-            "TokenSecurityScheme": []
-          },
           {
             "CookieSecurityScheme": []
           },
@@ -845,15 +812,9 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": ""
           }
         },
         "security": [
-          {
-            "TokenSecurityScheme": []
-          },
           {
             "CookieSecurityScheme": []
           },
@@ -883,17 +844,11 @@
           "200": {
             "description": ""
           },
-          "401": {
-            "description": ""
-          },
           "404": {
             "description": ""
           }
         },
         "security": [
-          {
-            "TokenSecurityScheme": []
-          },
           {
             "CookieSecurityScheme": []
           },
@@ -919,9 +874,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": ""
           }
         },
         "security": [
@@ -968,15 +920,9 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": ""
           }
         },
         "security": [
-          {
-            "TokenSecurityScheme": []
-          },
           {
             "CookieSecurityScheme": []
           },
@@ -1004,9 +950,6 @@
         ],
         "responses": {
           "204": {
-            "description": ""
-          },
-          "401": {
             "description": ""
           },
           "404": {
@@ -1101,9 +1044,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": ""
           }
         },
         "security": [
@@ -1145,9 +1085,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": ""
           },
           "404": {
             "description": ""
@@ -1192,9 +1129,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": ""
           },
           "404": {
             "description": ""
@@ -1249,9 +1183,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": ""
           }
         },
         "security": [
@@ -1285,9 +1216,6 @@
         ],
         "responses": {
           "204": {
-            "description": ""
-          },
-          "401": {
             "description": ""
           },
           "404": {
@@ -2119,6 +2047,27 @@
           }
         }
       },
+      "GitopsSyncInfo": {
+        "type": "object",
+        "title": "GitopsSyncInfo",
+        "description": "The latest GitOps sync",
+        "required": [
+          "status",
+          "started_at"
+        ],
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/SyncStatus"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
       "GroupInfo": {
         "type": "object",
         "title": "GroupInfo",
@@ -2265,6 +2214,17 @@
             "items": {
               "type": "string"
             }
+          },
+          "gitops_sync": {
+            "description": "For admins, while a GitOps source is configured or files are pushed\nthrough the API",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GitopsSyncInfo"
+              },
+              {
+                "description": "For admins, while a GitOps source is configured or files are pushed\nthrough the API"
+              }
+            ]
           }
         }
       },
@@ -2638,6 +2598,14 @@
           }
         }
       },
+      "SyncStatus": {
+        "type": "string",
+        "enum": [
+          "Applied",
+          "Unchanged",
+          "Failed"
+        ]
+      },
       "TargetClickAction": {
         "type": "string",
         "enum": [
@@ -2682,6 +2650,10 @@
           },
           "external_host": {
             "type": "string"
+          },
+          "default_http_path": {
+            "type": "string",
+            "description": "Initial HTTP path, query and fragment, omitted for the bare root path."
           },
           "group": {
             "$ref": "#/components/schemas/GroupInfo"
@@ -2843,6 +2815,10 @@
           },
           "kind": {
             "$ref": "#/components/schemas/TargetKind"
+          },
+          "ticket_max_duration_seconds": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },

@@ -1,9 +1,11 @@
+#![recursion_limit = "256"]
 pub mod api;
 mod approval_gate;
 mod catchall;
 mod client_cache;
 mod common;
 mod middleware;
+mod path_matcher;
 pub mod proxy;
 mod session;
 mod session_handle;
@@ -28,7 +30,6 @@ use tokio::sync::Mutex;
 use tracing::{Instrument, warn};
 use warpgate_admin::admin_api_app;
 use warpgate_common::ListenEndpoint;
-use warpgate_common::helpers::proxy_protocol::MaybeProxyProtocolAcceptor;
 use warpgate_common::version::warpgate_version;
 use warpgate_common_http::auth::UnauthenticatedRequestContext;
 use warpgate_common_http::cluster_tls::{ClusterTlsConfigs, cluster_aware_tls_acceptor};
@@ -38,7 +39,8 @@ use warpgate_common_http::logging::{
     get_client_ip, log_request_error, log_request_result, span_for_request,
 };
 use warpgate_common_http::{
-    WARPGATE_PLAYGROUND_CSP, cluster_peer_extension, warpgate_csp_with_connect_src,
+    HTTP2_MAX_CONCURRENT_STREAMS_PER_CONN, WARPGATE_PLAYGROUND_CSP, cluster_peer_extension,
+    warpgate_csp_with_connect_src,
 };
 use warpgate_core::{ProtocolServer, Services};
 use warpgate_db_entities::Parameters::RecordingsStorageConfig;
@@ -52,10 +54,15 @@ use warpgate_web_ssh::api::ws_handler as ssh_web_client_ws_handler;
 use crate::api::common::forward_ws_to_session_owner;
 use crate::client_cache::HttpClientCache;
 use crate::common::{endpoint_auth, page_auth};
-use crate::middleware::{CookieHostMiddleware, SecurityHeadersMiddleware, TicketMiddleware};
+use crate::middleware::{
+    CookieHostMiddleware, SecurityHeadersMiddleware, TicketMiddleware, limit_request_body,
+};
 use crate::session::SessionStore;
 use crate::session_handle::warpgate_server_handle_for_request;
 use crate::session_storage::SharedSessionStorage;
+
+/// Where the admin API sits under `/@warpgate`
+const ADMIN_API_MOUNT: &str = "/admin/api";
 
 pub struct HTTPProtocolServer {
     services: Services,
@@ -69,10 +76,10 @@ impl HTTPProtocolServer {
     }
 }
 
-/// The S3 bucket origin to allow-list in the admin document CSP, or `None` when
+/// The object storage origin to allow-list in the admin document CSP, or `None` when
 /// recordings are on disk (or the config can't be read). Read live so a storage
 /// config change takes effect on the next admin page load.
-async fn recordings_s3_browser_origin(ctx: &UnauthenticatedRequestContext) -> Option<String> {
+async fn recordings_storage_browser_origin(ctx: &UnauthenticatedRequestContext) -> Option<String> {
     match ctx
         .parameters()
         .await
@@ -80,7 +87,12 @@ async fn recordings_s3_browser_origin(ctx: &UnauthenticatedRequestContext) -> Op
         .recordings_storage_config()
         .ok()?
     {
+        // Streaming through Warpgate keeps the fetch same-origin, so storage
+        // only needs allow-listing when the browser is redirected to it.
+        RecordingsStorageConfig::S3(s3) if s3.serve_through_warpgate => None,
+        RecordingsStorageConfig::Azure(azure) if azure.serve_through_warpgate => None,
         RecordingsStorageConfig::S3(s3) => s3.browser_origin(),
+        RecordingsStorageConfig::Azure(azure) => azure.browser_origin(),
         RecordingsStorageConfig::Disk(_) => None,
     }
 }
@@ -198,7 +210,7 @@ impl ProtocolServer for HTTPProtocolServer {
                     EmbeddedFilesEndpoint::<Assets>::new().with(cache_static()),
                 )
                 .nest(
-                    "/admin/api",
+                    ADMIN_API_MOUNT,
                     endpoint_auth(admin_api_app).with(cache_bust()),
                 )
                 .at(
@@ -213,7 +225,7 @@ impl ProtocolServer for HTTPProtocolServer {
                             // via presigned URLs, so the bucket origin must be allow-listed
                             // in this document's CSP.
                             let origin = match Data::<&UnauthenticatedRequestContext>::from_request_without_body(&req).await {
-                                Ok(ctx) => recordings_s3_browser_origin(ctx.0).await,
+                                Ok(ctx) => recordings_storage_browser_origin(ctx.0).await,
                                 Err(_) => None,
                             };
                             let mut resp = ep.call(req).await?.into_response();
@@ -226,6 +238,10 @@ impl ProtocolServer for HTTPProtocolServer {
                         }),
                 )
                 .at("/api/logo", poem::get(api::logo::api_get_logo))
+                .at(
+                    api::gitops_webhook::PATH,
+                    poem::post(api::gitops_webhook::api_post_gitops_webhook),
+                )
                 .at(
                     "/api/auth/web-auth-requests/stream",
                     endpoint_auth(api::auth::api_get_web_auth_requests_stream),
@@ -241,8 +257,15 @@ impl ProtocolServer for HTTPProtocolServer {
                 .at(
                     "",
                     EmbeddedFileEndpoint::<Assets>::new("src/gateway/index.html")
-                        .with(cache_bust()),
+                        .with(cache_bust())
+                        // #/authorize-terminal hands its token to a client
+                        // listening on the loopback address.
+                        .with(SetHeader::new().overriding(
+                            http::header::CONTENT_SECURITY_POLICY,
+                            warpgate_csp_with_connect_src(Some("http://127.0.0.1:*")),
+                        )),
                 )
+                .around(limit_request_body)
                 .around({
                     let services = services;
                     move |ep, req| {
@@ -341,13 +364,17 @@ impl ProtocolServer for HTTPProtocolServer {
         // returned future drives the accept loop (errors there restart the listener).
         let acceptor = address.poem_acceptor().await?;
         let acceptor = cluster_aware_tls_acceptor(
-            MaybeProxyProtocolAcceptor::new(acceptor, proxy_protocol),
+            acceptor,
+            proxy_protocol,
             tls_configs,
             self.services.cluster.clone(),
         );
 
         Ok(async move {
-            Server::new_with_acceptor(acceptor).run(app).await?;
+            Server::new_with_acceptor(acceptor)
+                .http2_max_concurrent_streams(HTTP2_MAX_CONCURRENT_STREAMS_PER_CONN)
+                .run(app)
+                .await?;
             Ok(())
         }
         .boxed())

@@ -9,6 +9,7 @@
     import AsyncButton from 'common/AsyncButton.svelte'
     import { stringifyError } from 'common/errors'
     import Loadable from 'common/Loadable.svelte'
+    import { setCurrentSidebarSubtitle } from 'common/sidebarState.svelte'
     import Fa from 'svelte-fa'
 
     interface Props {
@@ -18,6 +19,7 @@
     let { params }: Props = $props()
 
     let server = $state<LdapServerResponse | null>(null)
+    setCurrentSidebarSubtitle(() => server?.name)
     let users = $state<LdapUserResponse[]>([])
     let error = $state<string | null>(null)
     let success = $state<string | null>(null)

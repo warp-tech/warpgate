@@ -45,7 +45,12 @@ fn main() -> Result<(), io::Error> {
     //
     // By agreement, the server places the trailer at the beginning
     // of the message, and the data comes after the trailer.
-    let mut token = vec![0u8; ntlm.query_context_sizes()?.security_trailer as usize];
+    let security_trailer_size: usize = ntlm
+        .query_context_sizes()?
+        .security_trailer
+        .try_into()
+        .map_err(io::Error::other)?;
+    let mut token = vec![0u8; security_trailer_size];
     let mut data = msg.as_bytes().to_vec();
     let mut msg_buffer = vec![
         SecurityBufferRef::token_buf(token.as_mut_slice()),
@@ -114,7 +119,7 @@ fn do_authentication(ntlm: &mut Ntlm, identity: &AuthIdentity, mut stream: &mut 
 pub fn read_message<T: io::Read, A: io::Write>(stream: &mut T, output_buffer: &mut A) -> Result<(), io::Error> {
     let msg_len = stream.read_u16::<LittleEndian>()?;
 
-    let mut buff = vec![0u8; msg_len as usize];
+    let mut buff = vec![0u8; usize::from(msg_len)];
     stream.read_exact(&mut buff)?;
 
     output_buffer.write_all(&buff)?;
@@ -129,7 +134,8 @@ pub fn write_message<T: io::Write>(stream: &mut T, input_buffer: &[u8]) -> Resul
     if !input_buffer.is_empty() {
         println!("Sending the buffer [{} bytes]: {:?}", input_buffer.len(), input_buffer);
 
-        stream.write_u16::<LittleEndian>(input_buffer.len() as u16)?;
+        let msg_len = u16::try_from(input_buffer.len()).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+        stream.write_u16::<LittleEndian>(msg_len)?;
         stream.write_all(input_buffer)?;
     }
 

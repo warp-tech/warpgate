@@ -52,10 +52,6 @@ impl Write for SaslBufferWriter<'_> {
 }
 
 impl PostgresClient {
-    pub const fn protocol_version(&self) -> ProtocolVersion {
-        self.decode_context.protocol_version
-    }
-
     pub async fn connect(
         admitted: AdmittedTarget<TargetPostgresOptions>,
         options: ConnectionOptions,
@@ -137,7 +133,7 @@ impl PostgresClient {
             warpgate_common::DatabaseTargetAuth::IamRole(_) => {
                 warpgate_aws::generate_rds_auth_token(&target.host, target.port, &target.username)
                     .await
-                    .map_err(WarpgateError::Aws)?
+                    .map_err(|e| WarpgateError::Aws(e.into()))?
             }
         };
 
@@ -162,6 +158,12 @@ impl PostgresClient {
                     pgwire::messages::startup::Authentication::Ok => {
                         info!("Authenticated at target");
                         break;
+                    }
+                    pgwire::messages::startup::Authentication::CleartextPassword
+                    | pgwire::messages::startup::Authentication::MD5Password(_)
+                        if !stream.is_tls() && target.tls.mode != TlsMode::Disabled =>
+                    {
+                        return Err(PostgresError::PasswordAuthWithoutTls);
                     }
                     pgwire::messages::startup::Authentication::CleartextPassword => {
                         let password_message =
@@ -299,5 +301,33 @@ impl PostgresClient {
         self.stream.push(message)?;
         self.stream.flush().await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// PLAIN would hand the target the password itself, on whatever
+    /// transport the target negotiated.
+    #[test]
+    fn sasl_never_selects_a_password_revealing_mechanism() {
+        let client = || {
+            SASLClient::new(
+                SASLConfig::with_credentials(None, "user".into(), "password".into()).unwrap(),
+            )
+        };
+        assert!(
+            client()
+                .start_suggested(&[Mechname::parse(b"PLAIN").unwrap()])
+                .is_err()
+        );
+        let session = client()
+            .start_suggested(&[
+                Mechname::parse(b"PLAIN").unwrap(),
+                Mechname::parse(b"SCRAM-SHA-256").unwrap(),
+            ])
+            .unwrap();
+        assert_eq!(session.get_mechname().as_str(), "SCRAM-SHA-256");
     }
 }

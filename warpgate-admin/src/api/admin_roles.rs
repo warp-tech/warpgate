@@ -4,11 +4,12 @@ use poem_openapi::{ApiResponse, Object, OpenApi};
 use sea_orm::{ActiveModelTrait, EntityTrait, ModelTrait, QueryFilter, QueryOrder, Set};
 use uuid::Uuid;
 use warpgate_common::{AdminPermission, AdminRole as AdminRoleConfig, WarpgateError};
-use warpgate_core::consts::BUILTIN_ADMIN_ROLE_NAME;
+use warpgate_common_http::errors::invalid_field;
+use warpgate_core::resources::audit;
 use warpgate_db_entities::{AdminRole, User};
 
 use super::AdminContext;
-use crate::api::common::case_insensitive_search;
+use crate::api::common::{case_insensitive_search, is_unique_violation};
 
 #[derive(Object)]
 struct AdminRoleDataRequest {
@@ -54,6 +55,8 @@ enum GetAdminRolesResponse {
 enum CreateAdminRoleResponse {
     #[oai(status = 201)]
     Created(Json<AdminRoleConfig>),
+    #[oai(status = 400)]
+    BadRequest(Json<String>),
 }
 
 #[derive(ApiResponse)]
@@ -68,6 +71,10 @@ enum GetAdminRoleResponse {
 enum UpdateAdminRoleResponse {
     #[oai(status = 200)]
     Ok(Json<AdminRoleConfig>),
+    #[oai(status = 400)]
+    BadRequest(Json<String>),
+    #[oai(status = 403)]
+    Forbidden,
     #[oai(status = 404)]
     NotFound,
 }
@@ -130,11 +137,19 @@ impl ListApi {
     ) -> Result<CreateAdminRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AdminRolesManage)?;
 
+        if body.name.is_empty() {
+            return Ok(CreateAdminRoleResponse::BadRequest(invalid_field(
+                "name",
+                "admin role name is empty",
+            )));
+        }
+
         let db = &admin.services().db;
         let values = AdminRole::ActiveModel {
             id: Set(Uuid::new_v4()),
             name: Set(body.name.clone()),
             description: Set(body.description.clone().unwrap_or_default()),
+            builtin: Set(false),
             targets_create: Set(body.targets_create),
             targets_edit: Set(body.targets_edit),
             targets_delete: Set(body.targets_delete),
@@ -156,9 +171,14 @@ impl ListApi {
             ticket_requests_manage: Set(body.ticket_requests_manage),
         };
 
-        let role = values.insert(db).await?;
-        let role_config: AdminRoleConfig = role.into();
-        Ok(CreateAdminRoleResponse::Created(Json(role_config)))
+        match values.insert(db).await {
+            Ok(role) => {
+                audit::created(db, admin.changed_by(), &role).await;
+                Ok(CreateAdminRoleResponse::Created(Json(role.into())))
+            }
+            Err(err) if is_unique_violation(&err) => Err(WarpgateError::NameTaken),
+            Err(err) => Err(err.into()),
+        }
     }
 }
 
@@ -197,12 +217,24 @@ impl DetailApi {
     ) -> Result<UpdateAdminRoleResponse, WarpgateError> {
         admin.require(AdminPermission::AdminRolesManage)?;
 
+        if body.name.is_empty() {
+            return Ok(UpdateAdminRoleResponse::BadRequest(invalid_field(
+                "name",
+                "admin role name is empty",
+            )));
+        }
+
         let db = &admin.services().db;
         let Some(role) = AdminRole::Entity::find_by_id(id.0).one(db).await? else {
             return Ok(UpdateAdminRoleResponse::NotFound);
         };
 
-        let mut model: AdminRole::ActiveModel = role.into();
+        // `create-user --role` and SSO admin role mappings find it by name.
+        if role.builtin && body.name != role.name {
+            return Ok(UpdateAdminRoleResponse::Forbidden);
+        }
+
+        let mut model: AdminRole::ActiveModel = role.clone().into();
         model.name = Set(body.name.clone());
         model.description = Set(body.description.clone().unwrap_or_default());
         model.targets_create = Set(body.targets_create);
@@ -224,8 +256,14 @@ impl DetailApi {
         model.config_edit = Set(body.config_edit);
         model.admin_roles_manage = Set(body.admin_roles_manage);
         model.ticket_requests_manage = Set(body.ticket_requests_manage);
-        let role = model.update(db).await?;
-        Ok(UpdateAdminRoleResponse::Ok(Json(role.into())))
+        match model.update(db).await {
+            Ok(updated) => {
+                audit::updated(db, admin.changed_by(), &role, &updated).await;
+                Ok(UpdateAdminRoleResponse::Ok(Json(updated.into())))
+            }
+            Err(err) if is_unique_violation(&err) => Err(WarpgateError::NameTaken),
+            Err(err) => Err(err.into()),
+        }
     }
 
     #[oai(
@@ -245,12 +283,13 @@ impl DetailApi {
             return Ok(DeleteAdminRoleResponse::NotFound);
         };
 
-        // don't allow deleting builtin admin role
-        if role.name == BUILTIN_ADMIN_ROLE_NAME {
+        if role.builtin {
             return Ok(DeleteAdminRoleResponse::Forbidden);
         }
 
-        role.delete(db).await?;
+        role.clone().delete(db).await?;
+        audit::deleted(admin.changed_by(), &role);
+
         Ok(DeleteAdminRoleResponse::Deleted)
     }
 

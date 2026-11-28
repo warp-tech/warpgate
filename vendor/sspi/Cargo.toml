@@ -11,9 +11,9 @@
 
 [package]
 edition = "2024"
-rust-version = "1.89"
+rust-version = "1.93"
 name = "sspi"
-version = "0.21.3"
+version = "0.23.0"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
 build = false
 autolib = false
@@ -131,10 +131,10 @@ version = "0.13"
 version = "0.11"
 
 [dependencies.md4]
-version = "0.10"
+version = "0.11"
 
 [dependencies.num-derive]
-version = "0.4"
+version = "0.5"
 
 [dependencies.num-traits]
 version = "0.2"
@@ -144,7 +144,7 @@ default-features = true
 version = "0.2"
 
 [dependencies.picky]
-version = "=7.0.0-rc.25"
+version = "=7.0.0-rc.26"
 default-features = false
 
 [dependencies.picky-asn1]
@@ -181,7 +181,7 @@ optional = true
 default-features = false
 
 [dependencies.rsa]
-version = "=0.10.0-rc.18"
+version = "0.10"
 default-features = false
 
 [dependencies.rustls]
@@ -233,7 +233,7 @@ default-features = true
 version = "1.2"
 
 [dependencies.winscard]
-version = "0.3"
+version = "0.4"
 optional = true
 
 [dependencies.zeroize]
@@ -241,13 +241,13 @@ version = "1.8"
 features = ["zeroize_derive"]
 
 [dev-dependencies.base64]
-version = "0.22"
+version = "0.23"
 
 [dev-dependencies.cfg-if]
 version = "1"
 
 [dev-dependencies.picky]
-version = "=7.0.0-rc.25"
+version = "=7.0.0-rc.26"
 features = ["x509"]
 default-features = false
 
@@ -270,6 +270,9 @@ version = "0.5"
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.futures]
 version = "0.3"
 
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.pkcs1]
+version = "0.8"
+
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.tokio]
 version = "1.52"
 features = [
@@ -285,7 +288,6 @@ optional = true
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies.time]
 version = "0.3"
 features = ["std"]
-default-features = false
 
 [target.'cfg(target_arch = "wasm32")'.dependencies.getrandom]
 version = "0.3"
@@ -314,6 +316,7 @@ features = [
 version = "0.6"
 
 [lints.clippy]
+as_conversions = "warn"
 as_pointer_underscore = "warn"
 as_ptr_cast_mut = "warn"
 as_underscore = "warn"
@@ -338,7 +341,6 @@ unnecessary_safety_comment = "warn"
 unused_result_ok = "warn"
 
 [lints.rust]
-# Vendored code: silence upstream lints so they do not surface in our builds.
 warnings = { level = "allow", priority = 1 }
 ambiguous_negative_literals = "warn"
 elided_lifetimes_in_paths = "warn"

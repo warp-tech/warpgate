@@ -34,10 +34,12 @@
     import { stringifyError } from 'common/errors'
     import { toLocalISO } from 'common/helpers'
     import Loadable from 'common/Loadable.svelte'
+    import OnboardingHint from 'common/OnboardingHint.svelte'
     import PageSummaryBar from 'common/PageSummaryBar.svelte'
     import RateLimitInput from 'common/RateLimitInput.svelte'
     import RelativeDate from 'common/RelativeDate.svelte'
     import StickyActionBar from 'common/StickyActionBar.svelte'
+    import { setCurrentSidebarSubtitle } from 'common/sidebarState.svelte'
     import { formatDistanceToNow } from 'date-fns'
     import { serverInfo } from 'gateway/lib/store'
     import { onDestroy, onMount } from 'svelte'
@@ -55,6 +57,7 @@
 
     let error: string | null = $state(null)
     let user: User | undefined = $state()
+    setCurrentSidebarSubtitle(() => user?.username)
     let allRoles: Role[] = $state([])
     let userRoles: UserRoleAssignmentResponse[] = $state([])
     let roleIsAllowed: Record<string, boolean> = $state({})
@@ -150,7 +153,7 @@
         }
         if (confirm(`Delete user ${user.username}?`)) {
             await api.deleteUser(user)
-            replace('/config/users')
+            replace('/manage/users')
         }
     }
 
@@ -385,6 +388,13 @@
                 {/if}
 
                 <Section id="roles" title="Access roles">
+                    <OnboardingHint>
+                        <em>Access roles</em>
+                        decide which targets this user is allowed to access. Add
+                        the same access role to both the user and the target to
+                        grant access.
+                    </OnboardingHint>
+
                     <div class="list-group list-group-flush">
                         {#each allRoles as role (role.id)}
                             {@const activeAssignment = userRoles.find(
@@ -501,6 +511,13 @@
                 </Section>
 
                 <Section id="admin-roles" title="Admin roles">
+                    <OnboardingHint>
+                        Assigning an <em>Admin role</em>
+                        will give this user access to this admin area. The
+                        default <code>warpgate:admin</code> role gives full
+                        access, but you can create more limited roles.
+                    </OnboardingHint>
+
                     <div class="list-group list-group-flush">
                         {#each allAdminRoles as role (role.id)}
                             <label

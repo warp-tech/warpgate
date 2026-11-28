@@ -119,7 +119,9 @@ where
     io::Cursor<T>: Read + io::Seek,
 {
     let mic = if negotiate_flags.contains(NegotiateFlags::NTLM_SSP_NEGOTIATE_TARGET_INFO) {
-        let mic_offset = buffer.position() as u8;
+        let mic_offset = u8::try_from(buffer.position())
+            .map_err(|_| crate::Error::new(crate::ErrorKind::InvalidToken, "MIC offset exceeds u8"))?;
+
         let mut mic_value = [0x00; MESSAGE_INTEGRITY_CHECK_SIZE];
         buffer.read_exact(&mut mic_value)?;
         Some(Mic::new(mic_value, mic_offset))
@@ -172,7 +174,7 @@ fn process_message_fields(
         .iter()
         .find(|av_pair| av_pair.as_u16() == AV_PAIR_CHANNEL_BINDINGS)
         && let Some(channel_bindings) = channel_bindings.as_ref()
-        && compute_md5_channel_bindings_hash(channel_bindings) != *hash
+        && compute_md5_channel_bindings_hash(channel_bindings)? != *hash
     {
         return Err(crate::Error::new(
             crate::ErrorKind::BadBindings,

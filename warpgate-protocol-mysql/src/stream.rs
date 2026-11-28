@@ -103,10 +103,7 @@ where
     }
 
     pub const fn is_tls(&self) -> bool {
-        match self.stream {
-            MaybeTlsStream::Tls(_) => true,
-            MaybeTlsStream::Raw(_) | MaybeTlsStream::Upgrading => false,
-        }
+        self.stream.is_tls()
     }
 }
 

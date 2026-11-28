@@ -1422,6 +1422,10 @@ fn integer_increment_le(buffer: &mut [u8]) {
 }
 
 fn construct_error(e: &Error) -> NStatusCode {
+    #[expect(
+        clippy::as_conversions,
+        reason = "enum repr cast for error_type to i64, then truncating cast to u32 for NTSTATUS code construction"
+    )]
     let code = ((e.error_type as i64 & 0x0000_FFFF) | (0x7 << 16) | 0xC000_0000) as u32;
     NStatusCode(code)
 }

@@ -4,6 +4,7 @@ mod extractors;
 mod generators;
 #[macro_use]
 pub mod macros;
+mod server;
 mod validate;
 
 use std::io::Write;
@@ -11,22 +12,22 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 
 pub use cert_utils::validation::validate_server_p2p_certificate;
-pub use config::Pku2uConfig;
+pub use config::{Pku2uConfig, Pku2uCredential, Pku2uPrivateKey};
 pub use extractors::{extract_pa_pk_as_rep, extract_server_nonce, extract_session_key_from_as_rep};
 pub use generators::{generate_authenticator, generate_authenticator_extension, generate_client_dh_parameters};
-use picky::hash::HashAlgorithm;
-use picky::signature::SignatureAlgorithm;
+use picky_asn1_x509::Certificate;
 use picky_asn1_x509::signed_data::SignedData;
 use picky_krb::constants::gss_api::{AP_REQ_TOKEN_ID, AS_REQ_TOKEN_ID, AUTHENTICATOR_CHECKSUM_TYPE};
 use picky_krb::constants::key_usages::{ACCEPTOR_SIGN, INITIATOR_SIGN};
+use picky_krb::crypto::aes::{AesSize, checksum_sha_aes};
 use picky_krb::crypto::diffie_hellman::{DhNonce, generate_key};
-use picky_krb::crypto::{ChecksumSuite, CipherSuite};
+use picky_krb::crypto::{ChecksumSuite, CipherSuite, DecryptWithoutChecksum, EncryptWithoutChecksum};
 use picky_krb::gss_api::{NegTokenTarg1, WrapToken};
 use picky_krb::messages::{ApRep, AsRep};
 use picky_krb::negoex::data_types::MessageType;
 use picky_krb::negoex::messages::{Exchange, Nego, Verify};
 use picky_krb::negoex::{NegoexMessage, RANDOM_ARRAY_SIZE};
-use picky_krb::pkinit::PaPkAsRep;
+use picky_krb::pkinit::{PaPkAsRep, Pku2uNegoRep, Pku2uNegoReqMetadata};
 use rand::rngs::{StdRng, SysRng};
 use rand_core::{Rng as _, SeedableRng as _};
 use uuid::Uuid;
@@ -37,52 +38,62 @@ use self::generators::{
     generate_server_dh_parameters,
 };
 use crate::builders::{ChangePassword, FilledAcceptSecurityContext};
+use crate::channel_bindings::ChannelBindings;
 use crate::generator::{GeneratorAcceptSecurityContext, GeneratorInitSecurityContext, YieldPointLocal};
-use crate::kerberos::client::extractors::extract_sub_session_key_from_ap_rep;
-use crate::kerberos::client::generators::{
-    ChecksumOptions, EncKey, GenerateAsReqOptions, GenerateAuthenticatorOptions, generate_ap_req, generate_as_req,
-    generate_as_req_kdc_body,
+use crate::kerberos::client::extractors::{
+    decrypt_ap_rep, extract_seq_number_from_ap_rep, extract_sub_session_key_from_ap_rep,
 };
-use crate::kerberos::{DEFAULT_ENCRYPTION_TYPE, EncryptionParams, MAX_SIGNATURE, RRC, SECURITY_TRAILER};
+use crate::kerberos::client::generators::{
+    ChecksumOptions, ChecksumValues, EncKey, GenerateAsReqOptions, GenerateAuthenticatorOptions, generate_ap_req,
+    generate_as_req, generate_as_req_kdc_body, generate_nonce,
+};
+use crate::kerberos::{DEFAULT_ENCRYPTION_TYPE, EncryptionParams, RRC};
 use crate::pk_init::{
     DhParameters, GenerateAsPaDataOptions, extract_server_dh_public_key, generate_pa_datas_for_as_req,
 };
-use crate::pku2u::extractors::extract_krb_rep;
+use crate::pku2u::cert_utils::validation::{extract_signing_certificate, validate_peer_p2p_certificate};
+use crate::pku2u::extractors::{extract_krb_rep, extract_krb_result, extract_session_key_and_nonce_from_as_rep};
 use crate::pku2u::generators::generate_as_req_username_from_certificate;
-use crate::utils::{extract_encrypted_data, generate_random_symmetric_key, get_encryption_key, save_decrypted_data};
+use crate::utils::{generate_random_symmetric_key, get_encryption_key, save_decrypted_data};
 use crate::{
     AcceptSecurityContextResult, AcquireCredentialsHandleResult, AuthIdentity, AuthIdentityBuffers, BufferType,
-    CertTrustStatus, ClientResponseFlags, ContextNames, ContextSizes, CredentialUse, DecryptionFlags, EncryptionFlags,
-    Error, ErrorKind, InitializeSecurityContextResult, PACKAGE_ID_NONE, PackageCapabilities, PackageInfo, Result,
-    SecurityBuffer, SecurityBufferRef, SecurityPackageType, SecurityStatus, Sspi, SspiEx, SspiImpl,
+    CertContext, CertEncodingType, CertTrustErrorStatus, CertTrustInfoStatus, CertTrustStatus, ClientResponseFlags,
+    ContextNames, ContextSizes, CredentialUse, DecryptionFlags, EncryptionFlags, Error, ErrorKind,
+    InitializeSecurityContextResult, PackageCapabilities, PackageInfo, Result, Secret, SecurityBuffer,
+    SecurityBufferRef, SecurityPackageType, SecurityStatus, Sspi, SspiEx, SspiImpl,
 };
 
-pub const PKG_NAME: &str = "Pku2u";
+pub const PKG_NAME: &str = "pku2u";
 
 pub const AZURE_AD_DOMAIN: &str = "AzureAD";
-
-/// [Authenticator Checksum](https://datatracker.ietf.org/doc/html/rfc4121#section-4.1.1)
-const AUTHENTICATOR_DEFAULT_CHECKSUM: [u8; 24] = [
-    16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 62, 64, 0, 0,
-];
 
 /// Default NEGOEX authentication scheme
 pub const DEFAULT_NEGOEX_AUTH_SCHEME: &str = "0d53335c-f9ea-4d0d-b2ec-4ae3786ec308";
 
-/// sealed = true
-/// other flags = false
-pub const CLIENT_WRAP_TOKEN_FLAGS: u8 = 2;
-/// sealed = true
-/// send by acceptor = true
-/// acceptor subkey = false
-pub const SERVER_WRAP_TOKEN_FLAGS: u8 = 3;
+const WRAP_SENT_BY_ACCEPTOR: u8 = 0x01;
+const WRAP_SEALED: u8 = 0x02;
+const WRAP_ACCEPTOR_SUBKEY: u8 = 0x04;
+const ENCRYPTED_WRAP_EC: u16 = 16;
+const INTEGRITY_ONLY_RRC: u16 = 12;
+const PKU2U_SECURITY_TRAILER: usize = 76;
+const NEGOEX_HEADER_LEN: usize = 40;
+const NEGOEX_NEGO_HEADER_LEN: usize = 96;
+const NEGOEX_EXCHANGE_HEADER_LEN: usize = 64;
+const NEGOEX_VERIFY_HEADER_LEN: usize = 80;
 
 pub static PACKAGE_INFO: LazyLock<PackageInfo> = LazyLock::new(|| PackageInfo {
-    capabilities: PackageCapabilities::empty(),
-    rpc_id: PACKAGE_ID_NONE,
-    max_token_len: 0xbb80, // 48 000 bytes: default maximum token len in Windows
+    capabilities: PackageCapabilities::INTEGRITY
+        | PackageCapabilities::PRIVACY
+        | PackageCapabilities::CONNECTION
+        | PackageCapabilities::IMPERSONATION
+        | PackageCapabilities::GSS_COMPATIBLE
+        | PackageCapabilities::MUTUAL_AUTH
+        | PackageCapabilities::NEGOTIABLE2
+        | PackageCapabilities::APP_CONTAINER_CHECKS,
+    rpc_id: 31,
+    max_token_len: 12_000,
     name: SecurityPackageType::Pku2u,
-    comment: String::from("Pku2u Security Package"),
+    comment: String::from("PKU2U Security Package"),
 });
 
 #[derive(Debug, Clone)]
@@ -112,6 +123,15 @@ pub struct Pku2u {
     conversation_id: Uuid,
     auth_scheme: Option<Uuid>,
     seq_number: u32,
+    gss_seq_number: u32,
+    remote_gss_seq_number: u32,
+    request_nonce: Option<u32>,
+    channel_bindings: Option<ChannelBindings>,
+    peer_certificate: Option<Certificate>,
+    peer_certificate_trusted: bool,
+    peer_name: Option<crate::Username>,
+    #[cfg(test)]
+    certificate_validation_time: Option<time::OffsetDateTime>,
     dh_parameters: DhParameters,
     // all sent and received NEGOEX messages concatenated in one vector
     // we need it for the further checksum calculation
@@ -124,6 +144,11 @@ pub struct Pku2u {
     // The checksum is performed on all previous NEGOEX messages in the context negotiation.
     gss_api_messages: Vec<u8>,
     negoex_random: [u8; RANDOM_ARRAY_SIZE],
+    // Acceptor-only: the symmetric key used to encrypt the self-issued Kerberos Ticket embedded in
+    // the AS-REP. Generated fresh when the acceptor builds the AS-REP and kept only so the acceptor
+    // can later decrypt that same Ticket out of the initiator's AP-REQ. Never set for the client role
+    // and never shared with the initiator (the Ticket is opaque to it).
+    ticket_encryption_key: Option<Secret<Vec<u8>>>,
 }
 
 impl Pku2u {
@@ -141,6 +166,15 @@ impl Pku2u {
             conversation_id: Uuid::default(),
             auth_scheme: Some(Uuid::from_str(DEFAULT_NEGOEX_AUTH_SCHEME).unwrap()),
             seq_number: 2,
+            gss_seq_number: 0,
+            remote_gss_seq_number: 0,
+            request_nonce: None,
+            channel_bindings: None,
+            peer_certificate: None,
+            peer_certificate_trusted: false,
+            peer_name: None,
+            #[cfg(test)]
+            certificate_validation_time: None,
             // https://www.rfc-editor.org/rfc/rfc4556.html#section-3.2.3
             // Contains the nonce in the pkAuthenticator field in the request if the DH keys are NOT reused,
             // 0 otherwise.
@@ -149,6 +183,7 @@ impl Pku2u {
             negoex_messages: Vec::new(),
             gss_api_messages: Vec::new(),
             negoex_random,
+            ticket_encryption_key: None,
         })
     }
 
@@ -166,6 +201,15 @@ impl Pku2u {
             conversation_id: Uuid::new_v4(),
             auth_scheme: None,
             seq_number: 0,
+            gss_seq_number: 0,
+            remote_gss_seq_number: 0,
+            request_nonce: None,
+            channel_bindings: None,
+            peer_certificate: None,
+            peer_certificate_trusted: false,
+            peer_name: None,
+            #[cfg(test)]
+            certificate_validation_time: None,
             // https://www.rfc-editor.org/rfc/rfc4556.html#section-3.2.3
             // Contains the nonce in the pkAuthenticator field in the request if the DH keys are NOT reused,
             // 0 otherwise.
@@ -174,11 +218,21 @@ impl Pku2u {
             negoex_messages: Vec::new(),
             gss_api_messages: Vec::new(),
             negoex_random,
+            ticket_encryption_key: None,
         })
     }
 
     pub fn config(&self) -> &Pku2uConfig {
         &self.config
+    }
+
+    fn certificate_validation_time(&self) -> time::OffsetDateTime {
+        #[cfg(test)]
+        if let Some(validation_time) = self.certificate_validation_time {
+            return validation_time;
+        }
+
+        time::OffsetDateTime::now_utc()
     }
 
     pub fn next_seq_number(&mut self) -> u32 {
@@ -187,6 +241,471 @@ impl Pku2u {
 
         seq_num
     }
+
+    fn next_gss_seq_number(&mut self) -> u32 {
+        let seq_num = self.gss_seq_number;
+        self.gss_seq_number += 1;
+
+        seq_num
+    }
+
+    fn is_client(&self) -> bool {
+        matches!(self.mode, Pku2uMode::Client)
+    }
+
+    fn read_channel_bindings(&mut self, input: Option<&[SecurityBuffer]>) -> Result<()> {
+        if let Some(input) = input
+            && let Ok(buffer) = SecurityBuffer::find_buffer(input, BufferType::ChannelBindings)
+        {
+            self.channel_bindings = Some(ChannelBindings::from_bytes(&buffer.buffer)?);
+        }
+
+        Ok(())
+    }
+
+    /// Selects, among this side's configured credentials (the primary [`Pku2uConfig::p2p_certificate`]
+    /// followed by [`Pku2uConfig::additional_credentials`]), the first one whose own issuer appears in
+    /// `trusted_issuers`. The initiator calls this with the acceptor's `AcceptorMetaData` so a
+    /// multi-identity client picks a credential issued by an authority the acceptor trusts. The acceptor
+    /// validates the initiator certificate separately against `trusted_client_certificates`.
+    /// A `trusted_issuers` is empty when the peer advertises no metadata, in which case the
+    /// currently-configured credential is kept as-is.
+    fn select_credential_for_metadata(&mut self, trusted_issuers: &[Pku2uNegoReqMetadata]) -> Result<()> {
+        if trusted_issuers.is_empty() {
+            return Ok(());
+        }
+
+        let accepts = |certificate: &Certificate| -> Result<bool> {
+            let issuer = picky_asn1_der::to_vec(&certificate.tbs_certificate.issuer)?;
+            Ok(trusted_issuers.iter().any(|trusted| trusted.inner.0.0 == issuer))
+        };
+
+        if accepts(&self.config.p2p_certificate)? {
+            return Ok(());
+        }
+
+        let selected = self
+            .config
+            .additional_credentials
+            .iter()
+            .find_map(|credential| match accepts(&credential.certificate) {
+                Ok(true) => Some(Ok(credential.clone())),
+                Ok(false) => None,
+                Err(error) => Some(Err(error)),
+            })
+            .transpose()?
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Pku2uCertFailure,
+                    "none of the configured PKU2U certificates is trusted by the peer",
+                )
+            })?;
+        self.config.p2p_certificate = selected.certificate;
+        self.config.private_key = selected.private_key;
+
+        Ok(())
+    }
+
+    fn generate_mic(&self, sequence_number: u64, data: &[u8]) -> Result<Vec<u8>> {
+        let key = get_encryption_key(&self.encryption_params)?;
+        let aes_size = self.encryption_params.aes_size().unwrap_or(AesSize::Aes256);
+
+        crate::kerberos::utils::generate_mic_token(self.is_client(), sequence_number, data.to_vec(), key, &aes_size)
+    }
+
+    fn verify_mic(&self, sequence_number: u64, token: &[u8], data: &[u8]) -> Result<()> {
+        crate::kerberos::utils::validate_mic_token(
+            self.is_client(),
+            sequence_number,
+            token,
+            &self.encryption_params,
+            data,
+        )
+    }
+
+    fn ensure_message_protection_ready(&self) -> Result<()> {
+        match self.state {
+            Pku2uState::PubKeyAuth | Pku2uState::Credentials | Pku2uState::Final => Ok(()),
+            _ => Err(Error::new(
+                ErrorKind::OutOfSequence,
+                format!("Pku2u context is not established: current state: {:?}", self.state),
+            )),
+        }
+    }
+
+    fn wrap_flags(&self, sealed: bool) -> u8 {
+        let mut flags = if sealed { WRAP_SEALED } else { 0 };
+        if !self.is_client() {
+            flags |= WRAP_SENT_BY_ACCEPTOR;
+        }
+        if self.encryption_params.sub_session_key.is_some() {
+            flags |= WRAP_ACCEPTOR_SUBKEY;
+        }
+        flags
+    }
+
+    fn validate_wrap_flags(&self, flags: u8) -> Result<()> {
+        let expected_sender = u8::from(self.is_client());
+        if flags & WRAP_SENT_BY_ACCEPTOR != expected_sender {
+            return Err(Error::new(
+                ErrorKind::InvalidToken,
+                "invalid PKU2U Wrap token SentByAcceptor flag",
+            ));
+        }
+
+        let expected_subkey = if self.encryption_params.sub_session_key.is_some() {
+            WRAP_ACCEPTOR_SUBKEY
+        } else {
+            0
+        };
+        if flags & WRAP_ACCEPTOR_SUBKEY != expected_subkey {
+            return Err(Error::new(
+                ErrorKind::InvalidToken,
+                "invalid PKU2U Wrap token AcceptorSubkey flag",
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+fn collect_writable_data(message: &[SecurityBufferRef<'_>]) -> Vec<u8> {
+    SecurityBufferRef::buffers_of_type_and_flags(message, BufferType::Data, crate::SecurityBufferFlags::NONE).fold(
+        Vec::new(),
+        |mut data, buffer| {
+            data.extend_from_slice(buffer.data());
+            data
+        },
+    )
+}
+
+fn collect_wrap_input(message: &[SecurityBufferRef<'_>]) -> Result<Vec<u8>> {
+    let mut input = SecurityBufferRef::buf_data(message, BufferType::Token)
+        .unwrap_or_default()
+        .to_vec();
+    if let Ok(stream) = SecurityBufferRef::buf_data(message, BufferType::Stream) {
+        input.extend_from_slice(stream);
+    } else {
+        input.extend_from_slice(&collect_writable_data(message));
+    }
+    Ok(input)
+}
+
+fn write_writable_data(data: &[u8], message: &mut [SecurityBufferRef<'_>]) -> Result<()> {
+    if SecurityBufferRef::buf_data(message, BufferType::Stream).is_ok() {
+        return save_decrypted_data(data, message);
+    }
+
+    let expected_len: usize =
+        SecurityBufferRef::buffers_of_type_and_flags(message, BufferType::Data, crate::SecurityBufferFlags::NONE)
+            .map(SecurityBufferRef::buf_len)
+            .sum();
+    if expected_len != data.len() {
+        return Err(Error::new(
+            ErrorKind::InvalidToken,
+            format!(
+                "PKU2U message data length does not match writable buffers: expected {expected_len}, got {}",
+                data.len()
+            ),
+        ));
+    }
+
+    let mut remaining = data;
+    for buffer in
+        SecurityBufferRef::buffers_of_type_and_flags_mut(message, BufferType::Data, crate::SecurityBufferFlags::NONE)
+    {
+        let (current, rest) = remaining.split_at(buffer.buf_len());
+        buffer.write_data(current)?;
+        remaining = rest;
+    }
+
+    Ok(())
+}
+
+fn validate_inner_wrap_header(wrap_token: &WrapToken, inner_header: &[u8]) -> Result<()> {
+    let mut expected = wrap_token.header();
+    expected[6..8].fill(0);
+    if inner_header != expected {
+        return Err(Error::new(
+            ErrorKind::MessageAltered,
+            "PKU2U Wrap token encrypted header does not match its outer header",
+        ));
+    }
+    Ok(())
+}
+
+fn read_negoex_u32(buffer: &[u8], offset: usize) -> Result<u32> {
+    let bytes = buffer
+        .get(offset..offset + 4)
+        .ok_or_else(|| Error::new(ErrorKind::InvalidToken, "NEGOEX message is truncated"))?;
+    Ok(u32::from_le_bytes(
+        bytes.try_into().expect("slice has exactly four bytes"),
+    ))
+}
+
+fn validate_negoex_vector(
+    message: &[u8],
+    descriptor_offset: usize,
+    element_size: usize,
+    payload_start: usize,
+) -> Result<(usize, usize)> {
+    let offset = usize::try_from(read_negoex_u32(message, descriptor_offset)?)
+        .map_err(|_| Error::new(ErrorKind::InvalidToken, "NEGOEX vector offset does not fit into usize"))?;
+    let count = usize::try_from(read_negoex_u32(message, descriptor_offset + 4)?)
+        .map_err(|_| Error::new(ErrorKind::InvalidToken, "NEGOEX vector count does not fit into usize"))?;
+    if count == 0 {
+        if offset > message.len() {
+            return Err(Error::new(
+                ErrorKind::InvalidToken,
+                "empty NEGOEX vector points outside its message",
+            ));
+        }
+        return Ok((offset, count));
+    }
+
+    let byte_len = count
+        .checked_mul(element_size)
+        .ok_or_else(|| Error::new(ErrorKind::InvalidToken, "NEGOEX vector length overflows"))?;
+    let end = offset
+        .checked_add(byte_len)
+        .ok_or_else(|| Error::new(ErrorKind::InvalidToken, "NEGOEX vector range overflows"))?;
+    if offset < payload_start || end > message.len() {
+        return Err(Error::new(
+            ErrorKind::InvalidToken,
+            "NEGOEX vector points outside its message",
+        ));
+    }
+
+    Ok((offset, count))
+}
+
+fn validate_negoex_message(
+    buffer: &[u8],
+    expected_type: MessageType,
+    expected_header_len: usize,
+) -> Result<(&[u8], &[u8])> {
+    if buffer.len() < NEGOEX_HEADER_LEN {
+        return Err(Error::new(
+            ErrorKind::InvalidToken,
+            "NEGOEX message header is truncated",
+        ));
+    }
+
+    let actual_type = read_negoex_u32(buffer, 8)?;
+    if actual_type != u32::from(&expected_type) {
+        return Err(Error::new(
+            ErrorKind::InvalidToken,
+            format!("unexpected NEGOEX message type {actual_type}"),
+        ));
+    }
+
+    let header_len = usize::try_from(read_negoex_u32(buffer, 16)?)
+        .map_err(|_| Error::new(ErrorKind::InvalidToken, "NEGOEX header length does not fit into usize"))?;
+    let message_len = usize::try_from(read_negoex_u32(buffer, 20)?)
+        .map_err(|_| Error::new(ErrorKind::InvalidToken, "NEGOEX message length does not fit into usize"))?;
+    if header_len != expected_header_len || message_len < header_len || message_len > buffer.len() {
+        return Err(Error::new(ErrorKind::InvalidToken, "invalid NEGOEX message length"));
+    }
+
+    Ok((&buffer[..message_len], &buffer[message_len..]))
+}
+
+fn decode_nego_message(buffer: &[u8], expected_type: MessageType) -> Result<(Nego, &[u8])> {
+    let (message, tail) = validate_negoex_message(buffer, expected_type, NEGOEX_NEGO_HEADER_LEN)?;
+    validate_negoex_vector(message, 80, 16, NEGOEX_NEGO_HEADER_LEN)?;
+    let (extensions_offset, extensions_count) = validate_negoex_vector(message, 88, 12, NEGOEX_NEGO_HEADER_LEN)?;
+    for index in 0..extensions_count {
+        let extension_offset = extensions_offset + index * 12;
+        validate_negoex_vector(message, extension_offset + 4, 1, NEGOEX_NEGO_HEADER_LEN)?;
+    }
+
+    Ok((Nego::decode(message)?, tail))
+}
+
+fn decode_exchange_message(buffer: &[u8], expected_type: MessageType) -> Result<(Exchange, &[u8])> {
+    let (message, tail) = validate_negoex_message(buffer, expected_type, NEGOEX_EXCHANGE_HEADER_LEN)?;
+    validate_negoex_vector(message, 56, 1, NEGOEX_EXCHANGE_HEADER_LEN)?;
+    Ok((Exchange::decode(message)?, tail))
+}
+
+fn decode_verify_message(buffer: &[u8]) -> Result<(Verify, &[u8])> {
+    let (message, tail) = validate_negoex_message(buffer, MessageType::Verify, NEGOEX_VERIFY_HEADER_LEN)?;
+    if read_negoex_u32(message, 56)? != 20 {
+        return Err(Error::new(
+            ErrorKind::InvalidToken,
+            "invalid NEGOEX checksum header length",
+        ));
+    }
+    validate_negoex_vector(message, 68, 1, NEGOEX_VERIFY_HEADER_LEN)?;
+    Ok((Verify::decode(message)?, tail))
+}
+
+fn ensure_no_negoex_tail(tail: &[u8]) -> Result<()> {
+    if tail.is_empty() {
+        Ok(())
+    } else {
+        Err(Error::new(
+            ErrorKind::InvalidToken,
+            "unexpected trailing NEGOEX message",
+        ))
+    }
+}
+
+fn decrypt_sealed_wrap(
+    wrap_token: &WrapToken,
+    key: &[u8],
+    key_usage: i32,
+    message: &mut [SecurityBufferRef<'_>],
+    cipher: &dyn picky_krb::crypto::Cipher,
+) -> Result<DecryptionFlags> {
+    let mut encrypted = wrap_token.checksum.clone();
+    if encrypted.is_empty() {
+        return Err(Error::new(ErrorKind::DecryptFailure, "empty PKU2U sealed Wrap token"));
+    }
+    let encrypted_len = encrypted.len();
+    encrypted.rotate_left((usize::from(wrap_token.rrc) + usize::from(wrap_token.ec)) % encrypted_len);
+
+    let DecryptWithoutChecksum {
+        plaintext: decrypted,
+        confounder,
+        checksum,
+        ki: _,
+    } = cipher.decrypt_no_checksum(key, key_usage, &encrypted)?;
+    let suffix_len = usize::from(wrap_token.ec) + WrapToken::header_len();
+    if decrypted.len() < suffix_len {
+        return Err(Error::new(
+            ErrorKind::DecryptFailure,
+            "PKU2U sealed Wrap token is shorter than its EC and header",
+        ));
+    }
+
+    let plaintext_len = decrypted.len() - suffix_len;
+    let (plaintext, filler_and_header) = decrypted.split_at(plaintext_len);
+    let (filler, inner_header) = filler_and_header.split_at(usize::from(wrap_token.ec));
+
+    let has_stream = SecurityBufferRef::buf_data(message, BufferType::Stream).is_ok();
+    let mut plaintext_offset = 0;
+    let mut to_sign = if has_stream {
+        let mut data = confounder;
+        data.extend_from_slice(plaintext);
+        plaintext_offset = plaintext.len();
+        data
+    } else {
+        SecurityBufferRef::buffers_of_type(message, BufferType::Data).fold(confounder, |mut data, buffer| {
+            if buffer.buffer_flags().intersects(
+                crate::SecurityBufferFlags::SECBUFFER_READONLY
+                    | crate::SecurityBufferFlags::SECBUFFER_READONLY_WITH_CHECKSUM,
+            ) {
+                data.extend_from_slice(buffer.data());
+            } else {
+                let end = plaintext_offset + buffer.buf_len();
+                if let Some(plaintext) = plaintext.get(plaintext_offset..end) {
+                    data.extend_from_slice(plaintext);
+                    plaintext_offset = end;
+                }
+            }
+            data
+        })
+    };
+    let buffer_lengths_match = plaintext_offset == plaintext.len();
+    to_sign.extend_from_slice(filler_and_header);
+
+    if cipher.encryption_checksum(key, key_usage, &to_sign)? != checksum {
+        return Err(Error::new(
+            ErrorKind::MessageAltered,
+            "invalid PKU2U sealed Wrap token checksum",
+        ));
+    }
+    if !buffer_lengths_match {
+        return Err(Error::new(ErrorKind::MessageAltered, "invalid PKU2U sealed Wrap token"));
+    }
+    if filler.iter().any(|byte| *byte != 0) {
+        return Err(Error::new(ErrorKind::MessageAltered, "invalid PKU2U sealed Wrap token"));
+    }
+    validate_inner_wrap_header(wrap_token, inner_header)?;
+
+    write_writable_data(plaintext, message)?;
+    Ok(DecryptionFlags::empty())
+}
+
+fn decrypt_integrity_only_wrap(
+    wrap_token: &WrapToken,
+    key: &[u8],
+    aes_size: &AesSize,
+    key_usage: i32,
+    message: &mut [SecurityBufferRef<'_>],
+) -> Result<DecryptionFlags> {
+    let mut payload = wrap_token.checksum.clone();
+    if payload.is_empty() {
+        return Err(Error::new(
+            ErrorKind::DecryptFailure,
+            "empty PKU2U integrity-only Wrap token",
+        ));
+    }
+    let payload_len = payload.len();
+    payload.rotate_left(usize::from(wrap_token.rrc) % payload_len);
+
+    let checksum_len = usize::from(wrap_token.ec);
+    if payload.len() < checksum_len {
+        return Err(Error::new(
+            ErrorKind::DecryptFailure,
+            "PKU2U integrity-only Wrap token is shorter than its checksum",
+        ));
+    }
+    let plaintext_len = payload.len() - checksum_len;
+    let (plaintext, received_checksum) = payload.split_at(plaintext_len);
+
+    let mut header = wrap_token.header();
+    header[4..8].fill(0);
+    let has_stream = SecurityBufferRef::buf_data(message, BufferType::Stream).is_ok();
+    let mut plaintext_offset = 0;
+    let mut to_sign = if has_stream {
+        plaintext_offset = plaintext.len();
+        plaintext.to_vec()
+    } else {
+        SecurityBufferRef::buffers_of_type(message, BufferType::Data).fold(Vec::new(), |mut data, buffer| {
+            if buffer.buffer_flags().intersects(
+                crate::SecurityBufferFlags::SECBUFFER_READONLY
+                    | crate::SecurityBufferFlags::SECBUFFER_READONLY_WITH_CHECKSUM,
+            ) {
+                data.extend_from_slice(buffer.data());
+            } else {
+                let end = plaintext_offset + buffer.buf_len();
+                if let Some(plaintext) = plaintext.get(plaintext_offset..end) {
+                    data.extend_from_slice(plaintext);
+                    plaintext_offset = end;
+                }
+            }
+            data
+        })
+    };
+    if plaintext_offset != plaintext.len() {
+        return Err(Error::new(
+            ErrorKind::InvalidToken,
+            "PKU2U integrity-only data does not match writable buffer lengths",
+        ));
+    }
+    to_sign.extend_from_slice(&header);
+
+    let calculated_checksum = checksum_sha_aes(key, key_usage, &to_sign, aes_size)?;
+    if calculated_checksum.len() != checksum_len {
+        return Err(Error::new(
+            ErrorKind::InvalidToken,
+            format!(
+                "invalid PKU2U integrity-only checksum length: expected {}, got {checksum_len}",
+                calculated_checksum.len()
+            ),
+        ));
+    }
+    if calculated_checksum.as_slice() != received_checksum {
+        return Err(Error::new(
+            ErrorKind::MessageAltered,
+            "invalid PKU2U integrity-only Wrap token checksum",
+        ));
+    }
+
+    write_writable_data(plaintext, message)?;
+    Ok(DecryptionFlags::WRAP_NO_ENCRYPT)
 }
 
 impl Sspi for Pku2u {
@@ -195,76 +714,110 @@ impl Sspi for Pku2u {
         Ok(SecurityStatus::Ok)
     }
 
-    #[instrument(level = "debug", ret, fields(state = ?self.state), skip(self, _flags))]
+    #[instrument(level = "debug", ret, fields(state = ?self.state), skip(self, flags))]
     fn encrypt_message(
         &mut self,
-        _flags: EncryptionFlags,
+        flags: EncryptionFlags,
         message: &mut [SecurityBufferRef<'_>],
     ) -> Result<SecurityStatus> {
+        self.ensure_message_protection_ready()?;
         trace!(encryption_params = ?self.encryption_params);
 
-        // checks if the Token buffer present
-        let _ = SecurityBufferRef::find_buffer(message, BufferType::Token)?;
-        let data_buffer = SecurityBufferRef::find_buffer_mut(message, BufferType::Data)?;
-
+        SecurityBufferRef::find_buffer(message, BufferType::Token)?;
+        let plaintext = collect_writable_data(message);
         let cipher = self
             .encryption_params
             .encryption_type
             .as_ref()
             .unwrap_or(&DEFAULT_ENCRYPTION_TYPE)
             .cipher();
-
-        let sequence_number = self.next_seq_number();
-
+        let sequence_number = self.next_gss_seq_number();
         let key = get_encryption_key(&self.encryption_params)?;
         let key_usage = self.encryption_params.sspi_encrypt_key_usage;
 
         let mut wrap_token = WrapToken::with_seq_number(u64::from(sequence_number));
-        wrap_token.flags = match self.mode {
-            Pku2uMode::Client => CLIENT_WRAP_TOKEN_FLAGS,
-            Pku2uMode::Server => SERVER_WRAP_TOKEN_FLAGS,
+        let integrity_only = flags.contains(EncryptionFlags::WRAP_NO_ENCRYPT);
+        wrap_token.flags = self.wrap_flags(!integrity_only);
+
+        let raw_wrap_token = if integrity_only {
+            let aes_size = self.encryption_params.aes_size().ok_or_else(|| {
+                Error::new(
+                    ErrorKind::UnsupportedFunction,
+                    "PKU2U integrity-only Wrap tokens require an AES session key",
+                )
+            })?;
+            let mut to_sign =
+                SecurityBufferRef::buffers_of_type(message, BufferType::Data).fold(Vec::new(), |mut data, buffer| {
+                    data.extend_from_slice(buffer.data());
+                    data
+                });
+            to_sign.extend_from_slice(&wrap_token.header());
+
+            let checksum = checksum_sha_aes(key.as_ref(), key_usage, &to_sign, &aes_size)?;
+            let checksum_len = u16::try_from(checksum.len())?;
+            let mut payload = plaintext;
+            payload.extend_from_slice(&checksum);
+            payload.rotate_right(usize::from(INTEGRITY_ONLY_RRC));
+
+            wrap_token.ec = checksum_len;
+            wrap_token.rrc = INTEGRITY_ONLY_RRC;
+            wrap_token.set_checksum(payload);
+
+            let mut encoded = Vec::with_capacity(WrapToken::header_len() + wrap_token.checksum.len());
+            wrap_token.encode(&mut encoded)?;
+            encoded
+        } else {
+            wrap_token.ec = ENCRYPTED_WRAP_EC;
+
+            let mut payload = plaintext;
+            payload.resize(payload.len() + usize::from(wrap_token.ec), 0);
+            payload.extend_from_slice(&wrap_token.header());
+
+            let EncryptWithoutChecksum {
+                mut encrypted,
+                confounder,
+                ki: _,
+            } = cipher.encrypt_no_checksum(key.as_ref(), key_usage, &payload)?;
+
+            let mut to_sign =
+                SecurityBufferRef::buffers_of_type(message, BufferType::Data).fold(confounder, |mut data, buffer| {
+                    data.extend_from_slice(buffer.data());
+                    data
+                });
+            to_sign.resize(to_sign.len() + usize::from(wrap_token.ec), 0);
+            to_sign.extend_from_slice(&wrap_token.header());
+
+            encrypted.extend_from_slice(&cipher.encryption_checksum(key.as_ref(), key_usage, &to_sign)?);
+            encrypted.rotate_right(usize::from(RRC + wrap_token.ec));
+            wrap_token.rrc = RRC;
+            wrap_token.set_checksum(encrypted);
+
+            let mut encoded = Vec::with_capacity(WrapToken::header_len() + wrap_token.checksum.len());
+            wrap_token.encode(&mut encoded)?;
+            encoded
         };
 
-        let mut payload = data_buffer.data().to_vec();
-        payload.extend_from_slice(&wrap_token.header());
-
-        let mut checksum = cipher.encrypt(key.as_ref(), key_usage, &payload)?;
-        checksum.rotate_right(RRC.into());
-
-        wrap_token.set_rrc(RRC);
-        wrap_token.set_checksum(checksum);
-
-        let mut raw_wrap_token = Vec::with_capacity(92);
-        wrap_token.encode(&mut raw_wrap_token)?;
-
-        match self.state {
-            Pku2uState::PubKeyAuth | Pku2uState::Credentials | Pku2uState::Final => {
-                if raw_wrap_token.len() < SECURITY_TRAILER {
-                    return Err(Error::new(ErrorKind::EncryptFailure, "Cannot encrypt the data"));
-                }
-
-                let (token, data) = raw_wrap_token.split_at(SECURITY_TRAILER);
-                data_buffer.write_data(data)?;
-                let token_buffer = SecurityBufferRef::find_buffer_mut(message, BufferType::Token)?;
-                token_buffer.write_data(token)?;
-            }
-            _ => {
-                return Err(Error::new(
-                    ErrorKind::OutOfSequence,
-                    "Pku2u context is not established".to_owned(),
-                ));
-            }
+        let token_len = if integrity_only {
+            WrapToken::header_len() + usize::from(wrap_token.ec)
+        } else {
+            PKU2U_SECURITY_TRAILER
         };
+        if raw_wrap_token.len() < token_len {
+            return Err(Error::new(ErrorKind::EncryptFailure, "PKU2U Wrap token is too short"));
+        }
+        let (token, data) = raw_wrap_token.split_at(token_len);
+        SecurityBufferRef::find_buffer_mut(message, BufferType::Token)?.write_data(token)?;
+        write_writable_data(data, message)?;
 
         Ok(SecurityStatus::Ok)
     }
 
     #[instrument(level = "debug", ret, fields(state = ?self.state), skip(self))]
     fn decrypt_message(&mut self, message: &mut [SecurityBufferRef<'_>]) -> Result<DecryptionFlags> {
+        self.ensure_message_protection_ready()?;
         trace!(encryption_params = ?self.encryption_params);
 
-        let encrypted = extract_encrypted_data(message)?;
-
+        let encrypted = collect_wrap_input(message)?;
         let cipher = self
             .encryption_params
             .encryption_type
@@ -275,41 +828,62 @@ impl Sspi for Pku2u {
         let key = get_encryption_key(&self.encryption_params)?;
         let key_usage = self.encryption_params.sspi_decrypt_key_usage;
 
-        let mut wrap_token = WrapToken::decode(encrypted.as_slice())?;
-        wrap_token.checksum.rotate_left(RRC.into());
+        let wrap_token = WrapToken::decode(encrypted.as_slice())?;
+        self.validate_wrap_flags(wrap_token.flags)?;
+        if wrap_token.seq_num != u64::from(self.remote_gss_seq_number) {
+            return Err(Error::new(
+                ErrorKind::OutOfSequence,
+                format!(
+                    "invalid PKU2U Wrap token sequence number: expected {}, got {}",
+                    self.remote_gss_seq_number, wrap_token.seq_num
+                ),
+            ));
+        }
 
-        let mut decrypted = cipher.decrypt(key.as_ref(), key_usage, &wrap_token.checksum)?;
-
-        // remove wrap token header
-        decrypted.truncate(decrypted.len() - WrapToken::header_len());
-
-        save_decrypted_data(&decrypted, message)?;
+        let decryption_flags = if wrap_token.flags & WRAP_SEALED == 0 {
+            let aes_size = self.encryption_params.aes_size().ok_or_else(|| {
+                Error::new(
+                    ErrorKind::UnsupportedFunction,
+                    "PKU2U integrity-only Wrap tokens require an AES session key",
+                )
+            })?;
+            decrypt_integrity_only_wrap(&wrap_token, key.as_ref(), &aes_size, key_usage, message)?
+        } else {
+            decrypt_sealed_wrap(&wrap_token, key.as_ref(), key_usage, message, cipher.as_ref())?
+        };
+        self.remote_gss_seq_number = self.remote_gss_seq_number.wrapping_add(1);
 
         match self.state {
             Pku2uState::PubKeyAuth => {
                 self.state = Pku2uState::Credentials;
-                Ok(DecryptionFlags::empty())
             }
             Pku2uState::Credentials => {
                 self.state = Pku2uState::Final;
-                Ok(DecryptionFlags::empty())
             }
-            _ => Ok(DecryptionFlags::empty()),
+            _ => {}
         }
+
+        Ok(decryption_flags)
     }
 
     #[instrument(level = "debug", ret, fields(state = ?self.state), skip(self))]
     fn query_context_sizes(&mut self) -> Result<ContextSizes> {
         Ok(ContextSizes {
             max_token: PACKAGE_INFO.max_token_len,
-            max_signature: MAX_SIGNATURE as u32,
-            block: 0,
-            security_trailer: SECURITY_TRAILER as u32,
+            max_signature: 28,
+            block: 1,
+            security_trailer: PKU2U_SECURITY_TRAILER.try_into()?,
         })
     }
 
     #[instrument(level = "debug", ret, fields(state = ?self.state), skip(self))]
     fn query_context_names(&mut self) -> Result<ContextNames> {
+        if let Some(username) = &self.peer_name {
+            return Ok(ContextNames {
+                username: username.clone(),
+            });
+        }
+
         if let Some(identity_buffers) = &self.auth_identity {
             let identity =
                 AuthIdentity::try_from(identity_buffers).map_err(|e| Error::new(ErrorKind::InvalidParameter, e))?;
@@ -332,10 +906,32 @@ impl Sspi for Pku2u {
 
     #[instrument(level = "debug", ret, fields(state = ?self.state), skip(self))]
     fn query_context_cert_trust_status(&mut self) -> Result<CertTrustStatus> {
-        Err(Error::new(
-            ErrorKind::UnsupportedFunction,
-            "Certificate trust status is not supported".to_owned(),
-        ))
+        self.ensure_message_protection_ready()?;
+        Ok(if self.peer_certificate_trusted {
+            CertTrustStatus {
+                error_status: CertTrustErrorStatus::NO_ERROR,
+                info_status: CertTrustInfoStatus::IS_PEER_TRUSTED,
+            }
+        } else {
+            CertTrustStatus {
+                error_status: CertTrustErrorStatus::IS_UNTRUSTED_ROOT,
+                info_status: CertTrustInfoStatus::empty(),
+            }
+        })
+    }
+
+    #[instrument(level = "debug", ret, fields(state = ?self.state), skip(self))]
+    fn query_context_remote_cert(&mut self) -> Result<CertContext> {
+        self.ensure_message_protection_ready()?;
+        let certificate = self
+            .peer_certificate
+            .clone()
+            .ok_or_else(|| Error::new(ErrorKind::CertificateUnknown, "PKU2U peer certificate is not available"))?;
+        Ok(CertContext {
+            encoding_type: CertEncodingType::X509AsnEncoding,
+            raw_cert: picky_asn1_der::to_vec(&certificate)?,
+            cert: certificate,
+        })
     }
 
     #[instrument(level = "debug", fields(state = ?self.state), skip(self))]
@@ -357,20 +953,28 @@ impl Sspi for Pku2u {
     fn make_signature(
         &mut self,
         _flags: u32,
-        _message: &mut [SecurityBufferRef<'_>],
-        _sequence_number: u32,
+        message: &mut [SecurityBufferRef<'_>],
+        sequence_number: u32,
     ) -> Result<()> {
-        Err(Error::new(
-            ErrorKind::UnsupportedFunction,
-            "make_signature is not supported",
-        ))
+        let data = SecurityBufferRef::buffers_of_type(message, BufferType::Data).fold(Vec::new(), |mut acc, buffer| {
+            acc.extend_from_slice(buffer.data());
+            acc
+        });
+        let signature = self.generate_mic(sequence_number.into(), &data)?;
+        SecurityBufferRef::find_buffer_mut(message, BufferType::Token)?.write_data(&signature)
     }
 
-    fn verify_signature(&mut self, _message: &mut [SecurityBufferRef<'_>], _sequence_number: u32) -> Result<u32> {
-        Err(Error::new(
-            ErrorKind::UnsupportedFunction,
-            "verify_signature is not supported",
-        ))
+    fn verify_signature(&mut self, message: &mut [SecurityBufferRef<'_>], sequence_number: u32) -> Result<u32> {
+        let token = SecurityBufferRef::find_buffer(message, BufferType::Token)?
+            .data()
+            .to_vec();
+        let data = SecurityBufferRef::buffers_of_type(message, BufferType::Data).fold(Vec::new(), |mut acc, buffer| {
+            acc.extend_from_slice(buffer.data());
+            acc
+        });
+        self.verify_mic(sequence_number.into(), &token, &data)?;
+
+        Ok(0)
     }
 }
 
@@ -424,13 +1028,10 @@ impl SspiImpl for Pku2u {
 impl Pku2u {
     pub(crate) async fn accept_security_context_impl(
         &mut self,
-        _yield_point: &mut YieldPointLocal,
-        _builder: FilledAcceptSecurityContext<'_, <Self as SspiImpl>::CredentialsHandle>,
+        yield_point: &mut YieldPointLocal,
+        builder: FilledAcceptSecurityContext<'_, <Self as SspiImpl>::CredentialsHandle>,
     ) -> Result<AcceptSecurityContextResult> {
-        Err(Error::new(
-            ErrorKind::UnsupportedFunction,
-            "accept_security_context_impl is not implemented yet",
-        ))
+        server::accept_security_context(self, yield_point, builder).await
     }
 
     #[instrument(ret, level = "debug", fields(state = ?self.state), skip_all)]
@@ -439,6 +1040,7 @@ impl Pku2u {
         builder: &mut crate::builders::FilledInitializeSecurityContext<'_, '_, <Self as SspiImpl>::CredentialsHandle>,
     ) -> Result<InitializeSecurityContextResult> {
         trace!(?builder);
+        self.read_channel_bindings(builder.input.as_deref())?;
 
         let status = match self.state {
             Pku2uState::Negotiate => {
@@ -499,7 +1101,7 @@ impl Pku2u {
 
                 self.negoex_messages.extend_from_slice(&buffer);
 
-                let acceptor_nego = Nego::decode(&buffer)?;
+                let (acceptor_nego, acceptor_exchange_data) = decode_nego_message(&buffer, MessageType::AcceptorNego)?;
                 trace!(?acceptor_nego, "NEGOEX ACCEPTOR NEGOTIATE");
 
                 check_conversation_id!(acceptor_nego.header.conversation_id, self.conversation_id);
@@ -524,17 +1126,16 @@ impl Pku2u {
                     ));
                 }
 
-                if buffer.len() < acceptor_nego.header.header_len as usize {
-                    return Err(Error::new(ErrorKind::InvalidToken, "NEGOEX buffer is too short"));
-                }
-
-                let acceptor_exchange_data = &buffer[(acceptor_nego.header.message_len as usize)..];
-                let acceptor_exchange = Exchange::decode(acceptor_exchange_data)?;
+                let (acceptor_exchange, tail) =
+                    decode_exchange_message(acceptor_exchange_data, MessageType::AcceptorMetaData)?;
+                ensure_no_negoex_tail(tail)?;
                 trace!(?acceptor_exchange, "NEGOEX ACCEPTOR EXCHANGE");
 
                 check_conversation_id!(acceptor_exchange.header.conversation_id, self.conversation_id);
                 check_sequence_number!(acceptor_exchange.header.sequence_num, self.next_seq_number());
                 check_auth_scheme!(acceptor_exchange.auth_scheme, self.auth_scheme);
+                let metadata: Pku2uNegoRep = picky_asn1_der::from_bytes(&acceptor_exchange.exchange)?;
+                self.select_credential_for_metadata(&metadata.metadata.0.0)?;
 
                 let mut mech_token = Vec::new();
 
@@ -544,13 +1145,15 @@ impl Pku2u {
                 debug!(names = ?snames, "Service principal names");
 
                 let next_seq_number = self.next_seq_number();
+                let mut rng = StdRng::try_from_rng(&mut SysRng)?;
+                let request_nonce = generate_nonce(&mut rng);
+                self.request_nonce = Some(request_nonce);
                 let kdc_req_body = generate_as_req_kdc_body(&GenerateAsReqOptions {
                     realm: WELLKNOWN_REALM,
                     username: &generate_as_req_username_from_certificate(&self.config.p2p_certificate)?,
                     cname_type: 0x80,
                     snames: &snames,
-                    // we don't need the nonce in Pku2u
-                    nonce: &[0],
+                    nonce: request_nonce,
                     hostname: &self.config.client_hostname,
                     context_requirements: builder.context_requirements,
                 })?;
@@ -560,17 +1163,15 @@ impl Pku2u {
                     kdc_req_body: &kdc_req_body,
                     dh_parameters: self.dh_parameters.clone(),
                     sign_data: Box::new(move |data_to_sign| {
-                        SignatureAlgorithm::RsaPkcs1v15(HashAlgorithm::SHA1)
-                            .sign(data_to_sign, private_key.as_ref())
-                            .map_err(|err| {
-                                Error::new(
-                                    ErrorKind::InternalError,
-                                    format!("Cannot calculate signer info signature: {err:?}"),
-                                )
-                            })
+                        private_key.sign(data_to_sign).map_err(|err| {
+                            Error::new(
+                                ErrorKind::InternalError,
+                                format!("Cannot calculate signer info signature: {err:?}"),
+                            )
+                        })
                     }),
                     with_pre_auth: true,
-                    authenticator_nonce: Default::default(),
+                    authenticator_nonce: request_nonce,
                 })?;
                 let as_req = generate_as_req(pa_datas, kdc_req_body);
 
@@ -588,7 +1189,7 @@ impl Pku2u {
 
                 self.negoex_messages.extend_from_slice(&mech_token);
 
-                let response_token = picky_asn1_der::to_vec(&generate_neg_token_targ(mech_token)?)?;
+                let response_token = picky_asn1_der::to_vec(&generate_neg_token_targ(mech_token, false)?)?;
 
                 let output_token = SecurityBuffer::find_buffer_mut(builder.output, BufferType::Token)?;
                 output_token.buffer.write_all(&response_token)?;
@@ -615,7 +1216,8 @@ impl Pku2u {
 
                 self.negoex_messages.extend_from_slice(&buffer);
 
-                let acceptor_exchange = Exchange::decode(&buffer)?;
+                let (acceptor_exchange, tail) = decode_exchange_message(&buffer, MessageType::ApRequest)?;
+                ensure_no_negoex_tail(tail)?;
                 trace!(?acceptor_exchange, "NEGOEX ACCEPTOR EXCHANGE MESSAGE");
 
                 check_conversation_id!(acceptor_exchange.header.conversation_id, self.conversation_id);
@@ -624,7 +1226,9 @@ impl Pku2u {
 
                 self.gss_api_messages.extend_from_slice(&acceptor_exchange.exchange);
 
-                let (as_rep, _): (AsRep, _) = extract_krb_rep(&acceptor_exchange.exchange)?;
+                let (as_rep, _): (picky_krb::data_types::KrbResult<AsRep>, _) =
+                    extract_krb_result(&acceptor_exchange.exchange)?;
+                let as_rep = as_rep.map_err(Error::from)?;
 
                 let dh_rep_info = match extract_pa_pk_as_rep(&as_rep)? {
                     PaPkAsRep::DhInfo(dh) => dh.0,
@@ -643,6 +1247,18 @@ impl Pku2u {
 
                 let rsa_public_key = validate_server_p2p_certificate(&signed_data)?;
                 validate_signed_data(&signed_data, &rsa_public_key)?;
+                let server_certificate = extract_signing_certificate(&signed_data)?;
+                validate_peer_p2p_certificate(&server_certificate, self.certificate_validation_time())?;
+                if !self.config.trusted_server_certificates.is_empty()
+                    && !self.config.trusted_server_certificates.contains(&server_certificate)
+                {
+                    return Err(Error::new(
+                        ErrorKind::Pku2uCertFailure,
+                        "PKU2U acceptor certificate is not trusted",
+                    ));
+                }
+                self.peer_certificate_trusted = self.config.trusted_server_certificates.contains(&server_certificate);
+                self.peer_certificate = Some(server_certificate);
 
                 let public_key = extract_server_dh_public_key(&signed_data)?;
                 self.dh_parameters.other_public_key = Some(public_key);
@@ -673,19 +1289,34 @@ impl Pku2u {
                 )?;
                 trace!(?session_key, "Session key generated from DH components");
 
-                let session_key = extract_session_key_from_as_rep(&as_rep, &session_key, &self.encryption_params)?;
+                let (session_key, response_nonce) =
+                    extract_session_key_and_nonce_from_as_rep(&as_rep, &session_key, &self.encryption_params)?;
+                let request_nonce = self
+                    .request_nonce
+                    .take()
+                    .ok_or_else(|| Error::new(ErrorKind::OutOfSequence, "PKU2U AS-REQ nonce is not set"))?;
+                if response_nonce != request_nonce {
+                    return Err(Error::new(
+                        ErrorKind::MessageAltered,
+                        format!("PKU2U AS-REP nonce mismatch: expected {request_nonce}, got {response_nonce}"),
+                    ));
+                }
                 self.encryption_params.session_key = Some(session_key);
 
                 let exchange_seq_number = self.next_seq_number();
                 let verify_seq_number = self.next_seq_number();
+                self.gss_seq_number = exchange_seq_number;
 
                 let enc_type = self
                     .encryption_params
                     .encryption_type
                     .as_ref()
                     .unwrap_or(&DEFAULT_ENCRYPTION_TYPE);
+                let checksum_suite = enc_type.cipher().checksum_type();
                 let mut rand = StdRng::try_from_rng(&mut SysRng)?;
                 let authenticator_sub_key = generate_random_symmetric_key(enc_type, &mut rand);
+                let mut checksum_value = ChecksumValues::default();
+                checksum_value.set_flags(builder.context_requirements.into());
 
                 let authenticator = generate_authenticator(GenerateAuthenticatorOptions {
                     kdc_rep: &as_rep.0,
@@ -696,12 +1327,13 @@ impl Pku2u {
                     }),
                     checksum: Some(ChecksumOptions {
                         checksum_type: AUTHENTICATOR_CHECKSUM_TYPE.to_vec(),
-                        checksum_value: AUTHENTICATOR_DEFAULT_CHECKSUM.into(),
+                        checksum_value,
                     }),
-                    channel_bindings: None,
+                    channel_bindings: self.channel_bindings.as_ref(),
                     extensions: vec![generate_authenticator_extension(
                         &authenticator_sub_key,
                         &self.gss_api_messages,
+                        &checksum_suite,
                     )?],
                 })?;
 
@@ -731,18 +1363,16 @@ impl Pku2u {
                     self.conversation_id,
                     verify_seq_number,
                     check_if_empty!(self.auth_scheme, "auth_scheme is not set"),
-                    ChecksumSuite::HmacSha196Aes256.into(),
-                    ChecksumSuite::HmacSha196Aes256.hasher().checksum(
-                        &authenticator_sub_key,
-                        INITIATOR_SIGN,
-                        &self.negoex_messages,
-                    )?,
+                    u32::from(&checksum_suite),
+                    checksum_suite
+                        .hasher()
+                        .checksum(&authenticator_sub_key, INITIATOR_SIGN, &self.negoex_messages)?,
                 );
                 verify.encode(&mut mech_token)?;
 
                 verify.encode(&mut self.negoex_messages)?;
 
-                let encoded_neg_token_targ = picky_asn1_der::to_vec(&generate_neg_token_targ(mech_token)?)?;
+                let encoded_neg_token_targ = picky_asn1_der::to_vec(&generate_neg_token_targ(mech_token, false)?)?;
 
                 let output_token = SecurityBuffer::find_buffer_mut(builder.output, BufferType::Token)?;
                 output_token.buffer.write_all(&encoded_neg_token_targ)?;
@@ -768,22 +1398,19 @@ impl Pku2u {
                     .0
                     .0;
 
-                let acceptor_exchange = Exchange::decode(&buffer)?;
+                let (acceptor_exchange, acceptor_verify_data) =
+                    decode_exchange_message(&buffer, MessageType::ApRequest)?;
                 trace!(?acceptor_exchange, "NEGOEX ACCEPTOR EXCHANGE MESSAGE");
 
                 check_conversation_id!(acceptor_exchange.header.conversation_id, self.conversation_id);
                 check_sequence_number!(acceptor_exchange.header.sequence_num, self.next_seq_number());
                 check_auth_scheme!(acceptor_exchange.auth_scheme, self.auth_scheme);
 
-                if buffer.len() < acceptor_exchange.header.header_len as usize {
-                    return Err(Error::new(ErrorKind::InvalidToken, "NEGOEX buffer is too short"));
-                }
+                let exchange_message_len = buffer.len() - acceptor_verify_data.len();
+                self.negoex_messages.extend_from_slice(&buffer[0..exchange_message_len]);
 
-                self.negoex_messages
-                    .extend_from_slice(&buffer[0..(acceptor_exchange.header.message_len as usize)]);
-
-                let acceptor_verify_data = &buffer[(acceptor_exchange.header.message_len as usize)..];
-                let acceptor_verify = Verify::decode(acceptor_verify_data)?;
+                let (acceptor_verify, tail) = decode_verify_message(acceptor_verify_data)?;
+                ensure_no_negoex_tail(tail)?;
                 trace!(?acceptor_exchange, "NEGOEX ACCEPTOR VERIFY MESSAGE");
 
                 check_conversation_id!(acceptor_verify.header.conversation_id, self.conversation_id);
@@ -792,25 +1419,47 @@ impl Pku2u {
 
                 let (ap_rep, _): (ApRep, _) = extract_krb_rep(&acceptor_exchange.exchange)?;
 
-                let sub_session_key = extract_sub_session_key_from_ap_rep(
+                let ap_rep_enc_part = decrypt_ap_rep(
                     &ap_rep,
                     check_if_empty!(self.encryption_params.session_key.as_ref(), "session key is not set"),
                     &self.encryption_params,
                 )?;
+                let sub_session_key = extract_sub_session_key_from_ap_rep(&ap_rep_enc_part)?;
+                self.remote_gss_seq_number = extract_seq_number_from_ap_rep(&ap_rep_enc_part)?;
 
                 self.encryption_params.sub_session_key = Some(sub_session_key);
 
-                let acceptor_checksum = ChecksumSuite::try_from(acceptor_verify.checksum.checksum_type as usize)?
-                    .hasher()
-                    .checksum(
-                        check_if_empty!(
-                            self.encryption_params.sub_session_key.as_ref(),
-                            "sub-session key is not set"
-                        )
-                        .as_ref(),
-                        ACCEPTOR_SIGN,
-                        &self.negoex_messages,
-                    )?;
+                let checksum_type: usize = acceptor_verify.checksum.checksum_type.try_into().map_err(|_| {
+                    Error::new(
+                        ErrorKind::InvalidToken,
+                        "NEGOEX checksum type is too big to fit into usize",
+                    )
+                })?;
+                let checksum_suite = ChecksumSuite::try_from(checksum_type)?;
+                let expected_checksum_suite = self
+                    .encryption_params
+                    .encryption_type
+                    .as_ref()
+                    .unwrap_or(&DEFAULT_ENCRYPTION_TYPE)
+                    .cipher()
+                    .checksum_type();
+                if checksum_suite != expected_checksum_suite {
+                    return Err(Error::new(
+                        ErrorKind::InvalidToken,
+                        format!(
+                            "invalid NEGOEX checksum type: expected {expected_checksum_suite:?}, got {checksum_suite:?}"
+                        ),
+                    ));
+                }
+                let acceptor_checksum = checksum_suite.hasher().checksum(
+                    check_if_empty!(
+                        self.encryption_params.sub_session_key.as_ref(),
+                        "sub-session key is not set"
+                    )
+                    .as_ref(),
+                    ACCEPTOR_SIGN,
+                    &self.negoex_messages,
+                )?;
                 if acceptor_verify.checksum.checksum_value != acceptor_checksum {
                     return Err(Error::new(
                         ErrorKind::MessageAltered,
@@ -847,38 +1496,146 @@ impl SspiEx for Pku2u {
 
         Ok(())
     }
+
+    fn verify_mic_token(&mut self, token: &[u8], data: &[u8], _: crate::private::Sealed) -> Result<()> {
+        self.verify_mic(self.remote_gss_seq_number.into(), token, data)?;
+        self.remote_gss_seq_number = self.remote_gss_seq_number.wrapping_add(1);
+        Ok(())
+    }
+
+    fn generate_mic_token(&mut self, data: &[u8], _: crate::private::Sealed) -> Result<Vec<u8>> {
+        let sequence_number = self.next_gss_seq_number();
+        self.generate_mic(sequence_number.into(), data)
+    }
+}
+
+#[cfg(feature = "__test-data")]
+#[doc(hidden)]
+pub fn fuzz_token(data: &[u8]) {
+    use std::io::Cursor;
+
+    use picky_krb::gss_api::{ApplicationTag0, GssApiNegInit, KrbMessage, MicToken};
+    use picky_krb::messages::{ApReq, AsReq, KrbError};
+
+    if let Ok(token) = picky_asn1_der::from_bytes::<ApplicationTag0<GssApiNegInit>>(data)
+        && let Some(mech_token) = token.0.neg_token_init.0.mech_token.0
+    {
+        let mech_token = mech_token.0.0;
+        if let Ok((_, tail)) = decode_nego_message(&mech_token, MessageType::InitiatorNego) {
+            let _ = decode_exchange_message(tail, MessageType::InitiatorMetaData);
+        }
+        if let Ok((_, tail)) = decode_nego_message(&mech_token, MessageType::AcceptorNego) {
+            let _ = decode_exchange_message(tail, MessageType::AcceptorMetaData);
+        }
+    }
+
+    if let Ok(token) = picky_asn1_der::from_bytes::<NegTokenTarg1>(data)
+        && let Some(response_token) = token.0.response_token.0
+    {
+        let response_token = response_token.0.0;
+        if let Ok((_, tail)) = decode_exchange_message(&response_token, MessageType::ApRequest) {
+            let _ = decode_verify_message(tail);
+        }
+    }
+
+    let _ = extract_krb_result::<AsRep>(data);
+    let _ = KrbMessage::<AsReq>::decode_application_krb_message(data);
+    let _ = KrbMessage::<KrbError>::decode_application_krb_message(data);
+    let _ = KrbMessage::<ApReq>::decode_application_krb_message(data);
+    let _ = KrbMessage::<ApRep>::decode_application_krb_message(data);
+    let _ = WrapToken::decode(Cursor::new(data));
+    let _ = MicToken::decode(Cursor::new(data));
 }
 
 #[cfg(test)]
 mod tests {
     use crypto_bigint::rand_core::TryRng;
     use picky::key::PrivateKey;
+    use picky::oids;
     use picky_asn1_x509::Certificate;
     use picky_krb::constants::key_usages::{ACCEPTOR_SEAL, INITIATOR_SEAL};
     use picky_krb::crypto::CipherSuite;
-    use picky_krb::negoex::RANDOM_ARRAY_SIZE;
+    use picky_krb::gss_api::{ApplicationTag0, GssApiNegInit};
+    use picky_krb::negoex::data_types::MessageType;
+    use picky_krb::negoex::messages::{Exchange, Nego};
+    use picky_krb::negoex::{NegoexMessage, RANDOM_ARRAY_SIZE};
     use rand::rngs::{StdRng, SysRng};
     use rand_core::{Rng as _, SeedableRng as _};
     use uuid::Uuid;
 
-    use super::Pku2uMode;
-    use super::generators::{generate_client_dh_parameters, generate_server_dh_parameters};
+    use super::generators::{
+        generate_as_req_username_from_certificate, generate_client_dh_parameters, generate_server_dh_parameters,
+    };
+    use super::{
+        PACKAGE_INFO, PKG_NAME, PKU2U_SECURITY_TRAILER, Pku2uMode, WRAP_SENT_BY_ACCEPTOR, decode_exchange_message,
+        decode_nego_message, validate_peer_p2p_certificate,
+    };
     use crate::kerberos::EncryptionParams;
-    use crate::{EncryptionFlags, Pku2u, Pku2uConfig, Pku2uState, SecurityBufferRef, Sspi};
+    use crate::{
+        AuthIdentityBuffers, BufferType, CertTrustErrorStatus, ClientRequestFlags, DataRepresentation, EncryptionFlags,
+        ErrorKind, Negotiate, NegotiateConfig, PackageCapabilities, Pku2u, Pku2uConfig, Pku2uState, Result,
+        SecurityBuffer, SecurityBufferFlags, SecurityBufferRef, SecurityStatus, ServerRequestFlags, Sspi, SspiEx,
+        SspiImpl,
+    };
 
     #[test]
-    fn stream_buffer_decryption() {
-        let session_key = vec![
-            137, 60, 120, 245, 164, 179, 76, 200, 242, 96, 57, 174, 111, 209, 90, 76, 58, 117, 55, 138, 81, 75, 110,
-            235, 80, 228, 14, 238, 76, 128, 139, 81,
-        ];
-        let sub_session_key = vec![
-            35, 147, 211, 63, 83, 48, 241, 34, 97, 95, 27, 106, 195, 18, 95, 91, 17, 45, 187, 6, 26, 195, 16, 108, 123,
-            119, 121, 155, 58, 142, 204, 74,
-        ];
+    fn negoex_decode_rejects_out_of_bounds_auth_scheme_vector() {
+        let mut encoded = Vec::new();
+        Nego::new(
+            MessageType::InitiatorNego,
+            Uuid::nil(),
+            0,
+            [0; RANDOM_ARRAY_SIZE],
+            vec![Uuid::nil()],
+            Vec::new(),
+        )
+        .encode(&mut encoded)
+        .unwrap();
+        encoded[80..84].copy_from_slice(&u32::MAX.to_le_bytes());
 
-        let mut rng = StdRng::try_from_rng(&mut SysRng).unwrap();
+        assert_eq!(
+            decode_nego_message(&encoded, MessageType::InitiatorNego)
+                .unwrap_err()
+                .error_type,
+            ErrorKind::InvalidToken
+        );
+    }
 
+    #[test]
+    fn negoex_decode_rejects_out_of_bounds_exchange_vector() {
+        let mut encoded = Vec::new();
+        Exchange::new(MessageType::ApRequest, Uuid::nil(), 0, Uuid::nil(), vec![1])
+            .encode(&mut encoded)
+            .unwrap();
+        encoded[56..60].copy_from_slice(&u32::MAX.to_le_bytes());
+
+        assert_eq!(
+            decode_exchange_message(&encoded, MessageType::ApRequest)
+                .unwrap_err()
+                .error_type,
+            ErrorKind::InvalidToken
+        );
+    }
+
+    #[test]
+    fn negoex_decode_rejects_out_of_bounds_empty_vector() {
+        let mut encoded = Vec::new();
+        Exchange::new(MessageType::ApRequest, Uuid::nil(), 0, Uuid::nil(), Vec::new())
+            .encode(&mut encoded)
+            .unwrap();
+        encoded[56..60].copy_from_slice(&u32::MAX.to_le_bytes());
+
+        assert_eq!(
+            decode_exchange_message(&encoded, MessageType::ApRequest)
+                .unwrap_err()
+                .error_type,
+            ErrorKind::InvalidToken
+        );
+    }
+
+    /// A real device-registration ("PKU2U") certificate + RSA private key pair, extracted from a live
+    /// Windows PKU2U exchange, used by several tests below as a stand-in server/client identity.
+    fn test_p2p_identity() -> (Certificate, PrivateKey) {
         let p2p_certificate: Certificate = picky_asn1_der::from_bytes(&[
             48, 130, 3, 213, 48, 130, 2, 189, 160, 3, 2, 1, 2, 2, 16, 32, 99, 134, 91, 60, 164, 166, 93, 186, 47, 71,
             107, 255, 241, 24, 166, 48, 13, 6, 9, 42, 134, 72, 134, 247, 13, 1, 1, 11, 5, 0, 48, 77, 49, 75, 48, 73, 6,
@@ -954,6 +1711,44 @@ xFnLp2UBrhxA9GYrpJ5i0onRmexQnTVSl5DDq07s+3dbr9YAKjrg9IDZYqLbdwP1
         )
         .unwrap();
 
+        (p2p_certificate, private_key)
+    }
+
+    fn test_certificate_validation_time() -> time::OffsetDateTime {
+        time::Date::from_calendar_date(2023, time::Month::January, 29)
+            .unwrap()
+            .with_hms(16, 0, 0)
+            .unwrap()
+            .assume_utc()
+    }
+
+    #[test]
+    fn expired_peer_certificate_is_rejected() {
+        let (certificate, _) = test_p2p_identity();
+
+        assert_eq!(
+            validate_peer_p2p_certificate(&certificate, time::OffsetDateTime::now_utc())
+                .unwrap_err()
+                .error_type,
+            ErrorKind::Pku2uCertFailure
+        );
+    }
+
+    #[test]
+    fn stream_buffer_decryption() {
+        let session_key = vec![
+            137, 60, 120, 245, 164, 179, 76, 200, 242, 96, 57, 174, 111, 209, 90, 76, 58, 117, 55, 138, 81, 75, 110,
+            235, 80, 228, 14, 238, 76, 128, 139, 81,
+        ];
+        let sub_session_key = vec![
+            35, 147, 211, 63, 83, 48, 241, 34, 97, 95, 27, 106, 195, 18, 95, 91, 17, 45, 187, 6, 26, 195, 16, 108, 123,
+            119, 121, 155, 58, 142, 204, 74,
+        ];
+
+        let mut rng = StdRng::try_from_rng(&mut SysRng).unwrap();
+
+        let (p2p_certificate, private_key) = test_p2p_identity();
+
         let mut negoex_random = [0; RANDOM_ARRAY_SIZE];
         rng.fill_bytes(&mut negoex_random);
 
@@ -963,6 +1758,9 @@ xFnLp2UBrhxA9GYrpJ5i0onRmexQnTVSl5DDq07s+3dbr9YAKjrg9IDZYqLbdwP1
                 p2p_certificate: p2p_certificate.clone(),
                 private_key: private_key.clone().into(),
                 client_hostname: "hostname".into(),
+                additional_credentials: Vec::new(),
+                trusted_client_certificates: vec![p2p_certificate.clone()],
+                trusted_server_certificates: Vec::new(),
             },
             state: Pku2uState::Final,
             encryption_params: EncryptionParams {
@@ -977,10 +1775,19 @@ xFnLp2UBrhxA9GYrpJ5i0onRmexQnTVSl5DDq07s+3dbr9YAKjrg9IDZYqLbdwP1
             conversation_id: Uuid::new_v4(),
             auth_scheme: None,
             seq_number: 0,
+            gss_seq_number: 0,
+            remote_gss_seq_number: 0,
+            request_nonce: None,
+            channel_bindings: None,
+            peer_certificate: None,
+            peer_certificate_trusted: false,
+            peer_name: None,
+            certificate_validation_time: None,
             dh_parameters: generate_server_dh_parameters(&mut rng).unwrap(),
             negoex_messages: Vec::new(),
             gss_api_messages: Vec::new(),
             negoex_random,
+            ticket_encryption_key: None,
         };
 
         let mut negoex_random = [0; RANDOM_ARRAY_SIZE];
@@ -989,9 +1796,12 @@ xFnLp2UBrhxA9GYrpJ5i0onRmexQnTVSl5DDq07s+3dbr9YAKjrg9IDZYqLbdwP1
         let mut pku2u_client = Pku2u {
             mode: Pku2uMode::Client,
             config: Pku2uConfig {
-                p2p_certificate,
+                p2p_certificate: p2p_certificate.clone(),
                 private_key: private_key.into(),
                 client_hostname: "hostname".into(),
+                additional_credentials: Vec::new(),
+                trusted_client_certificates: vec![p2p_certificate.clone()],
+                trusted_server_certificates: Vec::new(),
             },
             state: Pku2uState::Final,
             encryption_params: EncryptionParams {
@@ -1006,11 +1816,129 @@ xFnLp2UBrhxA9GYrpJ5i0onRmexQnTVSl5DDq07s+3dbr9YAKjrg9IDZYqLbdwP1
             conversation_id: Uuid::new_v4(),
             auth_scheme: None,
             seq_number: 0,
+            gss_seq_number: 0,
+            remote_gss_seq_number: 0,
+            request_nonce: None,
+            channel_bindings: None,
+            peer_certificate: None,
+            peer_certificate_trusted: false,
+            peer_name: None,
+            certificate_validation_time: None,
             dh_parameters: generate_client_dh_parameters(&mut rng),
             negoex_messages: Vec::new(),
             gss_api_messages: Vec::new(),
             negoex_random,
+            ticket_encryption_key: None,
         };
+
+        assert_eq!(PKG_NAME, "pku2u");
+        assert_eq!(PACKAGE_INFO.rpc_id, 31);
+        assert_eq!(PACKAGE_INFO.max_token_len, 12_000);
+        assert_eq!(
+            PACKAGE_INFO.capabilities,
+            PackageCapabilities::INTEGRITY
+                | PackageCapabilities::PRIVACY
+                | PackageCapabilities::CONNECTION
+                | PackageCapabilities::IMPERSONATION
+                | PackageCapabilities::GSS_COMPATIBLE
+                | PackageCapabilities::MUTUAL_AUTH
+                | PackageCapabilities::NEGOTIABLE2
+                | PackageCapabilities::APP_CONTAINER_CHECKS
+        );
+        let sizes = pku2u_client.query_context_sizes().unwrap();
+        assert_eq!(sizes.max_signature, 28);
+        assert_eq!(sizes.block, 1);
+
+        let mut negotiate = Negotiate::new_client(NegotiateConfig::new(
+            Box::new(pku2u_client.config.clone()),
+            Some(String::from("pku2u,!kerberos,!ntlm")),
+            "hostname".into(),
+        ))
+        .unwrap();
+        let mut credentials_handle = None;
+        let mut input = [SecurityBuffer::new(Vec::new(), BufferType::Token)];
+        let mut output = [SecurityBuffer::new(Vec::new(), BufferType::Token)];
+        let mut builder = negotiate
+            .initialize_security_context()
+            .with_credentials_handle(&mut credentials_handle)
+            .with_context_requirements(ClientRequestFlags::MUTUAL_AUTH)
+            .with_target_data_representation(DataRepresentation::Native)
+            .with_target_name("TERMSRV/host.example.com")
+            .with_input(&mut input)
+            .with_output(&mut output);
+        <Negotiate as SspiImpl>::initialize_security_context_impl(&mut negotiate, &mut builder)
+            .unwrap()
+            .resolve_to_result()
+            .unwrap();
+        let token: ApplicationTag0<GssApiNegInit> = picky_asn1_der::from_bytes(&output[0].buffer).unwrap();
+        let mech_types = token.0.neg_token_init.0.mech_types.0.unwrap().0;
+        assert_eq!(mech_types.0[0].0, oids::negoex());
+
+        let mic = pku2u_server
+            .generate_mic_token(b"SPNEGO mech list", crate::private::Sealed)
+            .unwrap();
+        let mut tampered_client = pku2u_client.clone();
+        pku2u_client
+            .verify_mic_token(&mic, b"SPNEGO mech list", crate::private::Sealed)
+            .unwrap();
+        assert_eq!(
+            tampered_client
+                .verify_mic_token(&mic, b"tampered mech list", crate::private::Sealed)
+                .unwrap_err()
+                .error_type,
+            ErrorKind::MessageAltered
+        );
+
+        let mut aes128_server = pku2u_server.clone();
+        let mut aes128_client = pku2u_client.clone();
+        for context in [&mut aes128_server, &mut aes128_client] {
+            context.encryption_params.encryption_type = Some(CipherSuite::Aes128CtsHmacSha196);
+            context.encryption_params.session_key = Some(vec![0x11; 16].into());
+            context.encryption_params.sub_session_key = Some(vec![0x22; 16].into());
+            context.gss_seq_number = 0;
+            context.remote_gss_seq_number = 0;
+        }
+        let aes128_mic = aes128_server
+            .generate_mic_token(b"AES-128 mech list", crate::private::Sealed)
+            .unwrap();
+        aes128_client
+            .verify_mic_token(&aes128_mic, b"AES-128 mech list", crate::private::Sealed)
+            .unwrap();
+
+        let mut signature = vec![0; usize::try_from(sizes.max_signature).unwrap()];
+        let mut signed_data = b"signed Pku2u message".to_vec();
+        let mut signed_message = [
+            SecurityBufferRef::token_buf(&mut signature),
+            SecurityBufferRef::data_buf(&mut signed_data),
+        ];
+        pku2u_server.make_signature(0, &mut signed_message, 42).unwrap();
+        pku2u_client.verify_signature(&mut signed_message, 42).unwrap();
+        let [mut signature_buffer, mut data_buffer] = signed_message;
+        let signature = signature_buffer.take_data();
+        let data = data_buffer.take_data();
+        data[0] ^= 1;
+        let mut tampered_message = [
+            SecurityBufferRef::token_buf(signature),
+            SecurityBufferRef::data_buf(data),
+        ];
+        assert_eq!(
+            pku2u_client
+                .verify_signature(&mut tampered_message, 42)
+                .unwrap_err()
+                .error_type,
+            ErrorKind::MessageAltered
+        );
+
+        let mut channel_bindings = vec![0; 36];
+        channel_bindings[24..28].copy_from_slice(&4_u32.to_le_bytes());
+        channel_bindings[28..32].copy_from_slice(&32_u32.to_le_bytes());
+        channel_bindings[32..].copy_from_slice(&[1, 2, 3, 4]);
+        let input = [SecurityBuffer::new(channel_bindings, BufferType::ChannelBindings)];
+        pku2u_client.read_channel_bindings(Some(&input)).unwrap();
+        assert_eq!(
+            pku2u_client.channel_bindings.as_ref().unwrap().application_data,
+            [1, 2, 3, 4]
+        );
 
         let plain_message = b"some plain message";
 
@@ -1036,5 +1964,362 @@ xFnLp2UBrhxA9GYrpJ5i0onRmexQnTVSl5DDq07s+3dbr9YAKjrg9IDZYqLbdwP1
         pku2u_client.decrypt_message(&mut message).unwrap();
 
         assert_eq!(message[1].data(), plain_message);
+
+        let mut token = [0; 128];
+        let mut first = b"first writable buffer".to_vec();
+        let mut second = b"second writable buffer".to_vec();
+        let mut message = [
+            SecurityBufferRef::token_buf(&mut token),
+            SecurityBufferRef::data_buf(&mut first),
+            SecurityBufferRef::data_buf(&mut second),
+        ];
+        pku2u_server
+            .encrypt_message(EncryptionFlags::empty(), &mut message)
+            .unwrap();
+        assert_eq!(message[0].data().len(), PKU2U_SECURITY_TRAILER);
+        pku2u_client.decrypt_message(&mut message).unwrap();
+        assert_eq!(message[1].data(), b"first writable buffer");
+        assert_eq!(message[2].data(), b"second writable buffer");
+
+        let mut token = [0; 64];
+        let mut readonly = b"signed header".to_vec();
+        let mut data = b"integrity-only payload".to_vec();
+        let mut message = [
+            SecurityBufferRef::token_buf(&mut token),
+            SecurityBufferRef::data_buf(&mut readonly)
+                .with_flags(SecurityBufferFlags::SECBUFFER_READONLY_WITH_CHECKSUM),
+            SecurityBufferRef::data_buf(&mut data),
+        ];
+        pku2u_server
+            .encrypt_message(EncryptionFlags::WRAP_NO_ENCRYPT, &mut message)
+            .unwrap();
+        assert_eq!(message[0].data().len(), 28);
+        assert_eq!(message[1].data(), b"signed header");
+        assert_eq!(message[2].data(), b"integrity-only payload");
+        assert_eq!(
+            pku2u_client.decrypt_message(&mut message).unwrap(),
+            crate::DecryptionFlags::WRAP_NO_ENCRYPT
+        );
+
+        let mut token = [0; 128];
+        let mut data = b"direction-bound payload".to_vec();
+        let mut message = [
+            SecurityBufferRef::token_buf(&mut token),
+            SecurityBufferRef::data_buf(&mut data),
+        ];
+        pku2u_server
+            .encrypt_message(EncryptionFlags::empty(), &mut message)
+            .unwrap();
+        let mut encoded_token = message[0].data().to_vec();
+        let mut encoded_data = message[1].data().to_vec();
+        encoded_token[2] ^= WRAP_SENT_BY_ACCEPTOR;
+        let mut tampered_message = [
+            SecurityBufferRef::token_buf(&mut encoded_token),
+            SecurityBufferRef::data_buf(&mut encoded_data),
+        ];
+        assert_eq!(
+            pku2u_client
+                .decrypt_message(&mut tampered_message)
+                .unwrap_err()
+                .error_type,
+            ErrorKind::InvalidToken
+        );
+    }
+
+    /// Drives one `initialize_security_context` leg for `client`, feeding back `input` (the peer's
+    /// previous message, or `None` for the very first leg) and returning `(status, output token)`.
+    fn client_step(client: &mut Pku2u, input: Option<Vec<u8>>) -> Result<(SecurityStatus, Vec<u8>)> {
+        let context_requirements = ClientRequestFlags::MUTUAL_AUTH
+            | ClientRequestFlags::INTEGRITY
+            | ClientRequestFlags::CONFIDENTIALITY
+            | ClientRequestFlags::REPLAY_DETECT
+            | ClientRequestFlags::SEQUENCE_DETECT;
+
+        let mut credentials_handle: Option<AuthIdentityBuffers> = None;
+        let mut input_buffer = [SecurityBuffer::new(input.unwrap_or_default(), BufferType::Token)];
+        let mut output_buffer = [SecurityBuffer::new(Vec::new(), BufferType::Token)];
+        let mut builder = client
+            .initialize_security_context()
+            .with_credentials_handle(&mut credentials_handle)
+            .with_context_requirements(context_requirements)
+            .with_target_data_representation(DataRepresentation::Native)
+            .with_target_name("server-host")
+            .with_input(&mut input_buffer)
+            .with_output(&mut output_buffer);
+        let result =
+            <Pku2u as SspiImpl>::initialize_security_context_impl(client, &mut builder)?.resolve_to_result()?;
+
+        Ok((result.status, output_buffer[0].buffer.clone()))
+    }
+
+    /// Drives one `accept_security_context` leg for `server`, feeding it the peer's latest message and
+    /// returning `(status, output token)`.
+    fn server_step(server: &mut Pku2u, input: Vec<u8>) -> Result<(SecurityStatus, Vec<u8>)> {
+        let mut credentials_handle: Option<AuthIdentityBuffers> = None;
+        let mut input_buffer = [SecurityBuffer::new(input, BufferType::Token)];
+        let mut output_buffer = [SecurityBuffer::new(Vec::new(), BufferType::Token)];
+        let builder = server
+            .accept_security_context()
+            .with_credentials_handle(&mut credentials_handle)
+            .with_context_requirements(ServerRequestFlags::empty())
+            .with_target_data_representation(DataRepresentation::Native)
+            .with_input(&mut input_buffer)
+            .with_output(&mut output_buffer);
+        let result = <Pku2u as SspiImpl>::accept_security_context_impl(server, builder)?.resolve_to_result()?;
+
+        Ok((result.status, output_buffer[0].buffer.clone()))
+    }
+
+    fn set_test_channel_bindings(context: &mut Pku2u, application_data: &[u8]) {
+        let mut channel_bindings = vec![0; 32 + application_data.len()];
+        channel_bindings[24..28].copy_from_slice(&u32::try_from(application_data.len()).unwrap().to_le_bytes());
+        channel_bindings[28..32].copy_from_slice(&32_u32.to_le_bytes());
+        channel_bindings[32..].copy_from_slice(application_data);
+        let input = [SecurityBuffer::new(channel_bindings, BufferType::ChannelBindings)];
+        context.read_channel_bindings(Some(&input)).unwrap();
+    }
+
+    /// End-to-end test: drives a real PKU2U client and a real PKU2U acceptor through every phase of
+    /// the handshake — SPNEGO/NEGOEX `InitiatorNego`+`InitiatorMetaData`, the acceptor's
+    /// `AcceptorNego`+`AcceptorMetaData`, the PKINIT AS-REQ/AS-REP (Diffie-Hellman key agreement,
+    /// signed with each side's own certificate, and a self-issued Kerberos Ticket), and the mutual
+    /// AP-REQ/AP-REP with NEGOEX `Verify` transcript signatures — using only the public `Sspi`/
+    /// `SspiImpl` API (no internal state is peeked at or injected). Both sides use the same
+    /// certificate/key pair (as if they were two devices registered through the same CA), matching
+    /// `Pku2uConfig::p2p_certificate`'s "self-issued" trust model. Once both contexts report
+    /// [`SecurityStatus::Ok`], it exercises sealed `Wrap` (`encrypt_message`/`decrypt_message`) and MIC
+    /// (`generate_mic_token`/`verify_mic_token`) in both directions over the negotiated session.
+    #[test]
+    fn full_handshake_then_wrap_and_mic() {
+        let (server_certificate, private_key) = test_p2p_identity();
+        let mut client_certificate = server_certificate.clone();
+        client_certificate.tbs_certificate.issuer = client_certificate.tbs_certificate.subject.clone();
+
+        let client_config = Pku2uConfig::new(client_certificate.clone(), private_key.clone(), "client-host".into())
+            .with_trusted_server_certificate(server_certificate.clone());
+        let mut client = Pku2u::new_client_from_config(client_config).unwrap();
+        let server_config = Pku2uConfig::new(server_certificate.clone(), private_key, "server-host".into())
+            .with_trusted_client_certificate(client_certificate.clone());
+        let mut server = Pku2u::new_server_from_config(server_config).unwrap();
+        client.certificate_validation_time = Some(test_certificate_validation_time());
+        server.certificate_validation_time = Some(test_certificate_validation_time());
+
+        // Leg 1 (initiator -> acceptor): InitiatorNego + InitiatorMetaData.
+        let (status, msg) = client_step(&mut client, None).unwrap();
+        assert_eq!(status, SecurityStatus::ContinueNeeded);
+        assert!(matches!(client.state, Pku2uState::Preauthentication));
+
+        // Leg 2 (acceptor -> initiator): AcceptorNego + AcceptorMetaData.
+        let (status, msg) = server_step(&mut server, msg).unwrap();
+        assert_eq!(status, SecurityStatus::ContinueNeeded);
+        assert!(matches!(server.state, Pku2uState::AsExchange));
+
+        // Leg 3 (initiator -> acceptor): the PKINIT AS-REQ, signed with the initiator's certificate.
+        let (status, msg) = client_step(&mut client, Some(msg)).unwrap();
+        assert_eq!(status, SecurityStatus::ContinueNeeded);
+        assert!(matches!(client.state, Pku2uState::AsExchange));
+
+        // Leg 4 (acceptor -> initiator): the self-issued AS-REP (DH-signed with the acceptor's own
+        // certificate) and Kerberos Ticket.
+        let (status, msg) = server_step(&mut server, msg).unwrap();
+        assert_eq!(status, SecurityStatus::ContinueNeeded);
+        assert!(matches!(server.state, Pku2uState::ApExchange));
+        assert!(server.encryption_params.session_key.is_some());
+        assert!(server.ticket_encryption_key.is_some());
+
+        // Leg 5 (initiator -> acceptor): AP-REQ + NEGOEX Verify (INITIATOR_SIGN).
+        let (status, msg) = client_step(&mut client, Some(msg)).unwrap();
+        assert_eq!(status, SecurityStatus::ContinueNeeded);
+        assert!(matches!(client.state, Pku2uState::ApExchange));
+        let mut replay_server = server.clone();
+        let replay_msg = msg.clone();
+
+        // Leg 6 (acceptor -> initiator): AP-REP + NEGOEX Verify (ACCEPTOR_SIGN). The acceptor's
+        // context is fully established after validating the ticket, authenticator, channel bindings,
+        // "Finished" checksum, and the initiator's transcript signature.
+        let (status, msg) = server_step(&mut server, msg).unwrap();
+        assert_eq!(status, SecurityStatus::Ok);
+        assert!(matches!(server.state, Pku2uState::PubKeyAuth));
+        assert_eq!(
+            server_step(&mut replay_server, replay_msg).unwrap_err().error_type,
+            ErrorKind::InvalidToken
+        );
+
+        // Leg 7: the initiator validates the acceptor's AP-REP/Verify and completes too. No further
+        // output token is produced.
+        let (status, msg) = client_step(&mut client, Some(msg)).unwrap();
+        assert_eq!(status, SecurityStatus::Ok);
+        assert!(matches!(client.state, Pku2uState::PubKeyAuth));
+        assert!(msg.is_empty());
+        assert_eq!(
+            client.query_context_cert_trust_status().unwrap().error_status,
+            CertTrustErrorStatus::NO_ERROR
+        );
+        assert_eq!(
+            server.query_context_cert_trust_status().unwrap().error_status,
+            CertTrustErrorStatus::NO_ERROR
+        );
+        assert_eq!(client.query_context_remote_cert().unwrap().cert, server_certificate);
+        assert_eq!(server.query_context_remote_cert().unwrap().cert, client_certificate);
+        assert_eq!(
+            server.query_context_names().unwrap().username.inner(),
+            generate_as_req_username_from_certificate(&client_certificate).unwrap()
+        );
+
+        // Both sides now agree on the same session key and sub-session key.
+        assert_eq!(
+            client.encryption_params.session_key.as_ref().unwrap().as_ref(),
+            server.encryption_params.session_key.as_ref().unwrap().as_ref()
+        );
+        assert_eq!(
+            client.encryption_params.sub_session_key.as_ref().unwrap().as_ref(),
+            server.encryption_params.sub_session_key.as_ref().unwrap().as_ref()
+        );
+
+        // Sealed Wrap, initiator -> acceptor.
+        let plaintext = b"hello from the PKU2U initiator";
+        let mut token = vec![0u8; PKU2U_SECURITY_TRAILER];
+        let mut data = plaintext.to_vec();
+        let mut message = [
+            SecurityBufferRef::token_buf(&mut token),
+            SecurityBufferRef::data_buf(&mut data),
+        ];
+        client.encrypt_message(EncryptionFlags::empty(), &mut message).unwrap();
+        server.decrypt_message(&mut message).unwrap();
+        assert_eq!(message[1].data(), plaintext);
+
+        // Sealed Wrap, acceptor -> initiator.
+        let plaintext = b"hello from the PKU2U acceptor";
+        let mut token = vec![0u8; PKU2U_SECURITY_TRAILER];
+        let mut data = plaintext.to_vec();
+        let mut message = [
+            SecurityBufferRef::token_buf(&mut token),
+            SecurityBufferRef::data_buf(&mut data),
+        ];
+        server.encrypt_message(EncryptionFlags::empty(), &mut message).unwrap();
+        client.decrypt_message(&mut message).unwrap();
+        assert_eq!(message[1].data(), plaintext);
+
+        // MIC, initiator -> acceptor.
+        let mic_payload = b"integrity-protected payload from the initiator";
+        let mic = client.generate_mic_token(mic_payload, crate::private::Sealed).unwrap();
+        server
+            .verify_mic_token(&mic, mic_payload, crate::private::Sealed)
+            .unwrap();
+
+        // MIC, acceptor -> initiator.
+        let mic_payload = b"integrity-protected payload from the acceptor";
+        let mic = server.generate_mic_token(mic_payload, crate::private::Sealed).unwrap();
+        // Verify against a tampered payload first, on a clone, so this check is independent of the
+        // real verification's sequence-number bookkeeping below.
+        let mut tampered_client = client.clone();
+        assert_eq!(
+            tampered_client
+                .verify_mic_token(&mic, b"a different payload", crate::private::Sealed)
+                .unwrap_err()
+                .error_type,
+            ErrorKind::MessageAltered
+        );
+        client
+            .verify_mic_token(&mic, mic_payload, crate::private::Sealed)
+            .unwrap();
+    }
+
+    #[test]
+    fn handshake_rejects_mismatched_channel_bindings() {
+        let (certificate, private_key) = test_p2p_identity();
+        let mut client = Pku2u::new_client_from_config(
+            Pku2uConfig::new(certificate.clone(), private_key.clone(), "client-host".into())
+                .with_trusted_server_certificate(certificate.clone()),
+        )
+        .unwrap();
+        let mut server = Pku2u::new_server_from_config(
+            Pku2uConfig::new(certificate.clone(), private_key, "server-host".into())
+                .with_trusted_client_certificate(certificate),
+        )
+        .unwrap();
+        client.certificate_validation_time = Some(test_certificate_validation_time());
+        server.certificate_validation_time = Some(test_certificate_validation_time());
+
+        let (_, message) = client_step(&mut client, None).unwrap();
+        let (_, message) = server_step(&mut server, message).unwrap();
+        let (_, message) = client_step(&mut client, Some(message)).unwrap();
+        let (_, message) = server_step(&mut server, message).unwrap();
+
+        set_test_channel_bindings(&mut client, b"initiator binding");
+        set_test_channel_bindings(&mut server, b"acceptor binding");
+        let (_, message) = client_step(&mut client, Some(message)).unwrap();
+
+        assert_eq!(
+            server_step(&mut server, message).unwrap_err().error_type,
+            ErrorKind::MessageAltered
+        );
+    }
+
+    /// The acceptor must reject a tampered message instead of panicking or silently accepting it,
+    /// whichever leg of the handshake it arrives on: a bit flip anywhere in the signed PKINIT AS-REQ
+    /// invalidates its CMS signature (or its `paChecksum` content binding), and a bit flip in the
+    /// AP-REQ invalidates either its encrypted `Authenticator` (AES-CTS-HMAC is itself
+    /// tamper-evident) or the ticket/"Finished"/NEGOEX-transcript checks layered on top of it.
+    #[test]
+    fn handshake_rejects_tampered_messages() {
+        let (p2p_certificate, private_key) = test_p2p_identity();
+
+        for leg_to_tamper in 1..=3 {
+            let mut client = Pku2u::new_client_from_config(Pku2uConfig::new(
+                p2p_certificate.clone(),
+                private_key.clone(),
+                "client-host".into(),
+            ))
+            .unwrap();
+            let mut server = Pku2u::new_server_from_config(Pku2uConfig::new(
+                p2p_certificate.clone(),
+                private_key.clone(),
+                "server-host".into(),
+            ))
+            .unwrap();
+            client.certificate_validation_time = Some(test_certificate_validation_time());
+            server.certificate_validation_time = Some(test_certificate_validation_time());
+
+            let (status, msg) = client_step(&mut client, None).unwrap();
+            assert_eq!(status, SecurityStatus::ContinueNeeded);
+            let msg = tamper(msg, leg_to_tamper == 1);
+
+            let step = server_step(&mut server, msg);
+            if leg_to_tamper == 1 {
+                step.unwrap_err();
+                continue;
+            }
+            let (status, msg) = step.unwrap();
+            assert_eq!(status, SecurityStatus::ContinueNeeded);
+            let msg = tamper(msg, leg_to_tamper == 2);
+
+            let step = client_step(&mut client, Some(msg));
+            if leg_to_tamper == 2 {
+                step.unwrap_err();
+                continue;
+            }
+            let (status, msg) = step.unwrap();
+            assert_eq!(status, SecurityStatus::ContinueNeeded);
+            let msg = tamper(msg, leg_to_tamper == 3);
+
+            server_step(&mut server, msg).unwrap_err();
+        }
+    }
+
+    /// Corrupts the last few bytes of `msg` (inverting each byte) when `should_tamper` is set,
+    /// otherwise returns it unchanged. Per the NEGOEX wire format, fixed-size headers (including the
+    /// offset/count fields of the `Vec`-like fields the wire encoding uses) always precede
+    /// variable-length data, which is appended at the very end — so the tail of the buffer is always
+    /// part of the innermost GSS-API payload (a signature, ciphertext, or ASN.1 string), never an
+    /// offset/count field whose corruption could send a third-party NEGOEX decoder out of bounds.
+    fn tamper(mut msg: Vec<u8>, should_tamper: bool) -> Vec<u8> {
+        if should_tamper {
+            let start = msg.len().saturating_sub(24);
+            for byte in &mut msg[start..] {
+                *byte ^= 0xFF;
+            }
+        }
+        msg
     }
 }

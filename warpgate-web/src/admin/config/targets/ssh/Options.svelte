@@ -7,7 +7,9 @@
         type Target,
         type TargetOptionsTargetSSHOptions,
     } from 'admin/lib/api'
+    import Section from 'admin/lib/Section.svelte'
     import { adminPermissions } from 'admin/lib/store'
+    import OnboardingHint from 'common/OnboardingHint.svelte'
     import SecretRefInput, {
         loadSecretBackends,
     } from 'common/SecretRefInput.svelte'
@@ -91,127 +93,147 @@
     })
 </script>
 
-<h4 class="mt-4">Connection</h4>
+<Section title="Connection" id="connection">
+    <OnboardingHint>
+        This is how Warpgate itself should connect to this target.
+    </OnboardingHint>
 
-<div class="row">
-    {#if sshTargets.length}
+    <div class="row">
+        {#if sshTargets.length}
+            <div class="col">
+                <FormGroup floating label="Jump host">
+                    <select
+                        class="form-control"
+                        bind:value={jumpHostSelectValue}
+                    >
+                        <option value="">Direct connection</option>
+                        {#each sshTargets as target (target.id)}
+                            <option value={target.id}>{target.name}</option>
+                        {/each}
+                    </select>
+                </FormGroup>
+            </div>
+        {/if}
+        <div class="col" style="flex-grow: 2">
+            <FormGroup floating label="Target host">
+                <input
+                    class="form-control"
+                    bind:value={options.host}
+                    onchange={() => (hostKeyCheckInvalidated = true)}
+                >
+            </FormGroup>
+        </div>
         <div class="col">
-            <FormGroup floating label="Jump host">
-                <select class="form-control" bind:value={jumpHostSelectValue}>
-                    <option value="">Direct connection</option>
-                    {#each sshTargets as target (target.id)}
-                        <option value={target.id}>{target.name}</option>
+            <FormGroup floating label="Target port">
+                <input
+                    class="form-control"
+                    type="number"
+                    bind:value={options.port}
+                    min="1"
+                    max="65535"
+                    step="1"
+                    onchange={() => (hostKeyCheckInvalidated = true)}
+                >
+            </FormGroup>
+        </div>
+    </div>
+
+    {#if $adminPermissions.targetsEdit}
+        <div class="mb-3">
+            {#if !hostKeyCheckInvalidated}
+                <TargetSshHostKeyChecker {id} {options} />
+            {:else}
+                <Alert color="secondary">
+                    Save changes to see the host key validation status
+                </Alert>
+            {/if}
+        </div>
+    {/if}
+</Section>
+
+<Section title="Authentication" id="authentication">
+    <OnboardingHint>
+        This is how Warpgate itself will authenticate against the target.
+    </OnboardingHint>
+
+    <FormGroup floating label="Username">
+        <input
+            class="form-control"
+            placeholder="Use the currently logged in user's name"
+            bind:value={options.username}
+        >
+    </FormGroup>
+
+    {#if options.auth.kind === 'PublicKey'}
+        <OnboardingHint>
+            Click the link on the right to see which key you should paste into
+            <code>authorized_keys</code>.
+        </OnboardingHint>
+    {/if}
+
+    <div class="d-flex">
+        <FormGroup floating label="Authenticate using" class="w-100">
+            <select bind:value={options.auth.kind} class="form-control">
+                <option value="PublicKey">Warpgate's own private keys</option>
+                <option value="Password">Password</option>
+                {#if hasSecretBackends || options.auth.kind === 'Certificate'}
+                    <option value="Certificate">
+                        Certificate signed by a secret backend's SSH CA
+                    </option>
+                {/if}
+                {#if $serverInfo?.runningOnEc2}
+                    <option value="IamRole">IAM Role</option>
+                {/if}
+            </select>
+        </FormGroup>
+        {#if options.auth.kind === 'PublicKey'}
+            <FormGroup floating label="Key" class="w-100 ms-3">
+                <select class="form-control" bind:value={clientKeySelectValue}>
+                    <option value="">Use default keys</option>
+                    {#each clientKeys as key (key.id)}
+                        <option value={key.id}>
+                            {key.label}
+                            ({key.kind}){key.isDefault ? ' — default' : ''}
+                        </option>
                     {/each}
                 </select>
             </FormGroup>
-        </div>
-    {/if}
-    <div class="col" style="flex-grow: 2">
-        <FormGroup floating label="Target host">
-            <input
-                class="form-control"
-                bind:value={options.host}
-                onchange={() => (hostKeyCheckInvalidated = true)}
+            <a
+                class="btn btn-link mb-3 d-flex align-items-center"
+                href="/@warpgate/admin#/manage/ssh"
+                target="_blank"
             >
-        </FormGroup>
-    </div>
-    <div class="col">
-        <FormGroup floating label="Target port">
-            <input
-                class="form-control"
-                type="number"
-                bind:value={options.port}
-                min="1"
-                max="65535"
-                step="1"
-                onchange={() => (hostKeyCheckInvalidated = true)}
-            >
-        </FormGroup>
-    </div>
-</div>
-
-{#if $adminPermissions.targetsEdit}
-    <div class="mb-3">
-        {#if !hostKeyCheckInvalidated}
-            <TargetSshHostKeyChecker {id} {options} />
-        {:else}
-            <Alert color="secondary">
-                Save changes to see the host key validation status
-            </Alert>
+                <Fa fw icon={faExternalLink} />
+            </a>
+        {/if}
+        {#if options.auth.kind === 'Password'}
+            <div class="w-100 ms-3 d-flex align-items-center">
+                <SecretRefInput
+                    bind:value={options.auth.password}
+                    inlineLabel="Password"
+                    disabled={!$adminPermissions.targetsEdit}
+                    intendedUsage={{
+                        kind: 'Target',
+                        id,
+                        name,
+                    }}
+                />
+            </div>
         {/if}
     </div>
-{/if}
 
-<h4 class="mt-4">Authentication</h4>
-
-<FormGroup floating label="Username">
-    <input
-        class="form-control"
-        placeholder="Use the currently logged in user's name"
-        bind:value={options.username}
-    >
-</FormGroup>
-
-<div class="d-flex">
-    <FormGroup floating label="Authenticate using" class="w-100">
-        <select bind:value={options.auth.kind} class="form-control">
-            <option value="PublicKey">Warpgate's own private keys</option>
-            <option value="Password">Password</option>
-            {#if hasSecretBackends || options.auth.kind === 'Certificate'}
-                <option value="Certificate">
-                    Certificate signed by a secret backend's SSH CA
-                </option>
-            {/if}
-            {#if $serverInfo?.runningOnEc2}
-                <option value="IamRole">IAM Role</option>
-            {/if}
-        </select>
-    </FormGroup>
-    {#if options.auth.kind === 'PublicKey'}
-        <FormGroup floating label="Key" class="w-100 ms-3">
-            <select class="form-control" bind:value={clientKeySelectValue}>
-                <option value="">Use default keys</option>
-                {#each clientKeys as key (key.id)}
-                    <option value={key.id}>
-                        {key.label}
-                        ({key.kind}){key.isDefault ? ' — default' : ''}
-                    </option>
-                {/each}
-            </select>
-        </FormGroup>
-        <a
-            class="btn btn-link mb-3 d-flex align-items-center"
-            href="/@warpgate/admin#/config/ssh"
-            target="_blank"
-        >
-            <Fa fw icon={faExternalLink} />
-        </a>
+    {#if options.auth.kind === 'Certificate'}
+        <CertificateOptions bind:auth={options.auth} />
     {/if}
-    {#if options.auth.kind === 'Password'}
-        <div class="w-100 ms-3 d-flex align-items-center">
-            <SecretRefInput
-                bind:value={options.auth.password}
-                inlineLabel="Password"
-                disabled={!$adminPermissions.targetsEdit}
-                intendedUsage={{
-                    kind: 'Target',
-                    id,
-                    name,
-                }}
-            />
-        </div>
-    {/if}
-</div>
+</Section>
 
-{#if options.auth.kind === 'Certificate'}
-    <CertificateOptions bind:auth={options.auth} />
-{/if}
-
-<div class="d-flex">
-    <Input
-        class="mb-0 me-2"
-        type="switch"
-        label="Allow insecure SSH algorithms (e.g. for older network devices)"
-        bind:checked={options.allowInsecureAlgos}
-    />
-</div>
+<Section title="Security" id="security">
+    <div class="d-flex">
+        <Input
+            class="mb-0 me-2"
+            type="switch"
+            label="Allow insecure SSH algorithms (e.g. for older network devices)"
+            bind:checked={options.allowInsecureAlgos}
+        />
+    </div>
+</Section>

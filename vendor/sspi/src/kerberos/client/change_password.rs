@@ -1,7 +1,7 @@
 use picky_krb::crypto::CipherSuite;
 use picky_krb::messages::KrbPrivMessage;
 use rand::rngs::{StdRng, SysRng};
-use rand_core::{Rng as _, SeedableRng as _};
+use rand_core::SeedableRng as _;
 
 use crate::builders::ChangePassword;
 use crate::generator::YieldPointLocal;
@@ -10,7 +10,7 @@ use crate::kerberos::client::extractors::{
 };
 use crate::kerberos::client::generators::{
     EncKey, GenerateAsPaDataOptions, GenerateAsReqOptions, GenerateAuthenticatorOptions, generate_as_req_kdc_body,
-    generate_authenticator, generate_krb_priv_request,
+    generate_authenticator_at, generate_krb_priv_request, generate_nonce,
 };
 use crate::kerberos::client::principal::{get_client_principal_name_type, get_client_principal_realm};
 use crate::kerberos::pa_datas::AsReqPaDataOptions;
@@ -39,14 +39,13 @@ pub async fn change_password<'a>(
     let realm = &get_client_principal_realm(username, domain);
 
     let mut rand = StdRng::try_from_rng(&mut SysRng)?;
-    let nonce = &rand.next_u32().to_ne_bytes();
+    let nonce = generate_nonce(&mut rand);
 
     let options = GenerateAsReqOptions {
         realm,
         username,
         cname_type,
         snames: &[KADMIN, CHANGE_PASSWORD_SERVICE_NAME],
-        // 4 = size of u32
         nonce,
         hostname: &client.config.client_computer_name,
         context_requirements: ClientRequestFlags::empty(),
@@ -82,17 +81,21 @@ pub async fn change_password<'a>(
         .unwrap_or(&DEFAULT_ENCRYPTION_TYPE);
     let authenticator_seb_key = generate_random_symmetric_key(enc_type, &mut rand);
 
-    let authenticator = generate_authenticator(GenerateAuthenticatorOptions {
-        kdc_rep: &as_rep.0,
-        seq_num: Some(seq_num),
-        sub_key: Some(EncKey {
-            key_type: enc_type.clone(),
-            key_value: authenticator_seb_key,
-        }),
-        checksum: None,
-        channel_bindings: client.channel_bindings.as_ref(),
-        extensions: Vec::new(),
-    })?;
+    let now = client.current_kdc_time()?;
+    let authenticator = generate_authenticator_at(
+        GenerateAuthenticatorOptions {
+            kdc_rep: &as_rep.0,
+            seq_num: Some(seq_num),
+            sub_key: Some(EncKey {
+                key_type: enc_type.clone(),
+                key_value: authenticator_seb_key,
+            }),
+            checksum: None,
+            channel_bindings: client.channel_bindings.as_ref(),
+            extensions: Vec::new(),
+        },
+        now,
+    )?;
 
     let krb_priv = generate_krb_priv_request(
         as_rep.0.ticket.0,
@@ -112,14 +115,14 @@ pub async fn change_password<'a>(
         let response = client.send(yield_point, &serialize_message(&krb_priv)?).await?;
         trace!(?response, "Change password raw response");
 
-        if response.len() < 4 {
+        let Some(response) = response.get(4..) else {
             return Err(Error::new(
                 ErrorKind::InternalError,
                 "the KDC reply message is too small: expected at least 4 bytes",
             ));
-        }
+        };
 
-        let krb_priv_response = KrbPrivMessage::deserialize(&response[4..]).map_err(|err| {
+        let krb_priv_response = KrbPrivMessage::deserialize(response).map_err(|err| {
             Error::new(
                 ErrorKind::InvalidToken,
                 format!("cannot deserialize krb_priv_response: {err:?}"),

@@ -52,4 +52,16 @@ impl EncryptionParams {
             CipherSuite::Des3CbcSha1Kd => None,
         })
     }
+
+    pub fn active_key_aes_size(&self) -> Option<AesSize> {
+        let key = self.sub_session_key.as_ref().or(self.session_key.as_ref())?;
+
+        // The supported AES enctypes have distinct key lengths, so the active key
+        // remains authoritative when an AP subkey differs from the ticket enctype.
+        match key.as_ref().len() {
+            16 => Some(AesSize::Aes128),
+            32 => Some(AesSize::Aes256),
+            _ => None,
+        }
+    }
 }

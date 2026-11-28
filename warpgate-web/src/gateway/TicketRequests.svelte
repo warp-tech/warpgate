@@ -30,6 +30,7 @@
         type TicketRequestTarget,
     } from 'gateway/lib/api'
     import { serverInfo } from 'gateway/lib/store'
+    import { onMount } from 'svelte'
     import Fa from 'svelte-fa'
 
     // Matches the server-side limit in warpgate-core/src/ticket_requests.rs
@@ -53,6 +54,14 @@
     let ticketRequestTargets: TicketRequestTarget[] | undefined = $state()
     let showForm = $state(!!paramTarget)
     let showAllRequests = $state(false)
+    let now = $state(Date.now())
+
+    onMount(() => {
+        const interval = setInterval(() => {
+            now = Date.now()
+        }, 1000)
+        return () => clearInterval(interval)
+    })
 
     const REQUEST_PAGE_SIZE = 25
     let visibleRequests = $derived.by(() => {
@@ -70,9 +79,31 @@
         [...(paramDescription ?? '')].slice(0, DESCRIPTION_MAX_LENGTH).join(''),
     )
     let descriptionTouched = $state(false)
-    let durationText = $state(paramDuration || '8h')
+    const DEFAULT_DURATION_SECONDS = 8 * 3600
+    let durationText = $state(
+        paramDuration || formatDurationAsHumantime(DEFAULT_DURATION_SECONDS),
+    )
+    let durationTouched = $state(!!paramDuration)
 
-    let maxDurationSeconds = $derived($serverInfo?.ticketMaxDurationSeconds)
+    let selectedTicketRequestTarget = $derived(
+        ticketRequestTargets?.find(target => target.name === selectedTarget),
+    )
+    let maxDurationSeconds = $derived(
+        selectedTicketRequestTarget?.ticketMaxDurationSeconds ??
+            $serverInfo?.ticketMaxDurationSeconds,
+    )
+
+    $effect(() => {
+        if (durationTouched) {
+            return
+        }
+        durationText = formatDurationAsHumantime(
+            Math.min(
+                DEFAULT_DURATION_SECONDS,
+                maxDurationSeconds || DEFAULT_DURATION_SECONDS,
+            ),
+        )
+    })
 
     let unavailableTarget = $derived.by(() => {
         if (!selectedTarget || !ticketRequestTargets) {
@@ -299,6 +330,7 @@
                             class="form-control"
                             class:is-invalid={!!durationError}
                             placeholder="e.g. 8h, 30m, 1d"
+                            oninput={() => (durationTouched = true)}
                         >
                         {#if durationError}
                             <div class="invalid-feedback">{durationError}</div>
@@ -399,6 +431,8 @@
         {#if tickets.length}
             <div class="list-group list-group-flush">
                 {#each tickets as ticket (ticket.id)}
+                    {@const expired =
+                        ticket.expiry != null && ticket.expiry.getTime() <= now}
                     <div class="list-group-item gap-3">
                         <Fa icon={faTicket} fw class="text-success" />
                         <div class="me-auto">
@@ -410,8 +444,10 @@
                             {/if}
                             {#if ticket.expiry}
                                 <small class="d-block text-muted">
-                                    Expires
-                                    <RelativeDate date={ticket.expiry} />
+                                    {expired ? 'Expired' : 'Expires'}
+                                    {#key expired}
+                                        <RelativeDate date={ticket.expiry} />
+                                    {/key}
                                 </small>
                             {/if}
                             {#if ticket.usesLeft != null}
@@ -429,7 +465,7 @@
                             size="sm"
                             onclick={() => deleteTicket(ticket)}
                         >
-                            Revoke
+                            {expired ? 'Dismiss' : 'Revoke'}
                         </Button>
                     </div>
                 {/each}

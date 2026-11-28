@@ -1,16 +1,17 @@
 use picky_krb::data_types::PaData;
 use picky_krb::messages::AsRep;
+use time::OffsetDateTime;
 
 use crate::kerberos::client::extractors::{extract_session_key_from_as_rep, extract_session_key_from_as_rep_with_key};
 use crate::kerberos::client::generators::{
     GenerateAsPaDataOptions as AuthIdentityPaDataOptions, GenerateKeytabPaDataOptions,
-    generate_pa_datas_for_as_req as generate_password_based,
-    generate_pa_datas_for_as_req_with_key as generate_keytab_based,
+    generate_pa_datas_for_as_req_at as generate_password_based_at,
+    generate_pa_datas_for_as_req_with_key_at as generate_keytab_based_at,
 };
 use crate::kerberos::encryption_params::EncryptionParams;
 #[cfg(feature = "scard")]
 use crate::pk_init::{
-    GenerateAsPaDataOptions as SmartCardPaDataOptions, generate_pa_datas_for_as_req as generate_private_key_based,
+    GenerateAsPaDataOptions as SmartCardPaDataOptions, generate_pa_datas_for_as_req_at as generate_private_key_based_at,
 };
 use crate::{Result, Secret};
 
@@ -24,12 +25,12 @@ pub(crate) enum AsReqPaDataOptions<'a> {
 }
 
 impl AsReqPaDataOptions<'_> {
-    pub(crate) fn generate(&mut self) -> Result<Vec<PaData>> {
+    pub(crate) fn generate(&mut self, now: OffsetDateTime) -> Result<Vec<PaData>> {
         match self {
-            AsReqPaDataOptions::AuthIdentity(options) => generate_password_based(options),
+            AsReqPaDataOptions::AuthIdentity(options) => generate_password_based_at(options, now),
             #[cfg(feature = "scard")]
-            AsReqPaDataOptions::SmartCard(options) => generate_private_key_based(options),
-            AsReqPaDataOptions::Keytab(options) => generate_keytab_based(options),
+            AsReqPaDataOptions::SmartCard(options) => generate_private_key_based_at(options, now),
+            AsReqPaDataOptions::Keytab(options) => generate_keytab_based_at(options, now),
         }
     }
 

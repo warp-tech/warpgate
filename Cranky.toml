@@ -5,6 +5,7 @@ deny = [
   "clippy::panic",
   "clippy::indexing_slicing",
   "clippy::dbg_macro",
+  "clippy::disallowed_methods",
 ]
 
 warn = ["clippy::pedantic", "clippy::nursery"]

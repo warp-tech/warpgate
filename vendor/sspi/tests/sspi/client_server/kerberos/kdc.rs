@@ -9,7 +9,7 @@ use picky_asn1::wrapper::{
     ExplicitContextTag4, ExplicitContextTag5, ExplicitContextTag6, ExplicitContextTag7, ExplicitContextTag9,
     ExplicitContextTag10, ExplicitContextTag12, IntegerAsn1, OctetStringAsn1, Optional,
 };
-use picky_krb::constants::error_codes::{KDC_ERR_PREAUTH_FAILED, KDC_ERR_PREAUTH_REQUIRED};
+use picky_krb::constants::error_codes::{KDC_ERR_PREAUTH_FAILED, KDC_ERR_PREAUTH_REQUIRED, KRB_AP_ERR_SKEW};
 use picky_krb::constants::etypes::AES256_CTS_HMAC_SHA1_96;
 use picky_krb::constants::key_usages::{
     AS_REP_ENC, TGS_REP_ENC_SESSION_KEY, TGS_REP_ENC_SUB_KEY, TGS_REQ_PA_DATA_AP_REQ_AUTHENTICATOR, TICKET_REP,
@@ -37,6 +37,14 @@ pub(crate) const MAX_TIME_SKEW: StdDuration = StdDuration::from_secs(3);
 pub(crate) const KDC_URL: &str = "tcp://192.168.1.103:88";
 pub(crate) const CLIENT_COMPUTER_NAME: &str = "DESKTOP-8F33RFH.example.com";
 pub(crate) const SERVER_COMPUTER_NAME: &str = "WIN-956CQOSSJTF.example.com";
+
+/// `AES256_CTS_HMAC_SHA1_96` cast to `u8` for use in ASN.1 encoding.
+/// The constant value fits in u8 by definition of the Kerberos etype numbering.
+#[expect(
+    clippy::as_conversions,
+    reason = "AES256_CTS_HMAC_SHA1_96 constant fits in u8 by definition"
+)]
+const AES256_ENC_TYPE: u8 = AES256_CTS_HMAC_SHA1_96 as u8;
 
 /// Represents user credentials in the internal KDC database.
 pub(crate) struct PasswordCreds {
@@ -99,6 +107,8 @@ pub(crate) struct KdcMock {
     users: HashMap<UserName, PasswordCreds>,
     /// Incoming Kerberos messages validators.
     validators: Validators,
+    clock_offset: Duration,
+    reject_valid_preauth_with_skew: bool,
 }
 
 impl KdcMock {
@@ -122,11 +132,28 @@ impl KdcMock {
             keys,
             users,
             validators,
+            clock_offset: Duration::ZERO,
+            reject_valid_preauth_with_skew: false,
         }
     }
 
-    fn make_err<const ERROR_CODE: u32>(sname: PrincipalName, realm: Realm, salt: Option<String>) -> KrbError {
-        let current_date = OffsetDateTime::now_utc();
+    pub(crate) fn with_clock_offset(mut self, clock_offset: Duration) -> Self {
+        self.clock_offset = clock_offset;
+        self
+    }
+
+    pub(crate) fn reject_valid_preauth_with_skew(mut self) -> Self {
+        self.reject_valid_preauth_with_skew = true;
+        self
+    }
+
+    fn make_err<const ERROR_CODE: u32>(
+        sname: PrincipalName,
+        realm: Realm,
+        salt: Option<String>,
+        clock_offset: Duration,
+    ) -> KrbError {
+        let current_date = OffsetDateTime::now_utc() + clock_offset;
         // https://www.rfc-editor.org/rfc/rfc4120#section-5.2.4
         // Microseconds    ::= INTEGER (0..999999)
         let microseconds = current_date.microsecond().min(999_999);
@@ -151,9 +178,7 @@ impl KdcMock {
                             padata_type: ExplicitContextTag1::from(IntegerAsn1::from(PA_ETYPE_INFO2_TYPE.to_vec())),
                             padata_data: ExplicitContextTag2::from(OctetStringAsn1::from(
                                 picky_asn1_der::to_vec(&Asn1SequenceOf::from(vec![EtypeInfo2Entry {
-                                    etype: ExplicitContextTag0::from(IntegerAsn1::from(vec![
-                                        AES256_CTS_HMAC_SHA1_96 as u8,
-                                    ])),
+                                    etype: ExplicitContextTag0::from(IntegerAsn1::from(vec![AES256_ENC_TYPE])),
                                     salt: Optional::from(Some(ExplicitContextTag1::from(KerberosStringAsn1::from(
                                         IA5String::from_string(salt).unwrap(),
                                     )))),
@@ -180,13 +205,24 @@ impl KdcMock {
         sname: PrincipalName,
         realm: Realm,
         pa_datas: &Asn1SequenceOf<PaData>,
+        clock_offset: Duration,
     ) -> Result<Vec<u8>, KrbError> {
         macro_rules! err_preauth {
             (failed) => {
-                Self::make_err::<{ KDC_ERR_PREAUTH_FAILED }>(sname.clone(), realm.clone(), Some(creds.salt.clone()))
+                Self::make_err::<{ KDC_ERR_PREAUTH_FAILED }>(
+                    sname.clone(),
+                    realm.clone(),
+                    Some(creds.salt.clone()),
+                    clock_offset,
+                )
             };
             (required) => {
-                Self::make_err::<{ KDC_ERR_PREAUTH_REQUIRED }>(sname.clone(), realm.clone(), Some(creds.salt.clone()))
+                Self::make_err::<{ KDC_ERR_PREAUTH_REQUIRED }>(
+                    sname.clone(),
+                    realm.clone(),
+                    Some(creds.salt.clone()),
+                    clock_offset,
+                )
             };
         }
 
@@ -217,13 +253,13 @@ impl KdcMock {
         )
         .map_err(|_| err_preauth!(failed))?;
 
-        let kdc_timestamp = OffsetDateTime::now_utc();
+        let kdc_timestamp = OffsetDateTime::now_utc() + clock_offset;
         let client_timestamp = OffsetDateTime::try_from(timestamp.patimestamp.0.0)
             .map_err(|_| err_preauth!(failed))
             .map_err(|_| err_preauth!(failed))?;
 
-        if client_timestamp > kdc_timestamp || kdc_timestamp - client_timestamp > MAX_TIME_SKEW {
-            return Err(err_preauth!(failed));
+        if (client_timestamp - kdc_timestamp).abs() > MAX_TIME_SKEW {
+            return Err(Self::make_err::<{ KRB_AP_ERR_SKEW }>(sname, realm, None, clock_offset));
         }
 
         Ok(key)
@@ -275,7 +311,7 @@ impl KdcMock {
             realm: ExplicitContextTag1::from(realm),
             sname: ExplicitContextTag2::from(sname),
             enc_part: ExplicitContextTag3::from(EncryptedData {
-                etype: ExplicitContextTag0::from(IntegerAsn1::from(vec![AES256_CTS_HMAC_SHA1_96 as u8])),
+                etype: ExplicitContextTag0::from(IntegerAsn1::from(vec![AES256_ENC_TYPE])),
                 kvno: Optional::from(None),
                 cipher: ExplicitContextTag2::from(OctetStringAsn1::from(ticket_enc_data)),
             }),
@@ -328,10 +364,25 @@ impl KdcMock {
             &padata
                 .0
                 .ok_or_else(|| {
-                    Self::make_err::<{ KDC_ERR_PREAUTH_REQUIRED }>(sname.clone(), realm, Some(creds.salt.clone()))
+                    Self::make_err::<{ KDC_ERR_PREAUTH_REQUIRED }>(
+                        sname.clone(),
+                        realm.clone(),
+                        Some(creds.salt.clone()),
+                        self.clock_offset,
+                    )
                 })?
                 .0,
+            self.clock_offset,
         )?;
+
+        if self.reject_valid_preauth_with_skew {
+            return Err(Self::make_err::<{ KRB_AP_ERR_SKEW }>(
+                sname,
+                realm,
+                None,
+                self.clock_offset,
+            ));
+        }
 
         let cipher = CipherSuite::Aes256CtsHmacSha196.cipher();
 
@@ -351,7 +402,7 @@ impl KdcMock {
 
         let as_rep_enc_part = EncAsRepPart::from(EncKdcRepPart {
             key: ExplicitContextTag0::from(EncryptionKey {
-                key_type: ExplicitContextTag0::from(IntegerAsn1::from(vec![AES256_CTS_HMAC_SHA1_96 as u8])),
+                key_type: ExplicitContextTag0::from(IntegerAsn1::from(vec![AES256_ENC_TYPE])),
                 key_value: ExplicitContextTag1::from(OctetStringAsn1::from(session_key.to_vec())),
             }),
             last_req: ExplicitContextTag1::from(LastReq::from(vec![LastReqInner {
@@ -387,7 +438,7 @@ impl KdcMock {
                 padata_type: ExplicitContextTag1::from(IntegerAsn1::from(PA_ETYPE_INFO2_TYPE.to_vec())),
                 padata_data: ExplicitContextTag2::from(OctetStringAsn1::from(
                     picky_asn1_der::to_vec(&Asn1SequenceOf::from(vec![EtypeInfo2Entry {
-                        etype: ExplicitContextTag0::from(IntegerAsn1::from(vec![AES256_CTS_HMAC_SHA1_96 as u8])),
+                        etype: ExplicitContextTag0::from(IntegerAsn1::from(vec![AES256_ENC_TYPE])),
                         salt: Optional::from(Some(ExplicitContextTag1::from(KerberosStringAsn1::from(
                             IA5String::from_string(creds.salt.clone()).unwrap(),
                         )))),
@@ -407,7 +458,7 @@ impl KdcMock {
                 username.0,
             )),
             enc_part: ExplicitContextTag6::from(EncryptedData {
-                etype: ExplicitContextTag0::from(IntegerAsn1::from(vec![AES256_CTS_HMAC_SHA1_96 as u8])),
+                etype: ExplicitContextTag0::from(IntegerAsn1::from(vec![AES256_ENC_TYPE])),
                 kvno: Optional::from(None),
                 cipher: ExplicitContextTag2::from(OctetStringAsn1::from(as_rep_enc_data)),
             }),
@@ -422,10 +473,10 @@ impl KdcMock {
     ) -> Result<(Vec<u8>, PrincipalName, i32), KrbError> {
         macro_rules! err_preauth {
             (failed) => {
-                Self::make_err::<{ KDC_ERR_PREAUTH_FAILED }>(sname.clone(), realm.clone(), None)
+                Self::make_err::<{ KDC_ERR_PREAUTH_FAILED }>(sname.clone(), realm.clone(), None, self.clock_offset)
             };
             (required) => {
-                Self::make_err::<{ KDC_ERR_PREAUTH_REQUIRED }>(sname.clone(), realm.clone(), None)
+                Self::make_err::<{ KDC_ERR_PREAUTH_REQUIRED }>(sname.clone(), realm.clone(), None, self.clock_offset)
             };
         }
 
@@ -488,6 +539,19 @@ impl KdcMock {
         )
         .expect("Authenticator decoding should not fail");
 
+        if self.clock_offset != Duration::ZERO {
+            let client_time = OffsetDateTime::try_from(authenticator.0.ctime.0.0.clone()).unwrap();
+            let kdc_time = OffsetDateTime::now_utc() + self.clock_offset;
+            if (client_time - kdc_time).abs() > MAX_TIME_SKEW {
+                return Err(Self::make_err::<{ KRB_AP_ERR_SKEW }>(
+                    sname,
+                    realm,
+                    None,
+                    self.clock_offset,
+                ));
+            }
+        }
+
         Ok(if let Some(key) = authenticator.0.subkey.0 {
             (key.0.key_value.0.0, cname.0, TGS_REP_ENC_SUB_KEY)
         } else {
@@ -529,7 +593,14 @@ impl KdcMock {
             realm.clone(),
             &padata
                 .0
-                .ok_or_else(|| Self::make_err::<{ KDC_ERR_PREAUTH_REQUIRED }>(sname.clone(), realm.clone(), None))?
+                .ok_or_else(|| {
+                    Self::make_err::<{ KDC_ERR_PREAUTH_REQUIRED }>(
+                        sname.clone(),
+                        realm.clone(),
+                        None,
+                        self.clock_offset,
+                    )
+                })?
                 .0,
         )?;
 
@@ -578,7 +649,7 @@ impl KdcMock {
 
         let tgs_rep_enc_part = EncTgsRepPart::from(EncKdcRepPart {
             key: ExplicitContextTag0::from(EncryptionKey {
-                key_type: ExplicitContextTag0::from(IntegerAsn1::from(vec![AES256_CTS_HMAC_SHA1_96 as u8])),
+                key_type: ExplicitContextTag0::from(IntegerAsn1::from(vec![AES256_ENC_TYPE])),
                 key_value: ExplicitContextTag1::from(OctetStringAsn1::from(session_key.to_vec())),
             }),
             last_req: ExplicitContextTag1::from(LastReq::from(vec![LastReqInner {
@@ -622,7 +693,7 @@ impl KdcMock {
                 cname,
             )),
             enc_part: ExplicitContextTag6::from(EncryptedData {
-                etype: ExplicitContextTag0::from(IntegerAsn1::from(vec![AES256_CTS_HMAC_SHA1_96 as u8])),
+                etype: ExplicitContextTag0::from(IntegerAsn1::from(vec![AES256_ENC_TYPE])),
                 kvno: Optional::from(None),
                 cipher: ExplicitContextTag2::from(OctetStringAsn1::from(tgs_rep_enc_data)),
             }),

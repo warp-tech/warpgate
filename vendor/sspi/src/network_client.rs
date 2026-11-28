@@ -105,7 +105,10 @@ pub mod reqwest_network_client {
                 .read_u32::<BigEndian>()
                 .map_err(|e| Error::new(ErrorKind::NoAuthenticatingAuthority, format!("{e:?}")))?;
 
-            let mut buf = vec![0; len as usize + 4];
+            let frame_len = usize::try_from(len)?
+                .checked_add(4)
+                .ok_or_else(|| Error::new(ErrorKind::NoAuthenticatingAuthority, "KDC TCP response length overflow"))?;
+            let mut buf = vec![0; frame_len];
             buf[0..4].copy_from_slice(&(len.to_be_bytes()));
 
             stream
@@ -136,7 +139,7 @@ pub mod reqwest_network_client {
                 .map_err(|e| Error::new(ErrorKind::NoAuthenticatingAuthority, format!("{e:?}")))?;
 
             let mut reply_buf = Vec::with_capacity(n + 4);
-            reply_buf.extend_from_slice(&(n as u32).to_be_bytes());
+            reply_buf.extend_from_slice(&(u32::try_from(n)?).to_be_bytes());
             reply_buf.extend_from_slice(&buf[0..n]);
 
             Ok(reply_buf)

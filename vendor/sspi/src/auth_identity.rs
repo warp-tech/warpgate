@@ -174,8 +174,14 @@ impl Username {
     }
 
     /// Builds a down-level logon name from an account name and a NetBIOS domain name
+    ///
+    /// The account name may contain `@`: once the down-level format is established, the account
+    /// name is opaque. Windows itself accepts `MicrosoftAccount\user@example.com`, where the
+    /// entire e-mail address *is* the account name (a Microsoft account, not an AD UPN), and
+    /// rejecting the `@` here left such accounts with no representable form at all (#718).
     pub fn new_down_level_logon_name(account_name: &str, netbios_domain_name: &str) -> Result<Self, UsernameError> {
-        if account_name.contains(['\\', '@']) {
+        // NOTE: account names may contain `@` (Microsoft accounts, AD names with an embedded `@`)
+        if account_name.contains('\\') || (netbios_domain_name.is_empty() && account_name.contains('@')) {
             return Err(UsernameError::MixedFormat);
         }
 
@@ -200,6 +206,14 @@ impl Username {
         })
     }
 
+    pub(crate) fn new_qualified_down_level_logon_name(account_name: &str, netbios_domain_name: &str) -> Self {
+        Self {
+            value: format!("{netbios_domain_name}\\{account_name}"),
+            format: UserNameFormat::DownLevelLogonName,
+            sep_idx: Some(netbios_domain_name.len()),
+        }
+    }
+
     /// Attempts to guess the right name format for the account name/domain combo
     ///
     /// If no netbios domain name is provided, or if it is an empty string, the username will
@@ -219,6 +233,11 @@ impl Username {
     ///
     /// If there is no `\` or `@` separator, the value is considered to be a down-level logon name with
     /// an empty NetBIOS domain.
+    ///
+    /// A value containing both separators is a down-level logon name: the `\` takes precedence and
+    /// everything after it is the account name, so `MicrosoftAccount\user@example.com` parses as
+    /// NetBIOS domain `MicrosoftAccount` with account name `user@example.com` — matching how
+    /// Windows itself reads that qualification.
     pub fn parse(value: &str) -> Result<Self, UsernameError> {
         match (value.split_once('\\'), value.rsplit_once('@')) {
             (None, None) => Ok(Self {
@@ -809,8 +828,9 @@ mod tests {
                 );
             }
 
-            // A down-level user name can't contain a @ in the account name
-            if !initial_username.account_name().contains('@') {
+            // With no NetBIOS domain, `Username::new` falls back to `parse`, which reads an `@` as
+            // a UPN separator — only that combination can't reconstruct as a down-level logon name.
+            if domain.is_some() || !initial_username.account_name().contains('@') {
                 let netbios_name = Username::new(initial_username.account_name(), domain).expect("NetBIOS");
                 assert_eq!(netbios_name.format(), UserNameFormat::DownLevelLogonName);
                 assert_eq!(netbios_name.account_name(), initial_username.account_name());
@@ -850,7 +870,9 @@ mod tests {
 
     #[test]
     fn down_level_logon_name_round_trip() {
-        proptest!(|(account_name in "[a-zA-Z0-9.]{1,3}", domain_name in "[A-Z0-9.]{1,3}")| {
+        // The account-name alphabet includes `@`: `DOMAIN\user@example.com` is a valid down-level
+        // logon name (the whole e-mail address is the account name — a Microsoft account, #718).
+        proptest!(|(account_name in "[a-zA-Z0-9@.]{1,3}", domain_name in "[A-Z0-9.]{1,3}")| {
             let username = Username::new_down_level_logon_name(&account_name, &domain_name).expect("down-level logon name");
 
             assert_eq!(username.account_name(), account_name);
@@ -886,6 +908,53 @@ mod tests {
 
             check_round_trip_property(&username);
         })
+    }
+
+    #[test]
+    fn down_level_logon_name_with_at_requires_a_domain() {
+        // Pins the fix in 2e05ed1 (Copilot's review finding, confirmed by @TheBestTvarynka):
+        // with no NetBIOS domain there is no `\` in the serialized string, so an `@`-bearing
+        // account name came back from an `AuthIdentityBuffers` round trip as a UPN, breaking the
+        // format-preservation invariant. The qualifier is what makes such a name representable.
+        assert_eq!(
+            Username::new_down_level_logon_name("frank@example.com", ""),
+            Err(UsernameError::MixedFormat),
+        );
+
+        // Qualified, the same account name is representable and survives the round trip.
+        let qualified =
+            Username::new_down_level_logon_name("frank@example.com", "MicrosoftAccount").expect("qualified");
+        assert_eq!(qualified.account_name(), "frank@example.com");
+        check_round_trip_property(&qualified);
+    }
+
+    /// #718: a Microsoft account's account name is the entire e-mail address. Every qualified way
+    /// of writing one must parse with the address intact, and the unqualified form keeps its
+    /// (AD-correct) UPN reading.
+    #[test]
+    fn microsoft_account_forms_are_representable() {
+        // `MicrosoftAccount\me@example.com` — the qualification Microsoft documents for users.
+        let qualified = Username::parse("MicrosoftAccount\\me@example.com").expect("qualified form");
+        assert_eq!(qualified.format(), UserNameFormat::DownLevelLogonName);
+        assert_eq!(qualified.account_name(), "me@example.com");
+        assert_eq!(
+            qualified.parts(),
+            UsernameParts::DownLevelLogonName(DownLevelLogonNameParts {
+                account_name: "me@example.com",
+                netbios_domain: Some("MicrosoftAccount"),
+            })
+        );
+        check_round_trip_property(&qualified);
+
+        // The same identity supplied as separate username + domain fields.
+        let split = Username::new("me@example.com", Some("MicrosoftAccount")).expect("split form");
+        assert_eq!(split, qualified);
+
+        // The unqualified e-mail alone still parses as a UPN: it is indistinguishable from an
+        // AD user principal name, and guessing "Microsoft account" would break AD logons.
+        let bare = Username::parse("me@example.com").expect("bare form");
+        assert_eq!(bare.format(), UserNameFormat::UserPrincipalName);
+        assert_eq!(bare.account_name(), "me");
     }
 
     #[test]

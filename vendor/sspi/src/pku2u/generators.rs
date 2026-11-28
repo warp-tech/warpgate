@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 use std::str::FromStr;
+use std::sync::{LazyLock, Mutex};
 
 use picky_asn1::date::GeneralizedTime;
 use picky_asn1::restricted_string::IA5String;
@@ -9,24 +10,25 @@ use picky_asn1::wrapper::{
     ImplicitContextTag0, IntegerAsn1, ObjectIdentifierAsn1, OctetStringAsn1, Optional,
 };
 use picky_asn1_der::Asn1RawDer;
-use picky_asn1_der::application_tag::ApplicationTag;
 use picky_asn1_x509::{AttributeTypeAndValueParameters, Certificate, oids};
-use picky_krb::constants::gss_api::{ACCEPT_INCOMPLETE, AUTHENTICATOR_CHECKSUM_TYPE};
-use picky_krb::constants::key_usages::KEY_USAGE_FINISHED;
-use picky_krb::constants::types::NT_SRV_INST;
-use picky_krb::crypto::ChecksumSuite;
+use picky_krb::constants::gss_api::{ACCEPT_COMPLETE, ACCEPT_INCOMPLETE, AUTHENTICATOR_CHECKSUM_TYPE};
+use picky_krb::constants::key_usages::{AP_REP_ENC, KEY_USAGE_FINISHED};
+use picky_krb::constants::types::{AP_REP_MSG_TYPE, NT_SRV_INST};
 use picky_krb::crypto::diffie_hellman::generate_private_key;
+use picky_krb::crypto::{ChecksumSuite, CipherSuite};
 use picky_krb::data_types::{
-    Authenticator, AuthenticatorInner, AuthorizationData, AuthorizationDataInner, Checksum, EncryptionKey,
-    KerbAdRestrictionEntry, KerberosStringAsn1, KerberosTime, LsapTokenInfoIntegrity, PrincipalName, Realm,
+    Authenticator, AuthenticatorInner, AuthorizationData, AuthorizationDataInner, Checksum, EncApRepPart,
+    EncApRepPartInner, EncryptedData, EncryptionKey, KerbAdRestrictionEntry, KerberosStringAsn1, KerberosTime,
+    LsapTokenInfoIntegrity, Microseconds, PrincipalName, Realm,
 };
 use picky_krb::gss_api::{
     ApplicationTag0, GssApiNegInit, KrbMessage, MechType, MechTypeList, NegTokenInit, NegTokenTarg,
 };
+use picky_krb::messages::{ApRep, ApRepInner};
 use picky_krb::negoex::RANDOM_ARRAY_SIZE;
-use picky_krb::pkinit::{KrbFinished, Pku2uNegoBody, Pku2uNegoReq, Pku2uNegoReqMetadata};
-use rand::rngs::StdRng;
-use rand_core::Rng as _;
+use picky_krb::pkinit::{KrbFinished, Pku2uNegoBody, Pku2uNegoRep, Pku2uNegoReq, Pku2uNegoReqMetadata};
+use rand::rngs::{StdRng, SysRng};
+use rand_core::{Rng as _, SeedableRng as _};
 use time::OffsetDateTime;
 
 use super::Pku2uConfig;
@@ -35,7 +37,7 @@ use crate::kerberos::client::generators::{
     AuthenticatorChecksumExtension, ChecksumOptions, EncKey, GenerateAuthenticatorOptions, MAX_MICROSECONDS,
 };
 use crate::pk_init::DhParameters;
-use crate::{Error, ErrorKind, KERBEROS_VERSION, Result};
+use crate::{Error, ErrorKind, KERBEROS_VERSION, Result, Secret};
 
 /// [The PKU2U Realm Name](https://datatracker.ietf.org/doc/html/draft-zhu-pku2u-09#section-3)
 /// The PKU2U realm name is defined as a reserved Kerberos realm name, and it has the value of "WELLKNOWN:PKU2U".
@@ -44,7 +46,7 @@ pub(super) const WELLKNOWN_REALM: &str = "WELLKNOWN:PKU2U";
 /// [The GSS-API Binding for PKU2U](https://datatracker.ietf.org/doc/html/draft-zhu-pku2u-04#section-6)
 /// The type for the checksum extension.
 /// GSS_EXTS_FINISHED 2
-const GSS_EXTS_FINISHED: u32 = 2;
+pub(super) const GSS_EXTS_FINISHED: u32 = 2;
 
 /// [2.2.5 LSAP_TOKEN_INFO_INTEGRITY](https://winprotocoldoc.blob.core.windows.net/productionwindowsarchives/MS-KILE/%5bMS-KILE%5d.pdf)
 /// indicating the token information type
@@ -54,12 +56,21 @@ const LSAP_TOKEN_INFO_INTEGRITY_FLAG: u32 = 1;
 /// indicating the integrity level of the calling process
 /// 0x00002000 = Medium.
 const LSAP_TOKEN_INFO_INTEGRITY_TOKEN_IL: u32 = 0x00002000;
-/// [3.1.1.4 Machine ID](https://winprotocoldoc.blob.core.windows.net/productionwindowsarchives/MS-KILE/%5bMS-KILE%5d.pdf)
-/// KILE implements a 32-byte binary random string machine ID.
-const MACHINE_ID: [u8; 32] = [
-    92, 95, 64, 72, 191, 160, 228, 23, 98, 35, 78, 151, 207, 227, 96, 126, 97, 180, 15, 98, 127, 211, 90, 177, 119,
-    132, 45, 113, 206, 90, 169, 124,
-];
+static PER_BOOT_MACHINE_ID: LazyLock<Mutex<Option<[u8; 32]>>> = LazyLock::new(|| Mutex::new(None));
+
+fn per_boot_machine_id() -> Result<[u8; 32]> {
+    let mut stored = PER_BOOT_MACHINE_ID
+        .lock()
+        .map_err(|_| Error::new(ErrorKind::InternalError, "PKU2U machine identifier lock is poisoned"))?;
+    if let Some(machine_id) = *stored {
+        return Ok(machine_id);
+    }
+
+    let mut machine_id = [0; 32];
+    StdRng::try_from_rng(&mut SysRng)?.fill_bytes(&mut machine_id);
+    *stored = Some(machine_id);
+    Ok(machine_id)
+}
 
 // returns supported authentication types
 pub(super) fn get_mech_list() -> MechTypeList {
@@ -89,6 +100,26 @@ pub(super) fn generate_pku2u_nego_req(service_names: &[&str], config: &Pku2uConf
     })
 }
 
+/// Builds the acceptor's `AcceptorMetaData` payload (`Pku2uNegoRep`).
+///
+/// Its `metadata` field lists the client-certificate issuers trusted by this acceptor. The initiator
+/// uses this list to select one of its candidate credentials.
+#[instrument(level = "debug", ret)]
+pub(super) fn generate_pku2u_nego_rep(config: &Pku2uConfig) -> Result<Pku2uNegoRep> {
+    let mut metadata = Vec::with_capacity(config.trusted_client_certificates.len());
+    for certificate in &config.trusted_client_certificates {
+        metadata.push(Pku2uNegoReqMetadata {
+            inner: ImplicitContextTag0::from(OctetStringAsn1::from(picky_asn1_der::to_vec(
+                &certificate.tbs_certificate.issuer,
+            )?)),
+        });
+    }
+
+    Ok(Pku2uNegoRep {
+        metadata: ExplicitContextTag0::from(Asn1SequenceOf::from(metadata)),
+    })
+}
+
 #[instrument(level = "trace", ret)]
 pub(super) fn generate_neg_token_init(mech_token: Vec<u8>) -> Result<ApplicationTag0<GssApiNegInit>> {
     Ok(ApplicationTag0(GssApiNegInit {
@@ -102,11 +133,30 @@ pub(super) fn generate_neg_token_init(mech_token: Vec<u8>) -> Result<Application
     }))
 }
 
+/// Wraps `token` into a `NegTokenTarg`. `complete` selects the SPNEGO `negResult`: pass `false`
+/// (`accept-incomplete`) for every leg that expects a further token from the peer, and `true`
+/// (`accept-complete`) only for the final leg of a successful negotiation. This crate's own PKU2U
+/// initiator does not currently inspect `negResult`, but a spec-compliant peer does.
 #[instrument(level = "trace", ret)]
-pub(super) fn generate_neg_token_targ(token: Vec<u8>) -> Result<ExplicitContextTag1<NegTokenTarg>> {
+pub(super) fn generate_neg_token_targ(token: Vec<u8>, complete: bool) -> Result<ExplicitContextTag1<NegTokenTarg>> {
+    generate_neg_token_targ_inner(token, complete, false)
+}
+
+pub(super) fn generate_initial_neg_token_targ(token: Vec<u8>) -> Result<ExplicitContextTag1<NegTokenTarg>> {
+    generate_neg_token_targ_inner(token, false, true)
+}
+
+fn generate_neg_token_targ_inner(
+    token: Vec<u8>,
+    complete: bool,
+    include_supported_mech: bool,
+) -> Result<ExplicitContextTag1<NegTokenTarg>> {
+    let neg_result = if complete { ACCEPT_COMPLETE } else { ACCEPT_INCOMPLETE };
     Ok(ExplicitContextTag1::from(NegTokenTarg {
-        neg_result: Optional::from(Some(ExplicitContextTag0::from(Asn1RawDer(ACCEPT_INCOMPLETE.to_vec())))),
-        supported_mech: Optional::from(None),
+        neg_result: Optional::from(Some(ExplicitContextTag0::from(Asn1RawDer(neg_result.to_vec())))),
+        supported_mech: Optional::from(
+            include_supported_mech.then(|| ExplicitContextTag1::from(MechType::from(oids::negoex()))),
+        ),
         response_token: Optional::from(Some(ExplicitContextTag2::from(OctetStringAsn1::from(token)))),
         mech_list_mic: Optional::from(None),
     }))
@@ -178,23 +228,36 @@ pub fn generate_client_dh_parameters(rng: &mut StdRng) -> DhParameters {
     }
 }
 
+/// Wraps a Kerberos message into a GSS-API [InitialContextToken](https://datatracker.ietf.org/doc/html/rfc2743#section-3.1):
+/// `[APPLICATION 0] IMPLICIT SEQUENCE { thisMech MechType, innerContextToken ANY DEFINED BY thisMech }`.
+///
+/// **Important**: we must use [ApplicationTag0] (which overwrites the inner value's leading tag byte to
+/// implement RFC 2743's `IMPLICIT` tagging) and not the generic `ApplicationTag` from `picky_asn1_der`
+/// (which wraps the inner value in an *additional* explicit tag). Using the generic wrapper here
+/// previously produced a doubly-nested, non-conformant token that neither this crate's own
+/// [extract_krb_rep](super::extractors::extract_krb_rep)/[extract_krb_result](super::extractors::extract_krb_result)
+/// nor a real PKU2U peer can parse.
 pub(super) fn generate_neg<T: Debug + PartialEq + Clone>(
     krb_msg: T,
     krb5_token_id: [u8; 2],
-) -> ApplicationTag<KrbMessage<T>, 0> {
-    ApplicationTag::from(KrbMessage {
+) -> ApplicationTag0<KrbMessage<T>> {
+    ApplicationTag0(KrbMessage {
         krb5_oid: ObjectIdentifierAsn1::from(oids::gss_pku2u()),
         krb5_token_id,
         krb_msg,
     })
 }
 
-pub fn generate_authenticator_extension(key: &[u8], payload: &[u8]) -> Result<AuthenticatorChecksumExtension> {
-    let hasher = ChecksumSuite::HmacSha196Aes256.hasher();
+pub fn generate_authenticator_extension(
+    key: &[u8],
+    payload: &[u8],
+    checksum_suite: &ChecksumSuite,
+) -> Result<AuthenticatorChecksumExtension> {
+    let hasher = checksum_suite.hasher();
 
     let krb_finished = KrbFinished {
         gss_mic: ExplicitContextTag1::from(Checksum {
-            cksumtype: ExplicitContextTag0::from(IntegerAsn1::from(vec![ChecksumSuite::HmacSha196Aes256.into()])),
+            cksumtype: ExplicitContextTag0::from(IntegerAsn1::from(vec![checksum_suite.into()])),
             checksum: ExplicitContextTag1::from(OctetStringAsn1::from(hasher.checksum(
                 key,
                 KEY_USAGE_FINISHED,
@@ -229,7 +292,7 @@ pub fn generate_authenticator(options: GenerateAuthenticatorOptions<'_>) -> Resu
     let lsap_token = LsapTokenInfoIntegrity {
         flags: LSAP_TOKEN_INFO_INTEGRITY_FLAG,
         token_il: LSAP_TOKEN_INFO_INTEGRITY_TOKEN_IL,
-        machine_id: MACHINE_ID,
+        machine_id: per_boot_machine_id()?,
     };
 
     let mut encoded_lsap_token = Vec::with_capacity(40);
@@ -263,7 +326,7 @@ pub fn generate_authenticator(options: GenerateAuthenticatorOptions<'_>) -> Resu
         if checksum_type == AUTHENTICATOR_CHECKSUM_TYPE
             && let Some(channel_bindings) = channel_bindings
         {
-            if checksum_value.len() < 20 {
+            let Some(channel_binding_buf) = checksum_value.get_mut(4..20) else {
                 return Err(Error::new(
                     ErrorKind::InvalidParameter,
                     format!(
@@ -271,15 +334,15 @@ pub fn generate_authenticator(options: GenerateAuthenticatorOptions<'_>) -> Resu
                         checksum_value.len()
                     ),
                 ));
-            }
+            };
             // [Authenticator Checksum](https://datatracker.ietf.org/doc/html/rfc4121#section-4.1.1)
             // 4..19 - Channel binding information (19 inclusive).
-            checksum_value[4..20].copy_from_slice(&compute_md5_channel_bindings_hash(channel_bindings));
+            channel_binding_buf.copy_from_slice(&compute_md5_channel_bindings_hash(channel_bindings)?);
         }
 
         for extension in extensions {
             checksum_value.extend_from_slice(&extension.extension_type.to_be_bytes());
-            checksum_value.extend_from_slice(&(extension.extension_value.len() as u32).to_be_bytes());
+            checksum_value.extend_from_slice(&u32::try_from(extension.extension_value.len())?.to_be_bytes());
             checksum_value.extend_from_slice(&extension.extension_value);
         }
 
@@ -308,6 +371,48 @@ pub fn generate_authenticator(options: GenerateAuthenticatorOptions<'_>) -> Resu
             ExplicitContextTag7::from(IntegerAsn1::from_bytes_be_unsigned(seq_num.to_be_bytes().to_vec()))
         })),
         authorization_data,
+    }))
+}
+
+/// Generates an acceptor's `AP-REP`, echoing the initiator's `Authenticator` `ctime`/`cusec` (per
+/// [RFC 4120 §3.2.4](https://www.rfc-editor.org/rfc/rfc4120#section-3.2.4)) and embedding `seq_number`
+/// as the acceptor's starting GSS sequence number and `subkey` as the negotiated acceptor sub-session key.
+#[instrument(level = "trace", skip(session_key, subkey), ret)]
+pub(super) fn generate_ap_rep(
+    session_key: &Secret<Vec<u8>>,
+    ctime: KerberosTime,
+    cusec: Microseconds,
+    seq_number: u32,
+    subkey: &Secret<Vec<u8>>,
+    encryption_type: &CipherSuite,
+) -> Result<ApRep> {
+    let enc_ap_rep_part = EncApRepPart::from(EncApRepPartInner {
+        ctime: ExplicitContextTag0::from(ctime),
+        cusec: ExplicitContextTag1::from(cusec),
+        subkey: Optional::from(Some(ExplicitContextTag2::from(EncryptionKey {
+            key_type: ExplicitContextTag0::from(IntegerAsn1::from(vec![encryption_type.into()])),
+            key_value: ExplicitContextTag1::from(OctetStringAsn1::from(subkey.as_ref().clone())),
+        }))),
+        // Older clients' `extract_seq_number_from_ap_rep` required exactly 4 bytes (`u32::from_be_bytes`),
+        // so this stays the full-width, non-minimized encoding — not `from_bytes_be_unsigned`,
+        // which would strip it down to as little as one byte for small sequence numbers.
+        seq_number: Optional::from(Some(ExplicitContextTag3::from(IntegerAsn1::from(
+            seq_number.to_be_bytes().to_vec(),
+        )))),
+    });
+
+    let cipher = encryption_type.cipher();
+    let encoded_enc_ap_rep_part = picky_asn1_der::to_vec(&enc_ap_rep_part)?;
+    let encrypted_enc_ap_rep_part = cipher.encrypt(session_key.as_ref(), AP_REP_ENC, &encoded_enc_ap_rep_part)?;
+
+    Ok(ApRep::from(ApRepInner {
+        pvno: ExplicitContextTag0::from(IntegerAsn1::from(vec![KERBEROS_VERSION])),
+        msg_type: ExplicitContextTag1::from(IntegerAsn1::from(vec![AP_REP_MSG_TYPE])),
+        enc_part: ExplicitContextTag2::from(EncryptedData {
+            etype: ExplicitContextTag0::from(IntegerAsn1::from(vec![encryption_type.into()])),
+            kvno: Optional::from(None),
+            cipher: ExplicitContextTag2::from(OctetStringAsn1::from(encrypted_enc_ap_rep_part)),
+        }),
     }))
 }
 
@@ -355,4 +460,46 @@ pub(super) fn generate_as_req_username_from_certificate(certificate: &Certificat
     }
 
     Ok(username)
+}
+
+#[cfg(test)]
+mod tests {
+    use picky_krb::constants::key_usages::KEY_USAGE_FINISHED;
+    use picky_krb::crypto::ChecksumSuite;
+    use picky_krb::pkinit::KrbFinished;
+
+    use super::{generate_authenticator_extension, generate_initial_neg_token_targ, per_boot_machine_id};
+
+    #[test]
+    fn authenticator_extension_uses_negotiated_checksum_suite() {
+        for (suite, key) in [
+            (ChecksumSuite::HmacSha196Aes128, vec![0x11; 16]),
+            (ChecksumSuite::HmacSha196Aes256, vec![0x22; 32]),
+        ] {
+            let payload = b"PKU2U GSS transcript";
+            let extension = generate_authenticator_extension(&key, payload, &suite).unwrap();
+            let finished: KrbFinished = picky_asn1_der::from_bytes(&extension.extension_value).unwrap();
+
+            assert_eq!(finished.gss_mic.0.cksumtype.0.0, vec![u8::from(&suite)]);
+            assert_eq!(
+                finished.gss_mic.0.checksum.0.0,
+                suite.hasher().checksum(&key, KEY_USAGE_FINISHED, payload).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn initial_acceptor_token_selects_negoex() {
+        let token = generate_initial_neg_token_targ(Vec::new()).unwrap();
+
+        assert_eq!(
+            token.0.supported_mech.0.unwrap().0,
+            picky_asn1::wrapper::ObjectIdentifierAsn1::from(picky_asn1_x509::oids::negoex())
+        );
+    }
+
+    #[test]
+    fn machine_identifier_is_stable_for_the_process_lifetime() {
+        assert_eq!(per_boot_machine_id().unwrap(), per_boot_machine_id().unwrap());
+    }
 }

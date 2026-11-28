@@ -12,11 +12,11 @@ impl Rc4 {
         // key scheduling
         let mut state = State::default();
         for (i, item) in state.iter_mut().enumerate().take(256) {
-            *item = i as u8;
+            *item = i.try_into().expect("state array is 256 bytes");
         }
         let mut j = 0usize;
         for i in 0..256 {
-            j = (j + state[i] as usize + key[i % key.len()] as usize) % 256;
+            j = (j + usize::from(state[i]) + usize::from(key[i % key.len()])) % 256;
             state.swap(i, j);
         }
 
@@ -28,9 +28,9 @@ impl Rc4 {
         let mut output = Vec::with_capacity(message.len());
         while output.capacity() > output.len() {
             self.i = (self.i + 1) % 256;
-            self.j = (self.j + self.state[self.i] as usize) % 256;
+            self.j = (self.j + usize::from(self.state[self.i])) % 256;
             self.state.swap(self.i, self.j);
-            let idx_k = (self.state[self.i] as usize + self.state[self.j] as usize) % 256;
+            let idx_k = (usize::from(self.state[self.i]) + usize::from(self.state[self.j])) % 256;
             let k = self.state[idx_k];
             let idx_msg = output.len();
             output.push(k ^ message[idx_msg]);

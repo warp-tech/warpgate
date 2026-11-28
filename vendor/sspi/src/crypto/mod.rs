@@ -34,27 +34,42 @@ pub(crate) fn compute_md5(data: &[u8]) -> [u8; HASH_SIZE] {
     result
 }
 
-pub(crate) fn compute_md5_channel_bindings_hash(channel_bindings: &ChannelBindings) -> [u8; HASH_SIZE] {
+pub(crate) fn compute_md5_channel_bindings_hash(channel_bindings: &ChannelBindings) -> crate::Result<[u8; HASH_SIZE]> {
     let mut context = Md5::new();
     let mut result = [0x00; HASH_SIZE];
 
-    let initiator_len = channel_bindings.initiator.len() as u32;
+    let initiator_len: u32 = channel_bindings.initiator.len().try_into().map_err(|_| {
+        crate::Error::new(
+            crate::ErrorKind::InvalidParameter,
+            "channel binding initiator length overflow",
+        )
+    })?;
     context.update(channel_bindings.initiator_addr_type.to_le_bytes());
     context.update(initiator_len.to_le_bytes());
     context.update(&channel_bindings.initiator);
 
-    let acceptor_len = channel_bindings.acceptor.len() as u32;
+    let acceptor_len: u32 = channel_bindings.acceptor.len().try_into().map_err(|_| {
+        crate::Error::new(
+            crate::ErrorKind::InvalidParameter,
+            "channel binding acceptor length overflow",
+        )
+    })?;
     context.update(channel_bindings.acceptor_addr_type.to_le_bytes());
     context.update(acceptor_len.to_le_bytes());
     context.update(&channel_bindings.acceptor);
 
-    let application_data_len = channel_bindings.application_data.len() as u32;
+    let application_data_len: u32 = channel_bindings.application_data.len().try_into().map_err(|_| {
+        crate::Error::new(
+            crate::ErrorKind::InvalidParameter,
+            "channel binding application data length overflow",
+        )
+    })?;
     context.update(application_data_len.to_le_bytes());
     context.update(&channel_bindings.application_data);
 
     result.clone_from_slice(&context.finalize());
 
-    result
+    Ok(result)
 }
 
 pub(crate) fn compute_sha256(data: &[u8]) -> [u8; SHA256_SIZE] {

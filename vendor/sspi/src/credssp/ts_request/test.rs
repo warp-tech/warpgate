@@ -378,10 +378,10 @@ fn ntlm_encode_first_phase_with_nego_token_and_client_nonce() {
         version: TS_REQUEST_VERSION,
     };
 
-    let ts_request_len = ts_request.buffer_len();
-    assert_eq!(ts_request_len as usize, expected_buffer.len());
+    let ts_request_len = ts_request.buffer_len().unwrap();
+    assert_eq!(usize::from(ts_request_len), expected_buffer.len());
 
-    let mut buffer = Vec::with_capacity(ts_request_len as usize);
+    let mut buffer = Vec::with_capacity(ts_request_len.into());
     ts_request.encode_ts_request(&mut buffer).unwrap();
 
     assert_eq!(buffer.as_slice(), expected_buffer.as_ref());
@@ -400,10 +400,10 @@ fn ntlm_encode_second_phase_with_nego_token_and_client_nonce() {
         version: TS_REQUEST_VERSION,
     };
 
-    let ts_request_len = ts_request.buffer_len();
-    assert_eq!(ts_request_len as usize, expected_buffer.len());
+    let ts_request_len = ts_request.buffer_len().unwrap();
+    assert_eq!(usize::from(ts_request_len), expected_buffer.len());
 
-    let mut buffer = Vec::with_capacity(ts_request_len as usize);
+    let mut buffer = Vec::with_capacity(ts_request_len.into());
     ts_request.encode_ts_request(&mut buffer).unwrap();
 
     assert_eq!(buffer.as_slice(), expected_buffer.as_ref());
@@ -422,10 +422,10 @@ fn ntlm_encode_third_phase_with_nego_token_and_pub_key_auth_and_client_nonce() {
         version: TS_REQUEST_VERSION,
     };
 
-    let ts_request_len = ts_request.buffer_len();
-    assert_eq!(ts_request_len as usize, expected_buffer.len());
+    let ts_request_len = ts_request.buffer_len().unwrap();
+    assert_eq!(usize::from(ts_request_len), expected_buffer.len());
 
-    let mut buffer = Vec::with_capacity(ts_request_len as usize);
+    let mut buffer = Vec::with_capacity(ts_request_len.into());
     ts_request.encode_ts_request(&mut buffer).unwrap();
 
     assert_eq!(buffer.as_slice(), expected_buffer.as_ref());
@@ -444,10 +444,10 @@ fn ntlm_encode_fourth_phase_with_pub_key_auth_and_client_nonce() {
         version: TS_REQUEST_VERSION,
     };
 
-    let ts_request_len = ts_request.buffer_len();
-    assert_eq!(ts_request_len as usize, expected_buffer.len());
+    let ts_request_len = ts_request.buffer_len().unwrap();
+    assert_eq!(usize::from(ts_request_len), expected_buffer.len());
 
-    let mut buffer = Vec::with_capacity(ts_request_len as usize);
+    let mut buffer = Vec::with_capacity(ts_request_len.into());
     ts_request.encode_ts_request(&mut buffer).unwrap();
 
     assert_eq!(buffer.as_slice(), expected_buffer.as_ref());
@@ -466,10 +466,10 @@ fn ntlm_encode_fiveth_phase_with_auth_info_and_client_nonce() {
         version: TS_REQUEST_VERSION,
     };
 
-    let ts_request_len = ts_request.buffer_len();
-    assert_eq!(ts_request_len as usize, expected_buffer.len());
+    let ts_request_len = ts_request.buffer_len().unwrap();
+    assert_eq!(usize::from(ts_request_len), expected_buffer.len());
 
-    let mut buffer = Vec::with_capacity(ts_request_len as usize);
+    let mut buffer = Vec::with_capacity(ts_request_len.into());
     ts_request.encode_ts_request(&mut buffer).unwrap();
 
     assert_eq!(buffer.as_slice(), expected_buffer.as_ref());
@@ -488,10 +488,10 @@ fn ntlm_encode_with_error_code() {
         version: TS_REQUEST_VERSION,
     };
 
-    let ts_request_len = ts_request.buffer_len();
-    assert_eq!(ts_request_len as usize, expected_buffer.len());
+    let ts_request_len = ts_request.buffer_len().unwrap();
+    assert_eq!(usize::from(ts_request_len), expected_buffer.len());
 
-    let mut buffer = Vec::with_capacity(ts_request_len as usize);
+    let mut buffer = Vec::with_capacity(ts_request_len.into());
     ts_request.encode_ts_request(&mut buffer).unwrap();
 
     assert_eq!(buffer.as_slice(), expected_buffer.as_ref());
@@ -598,7 +598,7 @@ fn buffer_len_correct_returns_len() {
     let buffer = NTLM_3_PHASE_TS_REQUEST;
     let ts_request = TsRequest::from_buffer(buffer.as_ref()).unwrap();
 
-    assert_eq!(buffer.len() as u16, ts_request.buffer_len());
+    assert_eq!(buffer.len(), usize::from(ts_request.buffer_len().unwrap()));
 }
 
 #[test]
@@ -611,5 +611,8 @@ fn buffer_len_correct_returns_len_with_garbage() {
 
     let ts_request = TsRequest::from_buffer(buffer.as_ref()).unwrap();
 
-    assert_eq!((buffer.len() - garbage_len) as u16, ts_request.buffer_len());
+    assert_eq!(
+        buffer.len() - garbage_len,
+        usize::from(ts_request.buffer_len().unwrap())
+    );
 }

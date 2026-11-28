@@ -2,11 +2,13 @@ use picky_krb::crypto::CipherSuite;
 use picky_krb::data_types::Ticket;
 use picky_krb::messages::TgtReq;
 use rand::rngs::{StdRng, SysRng};
-use rand_core::{Rng as _, SeedableRng as _};
+use rand_core::SeedableRng as _;
 
 use crate::generator::YieldPointLocal;
 use crate::kerberos::client::extractors::extract_encryption_params_from_as_rep;
-use crate::kerberos::client::generators::{GenerateAsPaDataOptions, GenerateAsReqOptions, generate_as_req_kdc_body};
+use crate::kerberos::client::generators::{
+    GenerateAsPaDataOptions, GenerateAsReqOptions, generate_as_req_kdc_body, generate_nonce,
+};
 use crate::kerberos::client::principal::{get_client_principal_name_type, get_client_principal_realm};
 use crate::kerberos::pa_datas::{AsRepSessionKeyExtractor, AsReqPaDataOptions};
 use crate::kerberos::{TGT_SERVICE_NAME, client};
@@ -69,14 +71,13 @@ pub(crate) async fn request_tgt(
     server.realm = Some(realm.clone());
 
     let mut rand = StdRng::try_from_rng(&mut SysRng)?;
-    let nonce = rand.next_u32();
+    let nonce = generate_nonce(&mut rand);
     let options = GenerateAsReqOptions {
         realm: &realm,
         username: &username,
         cname_type,
         snames: &[TGT_SERVICE_NAME, &realm],
-        // 4 = size of u32
-        nonce: &nonce.to_be_bytes(),
+        nonce,
         hostname: &server.config.client_computer_name,
         context_requirements: ClientRequestFlags::empty(),
     };
@@ -117,7 +118,7 @@ pub(crate) async fn request_tgt(
 
     let (encryption_type, salt) = extract_encryption_params_from_as_rep(&as_rep)?;
 
-    let encryption_type = CipherSuite::try_from(encryption_type as usize)?;
+    let encryption_type = CipherSuite::try_from(usize::from(encryption_type))?;
     server.encryption_params.encryption_type = Some(encryption_type);
 
     let mut session_key_extractor = AsRepSessionKeyExtractor::AuthIdentity {

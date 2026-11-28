@@ -1,20 +1,22 @@
+use warpgate_common::RoleId;
+use warpgate_common::UserId;
 use poem_openapi::Object;
 use sea_orm::entity::prelude::*;
 use sea_orm::{ColumnTrait, QueryFilter};
 use serde::Serialize;
-use uuid::Uuid;
-use warpgate_common::Role;
+use warpgate_common::{ProviderId, Role};
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Object)]
 #[sea_orm(table_name = "roles")]
 #[oai(rename = "Role")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub id: Uuid,
+    pub id: RoleId,
     pub name: String,
     #[sea_orm(column_type = "Text")]
     pub description: String,
     pub is_default: bool,
+    pub provider: Option<ProviderId>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -59,7 +61,7 @@ impl Entity {
 
     pub async fn grant_default_roles(
         db: &DatabaseConnection,
-        user_id: Uuid,
+        user_id: UserId,
     ) -> Result<Vec<Model>, DbErr> {
         let roles = Self::get_default_roles(db).await?;
 
@@ -78,6 +80,7 @@ impl From<Model> for Role {
             name: model.name,
             description: model.description,
             is_default: model.is_default,
+            provider: model.provider,
         }
     }
 }

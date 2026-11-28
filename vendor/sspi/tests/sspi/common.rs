@@ -179,7 +179,8 @@ where
 pub(crate) fn check_messages_encryption(client: &mut impl Sspi, server: &mut impl Sspi) -> sspi::Result<()> {
     let server_sizes = server.query_context_sizes()?;
 
-    let mut token = vec![0; server_sizes.security_trailer as usize];
+    let security_trailer_size: usize = server_sizes.security_trailer.try_into()?;
+    let mut token = vec![0; security_trailer_size];
     let mut data = MESSAGE_TO_CLIENT.to_vec();
     let mut messages = [
         SecurityBufferRef::token_buf(token.as_mut_slice()),

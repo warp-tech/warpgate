@@ -2,12 +2,13 @@ use std::io;
 
 use byteorder::{LittleEndian, WriteBytesExt};
 
-use crate::SecurityStatus;
-use crate::ntlm::messages::{MessageFields, MessageTypes, NTLM_SIGNATURE, NTLM_VERSION_SIZE};
+use crate::ntlm::messages::{MessageFields, MessageTypes, NTLM_SIGNATURE};
 use crate::ntlm::{NegotiateFlags, NegotiateMessage, Ntlm, NtlmState};
+use crate::{Result, SecurityStatus};
 
-const HEADER_SIZE: usize = 32;
-const NEGO_MESSAGE_OFFSET: usize = HEADER_SIZE + NTLM_VERSION_SIZE;
+const HEADER_SIZE: u8 = 32;
+// NTLM_VERSION_SIZE is 8, which fits in u8
+const NEGO_MESSAGE_OFFSET: u8 = HEADER_SIZE + 8;
 
 struct NegotiateMessageFields {
     domain_name: MessageFields,
@@ -15,25 +16,27 @@ struct NegotiateMessageFields {
 }
 
 impl NegotiateMessageFields {
-    pub(crate) fn new(offset: u32, workstation: Option<Vec<u8>>) -> Self {
+    pub(crate) fn new(offset: u32, workstation: Option<Vec<u8>>) -> Result<Self> {
         let mut domain_name = MessageFields::new();
         let mut workstation = MessageFields::with_buffer(workstation.unwrap_or_default());
 
         domain_name.buffer_offset = offset;
-        workstation.buffer_offset = domain_name.buffer_offset + domain_name.buffer.len() as u32;
+        let domain_name_len: u32 = domain_name.buffer.len().try_into()?;
+        workstation.buffer_offset = domain_name.buffer_offset + domain_name_len;
 
-        NegotiateMessageFields {
+        Ok(NegotiateMessageFields {
             domain_name,
             workstation,
-        }
+        })
     }
 
-    pub(crate) fn data_len(&self) -> usize {
-        self.workstation.buffer_offset as usize + self.workstation.buffer.len()
+    pub(crate) fn data_len(&self) -> Result<usize> {
+        let offset: usize = self.workstation.buffer_offset.try_into()?;
+        Ok(offset + self.workstation.buffer.len())
     }
 }
 
-fn check_state(state: NtlmState) -> crate::Result<()> {
+fn check_state(state: NtlmState) -> Result<()> {
     if state != NtlmState::Negotiate {
         Err(crate::Error::new(
             crate::ErrorKind::OutOfSequence,
@@ -44,20 +47,20 @@ fn check_state(state: NtlmState) -> crate::Result<()> {
     }
 }
 
-pub(crate) fn write_negotiate(context: &mut Ntlm, mut transport: impl io::Write) -> crate::Result<SecurityStatus> {
+pub(crate) fn write_negotiate(context: &mut Ntlm, mut transport: impl io::Write) -> Result<SecurityStatus> {
     check_state(context.state)?;
 
     let negotiate_flags = get_flags(context);
     let message_fields = NegotiateMessageFields::new(
-        NEGO_MESSAGE_OFFSET as u32,
+        NEGO_MESSAGE_OFFSET.into(),
         context
             .config
             .client_computer_name
             .as_ref()
             .map(|workstation| workstation.as_bytes().to_vec()),
-    );
+    )?;
 
-    let mut buffer = Vec::with_capacity(message_fields.data_len());
+    let mut buffer = Vec::with_capacity(message_fields.data_len()?);
 
     write_header(negotiate_flags, context.version.as_ref(), &message_fields, &mut buffer)?;
     write_payload(&message_fields, &mut buffer)?;
@@ -109,7 +112,7 @@ fn write_header(
     mut buffer: impl io::Write,
 ) -> io::Result<()> {
     buffer.write_all(NTLM_SIGNATURE)?; // signature 8 bytes
-    buffer.write_u32::<LittleEndian>(MessageTypes::Negotiate as u32)?; // message type 4 bytes
+    buffer.write_u32::<LittleEndian>(MessageTypes::Negotiate.as_u32())?; // message type 4 bytes
     buffer.write_u32::<LittleEndian>(negotiate_flags.bits())?; // negotiate flags 4 bytes
     message_fields.domain_name.write_to(&mut buffer)?; // domain name 8 bytes
     message_fields.workstation.write_to(&mut buffer)?; // workstation 8 bytes

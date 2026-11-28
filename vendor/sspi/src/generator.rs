@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll, Wake, Waker};
+use std::task::{Context, Poll, Waker};
 
 use url::Url;
 
@@ -122,16 +122,8 @@ where
 }
 
 fn execute_one_step<OutTy>(task: &mut PinnedFuture<'_, OutTy>) -> Option<OutTy> {
-    struct NoopWake;
-
-    impl Wake for NoopWake {
-        fn wake(self: Arc<Self>) {
-            // do nothing
-        }
-    }
-
-    let waker = Waker::from(Arc::new(NoopWake));
-    let mut context = Context::from_waker(&waker);
+    let waker = Waker::noop();
+    let mut context = Context::from_waker(waker);
 
     match task.as_mut().poll(&mut context) {
         Poll::Pending => None,

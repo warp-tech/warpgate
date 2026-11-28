@@ -33,7 +33,7 @@ use picky_krb::messages::{
     KrbPrivMessage, TgsReq, TgtReq,
 };
 use rand::rngs::{StdRng, SysRng};
-use rand_core::{Rng as _, SeedableRng as _};
+use rand_core::{Rng, SeedableRng as _};
 use time::{Duration, OffsetDateTime};
 
 use crate::channel_bindings::ChannelBindings;
@@ -70,7 +70,6 @@ pub fn get_client_principal_realm(username: &str, domain: &str) -> String {
 }
 
 const TGT_TICKET_LIFETIME_DAYS: i64 = 3;
-const NONCE_LEN: usize = 4;
 /// [Microseconds](https://www.rfc-editor.org/rfc/rfc4120#section-5.2.4).
 /// The maximum microseconds value.
 ///
@@ -130,10 +129,13 @@ pub struct GenerateAsPaDataOptions<'a> {
 
 /// Build the PA-ENC-TIMESTAMP pre-auth value, encrypting the current time with
 /// an already-derived long-term `key` of type `encryption_type`.
-fn encode_enc_timestamp_pa_data(key: &[u8], encryption_type: &CipherSuite) -> Result<PaData> {
+fn encode_enc_timestamp_pa_data(
+    key: &[u8],
+    encryption_type: &CipherSuite,
+    current_date: OffsetDateTime,
+) -> Result<PaData> {
     let cipher = encryption_type.cipher();
 
-    let current_date = OffsetDateTime::now_utc();
     let microseconds = current_date.microsecond().min(MAX_MICROSECONDS);
 
     let timestamp = PaEncTsEnc {
@@ -178,6 +180,13 @@ fn encode_pac_request_pa_data() -> Result<PaData> {
 
 #[instrument(level = "trace", ret, skip_all, fields(options.salt, options.enc_params, options.with_pre_auth))]
 pub fn generate_pa_datas_for_as_req(options: &GenerateAsPaDataOptions<'_>) -> Result<Vec<PaData>> {
+    generate_pa_datas_for_as_req_at(options, OffsetDateTime::now_utc())
+}
+
+pub(crate) fn generate_pa_datas_for_as_req_at(
+    options: &GenerateAsPaDataOptions<'_>,
+    timestamp: OffsetDateTime,
+) -> Result<Vec<PaData>> {
     let GenerateAsPaDataOptions {
         password,
         salt,
@@ -192,7 +201,7 @@ pub fn generate_pa_datas_for_as_req(options: &GenerateAsPaDataOptions<'_>) -> Re
         let key = encryption_type
             .cipher()
             .generate_key_from_password(password.as_bytes(), salt)?;
-        pa_datas.push(encode_enc_timestamp_pa_data(&key, encryption_type)?);
+        pa_datas.push(encode_enc_timestamp_pa_data(&key, encryption_type, timestamp)?);
     }
 
     pa_datas.push(encode_pac_request_pa_data()?);
@@ -214,18 +223,48 @@ pub struct GenerateKeytabPaDataOptions {
 
 #[instrument(level = "trace", ret, skip_all, fields(options.key_enctype, options.with_pre_auth))]
 pub fn generate_pa_datas_for_as_req_with_key(options: &GenerateKeytabPaDataOptions) -> Result<Vec<PaData>> {
+    generate_pa_datas_for_as_req_with_key_at(options, OffsetDateTime::now_utc())
+}
+
+pub(crate) fn generate_pa_datas_for_as_req_with_key_at(
+    options: &GenerateKeytabPaDataOptions,
+    timestamp: OffsetDateTime,
+) -> Result<Vec<PaData>> {
     let mut pa_datas = Vec::new();
 
     if options.with_pre_auth {
         pa_datas.push(encode_enc_timestamp_pa_data(
             options.key.as_ref(),
             &options.key_enctype,
+            timestamp,
         )?);
     }
 
     pa_datas.push(encode_pac_request_pa_data()?);
 
     Ok(pa_datas)
+}
+
+/// Generates a random KDC-REQ nonce in the positive `Int32` range.
+///
+/// Windows and MIT krb5 read the nonce as a signed `Int32`. Like MIT krb5 and Heimdal, the high bit
+/// is cleared so the value is the same whether a peer reads the nonce as signed or unsigned.
+pub(crate) fn generate_nonce(rng: &mut impl Rng) -> u32 {
+    rng.next_u32() & 0x7fff_ffff
+}
+
+/// Encodes a nonce as a minimal DER INTEGER in the `Int32` range.
+///
+/// The TGS-REQ authenticator checksum covers the DER encoded KDC-REQ-BODY and the Windows KDC
+/// verifies it against its own re-encoding of the body. A nonce that is not minimal DER makes the
+/// re-encoded body differ and the KDC fails the request with `KRB_AP_ERR_MODIFIED`.
+///
+/// The value is encoded as a signed `Int32`, the way Windows re-encodes the nonce. A nonce with the
+/// high bit set stays a 4-byte negative INTEGER, an unsigned encoding would add a fifth `00` octet
+/// and the Windows KDC rejects the request outright. Nonces from [generate_nonce] are positive and
+/// encode the same either way.
+pub(crate) fn nonce_to_asn1(nonce: u32) -> IntegerAsn1 {
+    IntegerAsn1::from_bytes_be_signed(nonce.to_be_bytes().to_vec())
 }
 
 /// Parameters for generating [AsReq].
@@ -235,7 +274,8 @@ pub struct GenerateAsReqOptions<'a> {
     pub username: &'a str,
     pub cname_type: u8,
     pub snames: &'a [&'a str],
-    pub nonce: &'a [u8],
+    /// KDC-REQ nonce, encoded with [nonce_to_asn1].
+    pub nonce: u32,
     pub hostname: &'a str,
     pub context_requirements: ClientRequestFlags,
 }
@@ -299,7 +339,7 @@ pub fn generate_as_req_kdc_body(options: &GenerateAsReqOptions<'_>) -> Result<Kd
         rtime: Optional::from(Some(ExplicitContextTag6::from(GeneralizedTimeAsn1::from(
             GeneralizedTime::from(expiration_date),
         )))),
-        nonce: ExplicitContextTag7::from(IntegerAsn1::from(nonce.to_vec())),
+        nonce: ExplicitContextTag7::from(nonce_to_asn1(*nonce)),
         etype: ExplicitContextTag8::from(Asn1SequenceOf::from(vec![
             IntegerAsn1::from(vec![CipherSuite::Aes256CtsHmacSha196.into()]),
             IntegerAsn1::from(vec![CipherSuite::Aes128CtsHmacSha196.into()]),
@@ -365,8 +405,7 @@ pub fn generate_tgs_req(options: GenerateTgsReqOptions<'_>) -> Result<TgsReq> {
     }
 
     let mut rng = StdRng::try_from_rng(&mut SysRng)?;
-    let mut nonce = [0; NONCE_LEN];
-    rng.fill_bytes(&mut nonce);
+    let nonce = generate_nonce(&mut rng);
 
     let req_body = KdcReqBody {
         kdc_options: ExplicitContextTag0::from(KerberosFlags::from(BitString::with_bytes(
@@ -384,7 +423,7 @@ pub fn generate_tgs_req(options: GenerateTgsReqOptions<'_>) -> Result<TgsReq> {
         from: Optional::from(None),
         till: ExplicitContextTag5::from(GeneralizedTimeAsn1::from(GeneralizedTime::from(expiration_date))),
         rtime: Optional::from(None),
-        nonce: ExplicitContextTag7::from(IntegerAsn1::from(nonce.to_vec())),
+        nonce: ExplicitContextTag7::from(nonce_to_asn1(nonce)),
         etype: ExplicitContextTag8::from(Asn1SequenceOf::from(vec![
             IntegerAsn1::from(vec![CipherSuite::Aes256CtsHmacSha196.into()]),
             IntegerAsn1::from(vec![CipherSuite::Aes128CtsHmacSha196.into()]),
@@ -553,6 +592,14 @@ impl From<ClientRequestFlags> for GssFlags {
             flags |= GssFlags::GSS_C_DCE_STYLE;
         }
 
+        if value.contains(ClientRequestFlags::EXTENDED_ERROR) {
+            flags |= GssFlags::GSS_C_EXTENDED_ERROR_FLAG;
+        }
+
+        if value.contains(ClientRequestFlags::IDENTIFY) {
+            flags |= GssFlags::GSS_C_IDENTIFY_FLAG;
+        }
+
         flags
     }
 }
@@ -592,6 +639,13 @@ pub struct GenerateAuthenticatorOptions<'a> {
 /// Generated ApReq Authenticator.
 #[instrument(level = "trace", ret)]
 pub fn generate_authenticator(options: GenerateAuthenticatorOptions<'_>) -> Result<Authenticator> {
+    generate_authenticator_at(options, OffsetDateTime::now_utc())
+}
+
+pub(crate) fn generate_authenticator_at(
+    options: GenerateAuthenticatorOptions<'_>,
+    current_date: OffsetDateTime,
+) -> Result<Authenticator> {
     let GenerateAuthenticatorOptions {
         kdc_rep,
         seq_num,
@@ -601,7 +655,6 @@ pub fn generate_authenticator(options: GenerateAuthenticatorOptions<'_>) -> Resu
         ..
     } = options;
 
-    let current_date = OffsetDateTime::now_utc();
     let mut microseconds = current_date.microsecond();
     if microseconds > MAX_MICROSECONDS {
         microseconds = MAX_MICROSECONDS;
@@ -623,7 +676,7 @@ pub fn generate_authenticator(options: GenerateAuthenticatorOptions<'_>) -> Resu
         if checksum_type == AUTHENTICATOR_CHECKSUM_TYPE
             && let Some(channel_bindings) = channel_bindings
         {
-            if checksum_value.len() < 20 {
+            let Some(channel_binding_buf) = checksum_value.get_mut(4..20) else {
                 return Err(Error::new(
                     ErrorKind::InvalidParameter,
                     format!(
@@ -631,10 +684,10 @@ pub fn generate_authenticator(options: GenerateAuthenticatorOptions<'_>) -> Resu
                         checksum_value.len()
                     ),
                 ));
-            }
+            };
             // [Authenticator Checksum](https://datatracker.ietf.org/doc/html/rfc4121#section-4.1.1)
             // 4..19 - Channel binding information (19 inclusive).
-            checksum_value[4..20].copy_from_slice(&compute_md5_channel_bindings_hash(channel_bindings));
+            channel_binding_buf.copy_from_slice(&compute_md5_channel_bindings_hash(channel_bindings)?);
         }
         Optional::from(Some(ExplicitContextTag3::from(Checksum {
             cksumtype: ExplicitContextTag0::from(IntegerAsn1::from(checksum_type)),
@@ -845,6 +898,61 @@ mod tests {
     use super::*;
 
     #[test]
+    fn nonce_is_minimal_der() {
+        for (nonce, expected) in [
+            // Previously sent verbatim, the Windows KDC failed these with KRB_AP_ERR_MODIFIED.
+            (0x0009_a792, vec![0x02, 0x03, 0x09, 0xa7, 0x92]),
+            (0x0000_0001, vec![0x02, 0x01, 0x01]),
+            (0x0000_0000, vec![0x02, 0x01, 0x00]),
+            (0x7fa0_b3df, vec![0x02, 0x04, 0x7f, 0xa0, 0xb3, 0xdf]),
+            (0x1234_5678, vec![0x02, 0x04, 0x12, 0x34, 0x56, 0x78]),
+            // A high bit must not add a fifth `00` octet, the Windows KDC rejects a nonce outside the
+            // `Int32` range.
+            (0x9abc_def0, vec![0x02, 0x04, 0x9a, 0xbc, 0xde, 0xf0]),
+            (0x8000_0000, vec![0x02, 0x04, 0x80, 0x00, 0x00, 0x00]),
+            (0xffff_ffff, vec![0x02, 0x01, 0xff]),
+            // Non-minimal negative, previously failed with KRB_AP_ERR_MODIFIED.
+            (0xffa0_b3df, vec![0x02, 0x03, 0xa0, 0xb3, 0xdf]),
+        ] {
+            assert_eq!(picky_asn1_der::to_vec(&nonce_to_asn1(nonce)).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn generated_nonce_is_positive_int32() {
+        let mut rng = StdRng::seed_from_u64(0);
+        for _ in 0..10_000 {
+            let nonce = generate_nonce(&mut rng);
+            assert!(
+                i32::try_from(nonce).is_ok(),
+                "nonce {nonce:#x} does not fit in an Int32"
+            );
+        }
+    }
+
+    #[test]
+    fn as_req_kdc_body_nonce_is_minimal_der() {
+        for (nonce, expected) in [
+            (0x0009_a792, &[0xa7, 0x05, 0x02, 0x03, 0x09, 0xa7, 0x92][..]),
+            // An unrestricted random nonce (e.g. `next_u32()`) must stay within 4 octets.
+            (0x9abc_def0, &[0xa7, 0x06, 0x02, 0x04, 0x9a, 0xbc, 0xde, 0xf0][..]),
+        ] {
+            let body = generate_as_req_kdc_body(&GenerateAsReqOptions {
+                realm: "CRABKA.TEST",
+                username: "alice",
+                cname_type: NT_PRINCIPAL,
+                snames: &["krbtgt", "CRABKA.TEST"],
+                nonce,
+                hostname: "host",
+                context_requirements: ClientRequestFlags::empty(),
+            })
+            .expect("generate as-req body");
+
+            assert_eq!(picky_asn1_der::to_vec(&body.nonce).unwrap(), expected);
+        }
+    }
+
+    #[test]
     fn test_set_flags() {
         let mut checksum_values = ChecksumValues::default();
         let flags = GssFlags::GSS_C_MUTUAL_FLAG | GssFlags::GSS_C_REPLAY_FLAG;
@@ -873,13 +981,40 @@ mod tests {
         assert_eq!(checksum_values.inner[20..24], expected_bytes);
     }
 
+    #[test]
+    fn extended_error_client_request_flag_maps_to_gss_flag() {
+        assert_eq!(
+            GssFlags::from(ClientRequestFlags::EXTENDED_ERROR).bits(),
+            GssFlags::GSS_C_EXTENDED_ERROR_FLAG.bits()
+        );
+    }
+
+    #[test]
+    fn identify_client_request_flag_maps_to_gss_flag() {
+        assert_eq!(
+            GssFlags::from(ClientRequestFlags::IDENTIFY).bits(),
+            GssFlags::GSS_C_IDENTIFY_FLAG.bits()
+        );
+    }
+
+    #[test]
+    fn extended_error_and_identify_client_request_flags_map_with_existing_flags() {
+        let request_flags =
+            ClientRequestFlags::EXTENDED_ERROR | ClientRequestFlags::IDENTIFY | ClientRequestFlags::MUTUAL_AUTH;
+
+        assert_eq!(
+            GssFlags::from(request_flags).bits(),
+            (GssFlags::GSS_C_EXTENDED_ERROR_FLAG | GssFlags::GSS_C_IDENTIFY_FLAG | GssFlags::GSS_C_MUTUAL_FLAG).bits()
+        );
+    }
+
     fn cname_components(username: &str) -> Vec<String> {
         let body = generate_as_req_kdc_body(&GenerateAsReqOptions {
             realm: "CRABKA.TEST",
             username,
             cname_type: NT_PRINCIPAL,
             snames: &["krbtgt", "CRABKA.TEST"],
-            nonce: &[0, 0, 0, 1],
+            nonce: 1,
             hostname: "host",
             context_requirements: ClientRequestFlags::empty(),
         })
@@ -934,5 +1069,32 @@ mod tests {
         .expect("generate keytab pa-datas");
         // PA-ENC-TIMESTAMP plus PA-PAC-REQUEST.
         assert_eq!(pa_datas.len(), 2);
+    }
+
+    #[test]
+    fn keytab_pa_data_uses_supplied_timestamp() {
+        let key = vec![0_u8; 32];
+        let timestamp = OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap() + Duration::milliseconds(123);
+        let pa_datas = generate_pa_datas_for_as_req_with_key_at(
+            &GenerateKeytabPaDataOptions {
+                key: key.clone().into(),
+                key_enctype: CipherSuite::Aes256CtsHmacSha196,
+                with_pre_auth: true,
+            },
+            timestamp,
+        )
+        .unwrap();
+
+        let encrypted: EncryptedData = picky_asn1_der::from_bytes(&pa_datas[0].padata_data.0.0).unwrap();
+        let decrypted = CipherSuite::Aes256CtsHmacSha196
+            .cipher()
+            .decrypt(&key, PA_ENC_TIMESTAMP_KEY_USAGE, &encrypted.cipher.0.0)
+            .unwrap();
+        let decoded: PaEncTsEnc = picky_asn1_der::from_bytes(&decrypted).unwrap();
+        assert_eq!(
+            OffsetDateTime::try_from(decoded.patimestamp.0.0).unwrap(),
+            timestamp - Duration::milliseconds(123)
+        );
+        assert_eq!(decoded.pausec.0.unwrap().0.0, 123_000_u32.to_be_bytes());
     }
 }

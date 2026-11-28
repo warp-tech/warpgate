@@ -22,10 +22,20 @@ pub(super) const CLIENT_SEAL_MAGIC: &[u8; MAGIC_SIZE] = b"session key to client-
 pub(super) const SERVER_SEAL_MAGIC: &[u8; MAGIC_SIZE] = b"session key to server-to-client sealing key magic constant\0";
 
 #[derive(Clone, Copy)]
+#[repr(u32)]
 pub(super) enum MessageTypes {
     Negotiate = 1,
     Challenge = 2,
     Authenticate = 3,
+}
+
+impl MessageTypes {
+    fn as_u32(&self) -> u32 {
+        #[expect(clippy::as_conversions, reason = "#[repr(u32)] guarantees this cast is lossless")]
+        {
+            *self as u32
+        }
+    }
 }
 
 pub(super) struct MessageFields {
@@ -47,8 +57,11 @@ impl MessageFields {
         }
     }
     fn write_to(&self, mut buffer: impl io::Write) -> io::Result<()> {
-        buffer.write_u16::<LittleEndian>(self.buffer.len() as u16)?; // Len
-        buffer.write_u16::<LittleEndian>(self.buffer.len() as u16)?; // MaxLen
+        let len = u16::try_from(self.buffer.len()).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+
+        buffer.write_u16::<LittleEndian>(len)?; // Len
+        buffer.write_u16::<LittleEndian>(len)?; // MaxLen
+
         buffer.write_u32::<LittleEndian>(self.buffer_offset)?; // BufferOffset
 
         Ok(())
@@ -62,7 +75,7 @@ impl MessageFields {
         let len = buffer.read_u16::<LittleEndian>()?; // Len
         let _max_len = buffer.read_u16::<LittleEndian>()?; // MaxLen
         self.buffer_offset = buffer.read_u32::<LittleEndian>()?; // BufferOffset
-        self.buffer.resize(len as usize, 0x00);
+        self.buffer.resize(len.into(), 0x00);
         Ok(())
     }
     fn read_buffer_from(&mut self, mut cursor: impl io::Read + io::Seek) -> io::Result<()> {
@@ -107,12 +120,13 @@ pub(super) fn read_ntlm_header(mut stream: impl io::Read, expected_message_type:
             format!("Read NTLM signature is invalid: {signature:?}"),
         ));
     }
-    if message_type != expected_message_type as u32 {
+    if message_type != expected_message_type.as_u32() {
         return Err(crate::Error::new(
             crate::ErrorKind::InvalidToken,
             format!(
                 "Message type is invalid: {} != expected ({})",
-                message_type, expected_message_type as u32
+                message_type,
+                expected_message_type.as_u32()
             ),
         ));
     }

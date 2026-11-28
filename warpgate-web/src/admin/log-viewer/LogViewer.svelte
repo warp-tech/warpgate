@@ -16,6 +16,9 @@
     import { firstBy } from 'thenby'
     import AccessRoleBadge from './AccessRoleBadge.svelte'
     import AdminRoleBadge from './AdminRoleBadge.svelte'
+    import ResourceChangeEntry, {
+        type ResourceChanged1,
+    } from './ResourceChangeEntry.svelte'
     import TargetBadge from './TargetBadge.svelte'
     import UserBadge from './UserBadge.svelte'
 
@@ -236,6 +239,7 @@
         grantee_username: string
         role_id: string
         role_name: string
+        expires_at?: string
     }
 
     interface AccessRoleRevoked1 {
@@ -291,17 +295,8 @@
         client_ip?: string
     }
 
-    interface CredentialCreated1 {
-        _type: 'CredentialCreated1'
-        credential_type: string
-        credential_name?: string
-        via: 'admin' | 'self-service'
-        user_id: string
-        username: string
-    }
-
-    interface CredentialDeleted1 {
-        _type: 'CredentialDeleted1'
+    interface CredentialChanged1 {
+        _type: keyof typeof credentialChangeWording
         credential_type: string
         credential_name?: string
         via: 'admin' | 'self-service'
@@ -395,17 +390,38 @@
         target_container?: string
         command: string
         tty: string
-        response_status: string
+        /** Absent if the cluster sent no response. */
+        response_status?: string
     }
 
-    interface KubernetesPodCreated1 extends KubernetesEvent {
-        _type: 'KubernetesPodCreated1'
+    /** Pod creation and pod update events have the same fields. */
+    interface KubernetesPodWrite extends KubernetesEvent {
         images: string
         node_name?: string
         host_pid: string
         host_network: string
         privileged: string
-        response_status: string
+        response_status?: string
+    }
+
+    interface KubernetesPodCreated1 extends KubernetesPodWrite {
+        _type: 'KubernetesPodCreated1'
+    }
+
+    interface KubernetesPodUpdated1 extends KubernetesPodWrite {
+        _type: 'KubernetesPodUpdated1'
+    }
+
+    interface KubernetesUnknownRequest1 extends Omit<KubernetesEvent, 'pod'> {
+        _type: 'KubernetesUnknownRequest1'
+        /** Absent for a request against the pod collection. */
+        pod?: string
+        method: string
+        path: string
+        content_type?: string
+        body_length: string
+        reason: string
+        response_status?: string
     }
 
     type RichLogEntry =
@@ -419,8 +435,7 @@
         | UserAuthenticationFailed1
         | TargetSessionStarted1
         | TargetSessionEnded1
-        | CredentialCreated1
-        | CredentialDeleted1
+        | CredentialChanged1
         | TicketCreated1
         | TicketDeleted1
         | WebApprovalBypassed1
@@ -430,6 +445,9 @@
         | KubernetesStreamRejected1
         | KubernetesDebugContainerCreated1
         | KubernetesPodCreated1
+        | KubernetesPodUpdated1
+        | KubernetesUnknownRequest1
+        | ResourceChanged1
 
     function richLogType(entry: LogEntry): string {
         return String(entry.values?._type ?? '').replace(/^"|"$/g, '')
@@ -447,6 +465,7 @@
         'TargetSessionStarted1',
         'TargetSessionEnded1',
         'CredentialCreated1',
+        'CredentialUpdated1',
         'CredentialDeleted1',
         'TicketCreated1',
         'TicketDeleted1',
@@ -456,7 +475,16 @@
         'KubernetesStreamRejected1',
         'KubernetesDebugContainerCreated1',
         'KubernetesPodCreated1',
+        'KubernetesPodUpdated1',
+        'KubernetesUnknownRequest1',
+        'ResourceChanged1',
     ])
+
+    const credentialChangeWording = {
+        CredentialCreated1: ['Added', 'for'],
+        CredentialUpdated1: ['Updated', 'of'],
+        CredentialDeleted1: ['Removed', 'from'],
+    } as const
 
     function parseRichLogEntry(entry: LogEntry): RichLogEntry | null {
         return richLogTypes.has(richLogType(entry))
@@ -602,6 +630,12 @@
                                             id={richEntry.grantee_id}
                                             name={richEntry.grantee_username}
                                         />
+                                        {#if richEntry.expires_at}
+                                            until
+                                            {stringifyDate(
+                                                new Date(richEntry.expires_at),
+                                            )}
+                                        {/if}
                                     </div>
                                 {:else if richEntry?._type ===
                                     'AccessRoleRevoked1'}
@@ -744,9 +778,15 @@
                                         />
                                     </div>
                                 {:else if richEntry?._type ===
-                                    'CredentialCreated1'}
+                                    'CredentialCreated1' ||
+                                    richEntry?._type === 'CredentialUpdated1' ||
+                                    richEntry?._type === 'CredentialDeleted1'}
+                                    {@const [verb, preposition] =
+                                        credentialChangeWording[
+                                            richEntry._type
+                                        ]}
                                     <div class="rich-entry">
-                                        Added
+                                        {verb}
                                         {richEntry.credential_type}
                                         credential
                                         {#if richEntry.credential_name}
@@ -754,7 +794,7 @@
                                                 >{richEntry.credential_name}</strong
                                             >
                                         {/if}
-                                        for
+                                        {preposition}
                                         <UserBadge
                                             id={richEntry.user_id}
                                             name={richEntry.username}
@@ -766,26 +806,11 @@
                                         {/if}
                                     </div>
                                 {:else if richEntry?._type ===
-                                    'CredentialDeleted1'}
+                                    'ResourceChanged1'}
                                     <div class="rich-entry">
-                                        Removed
-                                        {richEntry.credential_type}
-                                        credential
-                                        {#if richEntry.credential_name}
-                                            <strong
-                                                >{richEntry.credential_name}</strong
-                                            >
-                                        {/if}
-                                        from
-                                        <UserBadge
-                                            id={richEntry.user_id}
-                                            name={richEntry.username}
+                                        <ResourceChangeEntry
+                                            entry={richEntry}
                                         />
-                                        {#if richEntry.via === 'self-service'}
-                                            <span class="badge bg-secondary">
-                                                self-service
-                                            </span>
-                                        {/if}
                                     </div>
                                 {:else if richEntry?._type === 'TicketCreated1'}
                                     <div class="rich-entry">
@@ -938,20 +963,26 @@
                                         />
                                     </div>
                                 {:else if richEntry?._type ===
-                                    'KubernetesPodCreated1'}
+                                    'KubernetesPodCreated1' ||
+                                    richEntry?._type ===
+                                        'KubernetesPodUpdated1'}
                                     <div class="rich-entry">
                                         <UserBadge
                                             id={richEntry.user_id}
                                             name={richEntry.username}
                                         />
-                                        created pod
+                                        {richEntry._type ===
+                                        'KubernetesPodCreated1'
+                                            ? 'created'
+                                            : 'updated'}
+                                        pod
                                         <strong
                                             >{richEntry.namespace}/{richEntry.pod}</strong
                                         >
                                         ({formatJsonList(
                                             richEntry.images,
                                             ', ',
-                                        )})
+                                        ) || 'no images named'})
                                         {#if richEntry.node_name}
                                             on node
                                             <strong
@@ -978,11 +1009,52 @@
                                                 hostNetwork
                                             </span>
                                         {/if}
+                                        <span class="badge bg-secondary">
+                                            {richEntry.response_status ??
+                                                'no response'}
+                                        </span>
+                                    </div>
+                                {:else if richEntry?._type ===
+                                    'KubernetesUnknownRequest1'}
+                                    <div class="rich-entry">
+                                        <UserBadge
+                                            id={richEntry.user_id}
+                                            name={richEntry.username}
+                                        />
+                                        sent
+                                        <strong
+                                            >{richEntry.method}
+                                            {richEntry.path}</strong
+                                        >
+                                        with a body Warpgate could not read ({richEntry.content_type ??
+                                            'no content type'},
+                                        {richEntry.body_length}
+                                        bytes:
+                                        {richEntry.reason}) on
+                                        <TargetBadge
+                                            id={richEntry.target_id}
+                                            name={richEntry.target_name}
+                                        />
+                                        <span class="badge bg-warning">
+                                            not audited in detail
+                                        </span>
+                                        <span class="badge bg-secondary">
+                                            {richEntry.response_status ??
+                                                'no response'}
+                                        </span>
                                     </div>
                                 {:else}
                                     <span class="text">
                                         {item.text}
                                     </span>
+                                    <!-- Generic rows hide `username`, which is the changed user here -->
+                                    {#if richLogType(item) ===
+                                        'UserLdapLinkChanged1'}
+                                        <UserBadge
+                                            id={String(item.values?.user_id)}
+                                            name={String(item.values?.username)}
+                                        />
+                                    {/if}
                                     {#each genericValues(
                                         item,
                                     ) as pair (pair[0])}
@@ -1010,11 +1082,11 @@
                     <div class="load-older-footer">
                         <IntersectionObserver
                             element={loadOlderButton}
-                            on:observe={event => {
+                            onobserve={entry => {
                                 if (
                                     !loading &&
                                     !error &&
-                                    event.detail.isIntersecting &&
+                                    entry.isIntersecting &&
                                     !endReached
                                 ) {
                                     loadOlder()

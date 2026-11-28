@@ -190,7 +190,7 @@ mod tests {
     use sea_orm_migration::MigratorTrait;
     use time::OffsetDateTime;
     use uuid::Uuid;
-    use warpgate_common::{TargetSessionId, UserSessionId};
+    use warpgate_common::{TargetId, TargetSessionId, UserId, UserSessionId};
     use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
     use warpgate_db_entities::{Recording, TargetSession, UserSession};
 
@@ -203,7 +203,7 @@ mod tests {
         db
     }
 
-    fn access_row(user_session_id: Uuid, target_id: Uuid) -> TargetSession::ActiveModel {
+    fn access_row(user_session_id: Uuid, target_id: TargetId) -> TargetSession::ActiveModel {
         TargetSession::ActiveModel {
             id: Set(TargetSessionId(Uuid::new_v4())),
             user_session_id: Set(UserSessionId(user_session_id)),
@@ -221,7 +221,7 @@ mod tests {
         UserSession::Entity::insert(UserSession::ActiveModel {
             id: Set(UserSessionId(id)),
             username: Set(Some("alice".into())),
-            user_id: Set(Some(Uuid::new_v4())),
+            user_id: Set(Some(UserId(Uuid::new_v4()))),
             remote_address: Set("127.0.0.1:1".into()),
             started: Set(OffsetDateTime::now_utc()),
             ended: Set(None),
@@ -239,7 +239,7 @@ mod tests {
     async fn one_access_row_per_login_and_target() {
         let db = migrated_db().await;
         let parent = user_session(&db).await;
-        let target_id = Uuid::new_v4();
+        let target_id = TargetId(Uuid::new_v4());
 
         TargetSession::Entity::insert(access_row(parent, target_id))
             .exec_without_returning(&db)
@@ -249,7 +249,7 @@ mod tests {
             .exec_without_returning(&db)
             .await
             .expect_err("the unique (user_session_id, target_id) index must reject a second row");
-        TargetSession::Entity::insert(access_row(parent, Uuid::new_v4()))
+        TargetSession::Entity::insert(access_row(parent, TargetId(Uuid::new_v4())))
             .exec_without_returning(&db)
             .await
             .unwrap();
@@ -262,7 +262,7 @@ mod tests {
         let db = migrated_db().await;
         let parent = user_session(&db).await;
         let session_id = Uuid::new_v4();
-        let mut row = access_row(parent, Uuid::new_v4());
+        let mut row = access_row(parent, TargetId(Uuid::new_v4()));
         row.id = Set(TargetSessionId(session_id));
         TargetSession::Entity::insert(row)
             .exec_without_returning(&db)
@@ -278,6 +278,7 @@ mod tests {
             kind: Set(Recording::RecordingKind::Terminal),
             metadata: Set(String::new()),
             generation: Set(3),
+            ..Default::default()
         })
         .exec_without_returning(&db)
         .await

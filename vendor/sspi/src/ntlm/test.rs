@@ -1,5 +1,7 @@
 use crate::crypto::{HASH_SIZE, Rc4};
+use crate::ntlm::messages::computations::generate_signing_key;
 use crate::ntlm::messages::test::TEST_CREDENTIALS;
+use crate::ntlm::messages::{CLIENT_SEAL_MAGIC, CLIENT_SIGN_MAGIC, SERVER_SEAL_MAGIC, SERVER_SIGN_MAGIC};
 use crate::ntlm::{
     AuthenticateMessage, CHALLENGE_SIZE, ChallengeMessage, Mic, NegotiateFlags, NegotiateMessage, Ntlm, NtlmState,
     SIGNATURE_SIZE,
@@ -328,6 +330,152 @@ fn verify_signature_fails_on_invalid_signature() {
         context
             .verify_signature(&mut verify_signature_buffers, TEST_SEQ_NUM)
             .is_err()
+    );
+}
+
+fn mic_test_pair() -> (Ntlm, Ntlm) {
+    let mut client = Ntlm::new();
+    let mut server = Ntlm::new();
+    client.flags = NegotiateFlags::NTLM_SSP_NEGOTIATE_KEY_EXCH;
+    server.flags = NegotiateFlags::NTLM_SSP_NEGOTIATE_KEY_EXCH;
+    client.session_key = Some(SEALING_KEY);
+    server.session_key = Some(SEALING_KEY);
+
+    client.send_signing_key = generate_signing_key(&SEALING_KEY, CLIENT_SIGN_MAGIC);
+    server.recv_signing_key = client.send_signing_key.clone();
+    server.send_signing_key = generate_signing_key(&SEALING_KEY, SERVER_SIGN_MAGIC);
+    client.recv_signing_key = server.send_signing_key.clone();
+
+    client.send_sealing_key = Some(Rc4::new(generate_signing_key(&SEALING_KEY, CLIENT_SEAL_MAGIC).as_ref()));
+    server.recv_sealing_key = client.send_sealing_key.clone();
+    server.send_sealing_key = Some(Rc4::new(generate_signing_key(&SEALING_KEY, SERVER_SEAL_MAGIC).as_ref()));
+    client.recv_sealing_key = server.send_sealing_key.clone();
+
+    (client, server)
+}
+
+fn assert_wrapped_message(sender: &mut Ntlm, receiver: &mut Ntlm, plaintext: &[u8]) {
+    let mut token = [0; SIGNATURE_SIZE];
+    let mut data = plaintext.to_vec();
+    {
+        let mut buffers = [
+            SecurityBufferRef::token_buf(&mut token),
+            SecurityBufferRef::data_buf(&mut data),
+        ];
+        sender.encrypt_message(EncryptionFlags::empty(), &mut buffers).unwrap();
+        assert_ne!(buffers[1].data(), plaintext);
+    }
+
+    let mut buffers = [
+        SecurityBufferRef::data_buf(&mut data),
+        SecurityBufferRef::token_buf(&mut token),
+    ];
+    receiver.decrypt_message(&mut buffers).unwrap();
+    assert_eq!(buffers[0].data(), plaintext);
+}
+
+#[test]
+fn generate_mic_token_preserves_both_sealing_handles() {
+    let (client, server) = mic_test_pair();
+    for mut context in [client, server] {
+        let _ = context
+            .send_sealing_key
+            .as_mut()
+            .unwrap()
+            .process(b"earlier outgoing data");
+        let _ = context
+            .recv_sealing_key
+            .as_mut()
+            .unwrap()
+            .process(b"earlier incoming data");
+        let mut send_before = context.send_sealing_key.clone().unwrap();
+        let mut recv_before = context.recv_sealing_key.clone().unwrap();
+
+        let mic = context.generate_mic_token(b"mech types", private::Sealed).unwrap();
+
+        assert_eq!(mic.len(), SIGNATURE_SIZE);
+        assert_eq!(
+            context.send_sealing_key.as_mut().unwrap().process(TEST_DATA),
+            send_before.process(TEST_DATA)
+        );
+        assert_eq!(
+            context.recv_sealing_key.as_mut().unwrap().process(TEST_DATA),
+            recv_before.process(TEST_DATA)
+        );
+    }
+}
+
+#[test]
+fn verify_mic_token_after_pub_key_auth_preserves_send_state() {
+    let (mut client, mut server) = mic_test_pair();
+    let mech_types = b"mech types";
+    let server_mic = server.generate_mic_token(mech_types, private::Sealed).unwrap();
+
+    assert_wrapped_message(&mut client, &mut server, b"client pubKeyAuth");
+    let mut reply_token = [0; SIGNATURE_SIZE];
+    let mut reply_data = b"server pubKeyAuth".to_vec();
+    server
+        .encrypt_message(
+            EncryptionFlags::empty(),
+            &mut [
+                SecurityBufferRef::token_buf(&mut reply_token),
+                SecurityBufferRef::data_buf(&mut reply_data),
+            ],
+        )
+        .unwrap();
+
+    client
+        .verify_mic_token(&server_mic, mech_types, private::Sealed)
+        .unwrap();
+    client
+        .decrypt_message(&mut [
+            SecurityBufferRef::data_buf(&mut reply_data),
+            SecurityBufferRef::token_buf(&mut reply_token),
+        ])
+        .unwrap();
+    assert_eq!(reply_data, b"server pubKeyAuth");
+
+    assert_wrapped_message(&mut client, &mut server, b"following client payload");
+}
+
+#[test]
+fn verify_mic_token_preserves_advanced_receive_state() {
+    let (mut client, mut server) = mic_test_pair();
+    assert_wrapped_message(&mut server, &mut client, b"earlier server payload");
+
+    let mech_types = b"mech types";
+    let server_mic = server.generate_mic_token(mech_types, private::Sealed).unwrap();
+    client
+        .verify_mic_token(&server_mic, mech_types, private::Sealed)
+        .unwrap();
+
+    assert_wrapped_message(&mut server, &mut client, b"following server payload");
+}
+
+#[test]
+fn verify_mic_token_restores_receive_state_on_invalid_signature() {
+    let (mut client, mut server) = mic_test_pair();
+    assert_wrapped_message(&mut server, &mut client, b"earlier server payload");
+
+    let mut mic = server.generate_mic_token(b"mech types", private::Sealed).unwrap();
+    mic[4] ^= 0xff;
+    let mut recv_before = client.recv_sealing_key.clone().unwrap();
+    let mut send_before = client.send_sealing_key.clone().unwrap();
+
+    assert_eq!(
+        client
+            .verify_mic_token(&mic, b"mech types", private::Sealed)
+            .unwrap_err()
+            .error_type,
+        ErrorKind::MessageAltered
+    );
+    assert_eq!(
+        client.recv_sealing_key.as_mut().unwrap().process(TEST_DATA),
+        recv_before.process(TEST_DATA)
+    );
+    assert_eq!(
+        client.send_sealing_key.as_mut().unwrap().process(TEST_DATA),
+        send_before.process(TEST_DATA)
     );
 }
 

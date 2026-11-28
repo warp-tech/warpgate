@@ -21,7 +21,7 @@ pub(crate) fn detect_kdc_hosts_from_system(domain: &str) -> Vec<String> {
     let domain_upper = domain.to_uppercase();
     let hklm = LOCAL_MACHINE;
     let domains_key_path = "SYSTEM\\CurrentControlSet\\Control\\Lsa\\Kerberos\\Domains";
-    let domain_key_path = format!("{}\\{}", domains_key_path, &domain_upper);
+    let domain_key_path = format!("{}\\{}", domains_key_path, domain_upper);
     if let Ok(domain_key) = hklm.open(domain_key_path) {
         let kdc_names: Vec<String> = domain_key.get_multi_string("KdcNames").unwrap_or_default();
         kdc_names.iter().map(|x| format!("tcp://{x}:88")).collect()
@@ -90,7 +90,7 @@ mod tests {
     #[test]
     fn test_detect_kdc() {
         if let Ok(domain) = std::env::var("TEST_KERBEROS_REALM") {
-            println!("Finding KDC for {} domain", &domain);
+            println!("Finding KDC for {} domain", domain);
             let kdc_hosts = detect_kdc_hosts(&domain);
             if let Some(kdc_host) = kdc_hosts.first() {
                 println!("KDC server: {kdc_host}");

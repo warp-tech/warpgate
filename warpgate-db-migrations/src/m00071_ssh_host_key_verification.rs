@@ -26,7 +26,6 @@ impl MigrationTrait for Migration {
             .await?;
 
         let db = manager.get_connection();
-        let backend = db.get_database_backend();
         let stmt = Query::update()
             .table(parameters::Entity)
             .value(
@@ -36,7 +35,7 @@ impl MigrationTrait for Migration {
                     .to_value(),
             )
             .to_owned();
-        db.execute(backend.build(&stmt)).await?;
+        db.execute(&stmt).await?;
 
         Ok(())
     }

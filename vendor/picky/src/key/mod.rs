@@ -684,7 +684,9 @@ impl PrivateKey {
         let public_exponent = key.e();
         let private_exponent = key.d();
 
-        Self::from_rsa_components(modulus, public_exponent, private_exponent, key.primes())
+        let primes: Vec<BoxedUint> = key.primes().iter().map(|prime| prime.as_ref().clone()).collect();
+
+        Self::from_rsa_components(modulus, public_exponent, private_exponent, &primes)
     }
 
     /// Generates new ec key pair with specified supported curve.

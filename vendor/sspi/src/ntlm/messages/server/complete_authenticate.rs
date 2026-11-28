@@ -137,8 +137,14 @@ fn check_mic_correctness(
         // we need empty the MIC part of auth. message and then will come back the MIC.
         let mic = mic.as_ref().unwrap();
         let mut authenticate_message = authenticate_message.to_vec();
-        authenticate_message[mic.offset as usize..mic.offset as usize + MESSAGE_INTEGRITY_CHECK_SIZE]
-            .clone_from_slice(&[0x00; MESSAGE_INTEGRITY_CHECK_SIZE]);
+        let mic_start = usize::from(mic.offset);
+        let Some(mic_buf) = authenticate_message.get_mut(mic_start..mic_start + MESSAGE_INTEGRITY_CHECK_SIZE) else {
+            return Err(crate::Error::new(
+                crate::ErrorKind::MessageAltered,
+                "invalid MIC offset in the authenticate message",
+            ));
+        };
+        mic_buf.clone_from_slice(&[0x00; MESSAGE_INTEGRITY_CHECK_SIZE]);
         let calculated_mic = compute_message_integrity_check(
             negotiate_message,
             challenge_message,

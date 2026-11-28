@@ -23,6 +23,8 @@ pub enum PostgresError {
     Stream(#[from] PostgresStreamError),
     #[error("server doesn't offer TLS")]
     TlsNotSupported,
+    #[error("server requests password authentication over a plaintext connection")]
+    PasswordAuthWithoutTls,
     #[error("TLS setup failed: {0}")]
     TlsSetup(#[from] RustlsSetupError),
     #[error("TLS stream error: {0}")]

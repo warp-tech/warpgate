@@ -162,7 +162,7 @@ impl MigrationTrait for Migration {
                         )
                         .await?;
                     }
-                    DbBackend::Sqlite => unreachable!(),
+                    _ => unreachable!(),
                 }
                 db.execute_unprepared(
                     "DELETE FROM tickets WHERE user_id IS NULL OR target_id IS NULL",
@@ -222,6 +222,11 @@ impl MigrationTrait for Migration {
                             .to_owned(),
                     )
                     .await?;
+            }
+            backend => {
+                return Err(DbErr::Migration(format!(
+                    "unsupported database backend: {backend:?}"
+                )));
             }
         }
 

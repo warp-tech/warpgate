@@ -16,6 +16,7 @@ use cryptoki::session::UserType;
 #[cfg(not(target_arch = "wasm32"))]
 use cryptoki::types::AuthPin;
 use picky::key::PrivateKey;
+use uuid::Uuid;
 use winscard::SmartCard as PivSmartCard;
 
 use crate::{Error, ErrorKind, Result, Secret, SmartCardIdentity, SmartCardType};
@@ -128,7 +129,9 @@ impl SmartCard {
         private_key: PrivateKey,
         auth_cert_der: Vec<u8>,
     ) -> Result<Self> {
-        let scard = PivSmartCard::new(reader_name, scard_pin, auth_cert_der, private_key)?;
+        // This smart card is not backed by any resource manager context, so it has no externally
+        // assigned identity: generate a fresh one for it.
+        let scard = PivSmartCard::new(reader_name, Uuid::new_v4(), scard_pin, auth_cert_der, private_key)?;
 
         Ok(Self {
             smart_card_type: SmartCardApi::PivEmulated(Box::new(scard)),

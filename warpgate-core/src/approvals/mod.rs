@@ -13,7 +13,7 @@
 //!
 use std::time::Duration;
 
-use sea_orm::sea_query::Condition;
+use sea_orm::sea_query::{Condition, ExprTrait};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use time::OffsetDateTime;
 use warpgate_common::WarpgateError;

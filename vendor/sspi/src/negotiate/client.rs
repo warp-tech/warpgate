@@ -85,6 +85,16 @@ pub(crate) async fn initialize_security_context<'a>(
         }
     }
 
+    // PKU2U contains its own SPNEGO/NEGOEX exchange. Wrapping it in this
+    // Negotiate context again would advertise NTLM while carrying a nested
+    // SPNEGO token, which Windows rejects.
+    if matches!(negotiate.protocol, NegotiatedProtocol::Pku2u(_)) {
+        return negotiate
+            .protocol
+            .initialize_security_context(negotiate.auth_identity.as_ref(), yield_point, builder)
+            .await;
+    }
+
     match negotiate.state {
         NegotiateState::Initial => {
             if builder

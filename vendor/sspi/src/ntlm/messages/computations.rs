@@ -31,7 +31,13 @@ pub(super) static SINGLE_HOST_DATA: LazyLock<[u8; SINGLE_HOST_DATA_SIZE]> = Lazy
     let mut result = [0x00; SINGLE_HOST_DATA_SIZE];
     let mut buffer = io::Cursor::new(result.as_mut());
 
-    buffer.write_u32::<LittleEndian>(SINGLE_HOST_DATA_SIZE as u32).unwrap(); //size
+    buffer
+        .write_u32::<LittleEndian>(
+            SINGLE_HOST_DATA_SIZE
+                .try_into()
+                .expect("SINGLE_HOST_DATA_SIZE should fit into u32"),
+        )
+        .unwrap(); //size
     buffer.write_u32::<LittleEndian>(0).unwrap(); //z4
     buffer.write_u32::<LittleEndian>(1).unwrap(); //data present
     buffer.write_u32::<LittleEndian>(0x2000).unwrap(); //custom_data
@@ -57,7 +63,7 @@ fn convert_to_file_time(end_date: OffsetDateTime) -> crate::Result<u64> {
     } else {
         let duration = end_date - start_date;
         let whole_microseconds = duration.whole_microseconds();
-        let file_time = u64::try_from(whole_microseconds).expect("whole_microseconds to u64 conversion") * 10;
+        let file_time = u64::try_from(whole_microseconds)? * 10;
         Ok(file_time)
     }
 }
@@ -101,7 +107,7 @@ pub(super) fn get_authenticate_target_info(
     if let Some(channel_bindings) = channel_bindings {
         av_pairs.push(AvPair::ChannelBindings(compute_md5_channel_bindings_hash(
             channel_bindings,
-        )));
+        )?));
     }
 
     let mut authenticate_target_info = AvPair::list_to_buffer(&av_pairs)?;

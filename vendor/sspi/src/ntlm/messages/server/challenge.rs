@@ -2,13 +2,14 @@ use std::io;
 
 use byteorder::{LittleEndian, WriteBytesExt};
 
-use crate::SecurityStatus;
 use crate::ntlm::messages::computations::*;
-use crate::ntlm::messages::{MessageFields, MessageTypes, NTLM_SIGNATURE, NTLM_VERSION_SIZE};
+use crate::ntlm::messages::{MessageFields, MessageTypes, NTLM_SIGNATURE};
 use crate::ntlm::{ChallengeMessage, NegotiateFlags, Ntlm, NtlmState};
+use crate::{Result, SecurityStatus};
 
-const BASE_OFFSET: usize = 48;
-const CHALLENGE_MESSAGE_OFFSET: usize = BASE_OFFSET + NTLM_VERSION_SIZE;
+const BASE_OFFSET: u8 = 48;
+// NTLM_VERSION_SIZE is 8, which fits in u8
+const CHALLENGE_MESSAGE_OFFSET: u8 = BASE_OFFSET + 8;
 
 struct ChallengeMessageFields {
     target_name: MessageFields,
@@ -16,27 +17,29 @@ struct ChallengeMessageFields {
 }
 
 impl ChallengeMessageFields {
-    fn new(target_info: &[u8], offset: u32) -> Self {
+    fn new(target_info: &[u8], offset: u32) -> Result<Self> {
         let mut target_info = MessageFields::with_buffer(target_info.to_vec());
         let mut target_name = MessageFields::new();
 
         // will not set target name because it is not used anywhere
 
         target_name.buffer_offset = offset;
-        target_info.buffer_offset = target_name.buffer_offset + target_name.buffer.len() as u32;
+        let target_name_len: u32 = target_name.buffer.len().try_into()?;
+        target_info.buffer_offset = target_name.buffer_offset + target_name_len;
 
-        ChallengeMessageFields {
+        Ok(ChallengeMessageFields {
             target_name,
             target_info,
-        }
+        })
     }
 
-    fn data_len(&self) -> usize {
-        self.target_info.buffer_offset as usize + self.target_info.buffer.len()
+    fn data_len(&self) -> Result<usize> {
+        let offset: usize = self.target_info.buffer_offset.try_into()?;
+        Ok(offset + self.target_info.buffer.len())
     }
 }
 
-pub(crate) fn write_challenge(context: &mut Ntlm, mut transport: impl io::Write) -> crate::Result<SecurityStatus> {
+pub(crate) fn write_challenge(context: &mut Ntlm, mut transport: impl io::Write) -> Result<SecurityStatus> {
     check_state(context.state)?;
 
     let server_challenge = generate_challenge()?;
@@ -44,9 +47,9 @@ pub(crate) fn write_challenge(context: &mut Ntlm, mut transport: impl io::Write)
     let target_info = get_challenge_target_info(timestamp)?;
 
     context.flags = get_flags(context.flags);
-    let message_fields = ChallengeMessageFields::new(target_info.as_ref(), CHALLENGE_MESSAGE_OFFSET as u32);
+    let message_fields = ChallengeMessageFields::new(target_info.as_ref(), CHALLENGE_MESSAGE_OFFSET.into())?;
 
-    let mut buffer = io::Cursor::new(Vec::with_capacity(message_fields.data_len()));
+    let mut buffer = io::Cursor::new(Vec::with_capacity(message_fields.data_len()?));
 
     write_header(
         context.flags,
@@ -68,7 +71,7 @@ pub(crate) fn write_challenge(context: &mut Ntlm, mut transport: impl io::Write)
     Ok(SecurityStatus::ContinueNeeded)
 }
 
-fn check_state(state: NtlmState) -> crate::Result<()> {
+fn check_state(state: NtlmState) -> Result<()> {
     if state != NtlmState::Challenge {
         Err(crate::Error::new(
             crate::ErrorKind::OutOfSequence,
@@ -91,7 +94,7 @@ fn write_header(
     mut buffer: impl io::Write,
 ) -> io::Result<()> {
     buffer.write_all(NTLM_SIGNATURE)?; // signature 8 bytes
-    buffer.write_u32::<LittleEndian>(MessageTypes::Challenge as u32)?; // message type 4 bytes
+    buffer.write_u32::<LittleEndian>(MessageTypes::Challenge.as_u32())?; // message type 4 bytes
     message_fields.target_name.write_to(&mut buffer)?; // target name fields 8 bytes
     buffer.write_u32::<LittleEndian>(negotiate_flags.bits())?; // negotiate flags 4 bytes
     buffer.write_all(server_challenge)?; // server challenge 8 bytes

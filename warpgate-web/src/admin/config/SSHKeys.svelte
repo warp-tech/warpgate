@@ -6,10 +6,12 @@
         type SSHClientKeyKind,
         type SSHKnownHost,
     } from 'admin/lib/api'
+    import ManagedObjectStatus from 'admin/lib/ManagedObjectStatus.svelte'
     import { adminPermissions } from 'admin/lib/store'
     import CopyableTextArea from 'common/CopyableTextArea.svelte'
     import { stringifyError } from 'common/errors'
     import InfoBox from 'common/InfoBox.svelte'
+    import OnboardingHint from 'common/OnboardingHint.svelte'
     import { isSecretRef } from 'common/SecretRefInput.svelte'
     import ClientKeyModal from './ClientKeyModal.svelte'
     import GenerateClientKeyModal from './GenerateClientKeyModal.svelte'
@@ -112,6 +114,11 @@
 {/if}
 
 {#if clientKeys}
+    <OnboardingHint>
+        These are Warpgate's internal SSH private keys that it uses to connect
+        to SSH targets. You can import your existing private keys if needed.
+    </OnboardingHint>
+
     <InfoBox>
         Add one of these keys to the targets'
         <code>authorized_keys</code>
@@ -121,7 +128,7 @@
     <div class="list-group list-group-flush">
         {#each clientKeys as key (key.id)}
             <div class="list-group-item px-0">
-                <div class="d-flex align-items-center gap-2">
+                <div class="d-flex align-items-center gap-2 mb-2">
                     <strong>{key.label}</strong>
                     {#if key.isDefault}
                         <Badge color="primary">Default</Badge>
@@ -135,7 +142,15 @@
                             {key.secretBackend}
                         </Badge>
                     {/if}
-                    {#if $adminPermissions.configEdit}
+                    <ManagedObjectStatus
+                        class="ms-auto"
+                        provider={key.provider}
+                        release={async () => {
+                            await api.releaseSshOwnKey(key)
+                            await load()
+                        }}
+                    />
+                    {#if $adminPermissions.configEdit && !key.provider}
                         <Button
                             class="ms-auto"
                             color="link px-0"

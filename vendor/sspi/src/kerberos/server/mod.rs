@@ -24,7 +24,7 @@ use self::generators::generate_ap_rep;
 use crate::builders::FilledAcceptSecurityContext;
 use crate::generator::YieldPointLocal;
 use crate::kerberos::DEFAULT_ENCRYPTION_TYPE;
-use crate::kerberos::client::extractors::extract_seq_number_from_ap_rep;
+use crate::kerberos::client::extractors::{decrypt_ap_rep, extract_seq_number_from_ap_rep};
 use crate::kerberos::flags::ApOptions;
 use crate::kerberos::messages::{decode_krb_message, generate_krb_message};
 use crate::kerberos::server::as_exchange::request_tgt;
@@ -305,6 +305,10 @@ pub async fn accept_security_context(
                     u32::from_be_bytes(buf)
                 });
 
+                if let Some(seq) = authenticator_seq_number {
+                    server.remote_seq_number = seq;
+                }
+
                 // [3.2.3.  Receipt of KRB_AP_REQ Message](https://www.rfc-editor.org/rfc/rfc4120#section-3.2.3)
                 // The name and realm of the client from the ticket are compared against the same fields in the authenticator.
                 if ticket_enc_part.0.crealm.0 != crealm.0 || ticket_enc_part.0.cname != cname.0 {
@@ -509,13 +513,8 @@ pub async fn accept_security_context(
                     .session_key
                     .as_ref()
                     .ok_or_else(|| Error::new(ErrorKind::InternalError, "session key is not set"))?;
-                let seq_number = extract_seq_number_from_ap_rep(&ap_rep, session_key, &server.encryption_params)?;
-                let seq_number = u32::from_be_bytes(seq_number.try_into().map_err(|err| {
-                    Error::new(
-                        ErrorKind::InvalidToken,
-                        format!("invalid ApRep sequence number: {:?}", err),
-                    )
-                })?);
+                let ap_rep_enc_part = decrypt_ap_rep(&ap_rep, session_key, &server.encryption_params)?;
+                let seq_number = extract_seq_number_from_ap_rep(&ap_rep_enc_part)?;
 
                 let expected_seq_number = server.seq_number + 1;
                 if seq_number != expected_seq_number {

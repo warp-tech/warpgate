@@ -168,7 +168,7 @@ pub fn extract_status_code_from_krb_priv_response(
     let encryption_type = encryption_params
         .encryption_type
         .clone()
-        .unwrap_or(CipherSuite::try_from(
+        .unwrap_or(CipherSuite::try_from(usize::from(
             *krb_priv
                 .0
                 .enc_part
@@ -177,8 +177,8 @@ pub fn extract_status_code_from_krb_priv_response(
                 .0
                 .0
                 .first()
-                .unwrap_or(&((&DEFAULT_ENCRYPTION_TYPE).into())) as usize,
-        )?);
+                .unwrap_or(&((&DEFAULT_ENCRYPTION_TYPE).into())),
+        ))?);
 
     let cipher = encryption_type.cipher();
 
@@ -186,23 +186,23 @@ pub fn extract_status_code_from_krb_priv_response(
         picky_asn1_der::from_bytes(&cipher.decrypt(auth_key, KRB_PRIV_ENC_PART, &krb_priv.0.enc_part.0.cipher.0.0)?)?;
     let user_data = enc_part.0.user_data.0.0;
 
-    if user_data.len() < 2 {
+    let Some((status_code, _)) = user_data.split_first_chunk::<2>() else {
         return Err(Error::new(
             ErrorKind::InvalidToken,
             "Invalid KRB_PRIV message: user-data first is too short (expected at least 2 bytes)",
         ));
-    }
+    };
 
-    Ok(u16::from_be_bytes(user_data[0..2].try_into().unwrap()))
+    Ok(u16::from_be_bytes(*status_code))
 }
 
-/// Extracts the sequence number from the [ApRep].
+/// Decrypt and decodes the encrypted part of the encoded [ApRep] message.
 #[instrument(level = "trace", ret)]
-pub fn extract_seq_number_from_ap_rep(
+pub fn decrypt_ap_rep(
     ap_rep: &ApRep,
     session_key: &Secret<Vec<u8>>,
     enc_params: &EncryptionParams,
-) -> Result<Vec<u8>> {
+) -> Result<EncApRepPart> {
     let cipher = enc_params
         .encryption_type
         .as_ref()
@@ -218,51 +218,61 @@ pub fn extract_seq_number_from_ap_rep(
             )
         })?;
 
-    let ap_rep_enc_part: EncApRepPart = picky_asn1_der::from_bytes(&res)?;
-
-    Ok(ap_rep_enc_part
-        .0
-        .seq_number
-        .0
-        .ok_or_else(|| Error::new(ErrorKind::InvalidToken, "missing sequence number in ap_rep"))?
-        .0
-        .0)
+    Ok(picky_asn1_der::from_bytes(&res)?)
 }
 
-/// Extracts a sub-session key from the [ApRep].
+/// Extracts a sub-session key from the [EncApRepPart].
 #[instrument(level = "trace", ret)]
-pub fn extract_sub_session_key_from_ap_rep(
-    ap_rep: &ApRep,
-    session_key: &Secret<Vec<u8>>,
-    enc_params: &EncryptionParams,
-) -> Result<Secret<Vec<u8>>> {
-    let cipher = enc_params
-        .encryption_type
-        .as_ref()
-        .unwrap_or(&DEFAULT_ENCRYPTION_TYPE)
-        .cipher();
-
-    let res = cipher
-        .decrypt(session_key.as_ref(), AP_REP_ENC, &ap_rep.0.enc_part.cipher.0.0)
-        .map_err(|err| {
-            Error::new(
-                ErrorKind::DecryptFailure,
-                format!("cannot decrypt ap_rep.enc_part: {err:?}"),
-            )
-        })?;
-
-    let ap_rep_enc_part: EncApRepPart = picky_asn1_der::from_bytes(&res)?;
-
+pub fn extract_sub_session_key_from_ap_rep(ap_rep_enc_part: &EncApRepPart) -> Result<Secret<Vec<u8>>> {
     Ok(ap_rep_enc_part
         .0
         .subkey
         .0
+        .clone()
         .ok_or_else(|| Error::new(ErrorKind::InvalidToken, "missing sub-key in ap_req"))?
         .0
         .key_value
         .0
         .0
         .into())
+}
+
+/// Extracts a sequence number from the [EncApRepPart].
+#[instrument(level = "trace", ret)]
+pub fn extract_seq_number_from_ap_rep(ap_rep_enc_part: &EncApRepPart) -> Result<u32> {
+    let seq_number_bytes = ap_rep_enc_part
+        .0
+        .seq_number
+        .0
+        .clone()
+        .ok_or_else(|| Error::new(ErrorKind::InvalidToken, "missing seq-number in ap_rep"))?
+        .0
+        .0;
+
+    seq_number_from_integer_bytes(&seq_number_bytes).ok_or_else(|| {
+        Error::new(
+            ErrorKind::InvalidToken,
+            format!("invalid ApRep sequence number: {:?}", seq_number_bytes),
+        )
+    })
+}
+
+/// Converts the content octets of a DER INTEGER holding a 32-bit sequence number into a [u32].
+///
+/// DER uses the minimal number of octets, so a peer encodes a small sequence number in fewer than
+/// 4 octets (the Windows acceptor sends 3 octets for values below `0x800000`, about 1 in 256 AP-REPs).
+/// A value encoded as unsigned (RFC 4120 `UInt32`) can take a fifth leading `00` octet, and a value
+/// encoded as signed (Windows `Int32`) can be a short negative number, which is sign-extended here.
+fn seq_number_from_integer_bytes(bytes: &[u8]) -> Option<u32> {
+    match bytes {
+        [0x00, rest @ ..] if rest.len() == 4 => rest.try_into().ok().map(u32::from_be_bytes),
+        [first, ..] if bytes.len() <= 4 => {
+            let mut buf = if first & 0x80 != 0 { [0xff; 4] } else { [0x00; 4] };
+            buf[4 - bytes.len()..].copy_from_slice(bytes);
+            Some(u32::from_be_bytes(buf))
+        }
+        _ => None,
+    }
 }
 
 /// Extracts TGT Ticket from encoded [NegTokenTarg1].
@@ -287,4 +297,61 @@ pub fn extract_tgt_ticket_with_oid(mut resp_token: &[u8]) -> Result<Option<(Tick
     let tgt_rep: TgtRep = picky_asn1_der::from_reader(&mut resp_token)?;
 
     Ok(Some((tgt_rep.ticket.0, oid)))
+}
+
+#[cfg(test)]
+mod tests {
+    use picky_asn1::date::GeneralizedTime;
+    use picky_asn1::wrapper::{ExplicitContextTag0, ExplicitContextTag1, ExplicitContextTag3, IntegerAsn1, Optional};
+    use picky_krb::data_types::{EncApRepPartInner, KerberosTime};
+    use time::OffsetDateTime;
+
+    use super::*;
+
+    #[test]
+    fn seq_number_accepts_any_der_length() {
+        for (bytes, expected) in [
+            // Minimal DER from the Windows acceptor, previously rejected.
+            (&[0x05, 0x84, 0xbc][..], 0x0005_84bc),
+            (&[0x00], 0),
+            (&[0x7f], 0x7f),
+            (&[0x00, 0x80], 0x80),
+            (&[0x12, 0x34, 0x56, 0x78], 0x1234_5678),
+            // Full width, as sent by older sspi-rs acceptors.
+            (&[0x9a, 0xbc, 0xde, 0xf0], 0x9abc_def0),
+            // Unsigned encoding with a leading zero octet.
+            (&[0x00, 0x9a, 0xbc, 0xde, 0xf0], 0x9abc_def0),
+            // Short negative values from a signed Int32 encoder.
+            (&[0xff], u32::MAX),
+            (&[0x80, 0x00, 0x00], 0xff80_0000),
+        ] {
+            assert_eq!(seq_number_from_integer_bytes(bytes), Some(expected), "{bytes:02x?}");
+        }
+    }
+
+    #[test]
+    fn seq_number_rejects_out_of_range() {
+        for bytes in [
+            &[][..],
+            &[0x01, 0x00, 0x00, 0x00, 0x00],
+            &[0xff, 0x80, 0x00, 0x00, 0x00],
+            &[0x00, 0x00, 0x00, 0x00, 0x00, 0x01],
+        ] {
+            assert_eq!(seq_number_from_integer_bytes(bytes), None, "{bytes:02x?}");
+        }
+    }
+
+    #[test]
+    fn ap_rep_with_short_seq_number() {
+        let enc_ap_rep_part = EncApRepPart::from(EncApRepPartInner {
+            ctime: ExplicitContextTag0::from(KerberosTime::from(GeneralizedTime::from(OffsetDateTime::now_utc()))),
+            cusec: ExplicitContextTag1::from(IntegerAsn1::from(vec![0x00])),
+            subkey: Optional::from(None),
+            seq_number: Optional::from(Some(ExplicitContextTag3::from(IntegerAsn1::from(vec![
+                0x1a, 0xad, 0x10,
+            ])))),
+        });
+
+        assert_eq!(extract_seq_number_from_ap_rep(&enc_ap_rep_part).unwrap(), 0x001a_ad10);
+    }
 }

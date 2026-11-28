@@ -276,7 +276,11 @@ impl Negotiate {
     }
 
     fn new(config: NegotiateConfig, mode: NegotiateMode) -> Result<Self> {
-        let mut protocol = config.protocol_config.new_instance()?;
+        let mut protocol = if mode.is_client() {
+            config.protocol_config.new_instance()?
+        } else {
+            config.protocol_config.new_server_instance()?
+        };
 
         let package_list = PackageListConfig::parse(&config.package_list);
         if let Some(filtered_protocol) =

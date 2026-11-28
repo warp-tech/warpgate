@@ -1,13 +1,16 @@
-Manifest-only fork of `sspi` 0.21.3.
+Fork of `sspi` 0.23.0.
 
-Upstream pins a set of RustCrypto crates to release candidates purely to force transitive
-resolution ("Pin transitive dependencies / TODO: Remove when stable versions will be
-released"). Those crates now have stable releases, and the pins conflict with `russh`,
-which resolves the same crates via caret requirements. `warpgate.patch` drops them and adds
-a `[lints.rust] warnings = { level = "allow", priority = 1 }` so this vendored path
-dependency's warnings don't surface in Warpgate's builds. No source is modified.
+## Relaxed `rsa` / `pkcs1` requirements
 
-The pins also sit inside a `cfg(macos/ios)` target block, which looks unintended — Cargo
-resolves every target into the lockfile, so they applied on Linux too.
+Upstream pins `rsa = "=0.10.0-rc.18"` and `pkcs1 = "=0.8.0-rc.4"`, which excludes the
+stable `rsa` 0.10 that `russh` ≥ 0.65.2 requires. The fork changes those two requirements
+to `"0.10"` / `"0.8"` in `Cargo.toml`; the source is untouched. See
+`vendor/picky/PATCHES.md` — `picky`, `sspi` and `winscard` carry the same pin and are
+vendored together.
 
-Drop this fork once sspi publishes a release without the pins.
+Drop all three forks once upstream releases accept stable `rsa` 0.10 and
+`ironrdp-connector` has moved to them.
+
+`Cargo.toml` also gains `warnings = { level = "allow", priority = 1 }` under
+`[lints.rust]`, so this vendored path dependency's warnings don't surface in Warpgate's
+builds. Repository tooling files (CI, release config, toolchain pin) are omitted.

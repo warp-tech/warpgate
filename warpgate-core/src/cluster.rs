@@ -3,29 +3,30 @@ use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Context;
 use futures::future::join_all;
 use futures::{SinkExt, StreamExt};
 use poem::IntoResponse;
 use poem::web::websocket::{Message, WebSocket};
 use sea_orm::ActiveValue::Set;
-use sea_orm::sea_query::{Expr, IntoCondition, OnConflict};
+use sea_orm::sea_query::{Expr, ExprTrait, IntoCondition, OnConflict};
 use sea_orm::{ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use tokio::sync::broadcast;
+use tokio::sync::{Mutex, broadcast};
 use tokio::time::timeout;
 use tracing::{info, warn};
 use uuid::Uuid;
 use warpgate_ca::{CLUSTER_TLS_SNI_NAME, ClusterTlsIdentity};
 use warpgate_common::http_headers::X_WARPGATE_CLUSTER_NODE;
-use warpgate_common::{NodeId, Protocol, UserSessionId, WarpgateError};
+use warpgate_common::{NodeId, Protocol, UserId, UserSessionId, WarpgateError};
 use warpgate_db_entities::{HttpSession, Node, Parameters, TargetSession, UserSession};
 use warpgate_tls::configure_cluster_tls_connector;
 
 use crate::SessionsFilter;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
-const REAP_INTERVAL: Duration = Duration::from_secs(15);
+pub const REAP_INTERVAL: Duration = Duration::from_secs(15);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub const NOTIFICATION_TIMEOUT: Duration = Duration::from_secs(10);
@@ -40,7 +41,7 @@ pub enum ClusterNotification {
     SessionApprovalsChanged,
     WebAuthRequested {
         session_id: UserSessionId,
-        user_id: Uuid,
+        user_id: UserId,
     },
 }
 
@@ -85,6 +86,9 @@ pub struct Cluster {
     /// cached warpgate root CA
     ca_certificate_pem: String,
     notifications: broadcast::Sender<ClusterNotification>,
+    /// Held across every write of this node's row. A heartbeat racing
+    /// `shutdown` would otherwise re-register the node after its row is deleted
+    deregistered: Mutex<bool>,
 }
 
 impl Cluster {
@@ -100,6 +104,7 @@ impl Cluster {
             hostname: std::net::hostname()?.to_string_lossy().to_string(),
             ca_certificate_pem: params.ca_certificate_pem,
             notifications: broadcast::channel(256).0,
+            deregistered: Mutex::new(false),
             db,
         })
     }
@@ -268,7 +273,8 @@ impl Cluster {
         Ok(PeerConnection { tls, addrs, port })
     }
 
-    /// Register this node and spawn heartbeat + reaper tasks
+    /// Registers this node and spawns the heartbeat. The reaper runs in
+    /// [`crate::Services::start_cluster`] so it can close what it ends.
     pub async fn start(self: &Arc<Self>) -> Result<(), WarpgateError> {
         self.heartbeat().await?;
         info!(node_id = %self.node_id, address = %self.address, "Joined cluster");
@@ -276,7 +282,11 @@ impl Cluster {
         tokio::spawn({
             let this = Arc::clone(self);
             async move {
-                let mut interval = tokio::time::interval(HEARTBEAT_INTERVAL);
+                // The first beat was sent above, so skip the interval's immediate tick.
+                let mut interval = tokio::time::interval_at(
+                    tokio::time::Instant::now() + HEARTBEAT_INTERVAL,
+                    HEARTBEAT_INTERVAL,
+                );
                 loop {
                     interval.tick().await;
                     if let Err(error) = this.heartbeat().await {
@@ -286,23 +296,14 @@ impl Cluster {
             }
         });
 
-        tokio::spawn({
-            let db = self.db.clone();
-            async move {
-                let mut interval = tokio::time::interval(REAP_INTERVAL);
-                loop {
-                    interval.tick().await;
-                    if let Err(error) = reap(&db).await {
-                        warn!(%error, "Node reaper failed");
-                    }
-                }
-            }
-        });
-
         Ok(())
     }
 
     async fn heartbeat(&self) -> Result<(), WarpgateError> {
+        let deregistered = self.deregistered.lock().await;
+        if *deregistered {
+            return Ok(());
+        }
         let model = Node::ActiveModel {
             id: Set(self.node_id),
             address: Set(self.address.clone()),
@@ -341,6 +342,8 @@ impl Cluster {
         end_connection_bound_sessions(&self.db, UserSession::Column::NodeId.eq(self.node_id))
             .await?;
         end_children_of_ended_parents(&self.db).await?;
+        let mut deregistered = self.deregistered.lock().await;
+        *deregistered = true;
         Node::Entity::delete_by_id(self.node_id)
             .exec(&self.db)
             .await?;
@@ -392,8 +395,8 @@ const SHARED_SESSION_ORPHAN_GRACE: time::Duration = time::Duration::minutes(5);
 async fn end_connection_bound_sessions(
     db: &DatabaseConnection,
     node_filter: impl IntoCondition,
-) -> Result<(), WarpgateError> {
-    UserSession::revoke_open_matching(
+) -> Result<Vec<UserSessionId>, WarpgateError> {
+    crate::user_sessions::revoke_open_matching(
         db,
         Condition::all()
             .add(node_filter.into_condition())
@@ -404,9 +407,11 @@ async fn end_connection_bound_sessions(
 
 /// End unowned (HTTP browser) sessions whose backing is gone: they are kept
 /// alive by their stored cookie sessions, not by any node.
-async fn end_sessions_without_cookie(db: &DatabaseConnection) -> Result<(), WarpgateError> {
+async fn end_sessions_without_cookie(
+    db: &DatabaseConnection,
+) -> Result<Vec<UserSessionId>, WarpgateError> {
     let grace_cutoff = OffsetDateTime::now_utc() - SHARED_SESSION_ORPHAN_GRACE;
-    UserSession::revoke_open_matching(
+    crate::user_sessions::revoke_open_matching(
         db,
         Condition::all()
             .add(UserSession::Column::Protocol.eq(Protocol::Http.name()))
@@ -457,7 +462,9 @@ pub async fn alive_nodes(db: &DatabaseConnection) -> Result<Vec<Node::Model>, Wa
         .await?)
 }
 
-async fn reap(db: &DatabaseConnection) -> Result<(), WarpgateError> {
+/// Returns the ids of the sessions it ended. Other nodes may still hold live
+/// views of them, which the caller closes.
+pub async fn reap(db: &DatabaseConnection) -> Result<Vec<UserSessionId>, WarpgateError> {
     let cutoff = OffsetDateTime::now_utc() - HEARTBEAT_TIMEOUT;
     // reap dead nodes
     let dead = Node::Entity::delete_many()
@@ -478,35 +485,47 @@ async fn reap(db: &DatabaseConnection) -> Result<(), WarpgateError> {
 
     // At least the current node should have been present - bail
     // intead of ending all sessions
-    if !live.is_empty() {
-        end_connection_bound_sessions(db, UserSession::Column::NodeId.is_not_in(live)).await?;
-    }
+    let mut ended = if live.is_empty() {
+        vec![]
+    } else {
+        end_connection_bound_sessions(db, UserSession::Column::NodeId.is_not_in(live)).await?
+    };
 
-    end_sessions_without_cookie(db).await?;
+    ended.extend(end_sessions_without_cookie(db).await?);
     end_children_of_ended_parents(db).await?;
-    Ok(())
+    Ok(ended)
 }
 
 /// Fallback order
 /// * WARPGATE_PEER_ADDRESS
 /// * POD_IP (kubernetes)
 /// * local outbound IP
-fn advertised_peer_address(http_port: u16) -> std::io::Result<String> {
+fn advertised_peer_address(http_port: u16) -> anyhow::Result<String> {
     if let Some(addr) = non_empty_env("WARPGATE_PEER_ADDRESS") {
         return Ok(addr);
     }
-    if let Some(ip) = non_empty_env("POD_IP") {
-        return Ok(format!("{ip}:{http_port}"));
-    }
+    let ip = match non_empty_env("POD_IP") {
+        Some(ip) => ip.parse().context("Invalid POD_IP")?,
+        None => local_ip()?,
+    };
 
-    let ip = local_ip()?;
-    Ok(format!("{ip}:{http_port}"))
+    Ok(format_peer_address(ip, http_port))
 }
 
-fn local_ip() -> std::io::Result<IpAddr> {
-    let socket = UdpSocket::bind(("0.0.0.0", 0))?;
-    socket.connect(("1.1.1.1", 80))?; // no traffic here yet, just a route resolve
-    socket.local_addr().map(|a| a.ip())
+fn format_peer_address(ip: IpAddr, port: u16) -> String {
+    SocketAddr::new(ip, port).to_string()
+}
+
+fn local_ip() -> anyhow::Result<IpAddr> {
+    let probe = |bind_ip: &str, peer_ip: &str| -> std::io::Result<IpAddr> {
+        let socket = UdpSocket::bind((bind_ip, 0))?;
+        socket.connect((peer_ip, 80))?; // no traffic here yet, just a route resolve
+        socket.local_addr().map(|a| a.ip())
+    };
+
+    probe("0.0.0.0", "1.1.1.1")
+        .or_else(|_| probe("::", "2606:4700:4700::1111"))
+        .context("Failed to determine local IP address; set WARPGATE_PEER_ADDRESS")
 }
 
 /// An environment variable's value, trimmed, or `None` if unset or blank.
@@ -517,11 +536,28 @@ fn non_empty_env(key: &str) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+#[cfg(test)]
+mod address_tests {
+    use super::*;
+
+    #[test]
+    fn peer_address_formats_ip_and_port() {
+        assert_eq!(
+            format_peer_address("192.0.2.1".parse().unwrap(), 8443),
+            "192.0.2.1:8443"
+        );
+        assert_eq!(
+            format_peer_address("2001:db8::1".parse().unwrap(), 8443),
+            "[2001:db8::1]:8443"
+        );
+    }
+}
+
 #[cfg(all(test, feature = "sqlite"))]
 mod tests {
     use sea_orm::ActiveValue::NotSet;
     use sea_orm::Database;
-    use warpgate_common::Protocol;
+    use warpgate_common::{Protocol, TargetId};
     use warpgate_db_entities::Parameters::{ConfigMigrationValues, set_config_migration_values};
     use warpgate_db_migrations::migrate_database;
 
@@ -534,13 +570,25 @@ mod tests {
         db
     }
 
+    #[tokio::test]
+    async fn heartbeat_after_shutdown_does_not_reregister() {
+        let db = migrated_db().await;
+        let cluster = Cluster::new(db.clone(), 1).await.unwrap();
+        cluster.heartbeat().await.unwrap();
+        assert_eq!(Node::Entity::find().all(&db).await.unwrap().len(), 1);
+
+        cluster.shutdown().await.unwrap();
+        cluster.heartbeat().await.unwrap();
+        assert!(Node::Entity::find().all(&db).await.unwrap().is_empty());
+    }
+
     async fn target_session(db: &DatabaseConnection, parent: Uuid, node_id: Option<Uuid>) -> Uuid {
         let id = Uuid::new_v4();
         TargetSession::Entity::insert(TargetSession::ActiveModel {
             id: Set(warpgate_common::TargetSessionId(id)),
             user_session_id: Set(warpgate_common::UserSessionId(parent)),
             target_snapshot: Set(r#"{"name":"web"}"#.into()),
-            target_id: Set(Uuid::new_v4()),
+            target_id: Set(TargetId(Uuid::new_v4())),
             started: Set(OffsetDateTime::now_utc()),
             ended: Set(None),
             ticket_id: Set(None),
@@ -572,7 +620,7 @@ mod tests {
         UserSession::Entity::insert(UserSession::ActiveModel {
             id: Set(warpgate_common::UserSessionId(id)),
             username: Set(Some("alice".into())),
-            user_id: Set(Some(Uuid::new_v4())),
+            user_id: Set(Some(UserId(Uuid::new_v4()))),
             remote_address: Set("127.0.0.1:1".into()),
             started: Set(started),
             ended: Set(None),
@@ -620,7 +668,7 @@ mod tests {
 
     #[test]
     fn notification_wire_format_is_tagged_by_type() {
-        let user_id = Uuid::new_v4();
+        let user_id = UserId(Uuid::new_v4());
         let msg = ClusterNotification::WebAuthRequested {
             session_id: UserSessionId(Uuid::nil()),
             user_id,
@@ -809,7 +857,7 @@ mod tests {
         target_session(&db, password, None).await;
         let ended = user_session_started(&db, None, Protocol::Ssh, now).await;
         admitted_by(&db, target_session(&db, ended, None).await, expired).await;
-        UserSession::revoke(&db, UserSessionId(ended))
+        crate::user_sessions::revoke(&db, UserSessionId(ended))
             .await
             .unwrap();
 
