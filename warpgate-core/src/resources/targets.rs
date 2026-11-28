@@ -209,8 +209,7 @@ pub async fn update<C: ConnectionTrait>(
         return Err(ResourceError::ProtocolChange);
     }
 
-    let should_close_sessions = before.name != data.name
-        || (!before.require_approval && data.require_approval)
+    let should_close_sessions = (!before.require_approval && data.require_approval)
         || options_changed(&before.options, &data.options);
 
     let mut model: Target::ActiveModel = before.clone().into();
